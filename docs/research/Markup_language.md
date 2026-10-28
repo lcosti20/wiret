@@ -1,3 +1,7 @@
+*(Snapshot of [Markup language – Wikipedia](https://en.wikipedia.org/wiki/Markup_language) as of 27 October 2026)*
+
+---
+
 # Markup language
 
 *From Wikipedia, the free encyclopedia*
