@@ -1,254 +1,284 @@
-# Wiret Language Specification & Reference
+# Wiret Language Design — Core Specification (Draft 0.1)
 
-**Wiret** is a human-readable, graph-oriented, text-based intermediate representation (IR) and programming language. Designed to bridge visual scripting paradigms (like Unreal Engine Blueprints) with traditional software development workflows, Wiret provides full fidelity for node-graph layouts, strict typing, deterministic compilation to bytecode, and a lightweight, C-embeddable runtime.
+**Status:** Design proposal synthesizing and refining the two submitted drafts.  
+**Goals:** Graph-first visual language with a canonical, diffable text representation (WGT); compiles to verified portable bytecode (WBC); executes in a small, embeddable, capability-based runtime (WRT).
 
----
+## 1. Design principles (summary)
 
-## 1. Text Syntax Design (`.wiret`)
+1. The visual graph is the source of truth. WGT is its durable, human- and machine-readable form.
+2. Semantics (nodes, pins, edges, types, operations) are completely separate from presentation (position, title, color, groups, comments).
+3. Stable, persistent IDs for nodes, pins, edges, and graphs. IDs never change because of layout or label edits.
+4. Canonical serialization: same graph → same text (ordering, formatting, attribute order).
+5. Explicit types, explicit execution vs data flow, no silent coercions beyond documented lossless conversions.
+6. Deterministic compilation by default. Same normalized source + compiler version + features → equivalent bytecode.
+7. Host capabilities are explicit imports, never ambient.
+8. Every diagnostic points to a concrete graph location (module, graph, node, pin, edge).
+9. Verifier rejects malformed or untrusted bytecode before execution.
+10. First implementation prioritizes round-trip fidelity, validation, and reviewable diffs over performance.
 
-Wiret syntax combines LLVM-IR explicit SSA/data-flow ordering with GML/DOT-style graph attributes and metadata annotations.
+## 2. Text syntax — Wiret Graph Text (WGT)
 
-### Key Syntax Concepts
+### 2.1 File model
 
-* **Attributes / Metadata (`@...`)**: Placed inside square brackets `[...]` on graphs, nodes, pins, and edges to preserve visual positioning, comments, and runtime annotations without affecting evaluation logic.
-* **Flow Execution (`->`)**: Control flow connections between execution pins.
-* **Data Flow (`=`)**: Explicit data assignments from source node pins to target inputs.
-* **Types**: `exec`, `i32`, `i64`, `f32`, `f64`, `bool`, `string`, `object`, `array<T>`, `any`.
+- One module per `.wrt` file.
+- Module name is a dotted identifier (`game.player`, `math.utils`).
+- Optional project files: `wiret.toml`, `wiret.lock`, `.wbc` (bytecode), `.wdbg` (debug sidecar).
 
-### Example: Standard Class & Function Graph
+### 2.2 Grammar (illustrative EBNF)
+
+```ebnf
+document     = "wiret", version, newline, "module", ident, [attrs], newline, {decl} ;
+decl         = import | type | const | graph | meta ;
+import       = "import", string, ["as", ident], [attrs], newline ;
+type         = "type", ident, "=", type_expr, [attrs], newline ;
+const        = "const", ident, ":", type_expr, "=", literal, [attrs], newline ;
+graph        = "graph", kind, ident, "(", [params], ")", ["->", type_expr], [attrs], "{", {item}, "}" ;
+kind         = "function" | "event" | "macro" ;
+item         = node | edge | region | note | meta ;
+node         = "node", ident, ":", operation, [pin_list], [attrs], newline ;
+pin_list     = "(", pin, {",", pin}, ")" ;
+pin          = ("in" | "out"), ident, ":", type_expr, ["=", literal], [attrs] ;
+edge         = "edge", ident, ":", ("exec" | "data"), endpoint, "->", endpoint, [attrs], newline ;
+endpoint     = ident, ".", ident ;   /* node.pin or graph.param */
+region       = "region", ident, [attrs], "{", {item}, "}" ;
+note         = "note", ident, string, [attrs], newline ;
+meta         = "meta", ident, "=", value, newline ;
+attrs        = "[", attr, {",", attr}, "]" ;
+attr         = ident, "=", value ;
+```
+
+- Whitespace is insignificant except that top-level declarations are newline-terminated outside balanced `()[]{}`.
+- `#` starts a line comment.
+- Strings use JSON-compatible escaping.
+- Numeric literals are locale-independent.
+- Recommended indentation: two spaces. Canonical writers emit a final newline and stable declaration order (creation order preferred).
+
+### 2.3 Core types (portable)
+
+`void`, `bool`, `i32`, `i64`, `u32`, `u64`, `f32`, `f64`, `string` (UTF-8, value), `bytes`, `option<T>`, `array<T>`, `map<K,V>` (K hashable), `struct Name`, `handle<Name>`, `func<(T…)->R>`.
+
+Extensions (vectors, entities, etc.) must declare stable type IDs and host-boundary rules.
+
+### 2.4 Example (clamp)
 
 ```wiret
-module MathUtils @[version="1.0.0", author="Wiret Team"] {
+wiret 0.2
+module demo.math [target="portable"]
 
-    // Function Graph Definition
-    function CalculateDamage(
-        pin exec in_flow,
-        pin f32 base_damage @[tooltip="Base attack power"],
-        pin f32 armor @[tooltip="Target armor value"],
-        pin bool is_critical
-    ) -> (
-        pin exec out_flow,
-        pin f32 final_damage
-    ) @[pos={x:100, y:50}, color="#3498db"] 
-    {
-        // Entry Node
-        node Entry = core::entry @[pos={x:0, y:0}] {
-            out exec flow -> Branch.flow;
-            out f32 base = base_damage;
-            out f32 arm = armor;
-            out bool crit = is_critical;
-        }
+graph function clamp01(value: f32) -> f32 [public=true, id="g_clamp"] {
+  node n_zero: core.f32.const (out value: f32 = 0.0)
+    [id="n_zero", title="Zero", pos=[80, 220]]
 
-        // Branch (If / Else) Node
-        node Branch = core::branch @[pos={x:250, y:0}] {
-            in exec flow;
-            in bool condition = Entry.crit;
+  node n_one: core.f32.const (out value: f32 = 1.0)
+    [id="n_one", title="One", pos=[80, 340]]
 
-            out exec true_branch -> MultCrit.flow;
-            out exec false_branch -> ArmorCalc.flow;
-        }
+  node n_low: core.f32.max (
+    in a: f32, in b: f32, out value: f32
+  ) [id="n_low", title="Clamp min", pos=[340, 220]]
 
-        // Multiply Critical Damage Node
-        node MultCrit = math::multiply @[pos={x:500, y:-100}] {
-            in exec flow;
-            in f32 a = Entry.base;
-            in f32 b = 2.0;
+  node n_high: core.f32.min (
+    in a: f32, in b: f32, out value: f32
+  ) [id="n_high", title="Clamp max", pos=[570, 220]]
 
-            out exec flow_out -> ArmorCalc.flow;
-            out f32 result;
-        }
+  node n_ret: core.return (in value: f32)
+    [id="n_ret", title="Return", pos=[800, 220]]
 
-        // Armor Calculation Node
-        node ArmorCalc = math::sub_clamp @[pos={x:750, y:0}] {
-            in exec flow;
-            in f32 raw_val = select(Entry.crit, MultCrit.result, Entry.base);
-            in f32 reduction = Entry.arm;
+  edge e1: data n_zero.value -> n_low.b
+  edge e2: data n_low.value  -> n_high.a
+  edge e3: data n_one.value  -> n_high.b
+  edge e4: data n_high.value -> n_ret.value
 
-            out exec flow_out -> Exit.flow;
-            out f32 net_damage;
-        }
-
-        // Function Return Node
-        node Exit = core::return @[pos={x:1000, y:0}] {
-            in exec flow;
-            in f32 damage_val = ArmorCalc.net_damage;
-
-            out exec out_flow -> super.out_flow;
-            out f32 final_damage -> super.final_damage;
-        }
-    }
+  meta layout.graph [zoom=0.9, pan=[0,0], grid=16]
 }
-
 ```
 
----
+### 2.5 Execution + data example
 
-## 2. Bytecode Specification (`.wbc`)
+```wiret
+wiret 0.2
+module demo.greeting
 
-Wiret source files compile into binary bytecode files (`.wbc`). The format is designed for fast, single-pass decoding and low memory overhead.
+graph function greet(name: string) -> void [public=true, id="g_greet"] {
+  node n_entry: core.entry () [id="n_entry", pos=[64,120]]
+  node n_pfx:   core.string.const (out value: string = "Hello, ") [id="n_pfx", pos=[80,300]]
+  node n_join:  core.string.concat (in left: string, in right: string, out value: string)
+    [id="n_join", pos=[340,300]]
+  node n_log:   host.console.write (in value: string) [id="n_log", capability="console.write", pos=[600,160]]
+  node n_exit:  core.exit () [id="n_exit", pos=[840,160]]
 
-### Binary Layout Structure
-
-```
-+-------------------------------------------------------+
-| Magic Number: 'W', 'I', 'R', 'E' (4 bytes: 0x57495245) |
-+-------------------------------------------------------+
-| Version Major (u16) | Version Minor (u16)             |
-+-------------------------------------------------------+
-| Constant Pool Offset (u32) | Section Count (u32)      |
-+-------------------------------------------------------+
-| Constant Pool (Strings, Floats, Large Integers)       |
-+-------------------------------------------------------+
-| Function Headers Table                                |
-+-------------------------------------------------------+
-| Bytecode Instructions Stream                          |
-+-------------------------------------------------------+
-| Metadata Table (Strippable for production release)    |
-+-------------------------------------------------------+
-
+  edge x1: exec n_entry.then -> n_log.exec
+  edge x2: exec n_log.then   -> n_exit.exec
+  edge d1: data n_pfx.value  -> n_join.left
+  edge d2: data g_greet.name -> n_join.right
+  edge d3: data n_join.value -> n_log.value
+}
 ```
 
-### Instruction Set Architecture (ISA)
+### 2.6 Edge and pin rules (summary)
 
-Wiret bytecode operates on a stack-based virtual machine with local register windows per frame.
+- `exec` edges connect execution pins only; fan-out requires an explicit sequence/fork node.
+- `data` edges connect compatible data pins; single-input pins accept at most one incoming edge unless the operation defines merge semantics.
+- Cycles in pure data flow are illegal unless expressed through loop/phi nodes.
+- Unconnected required inputs are errors (or use declared defaults).
+- Every executable path must terminate, return, or yield according to graph kind.
 
-| Opcode | Mnemonic | Operands | Description |
-| --- | --- | --- | --- |
-| `0x00` | `NOP` | None | No operation |
-| `0x01` | `PUSH_I32` | `i32_val` | Push 32-bit integer onto evaluation stack |
-| `0x02` | `PUSH_F32` | `f32_val` | Push 32-bit float onto evaluation stack |
-| `0x03` | `PUSH_CONST` | `const_idx (u16)` | Push constant from Constant Pool |
-| `0x10` | `LOAD_LOCAL` | `slot (u16)` | Load variable from local register slot |
-| `0x11` | `STORE_LOCAL` | `slot (u16)` | Store top of stack to local register slot |
-| `0x20` | `ADD_F32` | None | Pop `b`, pop `a`, push `a + b` |
-| `0x21` | `SUB_F32` | None | Pop `b`, pop `a`, push `a - b` |
-| `0x22` | `MUL_F32` | None | Pop `b`, pop `a`, push `a * b` |
-| `0x23` | `DIV_F32` | None | Pop `b`, pop `a`, push `a / b` |
-| `0x30` | `JUMP` | `offset (i32)` | Unconditional branch |
-| `0x31` | `JUMP_IF_FALSE` | `offset (i32)` | Pop condition; jump if zero/false |
-| `0x40` | `CALL` | `func_idx (u32)` | Call Wiret function |
-| `0x41` | `CALL_HOST` | `host_fn_idx (u32)` | Call host C function via binding |
-| `0x50` | `RETURN` | None | Return from function frame |
+### 2.7 Metadata namespaces
 
----
+`layout.*`, `editor.*`, `doc.*`, `debug.*`, `vendor.<name>.*`. Unknown metadata must be preserved by tools that do not understand it. Only semantic attributes and `id` affect program meaning.
 
-## 3. C Runtime API Design
+### 2.8 Canonical formatting rules
 
-The Wiret Runtime C API follows Lua's stack-based host interop pattern for safety, performance, and simplicity.
+UTF-8 + LF, two-space indent, stable declaration order, fixed attribute order (semantic → id → title → layout → extensions), lowercase booleans, canonical numeric form, no ID regeneration, preserve unknown attributes. Canonical writers are required; parsers tolerate harmless whitespace differences.
+
+## 3. Compilation model (brief)
+
+1. Parse WGT → preserve IDs and metadata.
+2. Lower to **Typed Graph IR (TGIR)**: resolve types, validate pins/edges, convert control-flow nodes into basic blocks with explicit terminators, introduce block parameters for path-dependent values (SSA-like).
+3. Emit **WBC** (verified binary) + optional debug mapping.
+
+Pure data nodes are evaluated on demand in dependency order. Effectful nodes execute only when their exec input is reached; the compiler may not reorder observable effects.
+
+## 4. Bytecode specification — Wiret Bytecode (WBC)
+
+### 4.1 Goals
+
+Portable, versioned, easily verified, compact enough for embedding. Not a direct dump of WGT. Prefer verification simplicity and debuggability over extreme density in the first version.
+
+### 4.2 Binary layout
+
+All multi-byte integers are unsigned LEB128 unless fixed-width is stated.
+
+**Header (fixed):**
+
+| Field          | Size     | Meaning                          |
+|----------------|----------|----------------------------------|
+| Magic          | 4 bytes  | `WBC\0`                          |
+| Major          | u16 LE   | Incompatible format version      |
+| Minor          | u16 LE   | Compatible additions             |
+| Flags          | u32 LE   | Feature bits                     |
+| Header size    | u32 LE   | Length of header                 |
+| Section count  | u32 LE   | Number of sections               |
+
+**Sections** (ascending ID order, length-delimited):
+
+| ID | Name  | Required | Contents                                      |
+|----|-------|----------|-----------------------------------------------|
+| 1  | STRS  | yes      | UTF-8 string table                            |
+| 2  | TYPE  | yes      | Type descriptors                              |
+| 3  | IMPT  | yes      | Imported modules / host capabilities          |
+| 4  | CNST  | yes      | Constants                                     |
+| 5  | FUNC  | yes      | Function signatures, register counts, locals  |
+| 6  | CODE  | yes      | Instructions + basic-block tables             |
+| 7  | EXPT  | no       | Exports                                       |
+| 8  | DATA  | no       | Immutable data blobs                          |
+| 9  | DBG   | no       | Node IDs, source spans, instruction→node map  |
+| 10 | META  | no       | Compiler ID, source hash, features, etc.      |
+
+Unknown optional sections are skipped; unknown required sections or malformed lengths cause load failure. Indexes are bounds-checked before allocation.
+
+### 4.3 Execution model
+
+Typed **register VM**. Each function declares a register count and typed register map. Instructions operate on numbered registers. Frames are created on call. Control flow uses an explicit block table; every block has exactly one terminator; no fall-through.
+
+### 4.4 Instruction families (illustrative)
+
+- Constants: `const.i32`, `const.f32`, `const.string`, `const.null`
+- Moves / selection: `move`, `select`, `phi.copy`
+- Integer / float arithmetic and comparisons (with explicit wrap vs checked variants where relevant)
+- Strings, arrays, maps (bounds- and type-checked)
+- Calls: `call`, `call.import`, `call.indirect`
+- Handles / casts: `handle.get/set`, `type.test`, `cast.checked`
+- Control: `br`, `br_if`, `switch`, `return`, `unreachable`
+- Optional: structured exceptions, `yield`/`resume` for cooperative async
+- Debug: `trap`, `debug.break`
+
+Opcodes are permanently assigned within a major version. Unknown or reserved opcodes trap. The verifier checks every operand and type before execution.
+
+### 4.5 Verification requirements
+
+Structural validity, type safety of registers/constants/calls/returns/branches, single terminator per block, import signature matching, resource limits, no illegal host access or use of uninitialized registers. Verification must succeed before any module initialization or execution. Untrusted `.wbc` files are assumed hostile.
+
+### 4.6 Versioning & security
+
+Major version = incompatible change. Minor = optional features. Required features are declared in the header. Semantic changes to existing opcodes are forbidden. Configurable fuel, memory, recursion, and allocation limits. Deterministic mode disables ambient time/randomness unless supplied as imports and defines map iteration order.
+
+## 5. Runtime API — Wiret Runtime (WRT)
+
+### 5.1 Goals
+
+Small, stable C ABI suitable for embedding in engines, tools, and host applications. Opaque handles, explicit ownership, length-delimited strings, status codes, protected execution, capability-checked imports.
+
+### 5.2 Core types and status
 
 ```c
-/* wiret.h - Host API Header */
-#ifndef WIRET_H
-#define WIRET_H
+typedef struct wrt_vm      wrt_vm;
+typedef struct wrt_module  wrt_module;
+typedef struct wrt_value   wrt_value;
+typedef struct wrt_error   wrt_error;
 
-#include <stddef.h>
-#include <stdint.h>
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-/* Opaque state types */
-typedef struct wiret_State wiret_State;
-typedef int (*wiret_CFunction)(wiret_State* L);
-
-/* Basic State Management */
-wiret_State* wiret_newstate(void);
-void wiret_close(wiret_State* L);
-
-/* Bytecode Loading and Execution */
-int wiret_loadbuffer(wiret_State* L, const char* buffer, size_t size, const char* name);
-int wiret_loadfile(wiret_State* L, const char* filename);
-int wiret_pcall(wiret_State* L, int nargs, int nresults);
-
-/* Stack Push Operations */
-void wiret_pushnil(wiret_State* L);
-void wiret_pushinteger(wiret_State* L, int64_t n);
-void wiret_pushnumber(wiret_State* L, double n);
-void wiret_pushboolean(wiret_State* L, int b);
-void wiret_pushlstring(wiret_State* L, const char* s, size_t len);
-void wiret_pushcfunction(wiret_State* L, wiret_CFunction fn);
-
-/* Stack Retrieval & Type Querying */
-int wiret_type(wiret_State* L, int idx);
-int64_t wiret_tointeger(wiret_State* L, int idx);
-double wiret_tonumber(wiret_State* L, int idx);
-int wiret_toboolean(wiret_State* L, int idx);
-const char* wiret_tostring(wiret_State* L, int idx, size_t* len);
-
-/* Registration & Bindings */
-void wiret_register(wiret_State* L, const char* name, wiret_CFunction fn);
-void wiret_pop(wiret_State* L, int n);
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif /* WIRET_H */
-
+typedef enum {
+    WRT_OK = 0,
+    WRT_E_INVALID_ARGUMENT,
+    WRT_E_OUT_OF_MEMORY,
+    WRT_E_PARSE,
+    WRT_E_VERIFY,
+    WRT_E_IMPORT,
+    WRT_E_TYPE,
+    WRT_E_RUNTIME,
+    WRT_E_TRAP,
+    WRT_E_LIMIT,
+    WRT_E_CANCELLED
+} wrt_status;
 ```
 
----
+Configuration includes ABI version, memory/instruction/call-depth limits, feature flags, and user data.
 
-## 4. Comprehensive Example: C Host Integration
+### 5.3 Essential API surface
 
-The following program initializes the runtime, registers a native C function (`Host_PrintLog`), loads compiled bytecode, calls a Wiret function graph, and reads the return value back into C.
+**VM lifecycle**  
+`wrt_vm_create`, `wrt_vm_destroy`, `wrt_vm_set_limits`, `wrt_vm_collect_garbage`, `wrt_vm_cancel`, `wrt_vm_get_stats`
+
+**Modules**  
+`wrt_module_load` (bytes), optional `wrt_module_load_file`, `wrt_module_unload`, `wrt_module_find_export`, `wrt_module_get_info`
+
+**Values**  
+Constructors/readers for primitives, `wrt_value_retain` / `wrt_value_release`, length-delimited string/bytes access, typed collection accessors, typed host handles.
+
+**Host imports**  
+Register named functions with canonical signatures, capability IDs, and purity/async/deterministic flags. Protected invocation; errors do not unwind through the C ABI.
+
+**Execution**  
+`wrt_call` (and optional async/continuation entry points), fuel/cancellation hooks, structured error objects that can carry module/function/offset/node-ID information when debug data is present.
+
+**Diagnostics**  
+Error code, message, stack trace, source location, graph node ID.
+
+### 5.4 Ownership and threading (first version)
+
+- VM owns loaded modules unless a retained handle is returned.
+- Destroying a VM invalidates all handles derived from it.
+- Returned owned values must be released by the caller.
+- Borrowed slices are valid only until the next API call on the owning object (or until a host callback returns).
+- Default: single-thread-affine VMs. Multiple VMs may run concurrently. Values and modules are not assumed thread-safe.
+- Host callbacks must not throw C++/language exceptions across the ABI boundary.
+
+### 5.5 Host callback shape (conceptual)
 
 ```c
-#include <stdio.h>
-#include <stdlib.h>
-#include "wiret.h"
-
-// Host function exposed to Wiret graphs
-static int Host_PrintLog(wiret_State* L) {
-    size_t len;
-    const char* msg = wiret_tostring(L, 1, &len);
-    printf("[HOST LOG]: %s\n", msg);
-    wiret_pushboolean(L, 1); // Return success
-    return 1; // Number of return values
-}
-
-int main(int argc, char** argv) {
-    // 1. Initialize Runtime State
-    wiret_State* L = wiret_newstate();
-    if (!L) {
-        fprintf(stderr, "Failed to create Wiret VM instance.\n");
-        return 1;
-    }
-
-    // 2. Register Host Functions
-    wiret_register(L, "host_print_log", Host_PrintLog);
-
-    // 3. Load Compiled Wiret Bytecode
-    if (wiret_loadfile(L, "MathUtils.wbc") != 0) {
-        fprintf(stderr, "Error loading script: %s\n", wiret_tostring(L, -1, NULL));
-        wiret_close(L);
-        return 1;
-    }
-
-    // 4. Push Arguments onto Stack for `CalculateDamage`
-    // Arguments: base_damage=100.0, armor=25.0, is_critical=true
-    wiret_pushnumber(L, 100.0);
-    wiret_pushnumber(L, 25.0);
-    wiret_pushboolean(L, 1);
-
-    // 5. Call `CalculateDamage` with 3 args and 1 expected result
-    if (wiret_pcall(L, 3, 1) != 0) {
-        fprintf(stderr, "Execution error: %s\n", wiret_tostring(L, -1, NULL));
-        wiret_close(L);
-        return 1;
-    }
-
-    // 6. Retrieve Result from Stack
-    if (wiret_type(L, -1) == 2 /* NUMBER */) {
-        double result = wiret_tonumber(L, -1);
-        printf("Final Calculated Damage: %.2f\n", result);
-    }
-    wiret_pop(L, 1);
-
-    // 7. Cleanup VM State
-    wiret_close(L);
-    return 0;
-}
-
+typedef wrt_status (*wrt_host_fn)(
+    wrt_call_context *ctx,
+    const wrt_value *args, size_t argc,
+    wrt_value *out_result,
+    wrt_error **out_error);
 ```
+
+The runtime supplies a protected context; the host returns status + optional owned error.
+
+### 5.6 Engine integration
+
+Engine-specific functionality lives in separate import modules (`engine.actor`, `engine.input`, …). Graphs that require engine types declare the required target environment and fail clearly when the imports are absent.
+
+## 6. Minimal conformance
+
+- **Text Reader**: parses supported WGT and preserves unknown metadata.
+- **Editor**: preserves IDs, ng Wiret_Language_Specifications_Proposal_3.md…]()
