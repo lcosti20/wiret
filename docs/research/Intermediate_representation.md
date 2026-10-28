@@ -1,3 +1,7 @@
+*(Snapshot of [Intermediate representation – Wikipedia](https://en.wikipedia.org/wiki/Intermediate_representation) as of 27 October 2026)*
+
+---
+
 # Intermediate representation
 
 *From Wikipedia, the free encyclopedia*
