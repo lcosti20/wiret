@@ -1,3 +1,7 @@
+*(Snapshot of [Visual programming language – Wikipedia](https://en.wikipedia.org/wiki/Visual_programming_language) as of 27 October 2026)*
+
+---
+
 # Visual programming language
 
 *From Wikipedia, the free encyclopedia*
