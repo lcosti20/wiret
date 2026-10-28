@@ -1,284 +1,1103 @@
-# Wiret Language Design — Core Specification (Draft 0.1)
+# Wiret Language Specification
 
-**Status:** Design proposal synthesizing and refining the two submitted drafts.  
-**Goals:** Graph-first visual language with a canonical, diffable text representation (WGT); compiles to verified portable bytecode (WBC); executes in a small, embeddable, capability-based runtime (WRT).
+*Draft 0.1: text syntax, bytecode (WBC) and embedding API for a text-based visual scripting language*
 
-## 1. Design principles (summary)
+> **Status.** This is a design draft, not an implementation. Nothing here has been run through a real parser, verifier or VM, so treat the grammar and opcode tables as a starting point to test, not a frozen standard. Where I went beyond your reference documents (mainly Blueprint runtime behaviour that the supplied documentation does not spell out), the text says so.
 
-1. The visual graph is the source of truth. WGT is its durable, human- and machine-readable form.
-2. Semantics (nodes, pins, edges, types, operations) are completely separate from presentation (position, title, color, groups, comments).
-3. Stable, persistent IDs for nodes, pins, edges, and graphs. IDs never change because of layout or label edits.
-4. Canonical serialization: same graph → same text (ordering, formatting, attribute order).
-5. Explicit types, explicit execution vs data flow, no silent coercions beyond documented lossless conversions.
-6. Deterministic compilation by default. Same normalized source + compiler version + features → equivalent bytecode.
-7. Host capabilities are explicit imports, never ambient.
-8. Every diagnostic points to a concrete graph location (module, graph, node, pin, edge).
-9. Verifier rejects malformed or untrusted bytecode before execution.
-10. First implementation prioritizes round-trip fidelity, validation, and reviewable diffs over performance.
+## 1. Overview
 
-## 2. Text syntax — Wiret Graph Text (WGT)
+### 1.1 What Wiret is
 
-### 2.1 File model
+Wiret is a graph-first programming language whose source of truth is a text file. A program is a set of *graphs* made of *nodes* joined by *wires*, as in Unreal Blueprints, but each graph is stored in a line-oriented, IR-like text format that diffs and merges cleanly in Git and that LLMs can read and write. A graph editor is the primary authoring tool; the text format is its storage, review and interchange format. Nobody is expected to type it by hand, but it must be pleasant to read in a diff.
 
-- One module per `.wrt` file.
-- Module name is a dotted identifier (`game.player`, `math.utils`).
-- Optional project files: `wiret.toml`, `wiret.lock`, `.wbc` (bytecode), `.wdbg` (debug sidecar).
+| Artifact | Extension | Purpose |
+| --- | --- | --- |
+| Source | `.wiret` | Canonical text. This is what gets committed. |
+| Bytecode | `.wbc` | Compiled, verified, portable module (WBC = Wiret ByteCode). |
+| Runtime | `libwiret` | Embeddable VM with a C API (`wiret.h`, prefix `wr_`). |
 
-### 2.2 Grammar (illustrative EBNF)
+### 1.2 Design principles
 
-```ebnf
-document     = "wiret", version, newline, "module", ident, [attrs], newline, {decl} ;
-decl         = import | type | const | graph | meta ;
-import       = "import", string, ["as", ident], [attrs], newline ;
-type         = "type", ident, "=", type_expr, [attrs], newline ;
-const        = "const", ident, ":", type_expr, "=", literal, [attrs], newline ;
-graph        = "graph", kind, ident, "(", [params], ")", ["->", type_expr], [attrs], "{", {item}, "}" ;
-kind         = "function" | "event" | "macro" ;
-item         = node | edge | region | note | meta ;
-node         = "node", ident, ":", operation, [pin_list], [attrs], newline ;
-pin_list     = "(", pin, {",", pin}, ")" ;
-pin          = ("in" | "out"), ident, ":", type_expr, ["=", literal], [attrs] ;
-edge         = "edge", ident, ":", ("exec" | "data"), endpoint, "->", endpoint, [attrs], newline ;
-endpoint     = ident, ".", ident ;   /* node.pin or graph.param */
-region       = "region", ident, [attrs], "{", {item}, "}" ;
-note         = "note", ident, string, [attrs], newline ;
-meta         = "meta", ident, "=", value, newline ;
-attrs        = "[", attr, {",", attr}, "]" ;
-attr         = ident, "=", value ;
+1. **One node, one line.** A node, with all of its incoming data wires and outgoing exec wires, is a single statement. A rewire is a one-line diff.
+2. **Resolved, not inferred.** The file stores the fully resolved graph. Wildcard pins have concrete types, every automatic conversion is an explicit `Convert` node, and no behaviour depends on editor-side inference. What you read is what compiles.
+3. **Every wire is written exactly once.** A data wire is written at its consumer; an exec wire is written at its producer. This matches Blueprint's rules (a data input has one source, an exec output has one target) and makes dangling wires impossible to express.
+4. **Semantics and presentation are separate.** Attributes that change compiled output are distinct from editor metadata (`@ed`: position, colour, size, comment boxes). Editor metadata never changes bytecode, but it is stored, canonicalised and diffed so every collaborator sees the same graph.
+5. **Preserve what you do not understand.** Unknown attributes survive load and save unchanged (the GML rule).
+6. **Deterministic by construction.** The same `.wbc` with the same host inputs gives the same results: wrapping integer arithmetic, IEEE-754 floats, insertion-ordered maps and sets, a host-driven clock.
+7. **Small core, big library.** The compiler knows a few dozen node kinds. Loops, `DoOnce`, `Gate` and similar are macros written in Wiret itself.
+8. **Safe to embed.** Bytecode is verified before it runs, modules have no ambient authority (they reach the outside world only through host-registered natives), execution has fuel and memory limits, and the VM never unwinds through host frames.
+
+### 1.3 Pipeline
+
+```
+ graph editor <-> .wiret (text) --wiretc--> .wbc (bytecode) --> libwiret VM <-> host (C API)
+                      |                          |
+                      +-- fmt / check / diff     +-- custom sections: names, debug map, embedded source
 ```
 
-- Whitespace is insignificant except that top-level declarations are newline-terminated outside balanced `()[]{}`.
-- `#` starts a line comment.
-- Strings use JSON-compatible escaping.
-- Numeric literals are locale-independent.
-- Recommended indentation: two spaces. Canonical writers emit a final newline and stable declaration order (creation order preferred).
+Compiler stages: parse, resolve names, type-check, validate graphs, expand macros, lower (graph to basic blocks to bytecode), optimise, verify, emit.
 
-### 2.3 Core types (portable)
+### 1.4 What was borrowed from where
 
-`void`, `bool`, `i32`, `i64`, `u32`, `u64`, `f32`, `f64`, `string` (UTF-8, value), `bytes`, `option<T>`, `array<T>`, `map<K,V>` (K hashable), `struct Name`, `handle<Name>`, `func<(T…)->R>`.
+| Source | Borrowed idea |
+| --- | --- |
+| Unreal Blueprints | Exec pins versus data pins, pure versus impure nodes, macros, collapsed graphs, event dispatchers, interfaces, comment boxes, reroute nodes, latent nodes, visible conversion nodes, Sequence-style "finish this branch, then the next". |
+| LLVM IR | One instruction per line, named values, explicit types everywhere, metadata attached to the thing it describes (our trailing `@attrs`). |
+| DOT | Addressing a part of a node (`node:port` becomes `node.pin`), attribute lists, clusters (our comment boxes). |
+| GML | Nested key/value attributes, plain ASCII portability, mandatory preservation of unknown attributes, "unsafe" capitalised keys. |
+| WebAssembly | Section-based binary, LEB128 integers, value-type codes, custom sections for names and debug data, single-pass validation. |
+| JVM | Class, interface and vtable model, exception handler tables, an attribute system, a verifier that runs before execution. |
+| Lua C API | One state object per VM, a virtual stack as the only host/VM data channel, registry references, a pluggable allocator, protected calls, coroutines. |
 
-Extensions (vectors, entities, etc.) must declare stable type IDs and host-boundary rules.
+### 1.5 Terminology
 
-### 2.4 Example (clamp)
+| Term | Meaning |
+| --- | --- |
+| Graph | The body of a function, event or macro: nodes plus locals. |
+| Node | One operation. Written `node id = Kind ...`. |
+| Pin | A named input or output of a node. Has a type. |
+| Exec pin | A pin of type `exec`. Wires between exec pins carry control flow. |
+| Data pin | Any other pin. Wires between data pins carry values. |
+| Pure node | No exec pins. Evaluated on demand by whoever consumes it. |
+| Impure node | Has exec pins. Runs when control reaches it. |
+| Fiber | One thread of VM execution with its own stack. Latent nodes suspend a fiber. |
+| Host | The application that embeds `libwiret`. |
 
-```wiret
-wiret 0.2
-module demo.math [target="portable"]
+## 2. Text syntax
 
-graph function clamp01(value: f32) -> f32 [public=true, id="g_clamp"] {
-  node n_zero: core.f32.const (out value: f32 = 0.0)
-    [id="n_zero", title="Zero", pos=[80, 220]]
+### 2.1 Files and lexical structure
 
-  node n_one: core.f32.const (out value: f32 = 1.0)
-    [id="n_one", title="One", pos=[80, 340]]
+A `.wiret` file is UTF-8 (no BOM) with LF line endings and holds exactly one module. Statements end at a newline. Newlines are ignored inside `( )` and inside exec maps `{ pin -> target, ... }`, so long nodes can wrap.
 
-  node n_low: core.f32.max (
-    in a: f32, in b: f32, out value: f32
-  ) [id="n_low", title="Clamp min", pos=[340, 220]]
+`//` starts a line comment. Line comments are *trivia*: the canonical writer drops them. Anything that must survive a round trip goes in a `comment` box (section 2.4) or a `@doc` attribute.
 
-  node n_high: core.f32.min (
-    in a: f32, in b: f32, out value: f32
-  ) [id="n_high", title="Clamp max", pos=[570, 220]]
+| Token | Form |
+| --- | --- |
+| Identifier | `[A-Za-z_][A-Za-z0-9_]*` |
+| Qualified name | `std.math.Sqrt` |
+| Pin reference | `node_id.pin_name` |
+| Integer | `42`, `-7`, `0xFF`, `1_000`; optional suffix `i8 u8 i16 u16 i32 u32 i64 u64` |
+| Float | `1.5`, `2e-3`; optional suffix `f32` or `f64` |
+| Other literals | `true`, `false`, `null` |
+| String | `"text"` with escapes `\\n`, `\\t`, `\\"`, `\\\\` and `\\u{1F600}` |
+| Tuple / list / map | `(1, 2)`, `[a, b]`, `{k: v}`; used only inside attributes |
 
-  node n_ret: core.return (in value: f32)
-    [id="n_ret", title="Return", pos=[800, 220]]
+A literal takes the type of the pin it is bound to, so suffixes are only needed where a literal is used without a pin (attribute arguments). Keywords are reserved: `wiret module use extern const var local enum struct interface class impl macro func event dispatcher node comment`.
 
-  edge e1: data n_zero.value -> n_low.b
-  edge e2: data n_low.value  -> n_high.a
-  edge e3: data n_one.value  -> n_high.b
-  edge e4: data n_high.value -> n_ret.value
+### 2.2 Module header and declarations
 
-  meta layout.graph [zoom=0.9, pan=[0,0], grid=16]
+Every file starts with a version line and a module line:
+
+```
+wiret 1
+module game.demo @id("mod_k3f9")
+```
+
+The module name is the namespace prefix of everything declared in the file (`game.demo.Player`). The grammar below uses `NL` for a newline and `attrs` for zero or more trailing attributes (section 2.4).
+
+```
+file       = "wiret" INT NL "module" qname attrs NL { item } ;
+item       = use | extern | const | var | enum | struct | interface
+           | class | macro | func | event ;
+use        = "use" qname [ "as" IDENT ] NL ;
+extern     = "extern" ( "func" qname params [ results ] | "type" qname ) attrs NL ;
+const      = "const" IDENT ":" type "=" literal attrs NL ;
+var        = "var" IDENT ":" type [ "=" literal ] attrs NL ;
+enum       = "enum" IDENT [ ":" inttype ] attrs "{" { IDENT [ "=" INT ] attrs NL } "}" ;
+struct     = "struct" IDENT attrs "{" { field } "}" ;
+field      = IDENT ":" type [ "=" literal ] attrs NL ;
+interface  = "interface" IDENT attrs "{" { "func" IDENT params [ results ] attrs NL } "}" ;
+class      = "class" IDENT [ ":" qname ] [ "impl" qname { "," qname } ] attrs
+             "{" { field | dispatcher | func | event } "}" ;
+dispatcher = "dispatcher" IDENT params attrs NL ;
+func       = "func" IDENT [ tparams ] params [ results ] attrs "{" body "}" ;
+event      = "event" IDENT params attrs "{" body "}" ;
+macro      = "macro" IDENT [ tparams ] params [ results ] attrs "{" body "}" ;
+params     = "(" [ param { "," param } ] ")" ;
+results    = "->" params ;                     (* results are always named *)
+param      = IDENT ":" type [ "=" literal ] ;
+tparams    = "<" IDENT { "," IDENT } ">" ;
+type       = prim | qname | "exec"
+           | "array" "<" type ">" | "set" "<" type ">" | "map" "<" type "," type ">"
+           | "delegate" "<" tlist [ "->" tlist ] ">" | "dispatcher" "<" tlist ">" ;
+tlist      = "(" [ type { "," type } ] ")" ;
+prim       = "bool" | "i8" | "u8" | "i16" | "u16" | "i32" | "u32"
+           | "i64" | "u64" | "f32" | "f64" | "string" ;
+```
+
+Notes on the declarations:
+
+- `struct` is a **value type**: immutable, copied by value, compared by field. `class` is a **reference type**: single inheritance, any number of `interface`s, fields default to the value written in the declaration. An `extern type` is an opaque host object (section 6.6).
+- A function declared inside a class is a method. It receives an implicit first parameter `self`, visible in the graph as `entry.self`. Methods are virtual unless marked `@final`.
+- An `event` is a function with no results that the host or other graphs can invoke by name, and that may contain latent nodes (section 4.5). A `dispatcher` is a multicast event slot on a class, like a Blueprint Event Dispatcher.
+- A `macro` is inlined at every use, so it may contain `exec` pins as parameters and results. Everything else exposes `exec` pins implicitly.
+- `extern func host.Log(message: string)` imports a host native. The import module is every segment but the last (`host`), the import name is the last (`Log`).
+- `exec` is a type only for macro parameters and for the type arguments of `Reroute`.
+
+### 2.3 Graph bodies: nodes, bindings, exec wiring
+
+The body of a `func`, `event` or `macro` is a list of `local` declarations, `node` statements and `comment` boxes, in any order.
+
+```
+body    = { local | node | comment } ;
+local   = "local" IDENT ":" type [ "=" literal ] NL ;
+node    = "node" IDENT "=" KIND [ symbol ] [ "<" types ">" ]
+          [ "(" [ binding { "," binding } ] ")" ] [ execout ] attrs NL ;
+binding = IDENT ":" ( pinref | literal ) ;
+pinref  = IDENT "." IDENT ;
+execout = "->" target | "{" IDENT "->" target { "," IDENT "->" target } "}" ;
+target  = IDENT [ "." IDENT ] ;
+comment = "comment" IDENT STRING "(" [ IDENT { "," IDENT } ] ")" attrs NL ;
+```
+
+Rules:
+
+1. **Node ids** are identifiers, unique within the graph and never reused. They are the identity of a node for diffs and merges. Display names are not ids; they live in `@ed(label: ...)`. Editors generate ids like `branch_k3m9`; humans and LLMs may choose descriptive ones like `check_energy`.
+2. **Kind** is a PascalCase built-in (`Add`, `Branch`, `SetLocal`, ...; section 3.3). Calling a declared function is always `Call`, so the closed set of built-in kinds never collides with user names.
+3. **Symbol** (optional) names the thing the node acts on: `Call std.math.Sqrt`, `GetField health`, `SetLocal acc`, `New Player`, `Cast Player`, `Macro ForRange`, `Emit each`.
+4. **Type arguments** follow the symbol: `Add<i32>`, `Convert<i32, string>`, `Call std.array.Get<f32>`. They are always written out, never inferred.
+5. **Bindings** connect input pins. The right-hand side is either a pin reference (`other_node.pin`, a data wire) or a literal. An input that is not listed takes the pin's default value (the declared default, otherwise the zero value of its type); the compiler warns (`W0201`) about unlisted inputs that have no declared default.
+6. **Exec wiring** is written on the producer. `-> target` is shorthand for a node with exactly one exec output. The map form names each exec output pin. An exec output that is not listed is unconnected, which means "this chain ends here" (section 4.2).
+7. **Targets** are exec inputs. The default exec input is `in`; write `node.pin` to target another one. Any number of producers may target the same exec input (merging flow).
+8. **Data wires** may fan out freely: any number of nodes may reference the same output pin.
+9. A pin reference must name an output pin of a node in the same graph. Function and event parameters appear as output pins of the `Entry` node (`entry.amount`, and `entry.self` for methods).
+10. **Comment boxes** group nodes visually. They never affect compilation.
+11. `Reroute<T>` is a visual-only node that passes a wire through a bend point. It is erased by the compiler. `Reroute<exec>` reroutes control flow.
+
+### 2.4 Attributes and editor metadata
+
+Attributes are written after the head of the statement they describe, on the same line (for blocks, before the `{`):
+
+```
+attr  = "@" IDENT [ "(" [ arg { "," arg } ] ")" ] ;
+arg   = [ IDENT ":" ] value ;
+value = literal | IDENT | tuple | list | map ;
+```
+
+**Semantic attributes** may change compiled output. Only the ones in this table do; everything else is metadata.
+
+| Attribute | Applies to | Meaning |
+| --- | --- | --- |
+| `@id("...")` | any declaration, module | Stable identity that survives rename and move. Written by editors; optional for hand-written code. |
+| `@pure` | `func` | No exec pins. Callable as a pure node. May not contain impure or latent nodes. |
+| `@final` | method | Not virtual. Calls are bound at compile time. |
+| `@private` | declaration | Not visible outside the module. |
+| `@export` | `func`, `event`, `var`, type | Listed in the module's export table for the host and other modules. |
+| `@inline` | `func` | Hint to inline at call sites. |
+| `@deprecated("msg")` | declaration | Warning at every use. |
+| `@count(n)` | `Sequence`, `MakeArray`, ... | Number of dynamic pins. |
+| `@cases(v0, v1, ...)` | `Switch` | Case values. Pins are `case0`, `case1`, ... and `default`. |
+| `@disabled` | node | Node is skipped: a one-exec-out node passes control straight to its target; data outputs read as zero. |
+
+**Editor and documentation attributes** never change bytecode. They are stored and diffed, and all are covered by the layout hash (section 2.5).
+
+| Attribute | Applies to | Meaning |
+| --- | --- | --- |
+| `@ed(...)` | node, comment, declaration | `pos: (x, y)`, `size: (w, h)`, `color: "#RRGGBB"`, `label: "text"`, `collapsed: bool`, `hidden: [pin, ...]`. Integers only (no float noise in diffs). |
+| `@doc("text")` | any declaration or node | Tooltip and reflection text. |
+| `@category("Math")`, `@keywords("a", "b")` | `func`, `macro` | Palette organisation. |
+
+A node with no `@ed` is auto-laid-out by the editor and gets a position when first saved. This makes LLM-generated graphs valid without layout.
+
+**Preservation rules.**
+
+- Unknown attributes are preserved exactly: the order of arguments and of repeated attributes is kept. A tool may not drop an attribute because it does not recognise it.
+- **Unsafe attributes** (borrowed from GML): an attribute whose name starts with a capital letter, for example `@Hash(...)` or `@Cached(...)`, is derived data. Any tool that modifies the graph must delete it, and tools should not write one they cannot keep correct.
+- Third parties use a namespaced name such as `@x.acme.review("ok")`. Names without a dot are reserved for this specification.
+
+### 2.5 Canonical form, hashes and Git
+
+The canonical form is a function of the model alone, so two tools always write identical bytes for the same graph. The formatter (`wiretc fmt`) and every editor save produce it.
+
+1. UTF-8 NFC, LF, two-space indentation, one trailing newline.
+2. Items ordered by kind (`use`, `extern`, `const`, `var`, `enum`, `struct`, `interface`, `class`, `macro`, `func`, `event`), then by name.
+3. Inside a body: `local` statements by name, then `node` statements sorted by **node id** (ASCII order), then `comment` boxes by id. Wiring never reorders anything, and moving a node only changes its own `@ed` line.
+4. Bindings are written in the node kind's pin order; bindings equal to the pin default are omitted.
+5. Attributes: semantic ones alphabetically, then `@doc`, then `@ed` last. Exec targets precede attributes.
+6. A node longer than 100 columns wraps inside its parentheses or exec map, one binding per line.
+7. Numbers and strings are written in their shortest unambiguous form.
+8. Line comments are dropped.
+
+Two hashes are defined over the canonical form, both SHA-256:
+
+- **Semantic hash**: computed after removing `@ed`, `@doc`, `@category`, `@keywords`, comment boxes and `Reroute` nodes. It is embedded in the `.wbc`, so CI can prove that a commit changed behaviour or did not.
+- **Layout hash**: computed over the entire canonical file. If two collaborators have the same layout hash, they see the identical graph.
+
+Because the canonical order is by id and each node is one line, plain line-based Git merges succeed whenever two people touch different nodes. A semantic merge driver (`wiretc merge`) can additionally reject a merge that produces a node with two incoming data wires on one pin, or an unknown node id in a binding. The examples in this document are shown in *flow order* for readability, which `wiretc view --flow` produces; the compiler accepts any order.
+
+Guidance for LLM authors: choose descriptive snake\_case node ids, always write type arguments, never rely on inference, omit `@ed`, and run `wiretc check` and `wiretc fmt` on the output.
+
+### 2.6 A complete example
+
+This file is used again in sections 5 and 7.
+
+```
+wiret 1
+module game.demo @id("mod_k3f9")
+
+extern func host.Log(message: string)
+
+class Player {
+  health: i32 = 100
+
+  func TakeDamage(amount: i32) -> (died: bool) {
+    local new_hp: i32
+    node entry     = Entry -> set_new                                    @ed(pos: (0, 0))
+    node cur       = GetField health (obj: entry.self)                   @ed(pos: (160, 120))
+    node sub       = Sub<i32>(a: cur.value, b: entry.amount)             @ed(pos: (320, 120))
+    node set_new   = SetLocal new_hp (value: sub.result) -> store        @ed(pos: (160, 0))
+    node hp        = GetLocal new_hp                                     @ed(pos: (480, 120))
+    node store     = SetField health (obj: entry.self, value: hp.value) -> chk
+    node is_dead   = Le<i32>(a: hp.value, b: 0)                          @ed(pos: (640, 120))
+    node chk       = Branch(cond: is_dead.result) { then -> log_dead, else -> ret_alive }
+    node log_dead  = Call host.Log(message: "Player died") -> ret_dead
+    node ret_dead  = Return(died: true)
+    node ret_alive = Return(died: false)
+    comment c_death "Death handling" (log_dead, ret_dead) @ed(pos: (940, -90), size: (330, 120))
+  }
+}
+
+func Clamp01(v: f32) -> (result: f32) @pure {
+  node entry = Entry
+  node lo    = Max<f32>(a: entry.v, b: 0.0)
+  node hi    = Min<f32>(a: lo.result, b: 1.0)
+  node ret   = Return(result: hi.result)
+}
+
+macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, index: i32) {
+  local i: i32
+  node entry  = Entry -> init
+  node init   = SetLocal i (value: entry.first) -> test
+  node cur    = GetLocal i
+  node cmp    = Le<i32>(a: cur.value, b: entry.last)
+  node test   = Branch(cond: cmp.result) { then -> body, else -> finish }
+  node body   = Emit each (index: cur.value) -> bump
+  node nxt    = Add<i32>(a: cur.value, b: 1)
+  node bump   = SetLocal i (value: nxt.result) -> test
+  node finish = Exit done
+}
+
+func SumTo(n: i32) -> (total: i32) {
+  local acc: i32
+  node entry = Entry -> loop
+  node loop  = Macro ForRange(first: 1, last: entry.n) { each -> add, done -> ret }
+  node cur   = GetLocal acc
+  node sum   = Add<i32>(a: cur.value, b: loop.index)
+  node add   = SetLocal acc (value: sum.result)
+  node total = GetLocal acc
+  node ret   = Return(total: total.value)
 }
 ```
 
-### 2.5 Execution + data example
+Things to notice:
 
-```wiret
-wiret 0.2
-module demo.greeting
+- `TakeDamage` stores the new health in a local before using it twice. `cur` is pure, so it would be re-evaluated by every impure consumer; reading `health` again after `store` would subtract the damage a second time (section 4.3).
+- `add` has no exec output. A chain that ends returns control to whatever pushed it, here the macro (section 4.2), which is what makes the loop continue.
+- `loop.index` is a data output of a macro node, readable by any node downstream of `loop`.
 
-graph function greet(name: string) -> void [public=true, id="g_greet"] {
-  node n_entry: core.entry () [id="n_entry", pos=[64,120]]
-  node n_pfx:   core.string.const (out value: string = "Hello, ") [id="n_pfx", pos=[80,300]]
-  node n_join:  core.string.concat (in left: string, in right: string, out value: string)
-    [id="n_join", pos=[340,300]]
-  node n_log:   host.console.write (in value: string) [id="n_log", capability="console.write", pos=[600,160]]
-  node n_exit:  core.exit () [id="n_exit", pos=[840,160]]
+## 3. Types and the built-in node set
 
-  edge x1: exec n_entry.then -> n_log.exec
-  edge x2: exec n_log.then   -> n_exit.exec
-  edge d1: data n_pfx.value  -> n_join.left
-  edge d2: data g_greet.name -> n_join.right
-  edge d3: data n_join.value -> n_log.value
+### 3.1 Types
+
+| Type | Representation | Notes |
+| --- | --- | --- |
+| `bool` | i32 (0 or 1) | Default `false`. |
+| `i8 u8 i16 u16 i32 u32` | i32 slot | Narrow types wrap on arithmetic (`Convert` is needed to narrow explicitly). Unsigned types use unsigned compare, divide, remainder and shift. |
+| `i64 u64` | i64 slot | Same rules. |
+| `f32 f64` | IEEE-754 | NaN payloads are not observable except through reinterpretation. |
+| `string` | immutable UTF-8 reference | Never null; default is the empty string. Indexing is by byte offset via `std.string`. |
+| `enum` | its underlying integer (default `i32`) | Names are kept in the `name` custom section for editors and reflection. |
+| `struct` | immutable heap record with value semantics | Equality is structural. "Setting" a field makes a new struct (`WithField`). |
+| `class` | nullable reference | Equality is identity. Default `null`. |
+| `array<T>` | growable, zero-based reference | Aliased on assignment; `std.array.Clone` copies. |
+| `set<T>`, `map<K,V>` | insertion-ordered reference | Iteration order is insertion order, never hash order. Keys are primitives, `string`, enums or structs of those. |
+| `delegate<(A)->(R)>` | reference to a function plus optional bound receiver | Single-cast. |
+| `dispatcher<(A)>` | reference to an ordered handler list | Multicast; the `dispatcher` member of a class. |
+| `extern type` | host handle (index plus generation) | `IsValid` is false once the host destroys the object. |
+| `std.Signal`, `std.Fault` | built-in opaque classes | Used by `Await` and `Try`. |
+
+Wires connect a source pin to a destination pin of the **same type**, or of a **supertype** (a class wire may feed a pin of its superclass or of an interface it implements). There is no other implicit conversion.
+
+### 3.2 Conversions
+
+The editor, like Blueprint's, offers to insert a conversion node when you connect two compatible but different types. In Wiret that node is real and visible in the text: `Convert<From, To>`.
+
+| From | To | Behaviour |
+| --- | --- | --- |
+| integer | integer | Wraps (truncates, or sign/zero-extends). |
+| integer | float | Nearest representable value. |
+| float | integer | Truncates toward zero, **saturating**; NaN becomes 0. Never faults. |
+| f64 / f32 | f32 / f64 | IEEE demote / promote. |
+| bool | integer | 0 or 1. |
+| integer | bool | Non-zero is true. |
+| enum | its integer type, and back | Back-conversion does not check that the value names a member. |
+| bool, integer, float | string | Culture-independent decimal text. Floats use the shortest text that round-trips. |
+| string | number or bool | Not a `Convert`. Use `std.string.TryParse<T>`, which returns `(ok: bool, value: T)`. |
+
+### 3.3 Built-in node kinds
+
+Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and output `result`. `T` is the type argument. "Impure" kinds have the exec input `in` unless noted.
+
+**Control flow**
+
+| Kind | Pins | Behaviour |
+| --- | --- | --- |
+| `Entry` | out: the graph's parameters; exec out `then` | Starts a function or event. In a macro, has one exec output per `exec` parameter. |
+| `Return` | in: the graph's results | Leaves the function. In a `@pure` function it has no exec input and marks the result. |
+| `Branch` | in `cond: bool`; exec out `then`, `else` | Two-way choice. |
+| `Sequence` | `@count(n)`; exec out `then0` .. `then{n-1}` | Runs `then0`'s chain to its end, then `then1`'s, and so on. |
+| `Switch<T>` | in `value: T`; `@cases(...)`; exec out `case0`.., `default` | `T` is an integer, enum, string or bool. |
+| `Select<T>` | pure; in `cond`, `a`, `b`; out `result` | Both `a` and `b` are evaluated (they are pure). |
+| `Try` | exec out `body`, `fault`, `then`; out `message: string`, `code: i32` | Runs `body`. Normal end goes to `then`. A catchable fault inside it goes to `fault`. |
+| `Throw` | in `message: string`, `code: i32` | Raises a catchable fault. No exec out. |
+| `Delay` | in `seconds: f64`; exec out `then` | **Latent.** Suspends the fiber for virtual time. |
+| `Yield` | exec out `then` | **Latent.** Resumes on the next `wr_advance`. |
+| `Await` | in `signal: std.Signal`; exec out `then` | **Latent.** Resumes when the host fires the signal. |
+| `Macro` | symbol: macro name; pins from its signature | Inlined at compile time. |
+| `Emit` | symbol: macro exec output; in: its data outputs; exec out `then` | Macro-only. Runs the caller's chain for that output as a subroutine, then continues at `then`. |
+| `Exit` | symbol: macro exec output; in: its data outputs | Macro-only. Leaves the macro through that output (a jump). |
+| `Reroute<T>` | in `in`, out `out` | Visual only. |
+
+**Variables, fields and objects**
+
+| Kind | Pins | Behaviour |
+| --- | --- | --- |
+| `GetLocal` / `SetLocal` | `value` | Locals declared with `local`. `SetLocal` is impure. |
+| `GetVar` / `SetVar` | `value` | Module-level `var`. |
+| `GetField` | in `obj`; out `value` | Pure. Faults on a null class reference. |
+| `SetField` | in `obj`, `value` | Impure. On a struct use `WithField`. |
+| `WithField` | pure; in `obj`, `value`; out `result` | Returns a copy of a struct with one field replaced. |
+| `MakeStruct` / `BreakStruct` | one pin per field | Pure. |
+| `New` | out `result`; exec out `then` | Allocates a class instance with declared defaults. Impure because it creates identity. |
+| `Cast` | pure; in `obj`; out `result`, `ok: bool` | `result` is null when the cast fails. |
+| `IsValid` | pure; in `obj`; out `result: bool` | Non-null and, for host handles, still alive. |
+| `Convert<From, To>` | pure; in `value`; out `result` | See section 3.2. |
+
+**Arithmetic, comparison, logic** (all pure)
+
+| Kinds | Types | Notes |
+| --- | --- | --- |
+| `Add Sub Mul Div Rem Min Max` | `<T>` any number | Integer `Div`/`Rem` fault on zero. Integer overflow wraps. |
+| `Neg Abs` | `<T>` any signed number or float | Input `value`. |
+| `Eq Ne` | `<T>` number, bool, string, enum, struct, class | Output `bool`. |
+| `Lt Le Gt Ge` | `<T>` number, string (ordinal), enum | Output `bool`. |
+| `And Or Xor Not` | bool | Not short-circuiting. |
+| `BitAnd BitOr BitXor BitNot Shl Shr` | `<T>` integer | Shift counts are masked to the type's width. |
+
+**Containers**
+
+| Kind | Notes |
+| --- | --- |
+| `MakeArray<T>` | Pure. `@count(n)`, inputs `item0` ... |
+| `ArrayGet<T>`, `ArrayLength<T>` | Pure. Out-of-range index is a fault. |
+| `ArraySet<T>`, `ArrayAdd<T>`, `ArrayInsert<T>`, `ArrayRemove<T>`, `ArrayClear<T>` | Impure. |
+| `MapFind<K,V>` | Pure. Out: `value`, `found`. A missing key gives the zero value and `found = false`. |
+| `MapHas`, `MapLength`, `MapKeyAt`, `MapValueAt` | Pure. The `At` kinds index by insertion order, which is how `ForEach` over a map is built. |
+| `MapSet`, `MapRemove`, `MapClear` | Impure. |
+| `SetHas`, `SetLength`, `SetAt` / `SetAdd`, `SetRemove`, `SetClear` | Same pattern. |
+
+**Calls and events**
+
+| Kind | Pins | Behaviour |
+| --- | --- | --- |
+| `Call` | symbol: function, method or extern; its parameters and results | Pure if the callee is `@pure` or a pure native, otherwise impure. A method call has `self` as its first input; dispatch is virtual unless `@final`, and via the interface when the symbol names an interface method. |
+| `CreateDelegate` | pure; symbol: function; optional `target`; out `result` | Binds a function (and receiver) into a delegate. |
+| `Invoke<D>` | `D` is a delegate type; in `delegate` plus the arguments | Impure. |
+| `Bind`, `Unbind` | symbol: dispatcher; in `obj`, `handler: delegate` | Impure. |
+| `Broadcast` | symbol: dispatcher; in `obj` plus the arguments | Impure. Handlers run in bind order. A fault in one handler is reported to the host and does not stop the others. |
+
+### 3.4 The standard library
+
+The VM ships these namespaces as natives (callable through `Call`) and as Wiret source:
+
+- `std.math`: `Sqrt`, `Pow`, `Sin`, `Cos`, `Atan2`, `Floor`, `Ceil`, `Round`, `Clamp<T>`, `Lerp`, ... (pure).
+- `std.string`: `Concat`, `Length`, `Substring`, `Find`, `Format`, `TryParse<T>`, `Split`, ... (pure).
+- `std.array`, `std.map`: `Clone`, `Sort<T>` (stable, caller supplies a comparison delegate), `IndexOf<T>`, ...
+- `std.random`: an explicit-state generator class (`New`, `NextI32`, `NextF64`). There is **no ambient randomness, clock or I/O**. The host provides any of those as natives, which keeps modules replayable.
+- `std.flow` (macros written in Wiret): `ForRange`, `ForEach<T>`, `ForEachMap<K,V>`, `While`, `DoOnce`, `DoN`, `Gate`, `FlipFlop`, `MultiGate`, `Retriggerable`.
+
+## 4. Execution model and compilation
+
+> **Provenance.** The supplied Blueprint documentation covers pins, macros, latent nodes and so on, but not the runtime rules below (re-evaluation of pure nodes, how a finished chain returns to a Sequence). Those rules reflect how Blueprints are commonly understood to behave and are specified here as Wiret's own semantics. Check them against Blueprint behaviour if exact compatibility matters.
+
+### 4.1 Two kinds of nodes
+
+Control flows along exec wires, one impure node at a time. Values flow along data wires and are produced by pure nodes on demand or by impure nodes when they run. A graph is therefore executable as a control-flow graph whose operands are small dataflow DAGs.
+
+### 4.2 Exec flow and the continuation stack
+
+Each call frame has a small **continuation stack**. Its entries are either a *continuation* (a place to resume) or a *fault handler marker* (section 4.6).
+
+- Following an exec wire is a jump.
+- A chain **ends** where an exec output is unconnected (or a node has no exec output). Ending pops the continuation stack and jumps to the popped continuation. If the stack holds no continuation, the frame ends: an event finishes, and a function returns the zero value of every result (the compiler warns with `W0302` if the function declares results).
+- `Sequence` with `n` outputs pushes continuations for outputs `n-1` down to `1`, then jumps to output `0`. Each chain therefore runs to its end before the next starts.
+- `Emit` pushes a continuation for its own `then` pin and jumps to the caller's chain for that macro output. When that chain ends, the loop macro resumes. That is how `ForRange` in section 2.6 works with no loop primitive.
+- `Return` discards the whole frame, including pending continuations. `Exit` is a plain jump.
+
+Because every bytecode label is a type-safe jump target (section 5.5), the stack's depth does not have to be statically known. When the compiler can prove the depth (the common case), the optimiser replaces the push/pop pair with a direct branch, and the generated code looks like structured code.
+
+### 4.3 Pure nodes and data persistence
+
+- **Evaluation unit.** Before an impure node runs, the compiler evaluates the pure nodes feeding its inputs, each at most once for that execution (shared sub-expressions are computed once). A pure node feeding two different impure nodes is evaluated twice. This is the familiar Blueprint behaviour and it is why `TakeDamage` stores its intermediate result in a local.
+- **Impure outputs persist.** A data output of an impure node (a call result, `loop.index`) is stored in a frame slot when the node runs. Any later node may read it. Reading it on a path where the node has not run yet gives the zero value; the compiler warns (`W0310`) when a read is not dominated by the producing node.
+- **No short-circuiting.** `And`, `Or` and `Select` evaluate every input. Use `Branch` for conditional evaluation.
+- **Macro inputs** are evaluated once, at macro entry, and captured in locals.
+- **Cycles** among pure nodes are rejected (`E0301`). Cycles through exec wires are loops and are allowed.
+
+### 4.4 Functions, events, macros and groups
+
+| Construct | Semantics |
+| --- | --- |
+| Function | Callable, may recurse, returns results. May contain latent nodes, unlike Blueprint functions. The compiler infers `latent` for a function that contains one, directly or through calls, and records it in the export table. `@pure` functions can never be latent. |
+| Event | A function with no results, intended as an entry point. Invoked by the host (`wr_push_func` plus `wr_call`) or by `Call` from another graph. |
+| Macro | Expanded in place before type-checking the caller's body. Macro locals are renamed per expansion, so two expansions never share state. A macro may not expand itself, directly or indirectly (`E0401`). |
+| Collapsed graph / group | Editor-only. A `comment` box with `@ed(collapsed: true)` is drawn as a single node whose pins are the wires crossing the box edge. The compiler sees the flat graph. |
+
+### 4.5 Latent nodes and fibers
+
+Every call runs on a **fiber**: its own value stack and call frames, heap-allocated and owned by the VM. A latent node (`Delay`, `Yield`, `Await`) compiles to `suspend`, which parks the whole fiber, including every frame beneath it, until its wake condition. The fiber resumes at the next instruction with all frames intact. Rules:
+
+- Latent nodes are rejected inside `@pure` functions (natives cannot suspend in version 1; see section 6.6).
+- A fiber can only suspend if every frame between it and its base is a Wiret frame. A native that calls back into Wiret and then yields would have to unwind a C frame, which the VM refuses (`WR_ERR_API`), as Lua does for yielding across a C call.
+- Time is virtual. `Delay` waits for virtual seconds that advance only when the host calls `wr_advance`. Wake order is by wake time, then by fiber creation order, so execution is deterministic.
+
+### 4.6 Faults
+
+A **fault** is a runtime error: null dereference, array index out of range, integer divide by zero, failed `ref.cast`, stack overflow, `Throw`, or an error returned by a native. Faults are catchable with `Try`. `Try` lowers to a *handler marker* pushed on the continuation stack. On a fault, the VM pops the stack down to the nearest marker, stores the fault in a local, clears the operand stack, and jumps to the handler. Normal chain ends discard markers while looking for the next continuation.
+
+A `Try` body must be properly nested: the nodes reachable from `body` must not also be reachable from outside it (`E0412`). Without that rule a stale marker could survive past the end of the region.
+
+Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber killed by the host. These end the fiber and are reported to the host.
+
+### 4.7 Diagnostics
+
+| Code | Meaning |
+| --- | --- |
+| `E0101` / `E0102` | Binding or exec target names an unknown node / duplicate node id. |
+| `E0103` | Unknown pin on a node. |
+| `E0110` | Wire type mismatch (and no supertype relation). |
+| `E0111` | The same input pin is bound twice. |
+| `E0120` | Exec output wired to a data pin, or a data wire to an exec pin. |
+| `E0121` | An exec output is listed twice. |
+| `E0301` | Cycle among pure nodes. |
+| `E0302` | `@pure` function contains an impure or latent node. |
+| `E0401` | Macro expands itself. |
+| `E0412` | `Try` body is not properly nested. |
+| `E0501` / `E0502` | Unresolved symbol / missing type argument. |
+| `W0201` | Input left unbound and no declared default. |
+| `W0301` | Node unreachable from any entry. |
+| `W0302` | Chain can end in a function that declares results. |
+| `W0310` | Read of an impure output not dominated by its producer. |
+
+### 4.8 Lowering a graph to bytecode
+
+1. **Expand macros** into the caller. Entry inputs become locals, `Emit` and `Exit` become jumps and local assignments.
+2. **Assign locals.** Parameters first, then declared `local`s, then one slot for each data output of each impure node that is read by another node, then temporaries.
+3. **Form blocks.** Each impure node starts a block labelled with its node id. The block evaluates the pure subgraph for its inputs in dependency order, using `local.tee` for shared values, performs the operation, stores outputs, and ends with the exec transfer.
+4. **Emit exec transfers.** A single target becomes `br` (omitted when the target is next in layout). `Branch` becomes `br_if`. `Switch` becomes `br_table` (or a compare chain for strings). `Sequence`, `Emit` and `Try` use the continuation instructions.
+5. **Optimise.** Constant folding, removal of unread locals, branch threading, layout so fall-through follows the exec wire, and replacement of statically balanced `cont.push` / `cont.pop` by `br`.
+6. **Record debug data.** Each block's start offset is mapped to its node id (custom section `wr.debug`).
+7. **Verify** the result with the same verifier the VM runs at load time (section 5.5). A compiler bug can therefore never produce an unsafe module.
+
+## 5. Bytecode specification (WBC 1)
+
+### 5.1 Design summary
+
+WBC is a **typed stack machine** with per-function typed locals, in the spirit of WebAssembly's encoding and the JVM's object model. Two decisions follow from graphs rather than structured source:
+
+- **Flat code with labels, not structured blocks.** Exec wiring can form loops with several entry points and merges (irreducible control flow). WebAssembly's `block`/`loop` nesting would force a restructuring pass, which would make bytecode unrelated to the graph. WBC uses plain branches to labels, as the JVM does.
+- **The operand stack is empty at every label.** Each impure node is one block that starts and ends with an empty operand stack, and only locals carry values between blocks. Locals have fixed declared types and are zero-initialised, so the verifier needs no stack maps, no merge of type states and no definite-assignment analysis. Verification is a single linear pass, and *any* label is a type-safe jump target, which is what makes the dynamic continuation stack (section 4.2) safe.
+
+All multi-byte fixed-width values are little-endian. Integer immediates are LEB128 (`u32`/`s32`/`s64`).
+
+### 5.2 Container
+
+```
+module  = magic version flags section*
+magic   = 00 57 42 43            ; NUL 'W' 'B' 'C'
+version = u32 (little endian)    ; 1
+flags   = u32                    ; bit 0: has embedded source (wr.graph)
+section = id:u8 size:u32 payload ; ids ascending, custom sections (id 0) anywhere
+vec(X)  = n:u32 X*               name = vec(u8)  ; UTF-8, no NUL
+```
+
+| Id | Section | Contents |
+| --- | --- | --- |
+| 0 | Custom | `name:name` then payload. Unknown custom sections are skipped. |
+| 1 | Type | `vec(typeentry)` |
+| 2 | Import | `vec(module:name field:name kind:u8=0 type:u32 flags:u8)`; kind 0 is a function. Flags: bit 0 pure, bit 1 reserved. |
+| 3 | Function | `vec(typeidx:u32)` for each defined function. Function indices count imports first. |
+| 4 | Global | `vec(valtype mut:u8 init:const)` |
+| 5 | Export | `vec(name kind:u8 index:u32 flags:u8)`; kind 0 func, 1 global, 2 type. Flags: bit 0 event, 1 latent, 2 pure. Methods are exported as `Class.Method`. |
+| 6 | Data | `vec(vec(u8))`: string constants, UTF-8. |
+| 7 | Code | `vec(body)` where `body = size:u32 locals:vec(count:u32 valtype) max_stack:u32 max_cont:u32 code:bytes` |
+
+A `const` is 8 bytes (numeric bit pattern), or a `u32` data index for `string`, or empty for references (always null).
+
+### 5.3 Value types and type entries
+
+| Code | Value type |  | Code | Storage-only type |
+| --- | --- | --- | --- | --- |
+| `7F` | i32 (also bool and all narrow integers) |  | `78` | i8 (loads sign-extend, stores truncate) |
+| `7E` | i64 |  | `77` | i16 (same) |
+| `7D` | f32 |  |  |  |
+| `7C` | f64 |  |  |  |
+| `6E` | string (never null) |  |  |  |
+| `6B t` | nullable reference to type index `t` (class, struct, array, map, set, interface, delegate, dispatcher) |  |  |  |
+| `6A` | fault |  |  |  |
+| `69` | signal |  |  |  |
+| `6D` | anyref (top of the reference types) |  |  |  |
+
+| Code | Type entry | Body |
+| --- | --- | --- |
+| `60` | func | `params:vec(valtype) results:vec(valtype)` |
+| `5F` | struct | `fields:vec(field)` |
+| `5E` | array | `elem:storagetype` |
+| `5D` | map | `key:valtype value:valtype` |
+| `5C` | set | `elem:valtype` |
+| `5B` | class | `flags:u8 super:u32 interfaces:vec(iface:u32 impl:vec(funcidx)) fields:vec(field) vtable:vec(funcidx)`. `super` is 0 for none, else type index + 1. Flag bit 0 marks a host type: then a `name` follows and there are no fields. `fields` are the class's own; inherited fields come first in the layout. `vtable` holds the full slot list, with overrides replacing inherited slots. |
+| `5A` | interface | `methods:vec(functype:u32)`; the method index is the dispatch slot. |
+| `59` | delegate | `functype:u32` |
+| `58` | dispatcher | `functype:u32` (no results) |
+
+`field = storagetype flags:u8 [const]` where flag bit 0 says a default value follows.
+
+### 5.4 Custom sections defined by this version
+
+| Name | Purpose |
+| --- | --- |
+| `name` | Names of functions, locals, types, fields and enum members, for tools and reflection. |
+| `wr.debug` | Maps code offsets to graph position. For each function: its graph item id, a string table of node ids, and `vec(pc_delta:u32 node:u32)`. Drives node-level breakpoints, stepping and "which wire is hot" in the editor. |
+| `wr.graph` | The canonical `.wiret` text, deflate-compressed. Lets a debugger or editor open a `.wbc` it did not build. |
+| `wr.meta` | Module id, compiler version, **semantic hash** and **layout hash** (section 2.5), source hash. |
+| `wr.reflect` | Attribute data for the host: `@doc`, `@category`, parameter names and defaults. |
+
+### 5.5 Verification
+
+A conforming VM verifies every module before running any of it. The verifier makes one linear pass over each function and requires all of the following.
+
+1. **Structure.** Sections are in order and sizes agree; every index is in range; exports are unique; the class hierarchy is acyclic; each vtable entry and interface implementation has the required signature.
+2. **Decoding.** Every instruction decodes; every branch target is an instruction boundary inside the same function. A first pass collects the set of labels.
+3. **Empty stack at labels.** The operand stack is empty before every label, after `br`, `br_table`, `return`, `throw`, `unreachable`, and after `cont.pop` (which falls through only when no continuation exists). A branch may only occur when its own operands are the entire stack: `br_if` with exactly one `i32` on the stack, `br_table` likewise.
+4. **Typing.** Each instruction's operands match its signature (section 5.6). References follow subtyping: a class is a subtype of its superclass chain and interfaces; every reference type is a subtype of `anyref`; null has every reference type. `local.*` and `global.*` match the declared types.
+5. **Returns.** At `return` the stack holds exactly the function's result types.
+6. **Limits.** The computed maximum operand stack height is at most `max_stack`. `try.push` names a local of type `fault`.
+7. **Suspension.** `suspend` appears only in functions that are not exported as pure and executes with only its operands on the stack.
+
+Stack maps for the GC are derived by the verifier at call, allocation and suspend points and cached.
+
+### 5.6 Instruction set
+
+Notation: `[in] -> [out]`. `L` is a branch target, an `s32` offset relative to the end of the instruction. `T` is a type index and `f` a field index. Unless stated, a null reference operand faults.
+
+**Control (00 to 0F)**
+
+| Op | Mnemonic | Immediates | Stack |
+| --- | --- | --- | --- |
+| 00 | `unreachable` |  | faults |
+| 01 | `nop` |  |  |
+| 02 | `br` | L |  |
+| 03 | `br_if` | L | `[i32]` -> `[]` |
+| 04 | `br_table` | n, L0 ... Ln-1, Ldefault | `[i32]` -> `[]` |
+| 05 | `return` |  | `[results]` -> |
+| 06 | `call` | func | `[params]` -> `[results]` |
+| 07 | `call_virtual` | T (declaring class), slot | `[recv, args]` -> `[results]` |
+| 08 | `call_interface` | T (interface), method | `[recv, args]` -> `[results]` |
+| 09 | `call_delegate` | T (func type) | `[delegate, args]` -> `[results]` |
+| 0A | `cont.push` | L |  |
+| 0B | `cont.pop` |  | Jumps to the top continuation; discards handler markers on the way; falls through if none. |
+| 0C | `try.push` | L, local | Pushes a handler marker. On a fault the VM stores the fault in `local`, unwinds to the marker, clears the operand stack and jumps to L. |
+| 0D | `suspend` | kind: 0 yield, 1 timer, 2 signal | `[]`, `[f64]` or `[signal]` -> `[]` |
+| 0E | `throw` |  | `[fault]` -> |
+| 0F | `brk` |  | Reserved for debuggers. Never appears in a file. |
+
+**Variables and constants (10 to 2F)**
+
+| Op | Mnemonic | Immediates | Stack |
+| --- | --- | --- | --- |
+| 10 | `drop` |  | `[t]` -> `[]` |
+| 11 | `select` |  | `[t, t, i32]` -> `[t]`; first operand when the condition is non-zero. |
+| 12 / 13 / 14 | `local.get` / `.set` / `.tee` | index |  |
+| 15 / 16 | `global.get` / `.set` | index |  |
+| 20 / 21 | `i32.const` / `i64.const` | s32 / s64 | `[]` -> `[i32]` / `[i64]` |
+| 22 / 23 | `f32.const` / `f64.const` | 4 / 8 bytes |  |
+| 24 | `string.const` | data index | `[]` -> `[string]` |
+| 25 | `ref.null` | T | `[]` -> `[ref T]` |
+| 26 | `ref.is_null` |  | `[ref]` -> `[i32]` |
+| 27 | `ref.eq` |  | `[ref, ref]` -> `[i32]`, identity. |
+| 28 | `ref.cast` | T | `[ref]` -> `[ref T]`; faults unless null or an instance of T. |
+| 29 | `ref.test` | T | `[ref]` -> `[i32]`; null gives 0. |
+| 2A | `ref.valid` |  | `[ref]` -> `[i32]`; non-null and, for host handles, alive. |
+
+**Numeric.** Four 32-slot blocks. The opcode is the block base plus the index in the table; for example `i32.add` is `30 + 0B = 3B`.
+
+| Block | Base | Operations (index order) |
+| --- | --- | --- |
+| `i32.` | 30 | 0 `eqz`, 1 `eq`, 2 `ne`, 3 `lt_s`, 4 `lt_u`, 5 `gt_s`, 6 `gt_u`, 7 `le_s`, 8 `le_u`, 9 `ge_s`, 10 `ge_u`, 11 `add`, 12 `sub`, 13 `mul`, 14 `div_s`, 15 `div_u`, 16 `rem_s`, 17 `rem_u`, 18 `and`, 19 `or`, 20 `xor`, 21 `shl`, 22 `shr_s`, 23 `shr_u`, 24 `neg`, 25 `not`, 26 `extend8_s`, 27 `extend16_s` |
+| `i64.` | 50 | Same indices, plus 28 `extend32_s`. Comparisons and `eqz` return `i32`. |
+| `f32.` | 70 | 0 `eq`, 1 `ne`, 2 `lt`, 3 `gt`, 4 `le`, 5 `ge`, 6 `add`, 7 `sub`, 8 `mul`, 9 `div`, 10 `min`, 11 `max`, 12 `neg`, 13 `abs`, 14 `sqrt`, 15 `ceil`, 16 `floor`, 17 `trunc`, 18 `nearest`, 19 `copysign` |
+| `f64.` | 90 | Same as f32. |
+
+Integer `div` and `rem` by zero fault. `INT_MIN / -1` yields `INT_MIN` and the remainder is 0 (no fault). Shift counts are masked to the width. `min`/`max` return NaN if either operand is NaN. Narrow integer types are produced by `and` with a mask (unsigned) or `extend8_s`/`extend16_s` (signed) after arithmetic.
+
+**Conversions (B0 to C8)**
+
+| Op | Mnemonic | Op | Mnemonic | Op | Mnemonic |
+| --- | --- | --- | --- | --- | --- |
+| B0 | `i32.wrap_i64` | BB | `f32.convert_i32_s` | C3 | `f32.demote_f64` |
+| B1 | `i64.extend_i32_s` | BC | `f32.convert_i32_u` | C4 | `f64.promote_f32` |
+| B2 | `i64.extend_i32_u` | BD | `f32.convert_i64_s` | C5 | `i32.reinterpret_f32` |
+| B3 / B4 | `i32.trunc_f32_s` / `_u` | BE | `f32.convert_i64_u` | C6 | `i64.reinterpret_f64` |
+| B5 / B6 | `i32.trunc_f64_s` / `_u` | BF / C0 | `f64.convert_i32_s` / `_u` | C7 | `f32.reinterpret_i32` |
+| B7 / B8 | `i64.trunc_f32_s` / `_u` | C1 / C2 | `f64.convert_i64_s` / `_u` | C8 | `f64.reinterpret_i64` |
+| B9 / BA | `i64.trunc_f64_s` / `_u` |  |  |  |  |
+
+All `trunc` instructions are **saturating** and map NaN to 0. They never fault.
+
+**Objects and containers (D0 to F8)**
+
+| Op | Mnemonic | Imm | Stack |
+| --- | --- | --- | --- |
+| D0 | `struct.new` | T | `[fields...]` -> `[ref]` |
+| D1 / D2 | `struct.get` / `struct.with` | T, f | `[ref]` -> `[v]` / `[ref, v]` -> `[ref']` (copy with one field replaced) |
+| D3 | `class.new` | T | `[]` -> `[ref]`, fields set to declared defaults, dispatchers empty. |
+| D4 / D5 | `class.get` / `class.set` | T, f | `[ref]` -> `[v]` / `[ref, v]` -> `[]` |
+| D6 | `array.new` | T | `[i32 length]` -> `[ref]`, zero-filled. |
+| D7 | `array.len` |  | `[ref]` -> `[i32]` |
+| D8 / D9 | `array.get` / `array.set` | T | `[ref, i32]` -> `[v]` / `[ref, i32, v]` -> `[]` (bounds-checked) |
+| DA / DB | `array.push` / `array.insert` | T | `[ref, v]` / `[ref, i32, v]` -> `[]` |
+| DC / DD / DE | `array.remove` / `.clear` / `.clone` | T | `[ref, i32]` -> `[]` / `[ref]` -> `[]` / `[ref]` -> `[ref]` |
+| E0 | `map.new` | T | `[]` -> `[ref]` |
+| E1 | `map.find` | T | `[ref, key]` -> `[value, i32 found]` |
+| E2 / E3 / E4 | `map.set` / `.remove` / `.has` | T | `[ref, key, v]` -> `[]` / `[ref, key]` -> `[i32]` (was present) / `[ref, key]` -> `[i32]` |
+| E5 / E8 | `map.len` / `map.clear` |  | `[ref]` -> `[i32]` / `[]` |
+| E6 / E7 | `map.key_at` / `map.value_at` | T | `[ref, i32]` -> `[k]` / `[v]`, insertion order. |
+| E9 / EA / EB / EC | `set.new` / `.add` / `.remove` / `.has` | T | add and remove return `i32` (changed) |
+| ED / EE / EF | `set.len` / `set.at` / `set.clear` | T | as for maps |
+| F0 | `string.concat` |  | `[string, string]` -> `[string]` |
+| F1 | `string.len` |  | `[string]` -> `[i32]` (bytes) |
+| F2 / F3 | `string.eq` / `string.cmp` |  | `[string, string]` -> `[i32]`; `cmp` is -1, 0 or 1 (ordinal bytes). |
+| F4 | `delegate.new` | func, flags | `[]` or `[recv]` -> `[ref]`. Flag bit 0: bind a receiver as the first argument. |
+| F5 / F6 | `dispatcher.bind` / `.unbind` | T | `[ref, delegate]` -> `[]` |
+| F7 | `dispatcher.broadcast` | T | `[ref, args]` -> `[]`. Runs handlers in bind order; a handler's fault is reported to the host and does not stop the others. |
+| FB | *prefix* |  | Next byte is a LEB128 sub-opcode. Reserved for future instructions. |
+
+All other opcodes are invalid. Everything else a node needs (string formatting, math, sorting) is a native in `std.*`, which keeps the instruction set small and lets embedders replace library functions.
+
+### 5.7 Fuel
+
+Each instruction costs 1 unit; `call`, `call_virtual`, `call_interface` and `call_delegate` cost 5; allocation adds 1 per 64 bytes (rounded up). Natives cost what they declare at registration. When a fiber's fuel reaches 0 it stops with `WR_ERR_FUEL`, which is not catchable. Counting is exact and deterministic, so fuel is a valid replay and billing unit.
+
+### 5.8 Disassembly
+
+`wiretc dis` prints the bytecode with node ids recovered from `wr.debug`. The two listings below are the compiled forms of `TakeDamage` and `SumTo` from section 2.6 (at `-O1`; at `-O0` the loop keeps its `cont.push` / `cont.pop` pair).
+
+```
+func game.demo.Player.TakeDamage (ref Player, i32) -> (i32)
+  locals: 2:i32 new_hp
+.set_new:
+  local.get 0
+  class.get Player.health
+  local.get 1
+  i32.sub
+  local.set 2
+.store:
+  local.get 0
+  local.get 2
+  class.set Player.health
+.chk:
+  local.get 2
+  i32.const 0
+  i32.le_s
+  br_if .log_dead
+.ret_alive:
+  i32.const 0
+  return
+.log_dead:
+  string.const 0          ; "Player died"
+  call host.Log
+  i32.const 1
+  return
+
+func game.demo.SumTo (i32) -> (i32)
+  locals: 1:i32 acc, 2:i32 loop.i, 3:i32 loop.last, 4:i32 loop.index
+  local.get 0
+  local.set 3             ; loop.last = n   (loop.first = 1 folded into the next line)
+  i32.const 1
+  local.set 2             ; loop.i = first
+.test:
+  local.get 2
+  local.get 3
+  i32.le_s
+  br_if .body
+  local.get 1             ; ret: total = acc
+  return
+.body:
+  local.get 2
+  local.set 4             ; Emit each: index = i
+  local.get 1
+  local.get 4
+  i32.add
+  local.set 1             ; add: acc = acc + index
+  local.get 2
+  i32.const 1
+  i32.add
+  local.set 2             ; bump
+  br .test
+```
+
+Example encodings: `local.get 1` is `12 01`, `i32.const 1` is `20 01`, `i32.le_s` is `37`, `i32.add` is `3B`.
+
+## 6. Runtime and embedding API (C)
+
+### 6.1 Design
+
+The API follows the Lua C API's central ideas and fixes the parts that do not suit a statically typed, verified language.
+
+| Lua idea | Wiret version |
+| --- | --- |
+| No global state; everything hangs off `lua_State` | `wr_Vm` owns the heap, modules and scheduler. A `wr_Fiber` owns one value stack and its frames. Nothing is global, so any number of VMs can coexist. |
+| A virtual stack is the only data channel | Same: 1-based indices from the bottom, negative from the top. Slots are **typed**, and `wr_type` tells you what is in one. |
+| `lua_call` may longjmp; `lua_pcall` does not | Every call is protected. The VM never unwinds through host frames, and natives report errors by returning `wr_fault(...)`. |
+| `luaL_ref` registry | `wr_ref` / `wr_pushref` / `wr_unref` keep a value alive from host code. |
+| `lua_Alloc` | `wr_AllocFn` is the only way the VM obtains memory. |
+| Coroutines (`lua_resume`) | Fibers. Latent nodes suspend them. The host drives time with `wr_advance`. |
+| Userdata | Host handles: `(index, generation)` pairs that become invalid when the host says the object is gone. |
+
+**Conventions.** Functions that can fail return `wr_Status`. A value pushed on the stack is owned by the fiber and may be collected once it is removed. Pointers returned by `wr_to_string` and `wr_to_host` are valid only while the value stays on the stack. A `wr_Vm` and all of its fibers belong to one thread at a time; to use several threads, create one VM per thread. The header is plain C99 and exports only `wr_`-prefixed names.
+
+### 6.2 Status codes
+
+| Status | Meaning |
+| --- | --- |
+| `WR_OK` | Finished. Results are on the stack. |
+| `WR_YIELD` | The fiber suspended (`Delay`, `Yield`, `Await`). It is owned by the scheduler now. |
+| `WR_ERR_FAULT` | An uncaught fault. See `wr_fault_info`. |
+| `WR_ERR_FUEL` | The fuel budget ran out. Not catchable in Wiret. |
+| `WR_ERR_MEM` | The heap limit was hit or the allocator failed. Not catchable. |
+| `WR_ERR_LOAD` | The `.wbc` is malformed. |
+| `WR_ERR_VERIFY` | The module failed verification (section 5.5). |
+| `WR_ERR_LINK` | An import, export or name could not be resolved, or its signature differs. |
+| `WR_ERR_API` | The host misused the API: wrong stack type, bad index, yielding across a native. |
+
+### 6.3 The header
+
+```c
+/* wiret.h (draft) */
+#include <stddef.h>
+#include <stdint.h>
+
+#define WR_BYTECODE_VERSION 1
+#define WR_MULTRET (-1)
+
+typedef struct wr_Vm     wr_Vm;
+typedef struct wr_Fiber  wr_Fiber;
+typedef struct wr_Module wr_Module;
+
+typedef enum { WR_OK = 0, WR_YIELD, WR_ERR_FAULT, WR_ERR_FUEL, WR_ERR_MEM,
+               WR_ERR_LOAD, WR_ERR_VERIFY, WR_ERR_LINK, WR_ERR_API } wr_Status;
+
+typedef enum { WR_T_NULL, WR_T_BOOL, WR_T_I32, WR_T_I64, WR_T_F32, WR_T_F64,
+               WR_T_STRING, WR_T_STRUCT, WR_T_CLASS, WR_T_ARRAY, WR_T_MAP, WR_T_SET,
+               WR_T_DELEGATE, WR_T_DISPATCHER, WR_T_HOST, WR_T_SIGNAL,
+               WR_T_FAULT } wr_Type;
+
+typedef void *(*wr_AllocFn)(void *ud, void *ptr, size_t old_size, size_t new_size);
+typedef int   (*wr_NativeFn)(wr_Fiber *f, void *ud);
+
+typedef struct wr_Error { wr_Status status; int code; char message[256]; } wr_Error;
+
+typedef struct wr_Config {
+  wr_AllocFn alloc;  void *alloc_ud;     /* NULL: malloc family            */
+  size_t   max_heap_bytes;               /* 0: unlimited                   */
+  uint32_t max_stack_slots;              /* per fiber, default 1<<20       */
+  uint32_t max_call_depth;               /* default 4096                   */
+  uint32_t max_cont_depth;               /* per frame, default 1024        */
+  int64_t  default_fuel;                 /* per wr_call / per wake, <0: unlimited */
+  void (*on_fault)(wr_Vm *, wr_Fiber *, void *ud);  /* detached fiber faulted */
+  void (*on_log)(wr_Vm *, int level, const char *msg, void *ud);
+  void *ud;
+} wr_Config;
+```
+
+### 6.4 VM lifecycle
+
+```c
+void       wr_config_init(wr_Config *cfg);          /* fill defaults */
+wr_Vm     *wr_vm_new(const wr_Config *cfg);         /* NULL on allocation failure */
+void       wr_vm_free(wr_Vm *vm);                   /* frees fibers, modules, heap */
+void      *wr_vm_userdata(wr_Vm *vm);
+double     wr_vm_time(wr_Vm *vm);                   /* virtual seconds */
+
+wr_Fiber  *wr_fiber_new(wr_Vm *vm);
+void       wr_fiber_free(wr_Fiber *f);              /* not while RUNNING */
+typedef enum { WR_FIBER_READY, WR_FIBER_RUNNING, WR_FIBER_SUSPENDED,
+               WR_FIBER_DONE, WR_FIBER_FAULTED } wr_FiberStatus;
+wr_FiberStatus wr_fiber_status(wr_Fiber *f);
+void       wr_fiber_kill(wr_Fiber *f);              /* ends it without running handlers */
+```
+
+### 6.5 Modules
+
+```c
+#define WR_LOAD_LAZY_LINK 1   /* unresolved imports fault when called, not at load */
+
+wr_Status wr_module_load(wr_Vm *vm, const void *bytes, size_t len, const char *name,
+                         unsigned flags, wr_Module **out, wr_Error *err);
+wr_Status wr_module_load_file(wr_Vm *vm, const char *path, unsigned flags,
+                              wr_Module **out, wr_Error *err);
+void      wr_module_release(wr_Vm *vm, wr_Module *m);
+const char *wr_module_hash(wr_Module *m, int which);   /* 0 semantic, 1 layout; hex */
+
+typedef struct wr_ExportInfo {
+  const char *name;        /* "SumTo", "Player.TakeDamage" */
+  const char *signature;   /* "(i32)->(i32)" */
+  unsigned    flags;       /* WR_EXPORT_EVENT | _LATENT | _PURE */
+} wr_ExportInfo;
+void wr_module_each_export(wr_Module *m, void (*fn)(const wr_ExportInfo *, void *), void *ud);
+```
+
+Loading decodes, **verifies**, then links. Link resolves each import against natives registered with `wr_register` and compares signatures; any mismatch is `WR_ERR_LINK`, with the offending name in `err->message`. A module cannot reach any capability the host did not register. Loading the same bytes twice gives two independent instances with separate globals.
+
+### 6.6 Natives and host types
+
+```c
+#define WR_NATIVE_PURE 1   /* no side effects; callable from @pure graphs */
+
+/* name: "host.Log"; sig uses Wiret type syntax: "(string)->()", "(i32,f32)->(bool)" */
+wr_Status wr_register(wr_Vm *vm, const char *name, const char *sig,
+                      wr_NativeFn fn, void *ud, unsigned flags);
+
+/* A native receives its arguments at stack indices 1..n, already checked against
+   the registered signature. It pushes its results and returns how many it pushed,
+   or returns wr_fault(...). */
+int wr_fault(wr_Fiber *f, const char *fmt, ...);   /* returns -1 */
+
+typedef struct wr_HostType {
+  const char *name;                                   /* "engine.Actor" */
+  void (*finalize)(wr_Vm *, void *ptr, void *ud);     /* called when the last handle is collected */
+  void *ud;
+} wr_HostType;
+wr_Status wr_register_type(wr_Vm *vm, const wr_HostType *t);
+void      wr_push_host(wr_Fiber *f, const char *type, void *ptr);  /* same ptr, same identity */
+void     *wr_to_host(wr_Fiber *f, int idx, const char *type);      /* NULL if wrong type or invalidated */
+void      wr_host_invalidate(wr_Vm *vm, void *ptr);   /* the host destroyed it: IsValid becomes false */
+```
+
+Natives cannot suspend in version 1. Host-side asynchronous work is modelled by returning a `std.Signal` (created with `wr_push_signal`) and firing it later; the graph uses `Await`. A native may call back into Wiret with `wr_call`, but the nested call cannot suspend (it would report `WR_ERR_API`).
+
+### 6.7 The stack
+
+```c
+int  wr_gettop(wr_Fiber *f);              void wr_settop(wr_Fiber *f, int idx);
+void wr_pop(wr_Fiber *f, int n);          void wr_pushvalue(wr_Fiber *f, int idx);
+void wr_remove(wr_Fiber *f, int idx);     void wr_insert(wr_Fiber *f, int idx);
+void wr_replace(wr_Fiber *f, int idx);
+int  wr_checkstack(wr_Fiber *f, int extra);          /* 0 if it cannot grow */
+
+wr_Type     wr_type(wr_Fiber *f, int idx);
+const char *wr_typename(wr_Fiber *f, int idx);       /* "i32", "game.demo.Player", "array<i32>" */
+
+void wr_push_bool(wr_Fiber *f, int b);    void wr_push_i32(wr_Fiber *f, int32_t v);
+void wr_push_i64(wr_Fiber *f, int64_t v); void wr_push_f32(wr_Fiber *f, float v);
+void wr_push_f64(wr_Fiber *f, double v);
+void wr_push_string(wr_Fiber *f, const char *s, size_t len);   /* copies */
+void wr_push_null(wr_Fiber *f, const char *type);              /* typed null reference */
+void wr_push_signal(wr_Fiber *f);
+
+int         wr_to_bool(wr_Fiber *f, int idx);       int32_t wr_to_i32(wr_Fiber *f, int idx);
+int64_t     wr_to_i64(wr_Fiber *f, int idx);        float   wr_to_f32(wr_Fiber *f, int idx);
+double      wr_to_f64(wr_Fiber *f, int idx);
+const char *wr_to_string(wr_Fiber *f, int idx, size_t *len);   /* valid while on the stack */
+```
+
+The `wr_to_*` functions return 0 or NULL when the slot has another type; use `wr_type` to branch. Narrow integer parameters (`u8`, `i16`, ...) are pushed and read as `i32`.
+
+**Objects and containers.** All look-ups are by name and return `wr_Status`.
+
+```c
+wr_Status wr_push_new(wr_Fiber *f, wr_Module *m, const char *type);  /* class, struct or "array<i32>" ... */
+wr_Status wr_getfield(wr_Fiber *f, int idx, const char *field);      /* pushes the field */
+wr_Status wr_setfield(wr_Fiber *f, int idx, const char *field);      /* pops a value; a struct slot is replaced by the updated copy */
+
+int       wr_array_len(wr_Fiber *f, int idx);
+wr_Status wr_array_get(wr_Fiber *f, int idx, int i);                 /* pushes element */
+wr_Status wr_array_set(wr_Fiber *f, int idx, int i);                 /* pops value */
+wr_Status wr_array_push(wr_Fiber *f, int idx);                       /* pops value */
+int       wr_map_len(wr_Fiber *f, int idx);
+wr_Status wr_map_get(wr_Fiber *f, int idx);    /* key on top is replaced by the value; pushes found flag */
+wr_Status wr_map_set(wr_Fiber *f, int idx);    /* pops value, then key */
+wr_Status wr_map_key_at(wr_Fiber *f, int idx, int i);                /* insertion order */
+
+int  wr_ref(wr_Fiber *f);                      /* pops the top value; returns a ref (> 0) */
+void wr_pushref(wr_Fiber *f, int ref);
+void wr_unref(wr_Vm *vm, int ref);
+```
+
+### 6.8 Calling Wiret and running fibers
+
+```c
+wr_Status wr_push_func(wr_Fiber *f, wr_Module *m, const char *name);     /* "SumTo", "Player.OnTick" */
+wr_Status wr_push_virtual(wr_Fiber *f, int obj_idx, const char *method); /* resolves the override */
+
+wr_Status wr_call(wr_Fiber *f, int nargs, int nresults);   /* run now, on the caller's thread */
+wr_Status wr_start(wr_Fiber *f, int nargs);                /* queue; runs during wr_advance */
+wr_Status wr_advance(wr_Vm *vm, double dt);                /* advance virtual time, run what is ready */
+void      wr_signal_fire(wr_Vm *vm, int signal_ref);       /* wake fibers awaiting it */
+```
+
+Calling protocol, as in Lua: push the function, push the arguments left to right, call. `wr_call` pops the function and arguments. On `WR_OK` it pushes `nresults` results (or all of them for `WR_MULTRET`). On `WR_YIELD` the fiber is suspended; when the scheduler later finishes it (`wr_fiber_status` becomes `WR_FIBER_DONE`) the results are on that fiber's stack. A fiber runs one call at a time; reuse it after it is `DONE` by clearing its stack with `wr_settop(f, 0)`.
+
+`wr_advance` is deterministic. It adds `dt` to the virtual clock, wakes timers whose time has come (ordered by wake time, then by fiber creation order), and runs each woken or queued fiber until it suspends again or finishes. Each run gets `default_fuel`. A fault in a detached fiber is passed to `on_fault`.
+
+### 6.9 Faults and tracebacks
+
+```c
+typedef struct wr_Frame {
+  const char *function;   /* "game.demo.Player.TakeDamage" */
+  const char *node;       /* node id from wr.debug, or NULL */
+  uint32_t    pc;
+} wr_Frame;
+
+typedef struct wr_FaultInfo {
+  wr_Status   status;     /* WR_ERR_FAULT, WR_ERR_FUEL, ... */
+  int32_t     code;       /* from Throw, or a built-in fault code */
+  const char *message;    /* valid until the fiber's next call */
+  int         nframes;
+} wr_FaultInfo;
+
+int wr_fault_info(wr_Fiber *f, wr_FaultInfo *out);        /* 0 if there is none */
+int wr_frame_info(wr_Fiber *f, int level, wr_Frame *out); /* level 0 is the faulting frame */
+```
+
+Because `wr_Frame` carries the node id, a host can report `Player.TakeDamage, node store: null reference` and an editor can highlight that node.
+
+### 6.10 Resource control and debugging
+
+```c
+void    wr_set_fuel(wr_Fiber *f, int64_t units);   int64_t wr_get_fuel(wr_Fiber *f);
+size_t  wr_mem_used(wr_Vm *vm);
+typedef enum { WR_GC_COLLECT, WR_GC_STEP, WR_GC_STOP, WR_GC_RESTART } wr_GcOp;
+size_t  wr_gc(wr_Vm *vm, wr_GcOp op, size_t arg);
+
+#define WR_HOOK_NODE 1   /* a node starts executing */
+#define WR_HOOK_CALL 2
+#define WR_HOOK_RETURN 4
+#define WR_HOOK_FAULT 8
+#define WR_HOOK_BREAK 16 /* a breakpoint was hit */
+typedef void (*wr_HookFn)(wr_Fiber *f, int event, const wr_Frame *frame, void *ud);
+void      wr_set_hook(wr_Vm *vm, wr_HookFn fn, int mask, void *ud);
+wr_Status wr_set_breakpoint(wr_Vm *vm, wr_Module *m, const char *function,
+                            const char *node_id, int enabled);
+```
+
+The collector is a precise tracing GC. It is non-moving in version 1, but the API never exposes object addresses, so a moving or generational collector can be added later. Hooks run inline on the fiber's thread; a debugger front end blocks inside the hook while the user inspects the stack. Breakpoints work by patching a `brk` instruction (opcode `0F`) over the first instruction of the node's block.
+
+### 6.11 Example host
+
+```c
+#include <stdio.h>
+#include <wiret.h>
+
+static int host_log(wr_Fiber *f, void *ud) {
+  size_t n; const char *s = wr_to_string(f, 1, &n);
+  fwrite(s, 1, n, stdout); fputc('\n', stdout);
+  return 0;                                   /* pushed no results */
+}
+
+int main(void) {
+  wr_Config cfg; wr_config_init(&cfg);
+  cfg.default_fuel = 1000000;                 /* sandbox: bounded work per call */
+  wr_Vm *vm = wr_vm_new(&cfg);
+  wr_register(vm, "host.Log", "(string)->()", host_log, NULL, 0);
+
+  wr_Module *mod; wr_Error err;
+  if (wr_module_load_file(vm, "demo.wbc", 0, &mod, &err) != WR_OK) {
+    fprintf(stderr, "load failed: %s\n", err.message);
+    return 1;
+  }
+
+  wr_Fiber *f = wr_fiber_new(vm);
+
+  /* int total = SumTo(10); */
+  wr_push_func(f, mod, "SumTo");
+  wr_push_i32(f, 10);
+  if (wr_call(f, 1, 1) == WR_OK)
+    printf("SumTo(10) = %d\n", wr_to_i32(f, -1));      /* 55 */
+  wr_settop(f, 0);
+
+  /* Player p = new Player(); bool died = p.TakeDamage(150); */
+  wr_push_new(f, mod, "Player");                         /* index 1 */
+  wr_push_virtual(f, 1, "TakeDamage");                   /* index 2: the function */
+  wr_pushvalue(f, 1);                                    /* self */
+  wr_push_i32(f, 150);                                   /* amount */
+  if (wr_call(f, 2, 1) == WR_OK)                         /* logs "Player died" */
+    printf("died = %d\n", wr_to_bool(f, -1));            /* 1 */
+  else {
+    wr_FaultInfo fi; wr_fault_info(f, &fi);
+    fprintf(stderr, "fault: %s\n", fi.message);
+  }
+
+  wr_fiber_free(f);
+  wr_module_release(vm, mod);
+  wr_vm_free(vm);
+  return 0;
 }
 ```
 
-### 2.6 Edge and pin rules (summary)
+A typical game loop adds one call per frame: `wr_advance(vm, dt)`. Events are started with `wr_start`, or with `wr_call` when the caller wants the first segment to run synchronously.
 
-- `exec` edges connect execution pins only; fan-out requires an explicit sequence/fork node.
-- `data` edges connect compatible data pins; single-input pins accept at most one incoming edge unless the operation defines merge semantics.
-- Cycles in pure data flow are illegal unless expressed through loop/phi nodes.
-- Unconnected required inputs are errors (or use declared defaults).
-- Every executable path must terminate, return, or yield according to graph kind.
+## 7. Toolchain
 
-### 2.7 Metadata namespaces
+| Command | Purpose |
+| --- | --- |
+| `wiretc check file.wiret` | Parse, resolve, type-check and validate; print diagnostics (section 4.7). |
+| `wiretc fmt file.wiret` | Rewrite in canonical form. `--check` fails if the file is not canonical (for CI). |
+| `wiretc build file.wiret -o out.wbc` | Compile and verify. `-O0` / `-O1`, `--embed-source`, `--no-debug`. |
+| `wiretc dis out.wbc` | Disassemble, with node ids from `wr.debug`. |
+| `wiretc view --flow file.wiret` | Print a reading view in flow order (not canonical). `--dot` exports Graphviz DOT, using `node:pin` ports and one cluster per comment box. |
+| `wiretc hash file.wiret` | Print the semantic and layout hashes. |
+| `wiretc diff a.wiret b.wiret` | Node-level diff: added, removed and rewired nodes; layout-only changes reported separately. |
+| `wiretc merge base ours theirs` | Git merge driver. Line-merges, then re-validates (duplicate bindings, dangling ids). |
+| `wiretc verify out.wbc` | Run only the verifier. |
 
-`layout.*`, `editor.*`, `doc.*`, `debug.*`, `vendor.<name>.*`. Unknown metadata must be preserved by tools that do not understand it. Only semantic attributes and `id` affect program meaning.
+Suggested Git setup:
 
-### 2.8 Canonical formatting rules
-
-UTF-8 + LF, two-space indent, stable declaration order, fixed attribute order (semantic → id → title → layout → extensions), lowercase booleans, canonical numeric form, no ID regeneration, preserve unknown attributes. Canonical writers are required; parsers tolerate harmless whitespace differences.
-
-## 3. Compilation model (brief)
-
-1. Parse WGT → preserve IDs and metadata.
-2. Lower to **Typed Graph IR (TGIR)**: resolve types, validate pins/edges, convert control-flow nodes into basic blocks with explicit terminators, introduce block parameters for path-dependent values (SSA-like).
-3. Emit **WBC** (verified binary) + optional debug mapping.
-
-Pure data nodes are evaluated on demand in dependency order. Effectful nodes execute only when their exec input is reached; the compiler may not reorder observable effects.
-
-## 4. Bytecode specification — Wiret Bytecode (WBC)
-
-### 4.1 Goals
-
-Portable, versioned, easily verified, compact enough for embedding. Not a direct dump of WGT. Prefer verification simplicity and debuggability over extreme density in the first version.
-
-### 4.2 Binary layout
-
-All multi-byte integers are unsigned LEB128 unless fixed-width is stated.
-
-**Header (fixed):**
-
-| Field          | Size     | Meaning                          |
-|----------------|----------|----------------------------------|
-| Magic          | 4 bytes  | `WBC\0`                          |
-| Major          | u16 LE   | Incompatible format version      |
-| Minor          | u16 LE   | Compatible additions             |
-| Flags          | u32 LE   | Feature bits                     |
-| Header size    | u32 LE   | Length of header                 |
-| Section count  | u32 LE   | Number of sections               |
-
-**Sections** (ascending ID order, length-delimited):
-
-| ID | Name  | Required | Contents                                      |
-|----|-------|----------|-----------------------------------------------|
-| 1  | STRS  | yes      | UTF-8 string table                            |
-| 2  | TYPE  | yes      | Type descriptors                              |
-| 3  | IMPT  | yes      | Imported modules / host capabilities          |
-| 4  | CNST  | yes      | Constants                                     |
-| 5  | FUNC  | yes      | Function signatures, register counts, locals  |
-| 6  | CODE  | yes      | Instructions + basic-block tables             |
-| 7  | EXPT  | no       | Exports                                       |
-| 8  | DATA  | no       | Immutable data blobs                          |
-| 9  | DBG   | no       | Node IDs, source spans, instruction→node map  |
-| 10 | META  | no       | Compiler ID, source hash, features, etc.      |
-
-Unknown optional sections are skipped; unknown required sections or malformed lengths cause load failure. Indexes are bounds-checked before allocation.
-
-### 4.3 Execution model
-
-Typed **register VM**. Each function declares a register count and typed register map. Instructions operate on numbered registers. Frames are created on call. Control flow uses an explicit block table; every block has exactly one terminator; no fall-through.
-
-### 4.4 Instruction families (illustrative)
-
-- Constants: `const.i32`, `const.f32`, `const.string`, `const.null`
-- Moves / selection: `move`, `select`, `phi.copy`
-- Integer / float arithmetic and comparisons (with explicit wrap vs checked variants where relevant)
-- Strings, arrays, maps (bounds- and type-checked)
-- Calls: `call`, `call.import`, `call.indirect`
-- Handles / casts: `handle.get/set`, `type.test`, `cast.checked`
-- Control: `br`, `br_if`, `switch`, `return`, `unreachable`
-- Optional: structured exceptions, `yield`/`resume` for cooperative async
-- Debug: `trap`, `debug.break`
-
-Opcodes are permanently assigned within a major version. Unknown or reserved opcodes trap. The verifier checks every operand and type before execution.
-
-### 4.5 Verification requirements
-
-Structural validity, type safety of registers/constants/calls/returns/branches, single terminator per block, import signature matching, resource limits, no illegal host access or use of uninitialized registers. Verification must succeed before any module initialization or execution. Untrusted `.wbc` files are assumed hostile.
-
-### 4.6 Versioning & security
-
-Major version = incompatible change. Minor = optional features. Required features are declared in the header. Semantic changes to existing opcodes are forbidden. Configurable fuel, memory, recursion, and allocation limits. Deterministic mode disables ambient time/randomness unless supplied as imports and defines map iteration order.
-
-## 5. Runtime API — Wiret Runtime (WRT)
-
-### 5.1 Goals
-
-Small, stable C ABI suitable for embedding in engines, tools, and host applications. Opaque handles, explicit ownership, length-delimited strings, status codes, protected execution, capability-checked imports.
-
-### 5.2 Core types and status
-
-```c
-typedef struct wrt_vm      wrt_vm;
-typedef struct wrt_module  wrt_module;
-typedef struct wrt_value   wrt_value;
-typedef struct wrt_error   wrt_error;
-
-typedef enum {
-    WRT_OK = 0,
-    WRT_E_INVALID_ARGUMENT,
-    WRT_E_OUT_OF_MEMORY,
-    WRT_E_PARSE,
-    WRT_E_VERIFY,
-    WRT_E_IMPORT,
-    WRT_E_TYPE,
-    WRT_E_RUNTIME,
-    WRT_E_TRAP,
-    WRT_E_LIMIT,
-    WRT_E_CANCELLED
-} wrt_status;
+```
+# .gitattributes
+*.wiret merge=wiret diff=wiret
 ```
 
-Configuration includes ABI version, memory/instruction/call-depth limits, feature flags, and user data.
+## 8. Versioning and compatibility
 
-### 5.3 Essential API surface
+- The text header `wiret N` and the bytecode `version` are independent integers. A reader must reject a file with a higher major number than it supports.
+- Within a major version, changes are additive: new node kinds, new semantic attributes, new custom sections, new instructions under the `FB` prefix. Old tools keep unknown attributes and skip unknown custom sections, so a new editor's file survives a round trip through an old one.
+- A new node kind can only be compiled by a compiler that knows it. Older compilers report `E0501` rather than guessing.
+- The semantic hash is stable across editor-only changes. Changing the canonical-form rules in section 2.5 is a major-version change.
 
-**VM lifecycle**  
-`wrt_vm_create`, `wrt_vm_destroy`, `wrt_vm_set_limits`, `wrt_vm_collect_garbage`, `wrt_vm_cancel`, `wrt_vm_get_stats`
+## 9. Open questions and next steps
 
-**Modules**  
-`wrt_module_load` (bytes), optional `wrt_module_load_file`, `wrt_module_unload`, `wrt_module_find_export`, `wrt_module_get_info`
+### 9.1 Decisions I would revisit once there is a prototype
 
-**Values**  
-Constructors/readers for primitives, `wrt_value_retain` / `wrt_value_release`, length-delimited string/bytes access, typed collection accessors, typed host handles.
+1. **Pure-node re-evaluation.** It matches Blueprints and is easy to compile, but it is a known source of surprises (a random-number node feeding two consumers gives two values). Alternatives are caching per event, or an explicit `Latch` node. The compiler could also warn when an impure-reading pure node feeds more than one impure consumer.
+2. **Canonical order by node id.** It gives the best merges but a flow-hostile file. If reviewers find it hard to read, an optional `@order(n)` hint (derived from flow order and ignored by the semantic hash) could be added at the cost of noisier diffs.
+3. **Nesting rule for `Try`.** `E0412` is conservative. It may reject graphs that users find natural. A region-aware lowering could allow more.
+4. **Immutable structs.** `WithField` allocates. Escape analysis in the optimiser should remove most of that, but it should be measured.
+5. **Generics by monomorphisation.** Simple and fast, but code size grows with instantiations. Shared generic code with a type descriptor argument is the alternative.
+6. **Cooperative-only natives.** Natives cannot suspend. Real engines often want a latent native (async I/O). The `Signal` pattern covers it, but with more ceremony.
 
-**Host imports**  
-Register named functions with canonical signatures, capability IDs, and purity/async/deterministic flags. Protected invocation; errors do not unwind through the C ABI.
+### 9.2 Not covered in this draft
 
-**Execution**  
-`wrt_call` (and optional async/continuation entry points), fuel/cancellation hooks, structured error objects that can carry module/function/offset/node-ID information when debug data is present.
+- Exact pin lists and bodies for every `std.*` function and `std.flow` macro, and string `Format` syntax.
+- Interface method call nodes beyond `Call`, enum `Switch` ergonomics, and `Format Text`-style nodes.
+- Blueprint features that are really engine features: timelines, construction scripts, components, replication, soft references and data tables. These would be host-provided natives and extern types, or a layer on top of Wiret.
+- Hot reload and state migration (the `@id` attributes are there to make this possible), serialisation of suspended fibers for save games, multi-threaded VMs, a wire protocol for remote debugging, and a WebAssembly backend or JIT.
 
-**Diagnostics**  
-Error code, message, stack trace, source location, graph node ID.
+### 9.3 Suggested build order
 
-### 5.4 Ownership and threading (first version)
-
-- VM owns loaded modules unless a retained handle is returned.
-- Destroying a VM invalidates all handles derived from it.
-- Returned owned values must be released by the caller.
-- Borrowed slices are valid only until the next API call on the owning object (or until a host callback returns).
-- Default: single-thread-affine VMs. Multiple VMs may run concurrently. Values and modules are not assumed thread-safe.
-- Host callbacks must not throw C++/language exceptions across the ABI boundary.
-
-### 5.5 Host callback shape (conceptual)
-
-```c
-typedef wrt_status (*wrt_host_fn)(
-    wrt_call_context *ctx,
-    const wrt_value *args, size_t argc,
-    wrt_value *out_result,
-    wrt_error **out_error);
-```
-
-The runtime supplies a protected context; the host returns status + optional owned error.
-
-### 5.6 Engine integration
-
-Engine-specific functionality lives in separate import modules (`engine.actor`, `engine.input`, …). Graphs that require engine types declare the required target environment and fail clearly when the imports are absent.
-
-## 6. Minimal conformance
-
-- **Text Reader**: parses supported WGT and preserves unknown metadata.
-- **Editor**: preserves IDs, ng Wiret_Language_Specifications_Proposal_3.md…]()
+1. Parser, printer and formatter with round-trip tests. Use section 2.6 as the first golden file and add a test that `fmt(fmt(x)) == fmt(x)`.
+2. Resolver, type checker and graph validator, driven by the diagnostics table.
+3. Lowering, the verifier and the disassembler. Section 5.8 gives expected output for `TakeDamage` and `SumTo`.
+4. A bytecode interpreter with fuel counting, then the C API and the host example in 6.11.
+5. The standard library and `std.flow` macros, written in Wiret wherever possible so they double as tests.
+6. Debug data, hooks and breakpoints, then the editor integration.
