@@ -1,8 +1,10 @@
 # Wiret Language Specification
 
-*Draft 0.1: text syntax, bytecode (WBC) and embedding API for a text-based visual scripting language*
+*Draft 0.2: text syntax, bytecode (WBC) and embedding API for a text-based visual scripting language*
 
 > **Status.** This is a design draft, not an implementation. Nothing here has been run through a real parser, verifier or VM, so treat the grammar and opcode tables as a starting point to test, not a frozen standard. Where I went beyond your reference documents (mainly Blueprint runtime behaviour that the supplied documentation does not spell out), the text says so.
+
+**Draft 0.2.** Revised after comparing three independent proposals (Appendix A lists every change and where it came from). The largest semantic change: `array`, `set` and `map` are now **value types** with copy-on-write, as arrays are in Blueprints (section 4.9). New material: a machine-readable node registry (3.5), a merge and editing protocol for tools and LLMs (7.1, 7.2), cross-module linking and a project manifest (7.3), capabilities, feature bits, interrupts and statistics (5.2, 5.4, 6.5, 6.10), and conformance levels (7.4).
 
 ## 1. Overview
 
@@ -178,7 +180,7 @@ value = literal | IDENT | tuple | list | map ;
 
 | Attribute | Applies to | Meaning |
 | --- | --- | --- |
-| `@id("...")` | any declaration, module | Stable identity that survives rename and move. Written by editors; optional for hand-written code. |
+| `@id("...")` | any declaration, module, parameter, result, field, enum member, local | Stable identity that survives rename and move. Written by editors; optional for hand-written code. |
 | `@pure` | `func` | No exec pins. Callable as a pure node. May not contain impure or latent nodes. |
 | `@final` | method | Not virtual. Calls are bound at compile time. |
 | `@private` | declaration | Not visible outside the module. |
@@ -188,6 +190,7 @@ value = literal | IDENT | tuple | list | map ;
 | `@count(n)` | `Sequence`, `MakeArray`, ... | Number of dynamic pins. |
 | `@cases(v0, v1, ...)` | `Switch` | Case values. Pins are `case0`, `case1`, ... and `default`. |
 | `@disabled` | node | Node is skipped: a one-exec-out node passes control straight to its target; data outputs read as zero. |
+| @capability("name") | extern func | The import needs this host capability. Listed in the wr.caps section; the load fails unless the host granted it (section 6.5). |
 
 **Editor and documentation attributes** never change bytecode. They are stored and diffed, and all are covered by the layout hash (section 2.5).
 
@@ -198,6 +201,8 @@ value = literal | IDENT | tuple | list | map ;
 | `@category("Math")`, `@keywords("a", "b")` | `func`, `macro` | Palette organisation. |
 
 A node with no `@ed` is auto-laid-out by the editor and gets a position when first saved. This makes LLM-generated graphs valid without layout.
+
+Wires refer to pins by name, so renaming a parameter or result would otherwise break every wire that mentions it. Giving parameters, results, fields, enum members and locals an `@id` lets an editor or merge tool recognise a rename as a rename (the id is unchanged, the name differs) and rewrite the references in one step.
 
 **Preservation rules.**
 
@@ -309,8 +314,8 @@ Things to notice:
 | `enum` | its underlying integer (default `i32`) | Names are kept in the `name` custom section for editors and reflection. |
 | `struct` | immutable heap record with value semantics | Equality is structural. "Setting" a field makes a new struct (`WithField`). |
 | `class` | nullable reference | Equality is identity. Default `null`. |
-| `array<T>` | growable, zero-based reference | Aliased on assignment; `std.array.Clone` copies. |
-| `set<T>`, `map<K,V>` | insertion-ordered reference | Iteration order is insertion order, never hash order. Keys are primitives, `string`, enums or structs of those. |
+| `array<T>` | growable, zero-based; **value type** | Copied on assignment, argument passing and return. The VM copies lazily (copy-on-write, section 4.9), so two variables never alias one array. Equality is element-wise. |
+| `set<T>`, `map<K,V>` | insertion-ordered; **value types** | Same copy rules as arrays. Iteration order is insertion order, never hash order. Keys are primitives, `string`, enums or structs of those. Equality ignores order. |
 | `delegate<(A)->(R)>` | reference to a function plus optional bound receiver | Single-cast. |
 | `dispatcher<(A)>` | reference to an ordered handler list | Multicast; the `dispatcher` member of a class. |
 | `extern type` | host handle (index plus generation) | `IsValid` is false once the host destroys the object. |
@@ -379,7 +384,7 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 | --- | --- | --- |
 | `Add Sub Mul Div Rem Min Max` | `<T>` any number | Integer `Div`/`Rem` fault on zero. Integer overflow wraps. |
 | `Neg Abs` | `<T>` any signed number or float | Input `value`. |
-| `Eq Ne` | `<T>` number, bool, string, enum, struct, class | Output `bool`. |
+| `Eq Ne` | `<T>` number, bool, string, enum, struct, class, array, set, map (compared element-wise) | Output `bool`. |
 | `Lt Le Gt Ge` | `<T>` number, string (ordinal), enum | Output `bool`. |
 | `And Or Xor Not` | bool | Not short-circuiting. |
 | `BitAnd BitOr BitXor BitNot Shl Shr` | `<T>` integer | Shift counts are masked to the type's width. |
@@ -390,11 +395,12 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 | --- | --- |
 | `MakeArray<T>` | Pure. `@count(n)`, inputs `item0` ... |
 | `ArrayGet<T>`, `ArrayLength<T>` | Pure. Out-of-range index is a fault. |
-| `ArraySet<T>`, `ArrayAdd<T>`, `ArrayInsert<T>`, `ArrayRemove<T>`, `ArrayClear<T>` | Impure. |
+| `ArraySet<T>`, `ArrayAdd<T>`, `ArrayInsert<T>`, `ArrayRemove<T>`, `ArrayClear<T>` | Impure. They change a **place**: the symbol names a local, a module variable, or a field. Examples: `ArrayAdd<i32> acc (item: x)` and `ArrayAdd<i32> Player.items (obj: p, item: x)`. Targeting anything else, such as a call result, is `E0130`. Arrays are value types (section 4.9), so no other variable sees the change. |
 | `MapFind<K,V>` | Pure. Out: `value`, `found`. A missing key gives the zero value and `found = false`. |
 | `MapHas`, `MapLength`, `MapKeyAt`, `MapValueAt` | Pure. The `At` kinds index by insertion order, which is how `ForEach` over a map is built. |
-| `MapSet`, `MapRemove`, `MapClear` | Impure. |
+| `MapSet`, `MapRemove`, `MapClear` | Impure, and change a place exactly like the array mutators. |
 | `SetHas`, `SetLength`, `SetAt` / `SetAdd`, `SetRemove`, `SetClear` | Same pattern. |
+| `std.array.Append<T>`, `std.array.With<T>`, ... | Pure functional forms that return the updated container and change nothing, for use inside `@pure` functions. |
 
 **Calls and events**
 
@@ -412,9 +418,38 @@ The VM ships these namespaces as natives (callable through `Call`) and as Wiret 
 
 - `std.math`: `Sqrt`, `Pow`, `Sin`, `Cos`, `Atan2`, `Floor`, `Ceil`, `Round`, `Clamp<T>`, `Lerp`, ... (pure).
 - `std.string`: `Concat`, `Length`, `Substring`, `Find`, `Format`, `TryParse<T>`, `Split`, ... (pure).
-- `std.array`, `std.map`: `Clone`, `Sort<T>` (stable, caller supplies a comparison delegate), `IndexOf<T>`, ...
+- `std.array`, `std.map`: `Equals`, `Sort<T>` (stable, caller supplies a comparison delegate), `IndexOf<T>`, ...
 - `std.random`: an explicit-state generator class (`New`, `NextI32`, `NextF64`). There is **no ambient randomness, clock or I/O**. The host provides any of those as natives, which keeps modules replayable.
 - `std.flow` (macros written in Wiret): `ForRange`, `ForEach<T>`, `ForEachMap<K,V>`, `While`, `DoOnce`, `DoN`, `Gate`, `FlipFlop`, `MultiGate`, `Retriggerable`.
+
+### 3.5 The node registry
+
+The kinds in section 3.3 and every `std.*` function are described by a **registry**: a versioned, machine-readable JSON file that ships with the compiler (`wiretc schema --json` prints it). The registry, not the prose tables in this document, is the authority on pin names, pin types, defaults, purity and display names. Editors build their palettes from it, the compiler uses it to expand a `Kind` into pins, and LLM tooling should read it instead of guessing pin names.
+
+```json
+{ "registry": "wiret.core", "version": "1.0",
+  "kinds": [
+    { "kind": "Branch", "display": "Branch", "category": "Flow", "purity": "impure",
+      "pins": [
+        { "name": "in",   "dir": "in",  "type": "exec" },
+        { "name": "cond", "dir": "in",  "type": "bool", "default": false },
+        { "name": "then", "dir": "out", "type": "exec" },
+        { "name": "else", "dir": "out", "type": "exec" } ] },
+    { "kind": "Add", "display": "Add", "category": "Math", "purity": "pure",
+      "typeParams": { "T": "number" },
+      "pins": [
+        { "name": "a",      "dir": "in",  "type": "T", "default": 0 },
+        { "name": "b",      "dir": "in",  "type": "T", "default": 0 },
+        { "name": "result", "dir": "out", "type": "T" } ] }
+  ] }
+```
+
+Rules:
+
+- A `.wiret` file never re-declares the pins of a registry kind. This keeps one line per node and one source of truth. Pins that depend on attributes (`@count`, `@cases`) are described in the registry by a pin pattern such as `then{i}`.
+- Functions, methods, events and `extern func` declarations get generated registry entries from their signatures plus `@doc` and `@category`, so the same palette and tooling cover user and host code.
+- Display names are for editors and may be localised. They never appear in `.wiret`.
+- The registry name and version are recorded in `wr.meta` and in the project lockfile (section 7.3). An unknown kind is `E0501`.
 
 ## 4. Execution model and compilation
 
@@ -488,6 +523,8 @@ Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber
 | `W0301` | Node unreachable from any entry. |
 | `W0302` | Chain can end in a function that declares results. |
 | `W0310` | Read of an impure output not dominated by its producer. |
+| E0130 | Container mutation node does not target a place (local, variable or field). |
+| E0900 | Edit rejected: the document changed since the hash the edit was based on (section 7.2). |
 
 ### 4.8 Lowering a graph to bytecode
 
@@ -498,6 +535,27 @@ Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber
 5. **Optimise.** Constant folding, removal of unread locals, branch threading, layout so fall-through follows the exec wire, and replacement of statically balanced `cont.push` / `cont.pop` by `br`.
 6. **Record debug data.** Each block's start offset is mapped to its node id (custom section `wr.debug`).
 7. **Verify** the result with the same verifier the VM runs at load time (section 5.5). A compiler bug can therefore never produce an unsafe module.
+
+### 4.9 Containers have value semantics
+
+`array<T>`, `set<T>` and `map<K,V>` are value types, as arrays are in Blueprints. Assigning one, passing it to a function, storing it in a field or returning it gives the receiver its own logical copy, and changing one never changes another. Two variables never alias one array.
+
+Copying eagerly would make a loop that appends to an array quadratic, so the VM implements the rule as **copy-on-write** with a single `shared` flag per container object:
+
+- **Fresh containers are unshared.** `array.new`, `array.clone` and the result of any mutating instruction start unshared.
+- **Letting a reference escape marks sharing.** When the value of a container variable, field, parameter or element is bound to anything that can retain it (another variable or field, a call argument, a return value, a macro input), the compiler emits `ref.share` after the read. `ref.share` sets the flag and returns the same reference. Read-only nodes (`ArrayGet`, `ArrayLength`, `MapFind`, ...) do not need it.
+- **Mutating instructions return the container.** `array.push` and the other mutators take the container and return one. If it is unshared they change it in place and return the same reference. If it is shared they change a fresh copy and return that. The compiler stores the result back into the place being changed, which is how `ArrayAdd<i32> acc (item: x)` works.
+- **A mutation node reads its own place without marking it.** A loop that keeps adding to a local array therefore changes it in place, at constant cost per iteration, as long as nothing else has read it.
+- **The flag is never cleared.** A holder that still points at a shared object copies it once on its next mutation and then owns an unshared copy. That costs at most one extra copy per sharing event and needs no reference counts, so the tracing collector is unchanged and every run behaves identically.
+
+Consequences:
+
+- `ForEach` iterates the array as it was when the loop started, because a macro input is captured (and so marked shared) at entry. Changing the variable inside the body does not disturb the iteration.
+- A struct that contains a container holds it by shared reference. Because every read marks it shared, nothing can change a struct through its array.
+- Containers of containers follow the same rule at each level: reading an element that is itself a container marks it shared.
+- Classes, delegates and host handles stay reference types. An `array<Player>` copies the references, not the players.
+- The optimiser removes a `ref.share` when liveness analysis shows the source holder is dead after the read, which is the common case when a function builds a local array and returns it.
+- `Eq` and `Ne` on containers are structural (element-wise for arrays; set and map equality ignores insertion order) and compile to calls to `std.array.Equals`, `std.set.Equals` and `std.map.Equals`.
 
 ## 5. Bytecode specification (WBC 1)
 
@@ -516,7 +574,7 @@ All multi-byte fixed-width values are little-endian. Integer immediates are LEB1
 module  = magic version flags section*
 magic   = 00 57 42 43            ; NUL 'W' 'B' 'C'
 version = u32 (little endian)    ; 1
-flags   = u32                    ; bit 0: has embedded source (wr.graph)
+flags   = u32                    ; bit 0: has embedded source (wr.graph); bits 1-31: required features, unknown bits are rejected
 section = id:u8 size:u32 payload ; ids ascending, custom sections (id 0) anywhere
 vec(X)  = n:u32 X*               name = vec(u8)  ; UTF-8, no NUL
 ```
@@ -571,6 +629,9 @@ A `const` is 8 bytes (numeric bit pattern), or a `u32` data index for `string`, 
 | `wr.graph` | The canonical `.wiret` text, deflate-compressed. Lets a debugger or editor open a `.wbc` it did not build. |
 | `wr.meta` | Module id, compiler version, **semantic hash** and **layout hash** (section 2.5), source hash. |
 | `wr.reflect` | Attribute data for the host: `@doc`, `@category`, parameter names and defaults. |
+| wr.caps | Every capability the module's imports require, so a host can inspect or refuse a module before loading it. |
+
+**Sidecar.** `wiretc build --sidecar` writes `wr.debug`, `wr.graph` and `wr.reflect` to a separate `out.wdbg` file instead of embedding them. `wr.meta` in both files carries the same module id and semantic hash, so a debugger can match them. Release builds can ship the small `.wbc` alone.
 
 ### 5.5 Verification
 
@@ -628,6 +689,7 @@ Notation: `[in] -> [out]`. `L` is a branch target, an `s32` offset relative to t
 | 28 | `ref.cast` | T | `[ref]` -> `[ref T]`; faults unless null or an instance of T. |
 | 29 | `ref.test` | T | `[ref]` -> `[i32]`; null gives 0. |
 | 2A | `ref.valid` |  | `[ref]` -> `[i32]`; non-null and, for host handles, alive. |
+| 2B | ref.share |  | \[ref\] -> \[ref\]. Marks an array, set or map object as shared (section 4.9) and returns the same reference. No effect on other references. |
 
 **Numeric.** Four 32-slot blocks. The opcode is the block base plus the index in the table; for example `i32.add` is `30 + 0B = 3B`.
 
@@ -662,17 +724,19 @@ All `trunc` instructions are **saturating** and map NaN to 0. They never fault.
 | D1 / D2 | `struct.get` / `struct.with` | T, f | `[ref]` -> `[v]` / `[ref, v]` -> `[ref']` (copy with one field replaced) |
 | D3 | `class.new` | T | `[]` -> `[ref]`, fields set to declared defaults, dispatchers empty. |
 | D4 / D5 | `class.get` / `class.set` | T, f | `[ref]` -> `[v]` / `[ref, v]` -> `[]` |
-| D6 | `array.new` | T | `[i32 length]` -> `[ref]`, zero-filled. |
+| D6 | `array.new` | T | `[i32 length]` -> `[ref]`, zero-filled, unshared. |
 | D7 | `array.len` |  | `[ref]` -> `[i32]` |
-| D8 / D9 | `array.get` / `array.set` | T | `[ref, i32]` -> `[v]` / `[ref, i32, v]` -> `[]` (bounds-checked) |
-| DA / DB | `array.push` / `array.insert` | T | `[ref, v]` / `[ref, i32, v]` -> `[]` |
-| DC / DD / DE | `array.remove` / `.clear` / `.clone` | T | `[ref, i32]` -> `[]` / `[ref]` -> `[]` / `[ref]` -> `[ref]` |
+| D8 | `array.get` | T | `[ref, i32]` -> `[v]` (bounds-checked) |
+| D9 | `array.set` | T | `[ref, i32, v]` -> `[ref']` |
+| DA / DB | `array.push` / `array.insert` | T | `[ref, v]` / `[ref, i32, v]` -> `[ref']` |
+| DC / DD | `array.remove` / `array.clear` | T | `[ref, i32]` / `[ref]` -> `[ref']` |
+| DE | `array.clone` | T | `[ref]` -> `[ref']`, a fresh unshared copy. |
 | E0 | `map.new` | T | `[]` -> `[ref]` |
 | E1 | `map.find` | T | `[ref, key]` -> `[value, i32 found]` |
-| E2 / E3 / E4 | `map.set` / `.remove` / `.has` | T | `[ref, key, v]` -> `[]` / `[ref, key]` -> `[i32]` (was present) / `[ref, key]` -> `[i32]` |
-| E5 / E8 | `map.len` / `map.clear` |  | `[ref]` -> `[i32]` / `[]` |
+| E2 / E3 / E4 | `map.set` / `map.remove` / `map.has` | T | `[ref, key, v]` -> `[ref']` / `[ref, key]` -> `[ref', i32 was present]` / `[ref, key]` -> `[i32]` |
+| E5 / E8 | `map.len` / `map.clear` | T | `[ref]` -> `[i32]` / `[ref]` -> `[ref']` |
 | E6 / E7 | `map.key_at` / `map.value_at` | T | `[ref, i32]` -> `[k]` / `[v]`, insertion order. |
-| E9 / EA / EB / EC | `set.new` / `.add` / `.remove` / `.has` | T | add and remove return `i32` (changed) |
+| E9 / EA / EB / EC | `set.new` / `.add` / `.remove` / `.has` | T | `add` and `remove` return `[ref', i32 changed]`; `has` returns `[i32]`. |
 | ED / EE / EF | `set.len` / `set.at` / `set.clear` | T | as for maps |
 | F0 | `string.concat` |  | `[string, string]` -> `[string]` |
 | F1 | `string.len` |  | `[string]` -> `[i32]` (bytes) |
@@ -779,6 +843,7 @@ The API follows the Lua C API's central ideas and fixes the parts that do not su
 | `WR_ERR_VERIFY` | The module failed verification (section 5.5). |
 | `WR_ERR_LINK` | An import, export or name could not be resolved, or its signature differs. |
 | `WR_ERR_API` | The host misused the API: wrong stack type, bad index, yielding across a native. |
+| WR\_ERR\_INTERRUPT | Stopped by wr\_interrupt, for example by a wall-clock watchdog. Not catchable. |
 
 ### 6.3 The header
 
@@ -795,7 +860,7 @@ typedef struct wr_Fiber  wr_Fiber;
 typedef struct wr_Module wr_Module;
 
 typedef enum { WR_OK = 0, WR_YIELD, WR_ERR_FAULT, WR_ERR_FUEL, WR_ERR_MEM,
-               WR_ERR_LOAD, WR_ERR_VERIFY, WR_ERR_LINK, WR_ERR_API } wr_Status;
+               WR_ERR_LOAD, WR_ERR_VERIFY, WR_ERR_LINK, WR_ERR_API, WR_ERR_INTERRUPT } wr_Status;
 
 typedef enum { WR_T_NULL, WR_T_BOOL, WR_T_I32, WR_T_I64, WR_T_F32, WR_T_F64,
                WR_T_STRING, WR_T_STRUCT, WR_T_CLASS, WR_T_ARRAY, WR_T_MAP, WR_T_SET,
@@ -858,6 +923,16 @@ void wr_module_each_export(wr_Module *m, void (*fn)(const wr_ExportInfo *, void 
 ```
 
 Loading decodes, **verifies**, then links. Link resolves each import against natives registered with `wr_register` and compares signatures; any mismatch is `WR_ERR_LINK`, with the offending name in `err->message`. A module cannot reach any capability the host did not register. Loading the same bytes twice gives two independent instances with separate globals.
+
+**Capabilities and linking.** An import can carry `@capability("console.write")` in source. The compiler lists every required capability in the `wr.caps` section, so a host can inspect a module before it runs anything. Nothing is granted by default.
+
+```c
+wr_Status wr_grant(wr_Vm *vm, const char *capability);
+void      wr_module_each_capability(wr_Module *m, void (*fn)(const char *cap, void *), void *ud);
+wr_Status wr_link(wr_Vm *vm);     /* resolve imports left pending by WR_LOAD_LAZY_LINK */
+```
+
+An import whose capability is not granted fails the load with `WR_ERR_LINK`, naming the capability. Imports between Wiret modules are resolved against the exports of modules already loaded, then against natives (section 7.3). To load modules that depend on each other in any order, pass `WR_LOAD_LAZY_LINK` to each and call `wr_link` once.
 
 ### 6.6 Natives and host types
 
@@ -934,6 +1009,8 @@ void wr_pushref(wr_Fiber *f, int ref);
 void wr_unref(wr_Vm *vm, int ref);
 ```
 
+Containers on the stack follow the value rules of section 4.9. `wr_pushvalue` duplicates a slot and marks a container shared, and so do `wr_ref` and `wr_pushref`. The mutators above (`wr_array_set`, `wr_array_push`, `wr_map_set`) operate on the slot at `idx`; when the container is shared they replace that slot with an updated copy, exactly as `wr_setfield` does for a struct. A copy kept earlier, on the stack or in the registry, never sees the change.
+
 ### 6.8 Calling Wiret and running fibers
 
 ```c
@@ -992,6 +1069,18 @@ wr_Status wr_set_breakpoint(wr_Vm *vm, wr_Module *m, const char *function,
 ```
 
 The collector is a precise tracing GC. It is non-moving in version 1, but the API never exposes object addresses, so a moving or generational collector can be added later. Hooks run inline on the fiber's thread; a debugger front end blocks inside the hook while the user inspects the stack. Breakpoints work by patching a `brk` instruction (opcode `0F`) over the first instruction of the node's block.
+
+```c
+void wr_interrupt(wr_Vm *vm);     /* the only thread-safe call */
+
+typedef struct wr_Stats {
+  size_t   heap_bytes;  size_t   live_objects;
+  uint64_t fuel_used;   uint32_t fibers;  uint32_t modules;
+} wr_Stats;
+void wr_get_stats(const wr_Vm *vm, wr_Stats *out);
+```
+
+Fuel is deterministic but does not bound wall-clock time. `wr_interrupt` may be called from any thread, for example by a watchdog; running fibers stop at the next call or backward branch with `WR_ERR_INTERRUPT`. It is the single exception to the rule that a VM belongs to one thread at a time.
 
 ### 6.11 Example host
 
@@ -1068,6 +1157,68 @@ Suggested Git setup:
 *.wiret merge=wiret diff=wiret
 ```
 
+### 7.1 Merge procedure
+
+`wiretc merge` implements the following, and an editor's built-in merge should behave the same way.
+
+1. Three-way line merge of the canonical files. Because each node is one line and lines are sorted by id, two people editing different nodes merge cleanly.
+2. Parse the result and validate it: duplicate node ids, an input bound twice (two wires into one pin), exec targets or pin references that name a node that no longer exists, and every other diagnostic in section 4.7.
+3. If it is valid, canonicalise it and finish. If not, report the problems as **semantic conflicts** keyed by node id and pin, not as text hunks, so a graph editor can present them on the graph.
+4. Never silently drop a node, a wire or an unknown attribute. Conflicts that involve only `@ed` metadata do not change the semantic hash, so they may be resolved by an explicit last-writer choice and never block a merge.
+
+### 7.2 Editing protocol for tools and LLMs
+
+A program that edits a graph (an editor, a refactoring tool, an LLM agent) should not rewrite whole files. `wiretc edit` accepts a list of operations as JSON and applies them to the parsed model:
+
+| Operation | Effect |
+| --- | --- |
+| `create_node` | Add a node with a kind, type arguments, bindings and exec wiring. The id may be supplied. |
+| `bind` / `unbind` | Connect or disconnect a data input. |
+| `wire_exec` / `unwire_exec` | Connect or disconnect an exec output. |
+| `set_attr` / `remove_attr` | Change an attribute on a node or declaration. |
+| `move` | Change `@ed` position, and only that. |
+| `delete_node` | Remove a node. Refused while other nodes still reference it, unless `cascade` is set, in which case the removed wires are listed in the reply. |
+| `rename` | Rename a declaration, parameter, field or local by its `@id` and rewrite every reference. |
+
+Every request carries `if_hash`, the layout hash of the document the caller last read. If the document has changed since, the request is rejected with `E0900` and the caller must re-read. On success the reply contains the new hash, all diagnostics, and the resulting text diff. A rejected or invalid request changes nothing. Together with the registry (section 3.5), this lets an LLM make precise, checked edits without guessing pin names and without ever producing a file that fails to parse.
+
+### 7.3 Projects, modules and linking
+
+A project is a directory with a `wiret.toml` manifest and a generated `wiret.lock`.
+
+```
+[project]
+name     = "mygame"
+wiret    = "1"
+registry = "wiret.core@1.0"
+roots    = ["src"]
+
+[dependencies]
+physics = { path = "../physics" }
+
+[capabilities]
+allow = ["console.write"]
+```
+
+- A module name maps to a path under a root: `game.player` is `src/game/player.wiret`. `use game.player` makes its exports visible, and `Call game.player.Heal` calls one.
+- A call to another Wiret module compiles to an import whose `module` field is the callee's module name. The loader resolves an import against the exports of loaded Wiret modules first (checking the signature), then against registered natives.
+- Import cycles between modules are rejected at build time.
+- `wiret.lock` records the semantic hash of every dependency and the registry version. `wiretc build` fails if a dependency's hash no longer matches, so a build is reproducible.
+- `[capabilities] allow` lists what the build permits modules to request. It is a build-time check; the host's `wr_grant` calls are the runtime authority.
+
+### 7.4 Conformance
+
+An implementation claims one or more levels:
+
+| Level | Requirements |
+| --- | --- |
+| Reader | Parses `.wiret`, preserves unknown attributes, and round-trips canonical files byte for byte. |
+| Editor | Reader, plus writes canonical form, preserves ids, and computes both hashes. |
+| Compiler | Editor, plus produces exactly the diagnostics of section 4.7 and emits verifiable `.wbc` with the lowering of section 4.8. |
+| Runtime | Verifies before running, enforces limits, implements the instruction semantics of section 5 including value semantics (4.9), and the C API of section 6. |
+
+A shared test suite should cover at least: formatter idempotence (`fmt(fmt(x)) == fmt(x)`); one failing graph for each diagnostic code; golden bytecode for `TakeDamage` and `SumTo`; verifier negative tests and a fuzzer for malformed `.wbc`; arithmetic edge cases (division by zero, `INT_MIN / -1`, saturating truncation, shift masking); a container alias test (copy an array, change the copy, check the original, and check that appending in a loop does not copy on each iteration); determinism (identical fuel counts and results on every platform); C API lifetime tests; and semantic-hash stability under layout-only edits.
+
 ## 8. Versioning and compatibility
 
 - The text header `wiret N` and the bytecode `version` are independent integers. A reader must reject a file with a higher major number than it supports.
@@ -1101,3 +1252,20 @@ Suggested Git setup:
 4. A bytecode interpreter with fuel counting, then the C API and the host example in 6.11.
 5. The standard library and `std.flow` macros, written in Wiret wherever possible so they double as tests.
 6. Debug data, hooks and breakpoints, then the editor integration.
+
+## Appendix A. Changes in Draft 0.2
+
+Three independent proposals were reviewed against Draft 0.1. This table records what changed and why.
+
+| Change | Section | Source |
+| --- | --- | --- |
+| `array`, `set`, `map` become value types with copy-on-write; mutators return the container; `ref.share`; place-based mutation nodes; structural equality | 3.1, 3.3, 4.9, 5.6, 6.7 | Decision by the project owner: Blueprints copy arrays by value. Replaces 0.1's aliasing arrays. |
+| Machine-readable node registry | 3.5 | Proposal 1 (operation registry), without its per-node pin lists. |
+| Merge procedure and editing protocol with a document-hash precondition | 7.1, 7.2 | Proposal 1 (merge and AI editing sections). |
+| Cross-module linking, project manifest and lockfile | 7.3 | A gap in 0.1; manifest and lock idea from Proposal 1. |
+| `@id` on parameters, results, fields, enum members and locals | 2.4 | Review of rename handling. |
+| Capabilities, `wr.caps`, required-feature bits in the header | 2.4, 5.2, 5.4, 6.5 | Proposal 1. |
+| `wr_interrupt`, `wr_get_stats`, `.wdbg` sidecar | 5.4, 6.10 | Proposal 1. |
+| Conformance levels and shared test suite | 7.4 | Proposal 1. |
+
+**Considered and not adopted.** Pins re-declared on every node and ids on every edge (Proposals 1 and 3): they lengthen every line, create a second source of truth next to the registry, and make sequentially numbered ids collide across Git branches. Creation-order canonical layout (Proposals 1 and 3): every addition lands at the end of the file, so concurrent additions conflict. Register-based bytecode (Proposals 1 and 3): the stack form with typed locals is denser and verifies in one pass. Optional async (Proposals 1 and 3): latent nodes are core to the target. Handle-based host API with retain and release (Proposals 1 and 3): the Lua-style stack avoids a second lifetime system next to the garbage collector. Expressions inside bindings and exec pins on arithmetic nodes (Proposal 2): they break the one-node-per-operation, pure-versus-impure model.
