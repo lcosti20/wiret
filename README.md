@@ -1,4 +1,4 @@
-# wiret
+# Wiret
 A text-based visual scripting language
 
 ## Why Wiret exists
