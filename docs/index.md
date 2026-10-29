@@ -1,6 +1,6 @@
 # Wiret Language Specification
 
-*Draft 0.3: text syntax, bytecode (WBC) and embedding API for a text-based visual scripting language*
+*Draft 0.4: text syntax, bytecode (WBC) and embedding API for a text-based visual scripting language*
 
 > **Status.** This is a design draft, not an implementation. Nothing here has been run through a real parser, verifier or VM, so treat the grammar and opcode tables as a starting point to test, not a frozen standard. Where I went beyond your reference documents (mainly Blueprint runtime behaviour that the supplied documentation does not spell out), the text says so.
 
@@ -8,7 +8,9 @@
 
 **Draft 0.3.** Incorporates the strongest parts of an independently developed design (Appendix B). Layout moves out of node lines into a per-graph `layout` block, so moving a node and rewiring it no longer touch the same line (2.3, 2.5, 7.1). Macros gain persistent `state` slots (2.3, 4.4). Latency becomes an explicit, compiler- and verifier-checked property of a function (4.4, 4.5, 5.5). Debug data now maps pins to locals, and hosts can probe pin values (5.4, 6.10). The host ABI is hardened (6.3, 6.5, 6.6). Merging is specified as a keyed, node-level operation (7.1). A contract for graph editors and a recommended reference-implementation path are added (7.5, 7.6).
 
-**Implementation status.** Nothing in this document is implemented. Parts expected to change after prototyping are marked **Provisional**: catchable faults (4.6), the copy-on-write rules for containers (4.9), and the choice of a stack rather than a register machine (9.1).
+**Draft 0.4.** Responds to a review of 0.3 (Appendix C). The scope is now cut into implementation tiers, and only Tier 0 is a prototype target (1.6). Evaluation is specified step by step, with an explicit evaluation point, fault ordering and join behaviour (4.2, 4.3). `@pure` is split into a precise contract plus a new `@reads` level (2.4, 4.3). Macro `Exit` has transition rules and a worked continuation-stack trace (4.2). Determinism is a defined mode with stated conditions and exclusions rather than a blanket claim (4.10). Persistent `notes` replace silently dropped comments (2.1, 2.3). Identity rules say what a single file can and cannot guarantee, and a project id registry supplies non-reuse (2.3, 2.4, 7.3). Layout-box membership is always explicit (2.3). Git diffs default to flow order while storage stays sorted by id (2.5, 7).
+
+**Implementation status.** Nothing in this document is implemented. Parts expected to change after prototyping are marked **Provisional**: catchable faults (4.6), the copy-on-write rules for containers (4.9), the deterministic-mode floating-point rules (4.10), and the choice of a stack rather than a register machine (9.1). Guarantees about exact diagnostics and cross-platform determinism are targets until the tier in section 1.6 that contains them has passed its tests.
 
 ## 1. Overview
 
@@ -29,7 +31,7 @@ Wiret is a graph-first programming language whose source of truth is a text file
 3. **Every wire is written exactly once.** A data wire is written at its consumer; an exec wire is written at its producer. This matches Blueprint's rules (a data input has one source, an exec output has one target) and makes dangling wires impossible to express.
 4. **Semantics and presentation are separate.** What changes compiled output is written in the node statements. Where things are drawn (position, colour, size, boxes) lives in a separate `layout` block, so moving a node and rewiring it never touch the same line. Layout never changes bytecode, but it is stored, canonicalised and diffed so every collaborator sees the same graph.
 5. **Preserve what you do not understand.** Unknown attributes and layout properties survive load and save unchanged (the GML rule).
-6. **Deterministic by construction.** The same `.wbc` with the same host inputs gives the same results: wrapping integer arithmetic, IEEE-754 floats, insertion-ordered maps and sets, a host-driven clock.
+6. **Deterministic in deterministic mode.** With `WR_CFG_DETERMINISTIC`, the same `.wbc` and the same logged sequence of host calls give the same results: wrapping integer arithmetic, specified floating-point and NaN behaviour, insertion-ordered maps and sets, defined scheduling order, a host-driven clock. The conditions and the exclusions (wall-clock interrupts, unlogged host callbacks) are in section 4.10; outside that mode nothing beyond memory safety is promised.
 7. **Small core, big library.** The compiler knows a few dozen node kinds. Loops, `DoOnce`, `Gate` and similar are macros written in Wiret itself.
 8. **Safe to embed.** Bytecode is verified before it runs, modules have no ambient authority (they reach the outside world only through host-registered natives), execution has fuel and memory limits, and the VM never unwinds through host frames.
 
@@ -68,6 +70,21 @@ Compiler stages: parse, resolve names, type-check, validate graphs, expand macro
 | Impure node | Has exec pins. Runs when control reaches it. |
 | Fiber | One thread of VM execution with its own stack. Latent nodes suspend a fiber. |
 | Host | The application that embeds `libwiret`. |
+| Note | A persistent, layout-class annotation attached to a graph, node or box (section 2.3). |
+| Evaluation point | The moment just before an impure node runs, when its pure inputs are evaluated (section 4.3). |
+| Join | An exec input with more than one producer (section 4.2). |
+
+### 1.6 Implementation tiers
+
+The specification covers a language, a canonical format, an editor contract, a merge protocol, macros, async, objects, containers, bytecode, a verifier, a C ABI, capabilities, a debugger and a project manager. None of it has run through a real parser or VM, so it is staged. A tier is not started until the one before it passes its tests, and a guarantee in this document is only as firm as the tier that contains it.
+
+| Tier | Scope | Done when |
+| --- | --- | --- |
+| 0. Core | `func`; primitive types and literals; pure arithmetic, comparison and logic; `Entry`, `Return`, `Branch`, `Sequence`; exec back-edges; the `ForRange` macro as the one loop construct (it exercises `Sequence`, `Exit` and the continuation stack); `@pure`; structured diagnostics for these kinds; canonical formatter, both hashes, a reference interpreter over the lowered blocks | The examples in 2.6 that use only Tier 0 features round-trip byte for byte, produce the traces in 4.2, and every Tier 0 diagnostic has a failing graph. |
+| 1. Data and tooling | `struct`, `enum`, `array`/`set`/`map` with **eager** copy (observably identical to 4.9), `Convert`, registry, `state`, `@reads`, notes, the merge and edit protocol, WBC and the verifier, `wiretc view --flow` and the Git textconv | Editor round trips are byte-stable; merge and edit tests pass; verifier fuzz passes. |
+| 2. Deferred | `class`, interfaces, `delegate`, `dispatcher`; latent nodes, fibers, `Signal`; `Try`/`Throw` (catchable faults); copy-on-write containers (an optimisation of Tier 1's semantics, not a change to them); capabilities; the full C API; debugger hooks; the project manager and lockfile | Started only after Tier 1; each item keeps the **Provisional** mark until it has its own tests. |
+
+Sections 4.6 (faults), 4.5 (latent nodes), 4.9 (copy-on-write), 5 (bytecode), 6 (C API) and 7.3 (projects) are therefore specified ahead of the prototype and may change when their tier starts.
 
 ## 2. Text syntax
 
@@ -75,7 +92,7 @@ Compiler stages: parse, resolve names, type-check, validate graphs, expand macro
 
 A `.wiret` file is UTF-8 (no BOM) with LF line endings and holds exactly one module. Statements end at a newline. Newlines are ignored inside `( )` and inside exec maps `{ pin -> target, ... }`, so long nodes can wrap.
 
-`//` starts a line comment. Line comments are *trivia*: the canonical writer drops them. Anything that must survive a round trip goes in a `@doc` attribute, or in a layout `box` (section 2.3) when it annotates the diagram.
+`//` starts a line comment. Line comments are *trivia* and are not part of the model, so the canonical writer cannot keep them. It never drops one silently: `wiretc fmt` reports `W0603` for each comment it would lose and exits non-zero, unless told what to do with them: `--convert-comments` turns each comment into a `note` attached to the next node or declaration (section 2.3), and `--drop-comments` discards them. An editor that opens a file containing comments offers the same choice. Anything that must survive a round trip is written as a `note` (graph, node or box explanations), a `@doc` attribute (the short tooltip text of a declaration), or a `box` (visual grouping).
 
 | Token | Form |
 | --- | --- |
@@ -88,7 +105,7 @@ A `.wiret` file is UTF-8 (no BOM) with LF line endings and holds exactly one mod
 | String | `"text"` with escapes `\\n`, `\\t`, `\\"`, `\\\\` and `\\u{1F600}` |
 | Tuple / list / map | `(1, 2)`, `[a, b]`, `{k: v}`; used only inside attributes |
 
-A literal takes the type of the pin it is bound to, so suffixes are only needed where a literal is used without a pin (attribute arguments). Keywords are reserved: `wiret module use extern const var local enum struct interface class impl macro func event dispatcher node state layout box at size`.
+A literal takes the type of the pin it is bound to, so suffixes are only needed where a literal is used without a pin (attribute arguments). Keywords are reserved: `wiret module use extern const var local enum struct interface class impl macro func event dispatcher node state notes note on layout box at size`.
 
 ### 2.2 Module header and declarations
 
@@ -142,10 +159,10 @@ Notes on the declarations:
 
 ### 2.3 Graph bodies: nodes, bindings, exec wiring
 
-The body of a `func`, `event` or `macro` is a list of `local` and `state` declarations and `node` statements, followed by at most one `layout` block. Everything that decides behaviour is in the node statements. Everything about where things are drawn is in the layout block.
+The body of a `func`, `event` or `macro` is a list of `local` and `state` declarations and `node` statements, followed by at most one `notes` block and at most one `layout` block. Everything that decides behaviour is in the node statements. Explanations for humans are in the notes block. Everything about where things are drawn is in the layout block.
 
 ```
-body    = { local | state | node } [ layout ] ;
+body    = { local | state | node } [ notes ] [ layout ] ;
 local   = "local" IDENT ":" type [ "=" literal ] NL ;
 state   = "state" IDENT ":" type [ "=" literal ] NL ;
 node    = "node" IDENT "=" KIND [ symbol ] [ "<" types ">" ]
@@ -154,15 +171,17 @@ binding = IDENT ":" ( pinref | literal ) ;
 pinref  = IDENT "." IDENT ;
 execout = "->" target | "{" IDENT "->" target { "," IDENT "->" target } "}" ;
 target  = IDENT [ "." IDENT ] ;
+notes   = "notes" "{" { note } "}" NL ;
+note    = "note" IDENT [ "on" IDENT ] STRING attrs NL ;   (* no "on": the whole graph *)
 layout  = "layout" "{" { place | box } "}" NL ;
 place   = IDENT "at" "(" INT "," INT ")" [ props ] NL ;
-box     = "box" STRING "at" "(" INT "," INT ")" "size" "(" INT "," INT ")" [ props ] NL ;
+box     = "box" IDENT STRING "at" "(" INT "," INT ")" "size" "(" INT "," INT ")" props NL ;
 props   = "[" IDENT "=" value { "," IDENT "=" value } "]" ;
 ```
 
 Rules:
 
-1. **Node ids** are identifiers, unique within the graph and never reused, not even after the node is deleted (a merge could otherwise resurrect an old wire onto a new node). They are the identity of a node for diffs and merges. Display names are not ids; they live in the layout (`label`). Editors generate a readable slug plus a short random suffix, such as `branch_k3m9`; humans and LLMs may choose descriptive ones such as `check_energy`.
+1. **Node ids** are identifiers, unique within the graph. They are the identity of a node for diffs and merges. Display names are not ids; they live in the layout (`label`). Editors generate a readable slug plus a short random suffix, such as `branch_k3m9`; humans and LLMs may choose descriptive ones such as `check_energy`. **Non-reuse is a project-level guarantee, not a file-level one.** A single file can only prove that its present ids are unique; it cannot know which ids were deleted earlier. Non-reuse is therefore enforced by the project's id registry `wiret.ids` (section 7.3), which records every retired node id: an editor save or `wiretc edit` that deletes a node appends its id, and a node that reuses a retired id is `E0140`. Without a project (a lone file) editors still generate fresh random suffixes, which makes accidental reuse improbable but not impossible, and `wiretc check` says so (`W0202`).
 2. **Kind** is a PascalCase built-in (`Add`, `Branch`, `SetLocal`, ...; section 3.3). Calling a declared function is always `Call`, so the closed set of built-in kinds never collides with user names.
 3. **Symbol** (optional) names the thing the node acts on: `Call std.math.Sqrt`, `GetField health`, `SetLocal acc`, `GetState done`, `New Player`, `Cast Player`, `Macro ForRange`, `Exit done`.
 4. **Type arguments** follow the symbol: `Add<i32>`, `Convert<i32, string>`, `Call std.array.Get<f32>`. They are always written out, never inferred.
@@ -182,17 +201,36 @@ Positions and appearance are not written on node lines. They live in the graph's
 layout {
   chk       at (800, 0)
   log_dead  at (960, -40) [label = "Log death", color = "#C0392B"]
-  box "Death handling" at (940, -90) size (330, 120) [color = "#C0392B"]
+  box death "Death handling" at (940, -90) size (330, 120) [members = [log_dead, ret_dead], color = "#C0392B"]
 }
 ```
 
 - A `place` line gives a node's position, and optionally `label`, `color`, `size`, `collapsed` and `hidden` (a list of pin names). Coordinates are integers, so there is no floating-point noise in diffs.
-- A `box` is a visual group. A node is in a box when its position lies inside the box. A box with `collapsed = true` must also list `members = [id, ...]` explicitly; it is drawn as one node whose pins are the wires crossing its edge (the compiler still sees the flat graph).
+- A `box` is a visual group with its own id (unique among node ids and box ids in the graph), a title, a position and a size. **Membership is explicit and authoritative:** `members = [id, ...]` is required and lists node ids and box ids. Position and size only say where the box is drawn; a node lying inside a box's rectangle is not thereby a member, and a member lying outside it is still a member. An editor may offer to add a node dragged into a box to `members`, but the list is what is saved. A box with `collapsed = true` is drawn as one node whose pins are the wires crossing its edge (the compiler still sees the flat graph).
+- **Nesting and overlap.** A box may list another box as a member, which nests it; the nesting must be acyclic. A node or box is a member of at most one box. If it appears in several, the box with the smallest id keeps it and `W0602` reports the rest. Rectangles may overlap freely, since they have no effect on membership. A member id that names nothing is `W0601` and is removed on the next editor save.
 - A node with no `place` line is auto-placed by the editor, and gets a line when first saved. This makes LLM-generated graphs valid without layout.
 - Unknown properties are preserved. The block never affects the semantic hash.
 - Personal view state (zoom, scroll, selection, open panels) is never written to the file (section 7.5).
 
 This split is what makes collaboration work: one person moving a node and another rewiring it edit different lines, and they merge without a conflict.
+
+#### The notes block
+
+Explanations that belong to the design rather than to the diagram persist in a `notes` block, one `note` per line, each with its own id:
+
+```
+notes {
+  note why_local on set_new "Store the new health once: pure nodes are re-evaluated per consumer (section 4.3)."
+  note overview "Applies damage and reports death. Called by the combat loop."
+  note death_rules on death "Death side effects live here so they can be disabled together."
+}
+```
+
+- `note <id> on <target> "text"` annotates the node or box named `<target>`. `note <id> "text"` annotates the graph as a whole. Text may contain `\n`; long notes are written as one long line, since line diffs of prose are no worse than for any other node.
+- Note ids follow the node-id rules (unique in the graph, readable slug plus suffix). Notes are keyed by id for merging (section 7.1) and sorted by id in canonical form.
+- Notes have no effect on compiled output, so they are outside the semantic hash and inside the layout hash. Unknown attributes on a note are preserved.
+- A note whose `on` target no longer exists is kept, shown by editors as detached, and reported as `W0604`. A note is never deleted by a tool as a side effect of deleting its target.
+- `@doc` remains the short tooltip and reflection text of a declaration or node. Long-form explanation, rationale and region-level comments go in notes.
 
 ### 2.4 Attributes and editor metadata
 
@@ -208,8 +246,9 @@ value = literal | IDENT | tuple | list | map ;
 
 | Attribute | Applies to | Meaning |
 | --- | --- | --- |
-| `@id("...")` | any declaration, module, parameter, result, field, enum member, local | Stable identity that survives rename and move. Written by editors; optional for hand-written code. |
-| `@pure` | `func` | No observable effects: results depend only on the arguments. Callers treat a call as a pure node (no exec pins, evaluated on demand). The graph inside is an ordinary exec graph and may branch, loop and recurse; it may use its own locals, but may not write variables, fields or state, call a function that is not `@pure`, or contain a latent node (`E0302`). |
+| `@id("...")` | any declaration, module, parameter, result, field, enum member, local | Stable identity that survives rename and move. Editors always write it (`W0202` where it is missing); hand-written and LLM-written code may omit it and gets one on the first editor save or `wiretc fmt --assign-ids`. See the identity rules below. |
+| `@pure` | `func` | Effect-free, deterministic and cacheable (section 4.3): the result depends only on the explicit arguments and on `const`s. Callers treat a call as a pure node (no exec pins, evaluated on demand). The graph inside is an ordinary exec graph and may branch, loop and recurse; it may use its own locals, but may not write variables, fields or state (`E0302`), read variables, fields or state, dereference a class reference or host handle, or call anything that is not `@pure` (`E0304`), and may not contain a latent node (`E0302`). |
+| `@reads` | `func` | Effect-free and deterministic for a given VM state, but not cacheable: may read variables, fields, state and objects, but not write them. A call is a pure node that is re-evaluated at each consumer (section 4.3), like `GetField`. May call only `@reads` and `@pure` functions (`E0302`) and may not contain a latent node. |
 | `@final` | method | Not virtual. Calls are bound at compile time. |
 | `@private` | declaration | Not visible outside the module. |
 | `@export` | `func`, `event`, `var`, type | Listed in the module's export table for the host and other modules. |
@@ -219,18 +258,25 @@ value = literal | IDENT | tuple | list | map ;
 | `@cases(v0, v1, ...)` | `Switch` | Case values. Pins are `case0`, `case1`, ... and `default`. |
 | `@disabled` | node | Node is skipped: a one-exec-out node passes control straight to its target; data outputs read as zero. |
 | @capability("name") | extern func | The import needs this host capability. Listed in the wr.caps section; the load fails unless the host granted it (section 6.5). |
-| @latent | func | The function may suspend. Required when it contains a latent node or calls a latent function or event (E0201). Events are implicitly latent. A latent function is never @pure. |
+| @latent | func | The function may suspend. Required when it contains a latent node or calls a latent function or event (E0201). Events are implicitly latent. A latent function is never @pure or @reads. |
 
 **Documentation attributes** never change bytecode. They are stored and diffed, and they are covered by the layout hash but not the semantic hash (section 2.5). Node positions, labels, colours and sizes are not attributes; they live in the layout block (section 2.3).
 
 | Attribute | Applies to | Meaning |
 | --- | --- | --- |
-| `@doc("text")` | any declaration or node | Tooltip and reflection text. |
+| `@doc("text")` | any declaration or node | Short tooltip and reflection text. Long-form and region-level explanations are `note`s (section 2.3). |
 | `@category("Math")`, `@keywords("a", "b")` | `func`, `macro` | Palette organisation. |
 
 A node with no `place` line in the layout block is auto-laid-out by the editor and gets a position when first saved, so graphs written by a tool or an LLM are valid without any layout.
 
 Wires refer to pins by name, so renaming a parameter or result would otherwise break every wire that mentions it. Giving parameters, results, fields, enum members and locals an `@id` lets an editor or merge tool recognise a rename as a rename (the id is unchanged, the name differs) and rewrite the references in one step.
+
+**Identity rules.**
+
+- **Required.** Every declaration, parameter, result, field, enum member and local that an editor writes carries an `@id`, generated by the editor as a short random token. Node ids are always present, since they are the node's name. An element without `@id` is still valid, but its identity is its name: renaming it is, for a merge, a deletion plus an addition (section 7.1), and `W0202` says so.
+- **Present uniqueness.** Within a file, every `@id` is unique among its siblings of the same kind (`E0102`), and a node or box id is unique within its graph. This is all a file can guarantee on its own.
+- **Operational non-reuse.** That an id is never used again after its element is deleted is guaranteed only by the project registry `wiret.ids` (section 7.3). Editors and `wiretc edit` append retired ids to it, and CI runs `wiretc ids --check base..head` to catch a commit that deleted an element without registering it. A retired id reappearing is `E0140`.
+- **Never regenerated.** Tools keep existing ids on load and save (section 7.5); they only generate ids for elements that have none.
 
 **Preservation rules.**
 
@@ -244,20 +290,22 @@ The canonical form is a function of the model alone, so two tools always write i
 
 1. UTF-8 NFC, LF, two-space indentation, one trailing newline.
 2. Items ordered by kind (`use`, `extern`, `const`, `var`, `enum`, `struct`, `interface`, `class`, `macro`, `func`, `event`), then by name.
-3. Inside a body: `local` statements by name, then `state` statements by name, then `node` statements sorted by **node id** (ASCII order), then the `layout` block last. Wiring never reorders anything.
-4. Inside the layout block: `place` lines sorted by node id, then `box` lines sorted by position (y, then x) and title. Moving a node changes only its own `place` line.
+3. Inside a body: `local` statements by name, then `state` statements by name, then `node` statements sorted by **node id** (ASCII order), then the `notes` block, then the `layout` block last. Wiring never reorders anything.
+4. Inside the layout block: `place` lines sorted by node id, then `box` lines sorted by box id. Inside a box, `members` are sorted by id. Moving a node changes only its own `place` line; moving a box changes only its own `box` line. Inside the notes block, `note` lines are sorted by note id.
 5. Bindings are written in the node kind's pin order (from the registry); bindings equal to the pin default are omitted.
 6. Attributes: semantic ones alphabetically, then `@doc`. Exec targets precede attributes.
 7. A node longer than 100 columns wraps inside its parentheses or exec map, one binding per line.
 8. Numbers and strings are written in their shortest unambiguous form.
-9. Line comments are dropped.
+9. Line comments are not representable. The formatter refuses to lose one silently (`W0603`, section 2.1); durable annotations are `note`s.
 
 Two hashes are defined over the canonical form, both SHA-256:
 
-- **Semantic hash**: computed after removing the `layout` block, `@doc`, `@category`, `@keywords`, and `Reroute` nodes, and after sorting declarations by name and nodes by id. It is embedded in the `.wbc`, so CI can prove that a commit changed behaviour or did not. Two properties must hold and should be tested: reversing the order of the nodes in a graph, or deleting its layout block and all documentation attributes, changes neither the semantic hash nor a single byte of the instruction stream.
+- **Semantic hash**: computed after removing the `layout` block, the `notes` block, `@doc`, `@category`, `@keywords`, and `Reroute` nodes, and after sorting declarations by name and nodes by id. It is embedded in the `.wbc`, so CI can prove that a commit changed behaviour or did not. Two properties must hold and should be tested: reversing the order of the nodes in a graph, or deleting its layout block and all documentation attributes, changes neither the semantic hash nor a single byte of the instruction stream.
 - **Layout hash**: computed over the entire canonical file. If two collaborators have the same layout hash, they see the identical graph.
 
 Because each node is one line, lines are sorted by id, and layout lives in its own block, plain line-based Git merges succeed whenever two people touch different nodes, and a move never collides with a rewire. Two people adding nodes also rarely collide, because ids are random slugs and sort into different places. The full merge algorithm, which works on the parsed model rather than on text, is in section 7.1. The examples in this document are shown in *flow order* for readability, which `wiretc view --flow` produces; the compiler accepts any order.
+
+**Storage order is not review order.** Sorting by id gives the best merges but scatters a function's execution order across the file. So the id-sorted file is the storage format, and reviewers are not expected to read it raw. The Git setup in section 7 attaches a `textconv` filter that runs `wiretc view --flow` before Git computes a diff, so `git diff`, `git log -p` and hosting-site pull requests that honour the attribute show nodes in flow order. `wiretc diff` goes further and prints a node-aware semantic diff (added, removed and rewired nodes, with layout-only changes separate). Flow order is defined in section 7 so that it is itself deterministic. Whether id-sorted storage should stay the default is decided by the review trial in section 9.1, not assumed here.
 
 Guidance for LLM authors: choose descriptive snake\_case node ids, always write type arguments, never rely on inference, read pin names from the registry (section 3.5) instead of guessing, omit the layout block, and run `wiretc check --json` and `wiretc fmt` on the output (section 7.2).
 
@@ -287,6 +335,9 @@ class Player {
     node log_dead  = Call host.Log(message: "Player died") -> ret_dead
     node ret_dead  = Return(died: true)
     node ret_alive = Return(died: false)
+    notes {
+      note why_local on set_new "Store the new health once: pure nodes are re-evaluated per consumer (section 4.3)."
+    }
     layout {
       entry     at (0, 0)
       set_new   at (160, 0)
@@ -299,7 +350,7 @@ class Player {
       log_dead  at (960, -40) [label = "Log death"]
       ret_dead  at (1120, -40)
       ret_alive at (960, 60)
-      box "Death handling" at (940, -90) size (330, 120) [color = "#C0392B"]
+      box death "Death handling" at (940, -90) size (330, 120) [members = [log_dead, ret_dead], color = "#C0392B"]
     }
   }
 
@@ -384,7 +435,7 @@ Things to notice:
 | `bool` | i32 (0 or 1) | Default `false`. |
 | `i8 u8 i16 u16 i32 u32` | i32 slot | Narrow types wrap on arithmetic (`Convert` is needed to narrow explicitly). Unsigned types use unsigned compare, divide, remainder and shift. |
 | `i64 u64` | i64 slot | Same rules. |
-| `f32 f64` | IEEE-754 | NaN payloads are not observable except through reinterpretation. |
+| `f32 f64` | IEEE-754 | In deterministic mode, NaN is canonical and arithmetic is fully specified (section 4.10). |
 | `string` | immutable UTF-8 reference | Never null; default is the empty string. Indexing is by byte offset via `std.string`. |
 | `enum` | its underlying integer (default `i32`) | Names are kept in the `name` custom section for editors and reflection. |
 | `struct` | immutable heap record with value semantics | Equality is structural. "Setting" a field makes a new struct (`WithField`). |
@@ -434,7 +485,7 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 | `Yield` | exec out `then` | **Latent.** Resumes on the next `wr_advance`. |
 | `Await` | in `signal: std.Signal`; exec out `then` | **Latent.** Resumes when the host fires the signal. |
 | `Macro` | symbol: macro name; pins from its signature | Inlined at compile time. |
-| `Exit` | symbol: macro exec output; in: its data outputs | Macro-only. Leaves the macro through that exec output (a jump) and assigns the data outputs bound on the node. On the first output of a Sequence it runs the caller's chain as a subroutine (see ForRange in section 2.6). |
+| `Exit` | symbol: macro exec output; in: its data outputs | Macro-only. Leaves the macro through that exec output (a jump) and assigns the data outputs bound on the node. It never changes the continuation stack, so a continuation the macro pushed stays pending. On the first output of a Sequence it runs the caller's chain as a subroutine (see ForRange in section 2.6 and the trace in section 4.2). |
 | `Reroute<T>` | in `in`, out `out` | Visual only. |
 
 **Variables, fields and objects**
@@ -443,7 +494,7 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 | --- | --- | --- |
 | `GetLocal` / `SetLocal` | `value` | Locals declared with `local`. `SetLocal` is impure. |
 | `GetVar` / `SetVar` | `value` | Module-level `var`. |
-| `GetField` | in `obj`; out `value` | Pure. Faults on a null class reference. |
+| `GetField` | in `obj`; out `value` | Pure node with `reads` purity (section 4.3): re-evaluated at each consumer and sees the state at that consumer's evaluation point. Faults on a null class reference. Not allowed in a `@pure` function (`E0304`). |
 | `SetField` | in `obj`, `value` | Impure. On a struct use `WithField`. |
 | `WithField` | pure; in `obj`, `value`; out `result` | Returns a copy of a struct with one field replaced. |
 | `MakeStruct` / `BreakStruct` | one pin per field | Pure. |
@@ -481,7 +532,7 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 
 | Kind | Pins | Behaviour |
 | --- | --- | --- |
-| `Call` | symbol: function, method or extern; its parameters and results | Pure if the callee is `@pure` or a pure native, otherwise impure. A method call has `self` as its first input; dispatch is virtual unless `@final`, and via the interface when the symbol names an interface method. |
+| `Call` | symbol: function, method or extern; its parameters and results | Pure node if the callee is `@pure`, `@reads`, or a native flagged effect-free; otherwise impure. A method call has `self` as its first input; dispatch is virtual unless `@final`, and via the interface when the symbol names an interface method. |
 | `CreateDelegate` | pure; symbol: function; optional `target`; out `result` | Binds a function (and receiver) into a delegate. |
 | `Invoke<D>` | `D` is a delegate type; in `delegate` plus the arguments | Impure. |
 | `Bind`, `Unbind` | symbol: dispatcher; in `obj`, `handler: delegate` | Impure. |
@@ -523,6 +574,7 @@ Rules:
 
 - A `.wiret` file never re-declares the pins of a registry kind. This keeps one line per node and one source of truth. Pins that depend on attributes (`@count`, `@cases`) are described in the registry by a pin pattern such as `then{i}`.
 - Functions, methods, events and `extern func` declarations get generated registry entries from their signatures plus `@doc` and `@category`, so the same palette and tooling cover user and host code.
+- `purity` is one of `impure`, `reads` (a pure node that reads mutable state, such as `GetField`, `GetVar`, `GetState`) or `pure`. Only `pure` kinds may appear in a `@pure` function; `pure` and `reads` kinds may appear in a `@reads` function.
 - Display names are for editors and may be localised. They never appear in `.wiret`.
 - The registry name and version are recorded in `wr.meta` and in the project lockfile (section 7.3). An unknown kind is `E0501`.
 
@@ -546,21 +598,102 @@ Each call frame has a small **continuation stack**. Its entries are either a *co
 
 Because every bytecode label is a type-safe jump target (section 5.5), the stack's depth does not have to be statically known. When the compiler can prove the depth (the common case), the optimiser replaces the push/pop pair with a direct branch, and the generated code looks like structured code.
 
+#### Transition rules
+
+Let `S` be the frame's continuation stack, with the top at the right. Each step below is the complete effect of one event on `S` and on the next node.
+
+| Event | Effect |
+| --- | --- |
+| Follow an exec wire | `S` unchanged; next node is the wire's target. |
+| Chain end | Pop `S`. A continuation `k`: next node is `k`. A handler marker: discard it and keep popping. `S` empty: the frame ends. |
+| `Sequence` with `n` outputs | Push the entries of outputs `n-1`, ..., `1` (so output 1 ends up on top); next node is output 0. |
+| Macro call site | Inlined, so no stack effect. Data inputs are captured into the expansion's locals; next node is the macro's `Entry` exec output for the exec input that was wired. |
+| `Exit o (vals)` | Assign the bound data outputs `vals`, then next node is the caller's target wired to macro output `o`; if `o` is unwired, this is a chain end. **`S` is not touched**: continuations the macro pushed stay pending, and anything the caller's chain pushes sits above them. |
+| `Try` | Push a handler marker, then run `body`. |
+| Fault | Pop `S` down to the nearest handler marker, discarding every continuation above it, and jump to its handler. No marker: the fiber ends with the fault. |
+| `Return` | Discard the frame, including `S`. |
+
+An `Exit` that leaves data outputs unbound keeps their previous values (the zero value if none was assigned), the same persistence rule as other impure outputs (section 4.3). Because `Exit` is a jump and not a call, there is no "return from Exit": the only way back into the macro is a continuation the macro itself pushed.
+
+#### Joins
+
+An exec input with several producers is a **join**. There is no merge of state at a join; the node simply runs when any producer reaches it, and:
+
+- Its pure inputs are evaluated at the join node's own evaluation point (section 4.3), not at the producers. Which producer was taken is not visible to it.
+- `S` is whatever the arriving path had. Paths with different stack depths may join; the verifier only requires that every label be a valid jump target (section 5.5).
+- Data outputs of impure nodes that sit on only some of the paths into a join are read as "the last value stored, else the zero value". `W0310` fires when the producer does not dominate the reader, which is exactly the situation a join creates; a reader after a join should read a local that every path assigned.
+- A back-edge to a join (a loop) re-runs the join and everything after it with the current stored values. Nothing is reset.
+
+#### Worked trace: one `ForRange` iteration
+
+`SumTo(2)` from section 2.6, after macro expansion. The call site is `loop` with `each -> add` and `done -> ret`. Macro nodes carry path-style ids (`loop/test`, ...). `S` is shown with the top at the right; `[]` is empty. `i` is the macro local, `acc` is the caller's local.
+
+| Step | Node | Action | `S` after |
+| --- | --- | --- | --- |
+| 1 | `entry` | start; follow to `loop` | `[]` |
+| 2 | `loop/init` | `i := 1` | `[]` |
+| 3 | `loop/test` | `1 <= 2` is true; follow `then` | `[]` |
+| 4 | `loop/seq` | push the entry of output 1 (`loop/bump`); jump to output 0 | `[loop/bump]` |
+| 5 | `loop/each_out` | `Exit each (index: i)`: `loop.index := 1`; jump to caller target `add`. `S` untouched | `[loop/bump]` |
+| 6 | `add` | `acc := acc + loop.index = 1`. No exec output: chain end, pop `loop/bump` | `[]` |
+| 7 | `loop/bump` | `i := 2`; follow to `loop/test` | `[]` |
+| 8 | `loop/test`, `loop/seq`, `loop/each_out`, `add` | as steps 3 to 6 with `i = 2`: `acc := 3`; chain end pops `loop/bump` | `[]` |
+| 9 | `loop/bump` | `i := 3`; follow to `loop/test` | `[]` |
+| 10 | `loop/test` | `3 <= 2` is false; follow `else` | `[]` |
+| 11 | `loop/finish` | `Exit done`: jump to caller target `ret` | `[]` |
+| 12 | `ret` | `Return(total: acc = 3)`; frame discarded | n/a |
+
+Two properties follow from the trace. The stack is balanced on every iteration (pushed at step 4, popped at step 6), so its depth depends on how deeply loops are nested and not on how many iterations run. And the continuation that resumes the macro after the caller's chain is the one `Sequence` pushed; `Exit` contributes nothing. That is the whole mechanism, which is why `ForRange` needs neither a loop primitive nor a call node.
+
+#### Required macro tests
+
+Section 7.4 requires each of these as a trace test (expected `S` after every step, not only the final result):
+
+1. **Nested loops.** A `ForRange` inside the `each` chain of another. At the inner `each` body, `S` holds the outer `bump` below the inner `bump`; the inner `done` returns to the outer chain's next node.
+2. **`Sequence` inside a macro body.** A macro that sequences two `Exit`s, to confirm the later one runs only after the caller's chain for the earlier one has ended.
+3. **Early exit.** A `Return` inside the `each` chain discards the pending `bump` with the frame. A caller chain cannot leave a macro any other way; a loop macro that offers `break` as an input does so with a `state` flag the `bump` step checks (**Provisional**: revisit if this proves awkward).
+4. **Unwired `Exit`.** `Exit` to an unwired caller output behaves as a chain end and pops a pending continuation if one exists.
+5. **Faults.** A fault in the `each` chain with a `Try` outside the loop pops the pending `bump` and everything above the marker; a `Try` entirely inside the `each` chain leaves the macro's continuation untouched.
+6. **Join.** Two producers wired to one exec input, and a read of an impure output on a path where its producer did not run (zero value, `W0310`).
+
 ### 4.3 Pure nodes and data persistence
 
-- **Evaluation unit.** Before an impure node runs, the compiler evaluates the pure nodes feeding its inputs, each at most once for that execution (shared sub-expressions are computed once). A pure node feeding two different impure nodes is evaluated twice. This is the familiar Blueprint behaviour and it is why `TakeDamage` stores its intermediate result in a local.
+- **Evaluation point.** Each time an impure node is about to run, the pure nodes feeding its inputs are evaluated, all at that moment and before the impure node's own effect. Evaluating them performs no writes, so every read of mutable state by those pure nodes sees the same state: the state at the evaluation point. A shared sub-expression is computed once per evaluation point. A pure node feeding two different impure nodes is evaluated at each one, and the two results differ if state changed in between. This is the familiar Blueprint behaviour and it is why `TakeDamage` stores its intermediate result in a local.
+- **Order.** Within one evaluation point, inputs are evaluated depth-first in the consumer's pin order from the registry, left to right. A node already evaluated at this point is reused. An implementation may reorder or share work only if no one can tell: results, the choice of fault, and fuel accounting must be as if this order were followed.
+- **Faults in pure nodes.** A fault in a pure node is raised at the consumer's evaluation point, before the consumer runs, and it is the first fault in the order above. A pure node whose result nobody demands is not evaluated and cannot fault. `Select`, `And` and `Or` demand all their inputs, so a fault in the untaken side of a `Select` is raised.
 - **Impure outputs persist.** A data output of an impure node (a call result, `loop.index`) is stored in a frame slot when the node runs. Any later node may read it. Reading it on a path where the node has not run yet gives the zero value; the compiler warns (`W0310`) when a read is not dominated by the producing node.
 - **No short-circuiting.** `And`, `Or` and `Select` evaluate every input. Use `Branch` for conditional evaluation.
 - **Macro inputs** are evaluated once, at macro entry, and captured in locals.
 - **Cycles** among pure nodes are rejected (`E0301`). Cycles through exec wires are loops and are allowed.
 
-**Calls to pure functions.** A call to a `@pure` function is itself a pure node. When its value is demanded, the callee runs its own exec graph to completion and returns its results, so a pure function can contain branches, loops and recursion (`Fib` in section 2.6). The compiler, not the verifier, checks that a `@pure` function has no effects (`E0302`); the verifier only checks that it is never latent.
+**Calls to pure and reads functions.** A call to a `@pure` or `@reads` function is itself a pure node. When its value is demanded, the callee runs its own exec graph to completion and returns its results, so such a function can contain branches, loops and recursion (`Fib` in section 2.6).
+
+#### Purity levels
+
+"Pure" is three separate guarantees. A function or native provides some of them, and each attribute names what it provides.
+
+| Guarantee | Meaning | `@reads` | `@pure` |
+| --- | --- | --- | --- |
+| Effect-free | Does not write any state another computation could observe: variables, fields, `state`, containers reachable from outside the call, host state. Writing its own locals is allowed. | yes | yes |
+| Deterministic | The same explicit arguments **and the same VM state** give the same result (and the same fault, if any). | yes | yes |
+| Cacheable | The result depends only on the explicit arguments and `const`s, so it may be memoised or hoisted across state changes. | no | yes |
+
+Rules:
+
+- **Reads of mutable state.** `GetField`, `GetVar`, `GetState` and dereferencing a class reference or host handle are `reads` operations. They are fine in a `@reads` function and forbidden in a `@pure` one (`E0304`). A struct, enum, string or container passed as an argument is a value and may be read freely, since the caller's copy cannot change under the callee. A class reference may be passed, compared with `Eq` or tested with `IsValid`'s null check, but not dereferenced.
+- **Calls.** A `@pure` function may call only `@pure` functions and natives flagged cacheable; a `@reads` function may also call `@reads` functions and natives flagged effect-free. Anything else is `E0304` (reads) or `E0302` (writes or latent).
+- **Cacheability is what the optimiser may use.** Common-subexpression elimination across a state change, hoisting out of loops and memoisation apply only to `@pure` calls and `pure`-purity kinds. A `reads` node is never moved across a write to anything it could read.
+- **Faults are results, not effects.** A fault is part of what a deterministic function returns: the same arguments fault the same way. So a pure call that may fault is kept when its result is unused (removing it would remove the fault), and it is never reordered past another node that could fault or write when that would change which fault is observed. Fuel exhaustion and an interrupt are not faults of the function; they are the VM's limits (section 5.7) and are exempt.
+- **Natives are trusted, not proved.** The VM cannot check a native's flags. A host registers `WR_NATIVE_EFFECT_FREE`, `WR_NATIVE_DETERMINISTIC` and `WR_NATIVE_CACHEABLE` (section 6.6) and is responsible for them. With `WR_CFG_AUDIT_NATIVES`, the VM calls each cacheable native twice and compares the results, and reports `WR_ERR_API` on a mismatch; this finds some false claims and proves none.
+- **Warning.** `W0320` fires when a `reads` node, or a call to a `@reads` function, feeds more than one impure consumer, since the consumers may see different values. The usual fix is to store the value in a local first, as `TakeDamage` does.
+
+The compiler, not the verifier, checks effect-freedom and the read restrictions (`E0302`, `E0304`); the verifier only checks that such functions are never latent.
 
 ### 4.4 Functions, events, macros and groups
 
 | Construct | Semantics |
 | --- | --- |
-| Function | Callable, may recurse, returns results. A function that may suspend is declared `@latent`, and the compiler checks the declaration (`E0201`): a function that contains a latent node, or calls a latent function or event, must be latent. A latent function is never `@pure`. Unlike Blueprint functions, Wiret allows this, but only when it is declared. |
+| Function | Callable, may recurse, returns results. A function that may suspend is declared `@latent`, and the compiler checks the declaration (`E0201`): a function that contains a latent node, or calls a latent function or event, must be latent. A latent function is never `@pure` or `@reads`. Unlike Blueprint functions, Wiret allows this, but only when it is declared. |
 | Event | A function with no results, intended as an entry point. Events are implicitly latent. Invoked by the host (`wr_push_func` plus `wr_call` or `wr_start`) or by `Call` from another latent graph. |
 | Macro | Expanded in place before type-checking the caller's body. Macro locals are renamed per expansion, so two expansions never share state; `state` slots are one per expansion site. After expansion, node ids are path-style (`loop/test`), and each macro exec pin gets a synthetic stub id (`loop!each`), so debug data and diagnostics point into the macro's own nodes. A macro may not expand itself, directly or indirectly (`E0401`). |
 | Collapsed group | Editor-only. A layout `box` with `collapsed = true` and explicit `members` is drawn as a single node whose pins are the wires crossing the box edge. The compiler sees the flat graph. |
@@ -572,7 +705,7 @@ Every call runs on a **fiber**: its own value stack and call frames, heap-alloca
 - **Latency is declared and checked.** Latent nodes (`Delay`, `Yield`, `Await`) and calls to latent functions or events are allowed only inside latent functions and events (`E0201` otherwise). The verifier enforces the same rule on bytecode: `suspend` and calls to a callee flagged latent appear only in functions flagged latent. A call to a non-latent function therefore can never suspend. A host can call a non-latent export with `wr_call` and rely on getting `WR_OK` or an error, never `WR_YIELD`.
 - Latent nodes are rejected inside `@pure` functions (`E0302`) and inside natives (natives cannot suspend in version 1; see section 6.6).
 - A fiber can only suspend if every frame between it and its base is a Wiret frame. A native that calls back into Wiret and then yields would have to unwind a C frame, which the VM refuses (`WR_ERR_API`), as Lua does for yielding across a C call.
-- Time is virtual. `Delay` waits for virtual seconds that advance only when the host calls `wr_advance`. Wake order is by wake time, then by fiber creation order, so execution is deterministic.
+- Time is virtual. `Delay` waits for virtual seconds that advance only when the host calls `wr_advance`. Wake order is by wake time, then by fiber creation order, so scheduling is deterministic. The full list of conditions for replay is in section 4.10.
 
 ### 4.6 Faults
 
@@ -595,7 +728,8 @@ Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber
 | `E0120` | Exec output wired to a data pin, or a data wire to an exec pin. |
 | `E0121` | An exec output is listed twice. |
 | `E0301` | Cycle among pure nodes. |
-| `E0302` | `@pure` function writes variables, fields or state, calls a function that is not `@pure`, or contains a latent node. |
+| `E0302` | `@pure` or `@reads` function writes variables, fields or state, contains a latent node, or (`@reads`) calls a function that is neither `@reads` nor `@pure`. |
+| `E0304` | `@pure` function reads variables, fields or state, dereferences a class reference or host handle, or calls anything that is not `@pure`. |
 | `E0401` | Macro expands itself. |
 | `E0412` | `Try` body is not properly nested. |
 | `E0501` / `E0502` | Unresolved symbol / missing type argument. |
@@ -607,6 +741,13 @@ Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber
 | E0900 | Edit rejected: the document changed since the hash the edit was based on (section 7.2). |
 | E0201 | A function that is not latent contains a latent node or calls a latent function or event. |
 | E0303 | A path provably ends, with no pending continuation, in a function that declares results and has not returned. |
+| E0140 | A node, box, note or `@id` reuses an id recorded as retired in `wiret.ids` (section 7.3). |
+| W0202 | Element has no `@id`, or the file is not in a project and non-reuse cannot be checked (section 2.4). |
+| W0320 | A `reads` node feeds more than one impure consumer (section 4.3). |
+| W0601 | A box lists a member id that names no node or box. |
+| W0602 | A node or box is listed as a member of more than one box. |
+| W0603 | `wiretc fmt` would drop a `//` comment (section 2.1). |
+| W0604 | A note's `on` target no longer exists. |
 
 Diagnostics are structured records, not only text: `code`, `severity`, `message`, `module`, `graph`, `node` and `pin`. `wiretc check --json` prints one record per line. An editor uses `node` and `pin` to highlight the exact place on the graph, and an LLM agent feeds the records back to itself until the check is clean (section 7.2). Diagnostics that arise inside an expanded macro carry the path-style node id (section 4.4).
 
@@ -640,6 +781,31 @@ Consequences:
 - Classes, delegates and host handles stay reference types. An `array<Player>` copies the references, not the players.
 - The optimiser removes a `ref.share` when liveness analysis shows the source holder is dead after the read, which is the common case when a function builds a local array and returns it.
 - `Eq` and `Ne` on containers are structural (element-wise for arrays; set and map equality ignores insertion order) and compile to calls to `std.array.Equals`, `std.set.Equals` and `std.map.Equals`.
+
+### 4.10 Deterministic mode
+
+Repeatable execution is a mode, not a property of every run. A VM created with `WR_CFG_DETERMINISTIC` promises: for the same `.wbc`, the same configuration, and the same **input log** (the ordered sequence of host API calls with their arguments, plus every value a native returned), every fiber executes the same instructions, consumes the same fuel and produces the same results and faults. Outside this mode the language is still memory-safe but promises no repeatability.
+
+The mode requires all of the following.
+
+1. **Deterministic natives only.** `wr_register` refuses a native without `WR_NATIVE_DETERMINISTIC` (section 6.6). A native that returns host-dependent data (time, input, files) is not flagged; in a replay its result must come from the input log.
+2. **Floating point is specified** (**Provisional**):
+   - `f32` and `f64` use IEEE-754 binary32 and binary64 with round-to-nearest-even for `+ - * /`, `Sqrt`, `Floor`, `Ceil` and conversions. No fused multiply-add contraction, no extended-precision intermediates, no flush-to-zero; subnormals are kept.
+   - Every operation that produces a NaN produces the canonical quiet NaN (`0x7FC00000`, `0x7FF8000000000000`), so NaN payloads and signs are never observable. `Eq` with a NaN is false, `Ne` is true, and `Lt Le Gt Ge` are false. `Min` and `Max` return NaN if either input is NaN (not IEEE minNum), and order `-0` before `+0`.
+   - `Round` rounds half away from zero. Float to string uses the shortest round-trip text (section 3.2).
+   - `std.math` functions that are not exactly rounded by IEEE (`Sin`, `Cos`, `Pow`, `Atan2`, `Exp`, `Log`, ...) use the VM's bundled implementation with a fixed algorithm and evaluation order, not the platform's `libm`. Outside the mode they may call `libm`, and their last bits may differ between platforms.
+3. **Defined iteration and scheduling order.** Maps and sets iterate in insertion order. Fibers wake by wake time, then fiber creation order (section 4.5). Fibers made runnable at the same `wr_advance` run in that order, each until it suspends, finishes or runs out of fuel; there is no time-sliced preemption. Waiters on a signal resume in the order they began waiting. Dispatcher handlers run in bind order.
+4. **Host events enter only at API boundaries.** The host affects a VM only through API calls (`wr_call`, `wr_advance`, firing a signal, `wr_grant`, ...), and the sequence of those calls is the input log. A native may call back into Wiret only with a call that is itself part of the log.
+5. **Limits are logical.** Fuel counts instructions (section 5.7). `max_heap_bytes` is charged by the VM's own accounting of object sizes, not by what the allocator returns, so a memory-limit fault happens at the same instruction on every platform (**Provisional**).
+
+Excluded from the guarantee:
+
+- **`wr_interrupt`** is driven by a thread or a wall clock. In deterministic mode an interrupt still stops the fiber with `WR_ERR_INTERRUPT`, but the run is marked non-replayable in `wr_get_stats`. Use fuel for limits that must replay.
+- **Unlogged host callbacks**: a native whose result is not in the log, or that reads state outside the VM.
+- **Host `finalize` callbacks**, which run when the collector frees a host handle. Collection timing is not observable from Wiret, but it is not specified either.
+- **Differences in the host environment** that the VM does not control: a different allocator that fails earlier than the logical limit, a different build of the same natives.
+
+The claim of identical results on every platform is a **target** until the conformance suite (section 7.4) passes the same golden traces on at least two CPU architectures and two compilers.
 
 ## 5. Bytecode specification (WBC 1)
 
@@ -957,11 +1123,12 @@ typedef int   (*wr_NativeFn)(wr_Fiber *f, void *ud);
 
 typedef struct wr_Error { wr_Status status; int code; char message[256]; } wr_Error;
 
-#define WR_CFG_DETERMINISTIC 1   /* refuse natives that are not marked deterministic */
+#define WR_CFG_DETERMINISTIC 1   /* deterministic mode, section 4.10: refuse natives not marked deterministic */
+#define WR_CFG_AUDIT_NATIVES 2   /* call cacheable natives twice and compare (section 4.3); a debugging aid */
 
 typedef struct wr_Config {
   size_t   struct_size;                  /* set by wr_config_init; lets the struct grow */
-  unsigned flags;                        /* WR_CFG_DETERMINISTIC */
+  unsigned flags;                        /* WR_CFG_DETERMINISTIC | WR_CFG_AUDIT_NATIVES */
   wr_AllocFn alloc;  void *alloc_ud;     /* NULL: malloc family            */
   size_t   max_heap_bytes;               /* 0: unlimited                   */
   uint32_t max_stack_slots;              /* per fiber, default 1<<20       */
@@ -991,7 +1158,7 @@ wr_FiberStatus wr_fiber_status(wr_Fiber *f);
 void       wr_fiber_kill(wr_Fiber *f);              /* ends it without running handlers */
 ```
 
-**ABI stability.** Structs that cross the API (`wr_Config`, `wr_HostType`, `wr_FaultInfo`, `wr_Stats`) begin with `size_t struct_size`, filled in by the matching `*_init` function or by the caller. The VM reads only as many bytes as the caller declared and treats missing trailing fields as zero, so a host built against an older header keeps working against a newer library. In a VM created with `WR_CFG_DETERMINISTIC`, wall-clock budgets (`wr_interrupt`) still work, but registering a native that is neither `WR_NATIVE_DETERMINISTIC` nor `WR_NATIVE_PURE` fails with `WR_ERR_LINK`, so a replay cannot silently depend on a clock or a random source.
+**ABI stability.** Structs that cross the API (`wr_Config`, `wr_HostType`, `wr_FaultInfo`, `wr_Stats`) begin with `size_t struct_size`, filled in by the matching `*_init` function or by the caller. The VM reads only as many bytes as the caller declared and treats missing trailing fields as zero, so a host built against an older header keeps working against a newer library. In a VM created with `WR_CFG_DETERMINISTIC`, wall-clock budgets (`wr_interrupt`) still work, but registering a native that is neither `WR_NATIVE_DETERMINISTIC` nor `WR_NATIVE_CACHEABLE` fails with `WR_ERR_LINK`, so a replay cannot silently depend on a clock or a random source.
 
 ### 6.5 Modules
 
@@ -1029,8 +1196,9 @@ An import whose capability is not granted fails the load with `WR_ERR_LINK`, nam
 ### 6.6 Natives and host types
 
 ```c
-#define WR_NATIVE_DETERMINISTIC 2   /* result depends only on arguments and VM state */
-#define WR_NATIVE_PURE 1   /* no side effects; callable from @pure graphs */
+#define WR_NATIVE_EFFECT_FREE   1   /* writes nothing observable; may read VM or host state; callable from @reads graphs */
+#define WR_NATIVE_DETERMINISTIC 2   /* same arguments and same VM state give the same result */
+#define WR_NATIVE_CACHEABLE     4   /* depends only on its arguments; implies 1 and 2; callable from @pure graphs */
 
 /* name: "host.Log"; sig uses Wiret type syntax: "(string)->()", "(i32,f32)->(bool)" */
 wr_Status wr_register(wr_Vm *vm, const char *name, const char *sig,
@@ -1052,6 +1220,8 @@ void      wr_push_host(wr_Fiber *f, const char *type, void *ptr);  /* same ptr, 
 void     *wr_to_host(wr_Fiber *f, int idx, const char *type);      /* NULL if wrong type or invalidated */
 void      wr_host_invalidate(wr_Vm *vm, void *ptr);   /* the host destroyed it: IsValid becomes false */
 ```
+
+The flags are claims by the host; the VM cannot verify them (section 4.3, "Natives are trusted, not proved"). `WR_NATIVE_CACHEABLE` without the other two bits is rejected at registration.
 
 Natives cannot suspend in version 1. Host-side asynchronous work is modelled by returning a `std.Signal` (created with `wr_push_signal`) and firing it later; the graph uses `Await`. A native may call back into Wiret with `wr_call`, but the nested call cannot suspend (it would report `WR_ERR_API`).
 
@@ -1251,9 +1421,10 @@ A typical game loop adds one call per frame: `wr_advance(vm, dt)`. Events are st
 | `wiretc fmt file.wiret` | Rewrite in canonical form. `--check` fails if the file is not canonical (for CI). |
 | `wiretc build file.wiret -o out.wbc` | Compile and verify. `-O0` / `-O1`, `--embed-source`, `--no-debug`. |
 | `wiretc dis out.wbc` | Disassemble, with node ids from `wr.debug`. |
-| `wiretc view --flow file.wiret` | Print a reading view in flow order (not canonical). `--dot` exports Graphviz DOT, using `node:pin` ports and one cluster per layout box. |
+| `wiretc view --flow file.wiret` | Print a reading view in flow order (not canonical). Flow order is deterministic: from each `Entry`, depth-first along exec outputs in pin order; a node reached twice is printed at its first visit; each pure node is printed immediately before its first consumer; nodes unreachable from any entry come last, sorted by id. `--dot` exports Graphviz DOT, using `node:pin` ports and one cluster per layout box. |
 | `wiretc hash file.wiret` | Print the semantic and layout hashes. |
-| `wiretc diff a.wiret b.wiret` | Node-level diff: added, removed and rewired nodes; layout-only changes reported separately. |
+| `wiretc diff a.wiret b.wiret` | Node-aware semantic diff, printed in flow order: added, removed and rewired nodes; note and layout-only changes reported separately. `--raw` prints the id-ordered text diff. |
+| `wiretc ids --check base..head` | Fail if a commit deleted an element whose id is not in `wiret.ids`, or reused a retired id (`E0140`). |
 | `wiretc merge base ours theirs` | Git merge driver. Line-merges, then re-validates (duplicate bindings, dangling ids). |
 | `wiretc verify out.wbc` | Run only the verifier. |
 | wiretc check --json file.wiret | Structured diagnostics, one JSON record per line (section 4.7). |
@@ -1265,16 +1436,24 @@ Suggested Git setup:
 ```
 # .gitattributes
 *.wiret merge=wiret diff=wiret
+
+# .git/config (or ~/.gitconfig); `wiretc init-git` writes it
+[diff "wiret"]
+    textconv = wiretc view --flow
+[merge "wiret"]
+    driver = wiretc merge %O %A %B
 ```
+
+The `textconv` filter changes only what Git displays: `git diff`, `git log -p` and `git blame` see flow-ordered text, while the stored file and `git apply` are unaffected. Use `git diff --no-textconv` for the raw id-ordered diff.
 
 ### 7.1 Merge procedure
 
 `wiretc merge` implements the following, and an editor's built-in merge should behave the same way.
 
 1. **Parse** base, ours and theirs into models. If any side does not parse, fall back to a plain text merge and say so.
-2. **Match by key.** Declarations are keyed by `@id`, otherwise by name; nodes by node id within their graph; parameters, fields and enum members by `@id`.
+2. **Match by key.** Declarations are keyed by `@id`, otherwise by name; nodes by node id within their graph; parameters, fields and enum members by `@id`; notes by note id. An element with no `@id` is matched by name, so renaming it appears as a deletion plus an addition (and, if wires named it, as a conflict); this is the cost of `W0202`, and the reason editors always write ids.
 3. **Merge each key.** Added on one side only: keep. Deleted on one side and unchanged on the other: delete. Deleted on one side and modified on the other: **conflict**. Modified on both sides: merge *per field*, where each input binding, each exec output, each type argument and each attribute is one field. A field changed on only one side takes that change, the same change on both sides is no change, and different changes to the same field are a conflict.
-4. **Merge layout separately.** `place` and `box` lines are keyed by node id and title, and their properties merge independently. A layout disagreement never blocks a merge: the later commit wins and a notice is printed.
+4. **Merge layout and notes separately.** `place` lines are keyed by node id and `box` lines by box id, and their properties merge independently; a box's `members` merge as a set, so two people adding different members to one box both succeed. A layout disagreement never blocks a merge: the later commit wins and a notice is printed. Notes are keyed by note id and merge per field like nodes, but they are prose: if both sides changed the same note's text differently, that is a conflict and the merge exits non-zero, rather than letting one side's text win silently. Neither kind of conflict affects compilation. After the merge, `W0601`, `W0602` and `W0604` are re-checked.
 5. **Validate** the merged model: duplicate ids, an input bound twice, exec targets or pin references that name a node that no longer exists, and every other diagnostic in section 4.7. Violations are reported as **semantic conflicts** keyed by node and pin, so an editor can show them on the graph.
 6. **Write** canonical text. Unresolved conflicts are written as conflict markers around the single node line concerned, one line for each side, and the command exits non-zero, so ordinary tools show them too. The merge never silently drops a node, a wire or an unknown attribute.
 
@@ -1288,7 +1467,8 @@ A program that edits a graph (an editor, a refactoring tool, an LLM agent) shoul
 | `bind` / `unbind` | Connect or disconnect a data input. |
 | `wire_exec` / `unwire_exec` | Connect or disconnect an exec output. |
 | `set_attr` / `remove_attr` | Change an attribute on a node or declaration. |
-| `place` | Change a node's entry in the layout block (position, label, colour), and only that. |
+| `place` | Change a node's or box's entry in the layout block (position, label, colour, and for a box its `members`), and only that. |
+| `add_note` / `set_note` / `delete_note` | Create, change or remove a `note` (section 2.3). `delete_node` never deletes notes; it reports them as detached (`W0604`). |
 | `delete_node` | Remove a node. Refused while other nodes still reference it, unless `cascade` is set, in which case the removed wires are listed in the reply. |
 | `rename` | Rename a declaration, parameter, field or local by its `@id` and rewrite every reference. |
 
@@ -1318,6 +1498,7 @@ allow = ["console.write"]
 - A call to another Wiret module compiles to an import whose `module` field is the callee's module name. The loader resolves an import against the exports of loaded Wiret modules first (checking the signature), then against registered natives.
 - Import cycles between modules are rejected at build time.
 - `wiret.lock` records the semantic hash of every dependency and the registry version. `wiretc build` fails if a dependency's hash no longer matches, so a build is reproducible.
+- `wiret.ids` is the project's **id registry**, committed next to the manifest: one line per retired id (module, graph, kind of element, id). It is append-only and merges by set union, so two branches that retire different ids never conflict. Editors and `wiretc edit` append to it when they delete an element, and `wiretc ids --check` verifies it in CI (section 2.4). It is what turns "ids are never reused" from a convention into something checkable; a single `.wiret` file cannot offer that on its own.
 - `[capabilities] allow` lists what the build permits modules to request. It is a build-time check; the host's `wr_grant` calls are the runtime authority.
 
 ### 7.4 Conformance
@@ -1328,21 +1509,21 @@ An implementation claims one or more levels:
 | --- | --- |
 | Reader | Parses `.wiret`, preserves unknown attributes, and round-trips canonical files byte for byte. |
 | Editor | Reader, plus writes canonical form, preserves ids, and computes both hashes. |
-| Compiler | Editor, plus produces exactly the diagnostics of section 4.7 and emits verifiable `.wbc` with the lowering of section 4.8. |
+| Compiler | Editor, plus produces exactly the diagnostics of section 4.7 for the tiers it claims (section 1.6) and emits verifiable `.wbc` with the lowering of section 4.8. Until Tier 0 has passed, the codes and records are the target, not a frozen contract. |
 | Runtime | Verifies before running, enforces limits, implements the instruction semantics of section 5 including value semantics (4.9), and the C API of section 6. |
 
-A shared test suite should cover at least: formatter idempotence (`fmt(fmt(x)) == fmt(x)`); one failing graph for each diagnostic code; golden bytecode for `TakeDamage` and `SumTo`; verifier negative tests and a fuzzer for malformed `.wbc`; arithmetic edge cases (division by zero, `INT_MIN / -1`, saturating truncation, shift masking); a container alias test (copy an array, change the copy, check the original, and check that appending in a loop does not copy on each iteration); determinism (identical fuel counts and results on every platform); C API lifetime tests; and semantic-hash stability under layout-only edits.
+A shared test suite should cover at least: formatter idempotence (`fmt(fmt(x)) == fmt(x)`); one failing graph for each diagnostic code; golden bytecode for `TakeDamage` and `SumTo`; verifier negative tests and a fuzzer for malformed `.wbc`; arithmetic edge cases (division by zero, `INT_MIN / -1`, saturating truncation, shift masking); a container alias test (copy an array, change the copy, check the original, and check that appending in a loop does not copy on each iteration); determinism in deterministic mode (section 4.10): identical fuel counts, results and faults for a recorded input log on at least two architectures and two compilers, including NaN, `-0`, `Min`/`Max` and `std.math` golden vectors; C API lifetime tests; and semantic-hash stability under layout-only edits.
 
-Add two metamorphic tests to the suite: reversing the node order of a graph, and deleting its layout block, must change neither the semantic hash nor a byte of the compiled instruction stream. Add a negative test that a non-latent function containing `suspend` fails verification, and a test that a layout-only edit never changes the semantic hash.
+Add the macro trace tests of section 4.2 (nested loops, `Sequence` inside macros, early exit, unwired `Exit`, faults, joins), the purity tests of section 4.3 (a `@pure` function that reads a field is `E0304`; a `@reads` function sees the state at each consumer's evaluation point; the first fault in evaluation order is the one reported), and identity tests (reusing a retired id is `E0140`; a rename of an element with `@id` merges as a rename; a comment is never dropped without `W0603`; a box with a member outside its rectangle keeps the member). Add two metamorphic tests to the suite: reversing the node order of a graph, and deleting its layout block, must change neither the semantic hash nor a byte of the compiled instruction stream. Add a negative test that a non-latent function containing `suspend` fails verification, and a test that a layout-only edit never changes the semantic hash.
 
 ### 7.5 Contract for graph editors
 
 An editor that reads and writes `.wiret` files must:
 
-1. **Preserve ids.** Never regenerate node, parameter or declaration ids on load or save.
+1. **Preserve ids.** Never regenerate node, box, note, parameter or declaration ids on load or save; generate an `@id` only for an element that has none, and append every id you retire to `wiret.ids`.
 2. **Write canonical form** with the shared formatter, so opening and saving an unchanged graph produces a byte-identical file and an empty diff.
 3. **Lay out only what has no layout.** Auto-place nodes that lack a `place` line and leave every other position alone.
-4. **Preserve unknown data**: unknown attributes, unknown layout properties and unknown custom sections.
+4. **Preserve unknown data**: unknown attributes, unknown layout properties and unknown custom sections. Preserve notes, show detached ones, and offer to convert `//` comments into notes rather than discarding them. Save box `members` as the user left them, whatever the rectangles say.
 5. **Insert conversions explicitly.** When a connection needs a conversion, add a real `Convert` node; never change a wire's type silently.
 6. **Never delete wires silently.** If a pin changes type or disappears, keep the wire visible as an error and let the user decide.
 7. **Show diagnostics on the graph**, using the `node` and `pin` of each record from `wiretc check --json`.
@@ -1365,7 +1546,7 @@ This specification should be built alongside a small reference implementation, n
 ### 9.1 Decisions I would revisit once there is a prototype
 
 1. **Pure-node re-evaluation.** It matches Blueprints and is easy to compile, but it is a known source of surprises (a random-number node feeding two consumers gives two values). Alternatives are caching per event, or an explicit `Latch` node. The compiler could also warn when an impure-reading pure node feeds more than one impure consumer.
-2. **Canonical order by node id.** It gives the best merges but a flow-hostile file. If reviewers find it hard to read, an optional `@order(n)` hint (derived from flow order and ignored by the semantic hash) could be added at the cost of noisier diffs.
+2. **Canonical order by node id.** It gives the best merges but a flow-hostile file. Section 2.5 already moves review to flow-ordered diffs (textconv and `wiretc diff`). Before freezing storage order, run a **review trial** on a real corpus: the same pull requests reviewed with raw id-ordered diffs, flow-ordered textconv diffs and `wiretc diff`, measuring review time, defects found, and merge-conflict rate of id-sorted versus flow-ordered storage. Keep id-sorted storage if the flow-ordered views close the readability gap. If not, an optional `@order(n)` hint (derived from flow order and ignored by the semantic hash) could be added at the cost of noisier diffs.
 3. **Nesting rule for `Try`.** `E0412` is conservative. It may reject graphs that users find natural. A region-aware lowering could allow more.
 4. **Immutable structs.** `WithField` allocates. Escape analysis in the optimiser should remove most of that, but it should be measured.
 5. **Generics by monomorphisation.** Simple and fast, but code size grows with instantiations. Shared generic code with a type descriptor argument is the alternative.
@@ -1385,6 +1566,8 @@ Three further questions are open.
 - Hot reload and state migration (the `@id` attributes are there to make this possible), serialisation of suspended fibers for save games, multi-threaded VMs, a wire protocol for remote debugging, and a WebAssembly backend or JIT.
 
 ### 9.3 Suggested build order
+
+The steps below follow the tiers of section 1.6. Steps 1 to 3 and the interpreter half of step 4 are Tier 0; classes, async, `Try`, copy-on-write, the full C API and the debugger wait until Tier 1 is passing.
 
 1. Parser, printer and formatter with round-trip tests. Use section 2.6 as the first golden file and add a test that `fmt(fmt(x)) == fmt(x)`.
 2. Resolver, type checker and graph validator, driven by the diagnostics table.
@@ -1435,3 +1618,20 @@ The Draft 0.3 examples were hand-ported into the compared design's reference com
 - **`Emit` is removed.** A `Sequence` whose first output is an `Exit` already runs the caller's chain as a subroutine and then continues, which is all `Emit` did. `ForRange` and the lowering steps are rewritten accordingly (sections 2.6, 3.3, 4.2, 4.8, 5.8).
 
 The port also confirmed that re-evaluating pure nodes behaves as section 4.3 describes, that a non-latent function calling a latent one is rejected with the same code (`E0201`), and that arrays in the compared design alias on assignment, which is the behaviour section 4.9 replaces.
+
+## Appendix C. Changes in Draft 0.4
+
+Draft 0.4 responds to a review of Draft 0.3. The table lists each finding, what changed, and where.
+
+| Finding | Change | Section |
+| --- | --- | --- |
+| Scope exceeds current validation | Implementation tiers; only Tier 0 is a prototype target; exact diagnostics and cross-platform determinism are targets until their tier passes; eager copy for containers in Tier 1 | 1.6, 7.4, 9.3 |
+| Canonical ordering hurts readability | Git `textconv` through `wiretc view --flow`, a deterministic flow-order definition, `wiretc diff` defaulting to flow order, and a review trial before storage order is frozen | 2.5, 7, 9.1 |
+| Annotation preservation is unclear | Persistent `notes` block; `//` comments are never dropped silently (`W0603`, `--convert-comments`); `@doc` narrowed to short tooltip text | 2.1, 2.3, 2.4, 2.5, 7.1, 7.2 |
+| `@pure` lacks a precise contract | Effect-free, deterministic and cacheable defined separately; `@pure` and the new `@reads`; `E0304`, `W0320`; faults are results; native flags split and marked trusted; audit option | 2.4, 3.3, 3.5, 4.3, 4.7, 6.3, 6.6 |
+| Determinism is overpromised | Deterministic mode with five conditions and explicit exclusions; specified NaN, `Min`/`Max` and `std.math` behaviour (Provisional); logical heap accounting; cross-platform claim marked a target | 1.2, 3.1, 4.5, 4.10, 7.4 |
+| Macro continuations need formal semantics | Transition rules, join rules, a step-by-step `ForRange` trace with the stack after each step, and required macro tests | 3.3, 4.2, 7.4 |
+| Identity guarantees exceed file-level evidence | Required, present-uniqueness and operational non-reuse separated; `wiret.ids` registry; `E0140`, `W0202`; unkeyed renames documented as delete plus add | 2.3, 2.4, 7.1, 7.3, 7.5 |
+| Layout-box membership is ambiguous | Boxes have ids; `members` is required and authoritative; geometry is drawing only; nesting acyclic; at most one parent; set-merge of members; `W0601`, `W0602` | 2.3, 2.5, 7.1 |
+
+**Considered and not adopted.** Making geometric containment authoritative: it makes a drag or resize change meaning, it needs overlap tie-break rules, and it forces collapsed boxes to derive membership. Keeping `//` comments in the canonical form: comments have no place in the model, so every tool would have to re-attach them to a moving target. Dropping id-sorted storage now: the review trial in 9.1 should decide that from evidence.
