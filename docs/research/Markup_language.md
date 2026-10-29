@@ -855,5 +855,3 @@ Their development has involved several recurring tensions: meaning versus appear
 The most important conceptual distinction is that a document's structure, its meaning, its visual presentation, and the operations performed on it are separate concerns, even when a particular language combines them.
 
 Understanding that distinction makes it easier to compare existing languages, understand their histories, select the appropriate format for a task, and evaluate the design of new markup systems.
-
-> **Research note.** The Wikipedia text in Part I is the basis for the historical framework and original categories. The technical examples, comparisons, and research directions above are additional explanatory material; they are not all claims made by the original article.
