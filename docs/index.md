@@ -164,7 +164,7 @@ Rules:
 
 1. **Node ids** are identifiers, unique within the graph and never reused, not even after the node is deleted (a merge could otherwise resurrect an old wire onto a new node). They are the identity of a node for diffs and merges. Display names are not ids; they live in the layout (`label`). Editors generate a readable slug plus a short random suffix, such as `branch_k3m9`; humans and LLMs may choose descriptive ones such as `check_energy`.
 2. **Kind** is a PascalCase built-in (`Add`, `Branch`, `SetLocal`, ...; section 3.3). Calling a declared function is always `Call`, so the closed set of built-in kinds never collides with user names.
-3. **Symbol** (optional) names the thing the node acts on: `Call std.math.Sqrt`, `GetField health`, `SetLocal acc`, `GetState done`, `New Player`, `Cast Player`, `Macro ForRange`, `Emit each`.
+3. **Symbol** (optional) names the thing the node acts on: `Call std.math.Sqrt`, `GetField health`, `SetLocal acc`, `GetState done`, `New Player`, `Cast Player`, `Macro ForRange`, `Exit done`.
 4. **Type arguments** follow the symbol: `Add<i32>`, `Convert<i32, string>`, `Call std.array.Get<f32>`. They are always written out, never inferred.
 5. **Bindings** connect input pins. The right-hand side is either a pin reference (`other_node.pin`, a data wire) or a literal. An input that is not listed takes the pin's default value (the declared default, otherwise the zero value of its type); the compiler warns (`W0201`) about unlisted inputs that have no declared default.
 6. **Exec wiring** is written on the producer. `-> target` is shorthand for a node with exactly one exec output. The map form names each exec output pin. An exec output that is not listed is unconnected, which means "this chain ends here" (section 4.2).
@@ -209,7 +209,7 @@ value = literal | IDENT | tuple | list | map ;
 | Attribute | Applies to | Meaning |
 | --- | --- | --- |
 | `@id("...")` | any declaration, module, parameter, result, field, enum member, local | Stable identity that survives rename and move. Written by editors; optional for hand-written code. |
-| `@pure` | `func` | No exec pins. Callable as a pure node. May not contain impure or latent nodes. |
+| `@pure` | `func` | No observable effects: results depend only on the arguments. Callers treat a call as a pure node (no exec pins, evaluated on demand). The graph inside is an ordinary exec graph and may branch, loop and recurse; it may use its own locals, but may not write variables, fields or state, call a function that is not `@pure`, or contain a latent node (`E0302`). |
 | `@final` | method | Not virtual. Calls are bound at compile time. |
 | `@private` | declaration | Not visible outside the module. |
 | `@export` | `func`, `event`, `var`, type | Listed in the module's export table for the host and other modules. |
@@ -311,10 +311,23 @@ class Player {
 }
 
 func Clamp01(v: f32) -> (result: f32) @pure {
-  node entry = Entry
+  node entry = Entry -> ret
   node lo    = Max<f32>(a: entry.v, b: 0.0)
   node hi    = Min<f32>(a: lo.result, b: 1.0)
   node ret   = Return(result: hi.result)
+}
+
+func Fib(n: i32) -> (result: i32) @pure {
+  node entry   = Entry -> is_base
+  node lt      = Lt<i32>(a: entry.n, b: 2)
+  node is_base = Branch(cond: lt.result) { then -> ret_n, else -> ret_sum }
+  node ret_n   = Return(result: entry.n)
+  node n1      = Sub<i32>(a: entry.n, b: 1)
+  node n2      = Sub<i32>(a: entry.n, b: 2)
+  node f1      = Call Fib(n: n1.result)
+  node f2      = Call Fib(n: n2.result)
+  node sum     = Add<i32>(a: f1.result, b: f2.result)
+  node ret_sum = Return(result: sum.result)
 }
 
 macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, index: i32) {
@@ -323,8 +336,9 @@ macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, inde
   node init   = SetLocal i (value: entry.first) -> test
   node cur    = GetLocal i
   node cmp    = Le<i32>(a: cur.value, b: entry.last)
-  node test   = Branch(cond: cmp.result) { then -> body, else -> finish }
-  node body   = Emit each (index: cur.value) -> bump
+  node test   = Branch(cond: cmp.result) { then -> seq, else -> finish }
+  node seq    = Sequence @count(2) { then0 -> each_out, then1 -> bump }
+  node each_out = Exit each (index: cur.value)
   node nxt    = Add<i32>(a: cur.value, b: 1)
   node bump   = SetLocal i (value: nxt.result) -> test
   node finish = Exit done
@@ -409,7 +423,7 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 | Kind | Pins | Behaviour |
 | --- | --- | --- |
 | `Entry` | out: the graph's parameters; exec out `then` | Starts a function or event. In a macro, has one exec output per `exec` parameter. |
-| `Return` | in: the graph's results | Leaves the function. In a `@pure` function it has no exec input and marks the result. |
+| `Return` | in: the graph's results | Leaves the function. `Return` has an exec input in every function, including `@pure` ones: a pure function's exec flow is internal and invisible to its callers. |
 | `Branch` | in `cond: bool`; exec out `then`, `else` | Two-way choice. |
 | `Sequence` | `@count(n)`; exec out `then0` .. `then{n-1}` | Runs `then0`'s chain to its end, then `then1`'s, and so on. |
 | `Switch<T>` | in `value: T`; `@cases(...)`; exec out `case0`.., `default` | `T` is an integer, enum, string or bool. |
@@ -420,8 +434,7 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 | `Yield` | exec out `then` | **Latent.** Resumes on the next `wr_advance`. |
 | `Await` | in `signal: std.Signal`; exec out `then` | **Latent.** Resumes when the host fires the signal. |
 | `Macro` | symbol: macro name; pins from its signature | Inlined at compile time. |
-| `Emit` | symbol: macro exec output; in: its data outputs; exec out `then` | Macro-only. Runs the caller's chain for that output as a subroutine, then continues at `then`. |
-| `Exit` | symbol: macro exec output; in: its data outputs | Macro-only. Leaves the macro through that output (a jump). |
+| `Exit` | symbol: macro exec output; in: its data outputs | Macro-only. Leaves the macro through that exec output (a jump) and assigns the data outputs bound on the node. On the first output of a Sequence it runs the caller's chain as a subroutine (see ForRange in section 2.6). |
 | `Reroute<T>` | in `in`, out `out` | Visual only. |
 
 **Variables, fields and objects**
@@ -528,8 +541,8 @@ Each call frame has a small **continuation stack**. Its entries are either a *co
 - Following an exec wire is a jump.
 - A chain **ends** where an exec output is unconnected (or a node has no exec output). Ending pops the continuation stack and jumps to the popped continuation. If the stack holds no continuation, the frame ends: an event finishes. A function that declares results must have run `Return` first: the compiler rejects (`E0303`) any path it can prove ends with an empty stack, and warns (`W0302`) where it cannot decide. At run time such a function returns the zero value of every result.
 - `Sequence` with `n` outputs pushes continuations for outputs `n-1` down to `1`, then jumps to output `0`. Each chain therefore runs to its end before the next starts, and the last chain runs in tail position with nothing pending.
-- `Emit` pushes a continuation for its own `then` pin and jumps to the caller's chain for that macro output. When that chain ends, the loop macro resumes. That is how `ForRange` in section 2.6 works with no loop primitive.
-- `Return` discards the whole frame, including pending continuations. `Exit` is a plain jump.
+- `Exit` leaves a macro by jumping to the caller's chain wired to that macro output. Placed on the first output of a `Sequence`, it runs that chain as a subroutine: when the chain ends, the continuation resumes the macro. That is how `ForRange` in section 2.6 works, with no loop primitive and no separate call node.
+- `Return` discards the whole frame, including pending continuations.
 
 Because every bytecode label is a type-safe jump target (section 5.5), the stack's depth does not have to be statically known. When the compiler can prove the depth (the common case), the optimiser replaces the push/pop pair with a direct branch, and the generated code looks like structured code.
 
@@ -540,6 +553,8 @@ Because every bytecode label is a type-safe jump target (section 5.5), the stack
 - **No short-circuiting.** `And`, `Or` and `Select` evaluate every input. Use `Branch` for conditional evaluation.
 - **Macro inputs** are evaluated once, at macro entry, and captured in locals.
 - **Cycles** among pure nodes are rejected (`E0301`). Cycles through exec wires are loops and are allowed.
+
+**Calls to pure functions.** A call to a `@pure` function is itself a pure node. When its value is demanded, the callee runs its own exec graph to completion and returns its results, so a pure function can contain branches, loops and recursion (`Fib` in section 2.6). The compiler, not the verifier, checks that a `@pure` function has no effects (`E0302`); the verifier only checks that it is never latent.
 
 ### 4.4 Functions, events, macros and groups
 
@@ -580,7 +595,7 @@ Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber
 | `E0120` | Exec output wired to a data pin, or a data wire to an exec pin. |
 | `E0121` | An exec output is listed twice. |
 | `E0301` | Cycle among pure nodes. |
-| `E0302` | `@pure` function contains an impure or latent node. |
+| `E0302` | `@pure` function writes variables, fields or state, calls a function that is not `@pure`, or contains a latent node. |
 | `E0401` | Macro expands itself. |
 | `E0412` | `Try` body is not properly nested. |
 | `E0501` / `E0502` | Unresolved symbol / missing type argument. |
@@ -597,10 +612,10 @@ Diagnostics are structured records, not only text: `code`, `severity`, `message`
 
 ### 4.8 Lowering a graph to bytecode
 
-1. **Expand macros** into the caller, giving every inlined node a path-style id. Entry inputs become locals, `state` slots become hidden fields or globals, and `Emit` and `Exit` become jumps and local assignments.
+1. **Expand macros** into the caller, giving every inlined node a path-style id. Entry inputs become locals, `state` slots become hidden fields or globals, and `Exit` becomes a jump plus local assignments.
 2. **Assign locals.** Parameters first, then declared `local`s, then one slot for each data output of each impure node that is read by another node, then temporaries.
 3. **Form blocks.** Each impure node starts a block labelled with its node id. The block evaluates the pure subgraph for its inputs in dependency order, using `local.tee` for shared values, performs the operation, stores outputs, and ends with the exec transfer.
-4. **Emit exec transfers.** A single target becomes `br` (omitted when the target is next in layout). `Branch` becomes `br_if`. `Switch` becomes `br_table` (or a compare chain for strings). `Sequence`, `Emit` and `Try` use the continuation instructions.
+4. **Emit exec transfers.** A single target becomes `br` (omitted when the target is next in layout). `Branch` becomes `br_if`. `Switch` becomes `br_table` (or a compare chain for strings). `Sequence` and `Try` use the continuation instructions.
 5. **Optimise.** Constant folding, removal of unread locals, branch threading, layout so fall-through follows the exec wire, and replacement of statically balanced `cont.push` / `cont.pop` by `br`. At `-Og` nothing that would hide a pin value is removed: every pin of every node is kept in a local, for debugging.
 6. **Record debug data.** Each block's start offset is mapped to its node id (`wr.debug`), and each pin's local to its node and pin name (`wr.pins`).
 7. **Verify** the result with the same verifier the VM runs at load time (section 5.5). A compiler bug can therefore never produce an unsafe module.
@@ -868,7 +883,7 @@ func game.demo.SumTo (i32) -> (i32)
   return
 .body:
   local.get 2
-  local.set 4             ; Emit each: index = i
+  local.set 4             ; Exit each: index = i
   local.get 1
   local.get 4
   i32.add
@@ -1411,3 +1426,12 @@ Draft 0.3 takes the strongest parts of an independently developed design that co
 | Reference-implementation path, section status, metamorphic hash tests | 7.4, 7.6 | The compared design found bugs by running its spec; this one has not yet. |
 
 **Considered and not adopted.** Sigils (`%node`, `@symbol`, `$local`) and multi-line node blocks: they make each node several lines (a 10-node function became about 50 lines), and bare identifiers are already unambiguous by position. Reference-type containers: they contradict the project's decision that arrays copy by value (section 4.9). Compile-time duplication of nodes for `Sequence` with a nesting limit: kept the runtime continuation stack, recorded as an open question (9.1). Raising errors from natives with a longjmp-style API: natives return `wr_fault` instead, which is safe with C++ and with natives that hold resources. An `any` boxing type: typed wildcards and explicit `Convert` nodes are kept. Preserving node order and inserting after the origin node: two people inserting after the same node collide in a line merge, so canonical order stays sorted by id. Dropping catchable faults: kept `Try`, but marked it Provisional (4.6).
+
+### Corrections after porting examples
+
+The Draft 0.3 examples were hand-ported into the compared design's reference compiler and VM. The semantics agreed in most respects, and two flaws in this specification were found and fixed:
+
+- **`@pure` no longer means having no exec pins.** It means no observable effects. The body of a pure function is still an exec graph, so a pure function can branch and recurse. Under the earlier definition a recursive pure function such as `Fib` could not be written, because `Select` evaluates both inputs and the recursion would never end. `Entry` and `Return` now always carry exec wires (sections 2.4, 3.3, 4.3, 4.7).
+- **`Emit` is removed.** A `Sequence` whose first output is an `Exit` already runs the caller's chain as a subroutine and then continues, which is all `Emit` did. `ForRange` and the lowering steps are rewritten accordingly (sections 2.6, 3.3, 4.2, 4.8, 5.8).
+
+The port also confirmed that re-evaluating pure nodes behaves as section 4.3 describes, that a non-latent function calling a latent one is rejected with the same code (`E0201`), and that arrays in the compared design alias on assignment, which is the behaviour section 4.9 replaces.
