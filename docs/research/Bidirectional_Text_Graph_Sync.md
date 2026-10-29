@@ -80,7 +80,7 @@ A well-designed system keeps these categories separate internally, even when the
 
 Consider a simple visual program:
 
-```mermaid
+```text
 graph Workflow {
  Start -> Validate
  Validate -> Process
@@ -312,7 +312,7 @@ An ideal system satisfies several useful properties.
 If the graph is derived from valid text, converting back should preserve the program's meaning:
 
 $$
-\operatorname{sem}(P(T')) = \operatorname{sem}(P(T))
+\mathrm{sem}(P(T')) = \mathrm{sem}(P(T))
 $$
 
 when $T'$ differs from $T$ only in presentation metadata, such as node coordinates.
@@ -322,7 +322,7 @@ when $T'$ differs from $T$ only in presentation metadata, such as node coordinat
 If a user performs a semantic edit on the graph, the generated text should represent that edit:
 
 $$
-\operatorname{sem}(P(E_T(T))) = \operatorname{sem}(E_G(P(T)))
+\mathrm{sem}(P(E_T(T))) = \mathrm{sem}(E_G(P(T)))
 $$
 
 This assumes the operation is supported by the language and the resulting program is valid.

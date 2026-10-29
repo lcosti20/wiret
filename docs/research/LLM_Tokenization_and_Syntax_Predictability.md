@@ -270,7 +270,7 @@ For a graph-based visual programming language, the recommended approach is to ex
 
 One possible design is outlined below.
 
-```mermaid
+```text
 graph Calculator
 
 node n1: Constant

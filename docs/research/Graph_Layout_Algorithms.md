@@ -283,26 +283,26 @@ This architecture keeps layout decisions independent of the programming language
 
 An application-level API could look like this:
 
-```mermaid
+```typescript
 type LayoutRequest = {
- graph: Graph;
- algorithm: "layered" | "force" | "tree";
- direction: "right" | "down" | "left" | "up";
- mode: "full" | "incremental" | "selection";
- spacing: {
- nodes: number;
- layers: number;
- };
- constraints: {
- fixedNodes: string[];
- preserveOrder: boolean;
- preserveGroups: boolean;
- };
+  graph: Graph;
+  algorithm: "layered" | "force" | "tree";
+  direction: "right" | "down" | "left" | "up";
+  mode: "full" | "incremental" | "selection";
+  spacing: {
+    nodes: number;
+    layers: number;
+  };
+  constraints: {
+    fixedNodes: string[];
+    preserveOrder: boolean;
+    preserveGroups: boolean;
+  };
 };
 
 type LayoutResult = {
- nodePositions: Map<NodeId, { x: number; y: number }>;
- edgeRoutes: Map<EdgeId, Point[]>;
+  nodePositions: Map<NodeId, { x: number; y: number }>;
+  edgeRoutes: Map<EdgeId, Point[]>;
 };
 ```
 

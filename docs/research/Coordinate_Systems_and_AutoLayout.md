@@ -241,7 +241,7 @@ There are more than two choices. A language can store layout in its main source 
 
 For example, a hypothetical graph language could use:
 
-```mermaid
+```text
 graph Main {
  node a = Input("x") at (80, 120)
  node b = Add(a, 10) at (320, 120)
@@ -264,7 +264,7 @@ Inline coordinates are reasonable when spatial layout is an intentional, reviewa
 
 The semantic source might look like this:
 
-```mermaid
+```text
 graph Main {
  node a = Input("x")
  node b = Add(a, 10)

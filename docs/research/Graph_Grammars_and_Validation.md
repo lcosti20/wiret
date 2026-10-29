@@ -154,7 +154,7 @@ Each port has a type, and each edge must respect the language's compatibility ru
 A simple formulation is:
 
 $$
-\forall (u,v)\in E,\quad \operatorname{type}(u)\preceq \operatorname{type}(v)
+\forall (u,v)\in E,\quad \mathrm{type}(u)\preceq \mathrm{type}(v)
 $$
 
 Here, $u$ is an output port, $v$ is an input port, and $\preceq$ denotes the language's permitted assignment or connection relation. It need not mean literal equality.
@@ -192,7 +192,7 @@ The table describes possible policies, not universal rules.
 **Consider a generic `Map` node with a type signature resembling**
 
 $$
-\operatorname{map}: (A\rightarrow B)\times \operatorname{List}(A) \rightarrow \operatorname{List}(B)
+\mathrm{map}: (A\rightarrow B)\times \mathrm{List}(A) \rightarrow \mathrm{List}(B)
 $$
 
 If a list of integers is connected to its input, the checker may infer $A=\texttt{Int}$. If the supplied function accepts an integer and returns a string, it can infer $B=\texttt{String}$.

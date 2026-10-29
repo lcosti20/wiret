@@ -1314,7 +1314,7 @@ The file should identify nodes by stable IDs and identify foreign operations by 
 
 For example:
 
-```mermaid
+```text
 graph PlayerController {
  node node_01: event.begin_play
 

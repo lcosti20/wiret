@@ -284,7 +284,7 @@ A better design separates the semantic model from its textual encoding.
 
 Consider a small graph:
 
-```mermaid
+```text
 graph Example {
  node input { type: "Number", x: 80, y: 100 }
  node output { type: "Display", x: 320, y: 100 }
@@ -338,14 +338,14 @@ The webview sends a semantic operation rather than a complete serialized documen
 
 ```json
 {
-  "type": "graph/patch",
-  "revision": 12,
-  "operations": [
+  type: "graph/patch",
+  revision: 12,
+  operations: [
     {
-      "op": "setNodePosition",
-      "id": "input",
-      "x": 80,
-      "y": 180
+      op: "setNodePosition",
+      id: "input",
+      x: 80,
+      y: 180
     }
   ]
 }
@@ -384,7 +384,7 @@ Important: Not every visual action should immediately become a document edit. Du
 
 The extension subscribes to `workspace.onDidChangeTextDocument`. When the underlying file changes, it updates the visual representation.
 
-```mermaid
+```javascript
 const subscription =
  vscode.workspace.onDidChangeTextDocument(event => {
  if (event.document.uri.toString() !== document.uri.toString()) {
@@ -493,7 +493,7 @@ A message schema should include at least:
 
 For example:
 
-```mermaid
+```typescript
 type GraphMessage =
  | {
  type: "graph/ready";

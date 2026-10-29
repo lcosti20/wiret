@@ -118,7 +118,7 @@ The first strategy is to make the canonical graph format a well-designed text la
 
 Consider this representation:
 
-```mermaid
+```text
 graph Main
 
 node n1: Input

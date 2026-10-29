@@ -669,7 +669,7 @@ For a first prototype, research should investigate a declaration-oriented hybrid
 
 For example:
 
-```mermaid
+```text
 graph Example {
  node input: Number
  node scale: Multiply {
