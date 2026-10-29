@@ -1476,13 +1476,13 @@ The following primary references are the best starting points for validating and
 
 - [Lua 5.5 Reference Manual](https://www.lua.org/manual/5.5/manual.html) — C API, value stack, userdata, error handling, garbage collection, and coroutines. *(Unreal reflection and visual nodes).*
 
-[UFunctions in Unreal Engine](https://dev.epicgames.com/documentation/unreal-engine/ufunctions-in-unreal-engine)
+- [UFunctions in Unreal Engine](https://dev.epicgames.com/documentation/unreal-engine/ufunctions-in-unreal-engine)
 
 - [Reflection System in Unreal Engine](https://dev.epicgames.com/documentation/unreal-engine/reflection-system-in-unreal-engine) — Native function metadata, Blueprint exposure, and engine-managed reflection. *(C# and native ABI interoperability).*
 
-[Native interoperability ABI support](https://learn.microsoft.com/dotnet/standard/native-interop/abi-support)
+- [Native interoperability ABI support](https://learn.microsoft.com/dotnet/standard/native-interop/abi-support)
 
-[Native interoperability best practices](https://learn.microsoft.com/dotnet/standard/native-interop/best-practices)
+- [Native interoperability best practices](https://learn.microsoft.com/dotnet/standard/native-interop/best-practices)
 
 - [P/Invoke source generation](https://learn.microsoft.com/dotnet/standard/native-interop/pinvoke-source-generation) — ABI compatibility, signature declarations, marshaling, generated stubs, and resource lifetime.
 
