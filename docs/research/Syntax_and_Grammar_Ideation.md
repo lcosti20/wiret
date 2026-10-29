@@ -58,13 +58,9 @@ These decisions should be explored together. For example, choosing `->` for edge
 
 One of the most important decisions is to separate the way a graph is written from the graph that the text represents.
 
-Research on visual-language design distinguishes concrete syntax, the notation users see, from abstract syntax, the underlying computer-interpretable structure. This distinction is useful because one graph can have multiple textual representations and multiple graphical presentations.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://www.sciencedirect.com\&sz=32)
+Research on visual-language design distinguishes concrete syntax, the notation users see, from abstract syntax, the underlying computer-interpretable structure. This distinction is useful because one graph can have multiple textual representations and multiple graphical presentations.
 
 ScienceDirect+1
-
-
 
 Consider the following three notations.
 
@@ -191,7 +187,7 @@ result = Add(input, Multiply(a, b))
 
 This looks natural in an expression language, but a visual editor may need stable identities for the nested `Add` and `Multiply` nodes. Anonymous nodes therefore require an explicit identity strategy, even if their identities remain hidden from the user.
 
-My initial recommendation is to explore named node declarations as the canonical representation, while allowing compact expressions as optional syntactic sugar if the graph model supports them cleanly.
+the author's initial recommendation is to explore named node declarations as the canonical representation, while allowing compact expressions as optional syntactic sugar if the graph model supports them cleanly.
 
 ## 4. Edge syntax ideation
 
@@ -205,23 +201,23 @@ source.out -> target.in
 
 This makes the direction and endpoints visible. But there are several competing approaches.
 
-| Style                    | Example                       | Main trade-off                                                            |
+| Style | Example | Main trade-off |
 | ------------------------ | ----------------------------- | ------------------------------------------------------------------------- |
-| Arrow                    | `a.out -> b.in`               | Compact, directional, visually intuitive                                  |
-| Keyword                  | `connect a.out to b.in`       | Readable, explicit, but verbose                                           |
-| Assignment               | `b.in = a.out`                | Familiar data-flow notation, but may blur connection and value assignment |
-| Nested input             | `b = Operation(input: a.out)` | Convenient for expressions; less natural for arbitrary graphs             |
-| Relationship declaration | `edge e: a.out -> b.in`       | Supports explicit edge identity and metadata                              |
+| Arrow | `a.out -> b.in`  | Compact, directional, visually intuitive |
+| Keyword | `connect a.out to b.in`  | Readable, explicit, but verbose |
+| Assignment | `b.in = a.out`  | Familiar data-flow notation, but may blur connection and value assignment |
+| Nested input | `b = Operation(input: a.out)` | Convenient for expressions; less natural for arbitrary graphs |
+| Relationship declaration | `edge e: a.out -> b.in`  | Supports explicit edge identity and metadata |
 
 ### Important edge-design decisions
 
-1\. Directionality
+1. Directionality
 
 Does `a -> b` mean data travels from `a` to `b`, execution passes from `a` to `b`, or merely that a relationship exists?
 
 If a language supports multiple edge types, the notation must distinguish them or provide a well-defined context.
 
-2\. Port addressing
+2. Port addressing
 
 Should users write:
 
@@ -243,7 +239,7 @@ a -> b
 
 The shortest form works when each node has only one relevant port. Explicit port addressing becomes essential when nodes have multiple inputs or outputs.
 
-3\. Edge identity
+3. Edge identity
 
 Can multiple edges connect the same pair of nodes? Can they have labels, conditions, weights, or other properties?
 
@@ -254,13 +250,13 @@ edge success: check.yes -> finish.in
 edge failure: check.no -> retry.in
 ```
 
-4\. Connection cardinality
+4. Connection cardinality
 
 Can an input accept multiple connections? Can one output feed multiple inputs? Does the language allow incomplete connections while the graph is being edited?
 
 These are semantic decisions, but they affect the grammar and the error-recovery behavior.
 
-5\. Chaining and fan-out
+5. Chaining and fan-out
 
 A compact grammar might allow:
 
@@ -276,7 +272,7 @@ a -> b, c
 
 The latter could mean that `a` connects to both `b` and `c`. Such shorthand reduces typing but introduces more rules that parsers, editors, and AI-generated code must handle consistently.
 
-For an initial grammar, I would prefer one unambiguous edge declaration per connection. Chaining and fan-out can be introduced later if they provide enough practical value.
+For an initial grammar, the recommended approach is to prefer one unambiguous edge declaration per connection. Chaining and fan-out can be introduced later if they provide enough practical value.
 
 ## 5. Keyword ideation: what words should the language use?
 
@@ -284,16 +280,16 @@ Keywords establish the vocabulary and personality of a language. They also influ
 
 For a graph-oriented language, the vocabulary can be divided into several categories.
 
-| Category      | Possible keywords or symbols     | Purpose                         |
+| Category | Possible keywords or symbols | Purpose |
 | ------------- | -------------------------------- | ------------------------------- |
-| Declaration   | `node`, `edge`, `graph`          | Introduce structural elements   |
-| Connection    | `->`, `connect`, `to`            | Express relationships           |
-| Identity      | `id`, `as`, `name`               | Assign or reference identities  |
-| Configuration | `with`, `set`, `using`           | Specify node or edge properties |
-| Structure     | `group`, `graph`, `scope`        | Organize subgraphs              |
-| Data flow     | `input`, `output`, `in`, `out`   | Address ports                   |
-| Control flow  | `branch`, `case`, `then`, `else` | Express execution decisions     |
-| Metadata      | `label`, `comment`, `layout`     | Describe or annotate the graph  |
+| Declaration | `node`, `edge`, `graph`  | Introduce structural elements |
+| Connection | `->`, `connect`, `to`  | Express relationships |
+| Identity | `id`, `as`, `name`  | Assign or reference identities |
+| Configuration | `with`, `set`, `using`  | Specify node or edge properties |
+| Structure | `group`, `graph`, `scope`  | Organize subgraphs |
+| Data flow | `input`, `output`, `in`, `out`  | Address ports |
+| Control flow | `branch`, `case`, `then`, `else` | Express execution decisions |
+| Metadata | `label`, `comment`, `layout`  | Describe or annotate the graph |
 
 These are candidates rather than a recommendation to use every keyword. A small language vocabulary is easier to learn and document, but excessive compactness can make the grammar harder to understand.
 
@@ -335,7 +331,7 @@ Strengths: Uses explicit declarations where they add clarity and compact operato
 
 Weaknesses: Requires careful consistency about where keywords are mandatory and where shorthand is allowed.
 
-My starting preference is the hybrid approach. It gives the language a small, predictable structural vocabulary without forcing every relationship to be expressed as a long English-like sentence.
+the author's starting preference is the hybrid approach. It gives the language a small, predictable structural vocabulary without forcing every relationship to be expressed as a long English-like sentence.
 
 The choice should be tested against actual programs, not just isolated syntax fragments. A keyword that looks elegant in a one-line example may become irritating when repeated hundreds of times.
 
@@ -361,27 +357,27 @@ A useful starting point is a deliberately small grammar.
 Here is an illustrative EBNF-style specification:
 
 ```
-program       = { statement } ;
+program = { statement };
 
-statement     = node_decl
-              | edge_decl
-              | comment ;
+statement = node_decl
+ | edge_decl
+ | comment;
 
-node_decl     = "node", identifier, ":", node_kind,
-                [ properties ], terminator ;
+node_decl = "node", identifier, ":", node_kind,
+ [ properties ], terminator;
 
-edge_decl     = endpoint, "->", endpoint,
-                [ properties ], terminator ;
+edge_decl = endpoint, "->", endpoint,
+ [ properties ], terminator;
 
-endpoint      = identifier, ".", identifier ;
+endpoint = identifier, ".", identifier;
 
-properties    = "{", [ property, { ",", property } ], "}" ;
+properties = "{", [ property, { ",", property } ], "}";
 
-property      = identifier, "=", value ;
+property = identifier, "=", value;
 
-terminator    = newline | ";" ;
+terminator = newline | ";";
 
-comment       = "//", text, newline ;
+comment = "//", text, newline;
 ```
 
 This is a starting sketch, not a complete implementable grammar. In a real specification, the definitions of `identifier`, `node_kind`, `value`, `newline`, and `text` would need to be made precise, along with whitespace, escaping, and lexical precedence.
@@ -412,13 +408,9 @@ source.out -> result.missing
 
 could be syntactically valid but semantically invalid if `result` has no `missing` port.
 
-This separation prevents the grammar from becoming entangled with every detail of type checking and graph validation. Formal specifications of visual languages likewise emphasize the value of defining structure and meaning precisely.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://www.sciencedirect.com\&sz=32)
+This separation prevents the grammar from becoming entangled with every detail of type checking and graph validation. Formal specifications of visual languages likewise emphasize the value of defining structure and meaning precisely.
 
 ScienceDirect+1
-
-
 
 ## 7. Syntax decisions that deserve deliberate experimentation
 
@@ -446,7 +438,7 @@ node "Calculate Total": Add
 
 The language should define whether identifiers are case-sensitive, whether they can contain spaces, how reserved keywords are escaped, and whether display labels are separate from stable identities.
 
-For bidirectional editing, I recommend distinguishing a node's stable identity from its display label. Renaming the label in the visual editor should not necessarily change references elsewhere in the text.
+For bidirectional editing, the recommendation is to distinguishing a node's stable identity from its display label. Renaming the label in the visual editor should not necessarily change references elsewhere in the text.
 
 ### Properties and parameters
 
@@ -499,13 +491,9 @@ normalize.out -> output.in
 
 Formatting should ideally be independent of graph semantics. Indentation, blank lines, and declaration ordering should not change the graph unless the language explicitly defines them as meaningful.
 
-Graph-description languages such as Graphviz DOT offer useful precedents for declarations, attributes, ports, and subgraphs. They can serve as a reference point without dictating the syntax of a programming-oriented graph DSL.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://www.graphviz.org\&sz=32)
+Graph-description languages such as Graphviz DOT offer useful precedents for declarations, attributes, ports, and subgraphs. They can serve as a reference point without dictating the syntax of a programming-oriented graph DSL.
 
 Graphviz+1
-
-
 
 ## 8. AI-friendly syntax and grammar
 
@@ -513,13 +501,9 @@ If the language is intended to be written by LLMs as well as humans, syntax idea
 
 A notation that is pleasant for a human expert is not necessarily the notation that produces the fewest errors in AI-generated output.
 
-Research and existing tools offer useful starting points. For example, yUML publishes an AI-oriented DSL reference intended for use in model prompts, while keeping its formal grammars as the authoritative definition of valid syntax.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://app.yuml.me\&sz=32)
+Research and existing tools offer useful starting points. For example, yUML publishes an AI-oriented DSL reference intended for use in model prompts, while keeping its formal grammars as the authoritative definition of valid syntax.
 
 yuml+1
-
-
 
 ### Design principles for AI-generated syntax
 
@@ -610,17 +594,13 @@ The final graph should be structurally equivalent to the original. Comments, mea
 
 One subtle issue is that structural equivalence is not textual equality. A formatter might reorder declarations or normalize whitespace without changing the graph. The language must decide which textual details are preserved and which are canonicalized.
 
-This is another reason to distinguish the graph's abstract structure from its textual representation.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://web.engr.oregonstate.edu\&sz=32)
+This is another reason to distinguish the graph's abstract structure from its textual representation.
 
 web.engr.oregonstate.edu+1
 
-
-
 ## 10. A practical syntax ideation workflow
 
-I would approach the design as a series of small, testable experiments rather than attempting to invent the entire language at once.
+the recommended approach is to approach the design as a series of small, testable experiments rather than attempting to invent the entire language at once.
 
 ## 1
 
@@ -660,17 +640,17 @@ Document the canonical syntax, semantics, reserved words, diagnostics, and forma
 
 ## 11. Suggested research artifacts
 
-To make Syntax and Grammar Ideation a concrete research topic, I would produce the following artifacts:
+To make Syntax and Grammar Ideation a concrete research topic, the recommended approach is to produce the following artifacts:
 
-| Artifact                    | What it establishes                                                      |
+| Artifact | What it establishes |
 | --------------------------- | ------------------------------------------------------------------------ |
-| Syntax candidate catalog    | Alternative node, edge, property, and scope notations                    |
-| Grammar comparison matrix   | Readability, ambiguity, verbosity, extensibility, and parser complexity  |
-| Example corpus              | Representative valid, invalid, and incomplete graph programs             |
-| Formal grammar              | A precise definition of legal textual structures                         |
-| Semantic constraints        | Rules that require knowledge of the graph, such as port compatibility    |
-| Canonical formatting rules  | How graphs are serialized into stable, predictable text                  |
-| AI evaluation suite         | Benchmarks for generation, modification, repair, and token efficiency    |
+| Syntax candidate catalog | Alternative node, edge, property, and scope notations |
+| Grammar comparison matrix | Readability, ambiguity, verbosity, extensibility, and parser complexity |
+| Example corpus | Representative valid, invalid, and incomplete graph programs |
+| Formal grammar | A precise definition of legal textual structures |
+| Semantic constraints | Rules that require knowledge of the graph, such as port compatibility |
+| Canonical formatting rules | How graphs are serialized into stable, predictable text |
+| AI evaluation suite | Benchmarks for generation, modification, repair, and token efficiency |
 | Bidirectional editing tests | Whether graph-to-text and text-to-graph transformations preserve meaning |
 
 These artifacts also provide a basis for comparing future language revisions without relying entirely on subjective judgments.
@@ -692,20 +672,20 @@ These questions connect syntax design to compiler construction, graph theory, pr
 
 ## Recommended direction
 
-For a first prototype, I would investigate a declaration-oriented hybrid DSL with explicit node declarations, a compact directed-edge operator, explicit port addressing, named properties, stable node identities, and canonical serialization.
+For a first prototype, research should investigate a declaration-oriented hybrid DSL with explicit node declarations, a compact directed-edge operator, explicit port addressing, named properties, stable node identities, and canonical serialization.
 
 For example:
 
 ```
 graph Example {
-    node input: Number
-    node scale: Multiply {
-        factor = 2
-    }
-    node output: Output
+ node input: Number
+ node scale: Multiply {
+ factor = 2
+ }
+ node output: Output
 
-    input.out -> scale.value
-    scale.out -> output.in
+ input.out -> scale.value
+ scale.out -> output.in
 }
 ```
 

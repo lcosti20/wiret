@@ -109,19 +109,19 @@ A deliberately simplified illustration of the document's shape is:
 
 ```json
 {
-  "patcher": {
-    "boxes": [
-      {
-        "box": {
-          "id": "obj-1",
-          "maxclass": "newobj",
-          "text": "cycle~ 440",
-          "patching_rect": [75, 107, 80, 22]
-        }
-      }
-    ],
-    "lines": []
-  }
+ "patcher": {
+ "boxes": [
+ {
+ "box": {
+ "id": "obj-1",
+ "maxclass": "newobj",
+ "text": "cycle~ 440",
+ "patching_rect": [75, 107, 80, 22]
+ }
+ }
+ ],
+ "lines": []
+ }
 }
 ```
 
@@ -141,14 +141,14 @@ A conceptual view of the layers is:
 Blueprint asset
 ├── Class identity, properties, components, references
 ├── Graph representation
-│   ├── Nodes
-│   ├── Pins and links
-│   ├── Layout and graph metadata
-│   └── Functions, events, and construction logic
+│ ├── Nodes
+│ ├── Pins and links
+│ ├── Layout and graph metadata
+│ └── Functions, events, and construction logic
 └── Compilation and execution
-    ├── Type and connection validation
-    ├── Generated executable representation
-    └── Runtime behavior
+ ├── Type and connection validation
+ ├── Generated executable representation
+ └── Runtime behavior
 ```
 
 Consequences for research include:
@@ -273,21 +273,21 @@ A conceptual representation might look like this:
 
 ```json
 {
-  "program": {
-    "nodes": [
-      {
-        "id": "n1",
-        "operation": "add",
-        "inputs": ["n2", "n3"]
-      }
-    ]
-  },
-  "layout": {
-    "n1": {
-      "x": 320,
-      "y": 160
-    }
-  }
+ "program": {
+ "nodes": [
+ {
+ "id": "n1",
+ "operation": "add",
+ "inputs": ["n2", "n3"]
+ }
+ ]
+ },
+ "layout": {
+ "n1": {
+ "x": 320,
+ "y": 160
+ }
+ }
 }
 ```
 
@@ -374,23 +374,23 @@ The internal representation determines how the environment reacts to edits. A ty
 
 ```text
 User action
-    |
-    v
+ |
+ v
 Apply edit transaction
-    |
-    v
+ |
+ v
 Update the in-memory model
-    |
-    v
+ |
+ v
 Validate graph and references
-    |
-    v
+ |
+ v
 Compile, schedule, or evaluate
-    |
-    v
+ |
+ v
 Refresh diagnostics and runtime feedback
-    |
-    v
+ |
+ v
 Persist changes when requested
 ```
 
@@ -431,17 +431,17 @@ A basic round trip is:
 
 ```text
 Serialized document
-        |
-        v
-      Parser
-        |
-        v
+ |
+ v
+ Parser
+ |
+ v
  Internal model <----> Visual editor
-        |
-        v
-    Serializer
-        |
-        v
+ |
+ v
+ Serializer
+ |
+ v
 Serialized document
 ```
 
@@ -557,15 +557,15 @@ For example:
 
 ```json
 {
-  "operation": "connect",
-  "source": {
-    "node": "n17",
-    "port": "result"
-  },
-  "target": {
-    "node": "n24",
-    "port": "input"
-  }
+ "operation": "connect",
+ "source": {
+ "node": "n17",
+ "port": "result"
+ },
+ "target": {
+ "node": "n24",
+ "port": "input"
+ }
 }
 ```
 

@@ -16,8 +16,6 @@ These are not mutually exclusive. Many sophisticated graph editors use a hybrid 
 
 ## 1. The rendering approaches
 
-[@comfyorg/litegraph - npm](https://images.openai.com/static-rsc-4/OP292fEUwEBA2SDkVzupuQOhB4hdlzm1jMZs8sldw0bSGOhOSqzy7pkGaCZDkUQmvMbMl6_nEbNv_VitPMyDJXtzfnKgK5ioFoWtOpAoIhDTEJvw5G2n-DtiHBZM-rZF6Qgv-jnOm5bVxpNdHV7yttr3x4TgH6nEcx19LEgc2Gw?purpose=inline)
-
 ### DOM / HTML
 
 Best for: Rich, interactive nodes.
@@ -25,8 +23,6 @@ Best for: Rich, interactive nodes.
 Each node can contain ordinary HTML, including buttons, inputs, tooltips, syntax-highlighted code, and nested components. The browser provides text layout, focus management, event handling, and accessibility infrastructure.
 
 The cost is the overhead of maintaining, laying out, styling, and compositing potentially large numbers of elements.
-
-[javascript - SVG Bezier path connecting two divs - Stack Overflow](https://images.openai.com/static-rsc-4/Ga_8lFrEfV3IQKxHZq5rGuFHuGhGik4oCRV3WqkuJemmDnft3Ft1Sf_8vhZRcPhDgD9vAVoEgLE_wNc35_b3_S73L7wqB-wNhEdaDHp5TMSiSEPemX0AGYyNu4fLj1VVcJdvkeV66vgKdTWcDF_jbZXuH0kPuyK26C2zWb5s1hQ?purpose=inline)
 
 ### SVG
 
@@ -36,8 +32,6 @@ Nodes, paths, ports, and labels are vector elements. They scale cleanly with zoo
 
 SVG retains a per-element object model, so large numbers of complex paths, filters, labels, and event handlers can become expensive.
 
-[PyGraphistry: Leverage the power of graphs & GPUs to visualize, analyze, and scale your data — PyGraphistry Documentation](https://images.openai.com/static-rsc-4/J2Uz-vLz5hTJiirZusrQzgSWT6QjtL0Mvk7m4PgNJuoMfX2wyWxxxCQjFL8WWKiNZzrdfzAqv4cU3b1Q1l1tcjRGGwJdz5U2V6bASV8kkhKlekMbTfO2mCSP0hTgmGvGx3KhjenjI_FWRiXPMSKBn4uqJJWqmHUTtgHn0Wg2gl8?purpose=inline)
-
 ### HTML5 Canvas
 
 Best for: Dense graphs with many simple visual objects.
@@ -45,8 +39,6 @@ Best for: Dense graphs with many simple visual objects.
 The application draws nodes and edges into a bitmap-backed surface. It can batch many drawing operations without creating one DOM element per node.
 
 The tradeoff is that individual objects are not independently accessible or interactive. The application must implement hit-testing, redraw scheduling, and much of the interaction system itself.
-
-[How to Visualize a Graph with a Million Nodes | Nightingale](https://images.openai.com/static-rsc-4/u5smIA-a22b7nHuVnB0yeehjIRnVEIqwABW292uGSVK453YFLtSb3JPvvo5m8jKX2XtgddhtFxbL5YrzEiuwKDcuSBBqACBqeDqDxrKgyJNQ3P3YalokDf8iYrzOJhcjlQEygrtBxxZtCvY_UAWBKzdmsK1liDmr37vDYyc3IMw?purpose=inline)
 
 ### WebGL
 
@@ -62,35 +54,27 @@ The most important distinction is between the cost of representing the graph and
 
 With DOM and SVG, graphical objects are represented by browser-managed elements. This makes them convenient to manipulate, but introduces overhead for element creation, style recalculation, layout, event processing, and painting.
 
-With Canvas, the application manages its own graphical scene and draws pixels directly. With WebGL, it can additionally use GPU buffers and shaders to render large batches of geometry. These approaches remove much of the per-element DOM overhead, but transfer more responsibility to the application.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://developer.mozilla.org\&sz=32)
+With Canvas, the application manages its own graphical scene and draws pixels directly. With WebGL, it can additionally use GPU buffers and shaders to render large batches of geometry. These approaches remove much of the per-element DOM overhead, but transfer more responsibility to the application.
 
 MDN+2
 
-
-
-| Dimension              | DOM / SVG                     | Canvas 2D                                    | WebGL                              |
+| Dimension | DOM / SVG | Canvas 2D | WebGL |
 | ---------------------- | ----------------------------- | -------------------------------------------- | ---------------------------------- |
-| Per-object overhead    | Higher                        | Low at rendering surface level               | Low with batching                  |
-| Rich node contents     | Excellent                     | Must overlay HTML or draw manually           | Must overlay HTML or draw manually |
-| Large numbers of edges | Can become expensive          | Good with batching                           | Excellent for suitable workloads   |
-| Text and typography    | Native browser text           | Limited drawing API                          | Requires text-rendering strategy   |
-| Hit-testing            | Browser-supported             | Application-managed                          | Application-managed                |
-| Accessibility          | Native DOM semantics possible | Requires a semantic companion                | Requires a semantic companion      |
-| Visual styling         | CSS and SVG styles            | Custom drawing code                          | Shaders and custom rendering       |
-| Development complexity | Low to moderate               | Moderate to high                             | High                               |
-| GPU use                | Browser-managed               | Browser-managed and implementation-dependent | Explicit graphics pipeline         |
+| Per-object overhead | Higher | Low at rendering surface level | Low with batching |
+| Rich node contents | Excellent | Must overlay HTML or draw manually | Must overlay HTML or draw manually |
+| Large numbers of edges | Can become expensive | Good with batching | Excellent for suitable workloads |
+| Text and typography | Native browser text | Limited drawing API | Requires text-rendering strategy |
+| Hit-testing | Browser-supported | Application-managed | Application-managed |
+| Accessibility | Native DOM semantics possible | Requires a semantic companion | Requires a semantic companion |
+| Visual styling | CSS and SVG styles | Custom drawing code | Shaders and custom rendering |
+| Development complexity | Low to moderate | Moderate to high | High |
+| GPU use | Browser-managed | Browser-managed and implementation-dependent | Explicit graphics pipeline |
 
 These are qualitative tendencies, not hard performance guarantees. Actual performance depends on the graph's structure, number of visible objects, node complexity, update frequency, browser, hardware, and implementation.
 
-A study comparing SVG, Canvas, and WebGL for large visualizations found that SVG and Canvas performed similarly in its tested configurations, with performance degradation beginning around 10,000 graphical elements. WebGL was less affected by increasing node counts when text was absent. This is a useful illustration of the tradeoffs, not a universal threshold for modern applications.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://imld.de\&sz=32)
+A study comparing SVG, Canvas, and WebGL for large visualizations found that SVG and Canvas performed similarly in its tested configurations, with performance degradation beginning around 10,000 graphical elements. WebGL was less affected by increasing node counts when text was absent. This is a useful illustration of the tradeoffs, not a universal threshold for modern applications.
 
 imld.de
-
-
 
 ### Why graph editors are particularly demanding
 
@@ -165,15 +149,15 @@ This avoids maintaining separate, potentially inconsistent versions of the graph
 
 ### Recommended division of responsibility
 
-| Layer                  | Responsibilities                                             |
+| Layer | Responsibilities |
 | ---------------------- | ------------------------------------------------------------ |
-| Graph model            | Node and edge identity, connectivity, properties, undo/redo  |
-| Layout engine          | Node placement, routing, collision avoidance                 |
-| Viewport               | Pan, zoom, world-to-screen transformation                    |
-| Spatial index          | Visible-object queries and pointer hit-testing               |
-| Canvas or WebGL        | Background, edges, bulk geometry, transient visual effects   |
-| DOM or SVG             | Complex nodes, interactive controls, text, accessible labels |
-| Interaction controller | Dragging, selection, keyboard navigation, gestures           |
+| Graph model | Node and edge identity, connectivity, properties, undo/redo |
+| Layout engine | Node placement, routing, collision avoidance |
+| Viewport | Pan, zoom, world-to-screen transformation |
+| Spatial index | Visible-object queries and pointer hit-testing |
+| Canvas or WebGL | Background, edges, bulk geometry, transient visual effects |
+| DOM or SVG | Complex nodes, interactive controls, text, accessible labels |
+| Interaction controller | Dragging, selection, keyboard navigation, gestures |
 
 One variation is to render edges on Canvas and nodes in HTML. This is especially attractive for visual programming systems because edges are often numerous and visually simple, while nodes contain complex interactive content.
 
@@ -201,19 +185,13 @@ At low zoom levels, rendering every label, port, icon, and shadow wastes both co
 
 A level-of-detail system changes the representation according to zoom:
 
-[DevLog 20260225: Divooka Visual Programming - Direct Value Setting of Compound Inputs - DEV Community](https://images.openai.com/static-rsc-4/5nk7qWQADoVVcIiFMDjvugOA6kMWQ3nRCFDOv1bpuCn3ElMZhubXquBi6U11VxFE1PYZe5Q6AI2WuTZRe4-bavAshUdTbHS6g0fMni8U4UIIoN0j4JaFyY_l1uSrxMeoknPC6qMC0IYLiAioGsNnGlbs8nd5OEA1TlteRxoxplQ?purpose=inline)
-
 High zoom — full detail
 
 Show complete node contents, labels, connection ports, selection handles, and editing controls.
 
-[Re-Route Nodes/Connections for Complex Workflows - Feature Requests - n8n Community](https://images.openai.com/static-rsc-4/1LQ8DG_y1uJ-O2o6fNIHfMHjaTW2fxVf9qbQFYeDlHBQDDhcE-nYREqFC_Losj0zEpfW2kHSuPUMZnIYjulCkKvRJjK4SXyKAJ2a0d0J085JETGzTP-FwBel8TKatBZdbwgMz9eU8WmNA1nrSZFDzjdMw0ycnXMZiBiRFNBtZUU?purpose=inline)
-
 Medium zoom — simplified nodes
 
 Show node titles, major shapes, and important connection points; omit expensive decorations.
-
-[Massive Graphs on Big Data](https://images.openai.com/static-rsc-4/L3exmJ6l4x_gzk7nKAkvGu5dG7w4wQ8y4SEHwPJLn0xizQNuuUD7hDDSclE2v0iv5L0TJ3qn0EzS8M5AxWsSAsXVHh2HzvHU7IA1_WCeyEc9mMhbiRrSL7vad1EiHrZyPOTZEj2HB8pbY_krC2Ya9qRTI7s2aSTMe9dCwoNCS7A?purpose=inline)
 
 Low zoom — graph overview
 
@@ -232,13 +210,9 @@ For example:
 - Nodes: change when their position or content changes.
 - Drag previews and selection highlights: change frequently during interaction.
 
-Separating these into layers can prevent a small change from triggering a full redraw of the scene. MDN specifically recommends layered canvases and offscreen pre-rendering as possible optimizations.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://developer.mozilla.org\&sz=32)
+Separating these into layers can prevent a small change from triggering a full redraw of the scene. MDN specifically recommends layered canvases and offscreen pre-rendering as possible optimizations.
 
 MDN
-
-
 
 However, layers have their own costs: memory, compositing, synchronization, and more complicated invalidation. A layer should exist because its update pattern justifies it, not simply because more layers seem faster.
 
@@ -301,13 +275,9 @@ For node dragging, it is often helpful to distinguish between transient interact
 
 Text is a particularly important consideration for node-based editors. Nodes often contain labels, code fragments, values, type annotations, and interactive controls.
 
-HTML provides browser-managed typography, selection, input methods, and accessibility semantics. Canvas provides drawing primitives but not the same native interactive text experience. The Canvas element itself does not expose its drawn objects as semantic HTML to accessibility tools.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://developer.mozilla.org\&sz=32)
+HTML provides browser-managed typography, selection, input methods, and accessibility semantics. Canvas provides drawing primitives but not the same native interactive text experience. The Canvas element itself does not expose its drawn objects as semantic HTML to accessibility tools.
 
 MDN
-
-
 
 For a programming environment, a useful design is:
 
@@ -325,13 +295,9 @@ Accessibility should be part of the architecture rather than a fallback added af
 
 Canvas 2D is often the right next step when SVG becomes expensive. It offers a comparatively simple drawing API and works well for many graph workloads, especially when combined with culling, batching, caching, and a DOM overlay.
 
-WebGL becomes attractive when the application needs to render large amounts of geometry, repeated shapes, dense connections, or animated visualizations. GPU batching can reduce per-object submission overhead substantially.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://developer.mozilla.org\&sz=32)
+WebGL becomes attractive when the application needs to render large amounts of geometry, repeated shapes, dense connections, or animated visualizations. GPU batching can reduce per-object submission overhead substantially.
 
 MDN+1
-
-
 
 However, moving work to the GPU does not make every operation faster.
 
@@ -350,18 +316,18 @@ For new projects, also evaluate newer browser graphics APIs where appropriate, b
 
 ## 9. A practical decision guide
 
-| Application profile                                  | Suggested starting point      |
+| Application profile | Suggested starting point |
 | ---------------------------------------------------- | ----------------------------- |
-| Small graph, rich custom node UIs                    | DOM / SVG                     |
-| Medium-sized editable diagrams                       | SVG, possibly with HTML nodes |
-| Large graph with many simple edges                   | Canvas 2D edges + DOM nodes   |
-| Dense visualization with simple repeated geometry    | WebGL                         |
-| Large visual programming editor with rich code nodes | Hybrid Canvas/WebGL + DOM     |
-| Primarily static, accessible diagram                 | SVG or semantic HTML          |
+| Small graph, rich custom node UIs | DOM / SVG |
+| Medium-sized editable diagrams | SVG, possibly with HTML nodes |
+| Large graph with many simple edges | Canvas 2D edges + DOM nodes |
+| Dense visualization with simple repeated geometry | WebGL |
+| Large visual programming editor with rich code nodes | Hybrid Canvas/WebGL + DOM |
+| Primarily static, accessible diagram | SVG or semantic HTML |
 
 These are starting points, not strict limits. An SVG graph with efficient updates and good culling may outperform a poorly implemented Canvas graph.
 
-For an editor intended to scale from hundreds to tens of thousands of nodes, I would begin with a hybrid architecture and explicitly benchmark the transition points between rendering strategies.
+For an editor intended to scale from hundreds to tens of thousands of nodes, a suitable starting point is a hybrid architecture and explicitly benchmark the transition points between rendering strategies.
 
 ## 10. Benchmarking methodology
 
@@ -393,33 +359,25 @@ For reproducibility, benchmark the same graph with the same visual detail, run r
 
 ## 11. Further reading
 
-[image](https://www.google.com/s2/favicons?domain=https://developer.mozilla.org\&sz=32)
-
 [MDN: Optimizing Canvas](https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Optimizing_canvas?utm_source=chatgpt.com)
 
 Practical techniques for caching, layering, batching, high-resolution rendering, and redraw optimization.
-
-[image](https://www.google.com/s2/favicons?domain=https://developer.mozilla.org\&sz=32)
 
 [MDN: Canvas element](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/canvas?utm_source=chatgpt.com)
 
 Canvas capabilities, OffscreenCanvas, sizing considerations, and accessibility limitations.
 
-[image](https://www.google.com/s2/favicons?domain=https://developer.mozilla.org\&sz=32)
-
 [MDN: WebGL best practices](https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/WebGL_best_practices?utm_source=chatgpt.com)
 
 GPU resource management, draw-call batching, buffer sizing, and rendering efficiency.
-
-[image](https://www.google.com/s2/favicons?domain=https://imld.de\&sz=32)
 
 [Comparing Rendering Performance of Common Web Technologies for Large Graphs](https://imld.de/cnt/uploads/Horak-2018-Graph-Performance.pdf?utm_source=chatgpt.com)
 
 An empirical comparison of SVG, Canvas, and WebGL for large graph visualizations, including how text changes the performance picture.
 
-## 12. Suggested expansion for your research notes
+## 12. Suggested expansion for the research notes
 
-You could replace your original TODO with the following research outline:
+You could replace the original TODO with the following research outline:
 
 # Canvas and DOM Rendering
 

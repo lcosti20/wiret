@@ -18,23 +18,23 @@ The goal is to make debugging feel like inspecting a system of connected compone
 
 A robust design starts by treating error visualization as a translation layer between the language implementation and the user interface.
 
-1\. Error sources
+1. Error sources
 
 Parser · Type checker · Compiler · Runtime · Validator
 
-2\. Structured diagnostic
+2. Structured diagnostic
 
 Error code · Severity · Source span · Node/pin IDs · Expected vs. actual
 
-3\. Graph mapping
+3. Graph mapping
 
 Resolve source locations to nodes, wires, pins, and execution traces
 
-4\. Visual explanation
+4. Visual explanation
 
 Highlight · Annotate · Explain · Suggest a fix
 
-5\. User action and feedback
+5. User action and feedback
 
 Inspect · Correct · Rerun · Verify resolution
 
@@ -46,8 +46,6 @@ This separation also makes the system resilient to changes in the compiler, visu
 
 Different errors require different visual treatments. A single red outline around every problematic node is too simplistic: it does not distinguish an invalid connection from a runtime exception or a warning about suspicious behavior.
 
-[Predictive and Live Debugging | Visual Scripting | 1.7.8](https://images.openai.com/static-rsc-4/e1jLBu_jh_ZrMflLyCCY12kCGLObhvao5aSHY7BJB2sXza4d8vfjz8yQi8Vq1aT9UNkN7T5h8S_r8dC0iJv0vGSbGsDnsvHtya9xYOTH_S0SjuSIu7HJ1UXkotq7NTLRxe9Z19MRPl_l0xb_vg2IHe_9wuaOnEp92XdGQy4RRaI?purpose=inline)
-
 A. Syntax and structural errors
 
 Parse time
@@ -56,15 +54,11 @@ The text representation is malformed, a required node field is missing, or a gra
 
 Visualization: Highlight the node or graph region that cannot be parsed. Show a local explanation such as “This node is missing its required operation.” If the parser cannot identify a precise node, highlight the smallest reliable enclosing region.
 
-[Solved: Number array to boolean array - NI Community](https://images.openai.com/static-rsc-4/Mc1xHr5eZHK-37jrC8dJ99_zxMmbHXt5rHDb8JylCHCAKzdghMWDKZfqwUgJiWaQOd5v-U9lcfPGk5ZQMWtaS9RaGK-9ImTY6fJETCFuifRWCQZxkfuvw4yDUufRfV_qLAxGxlPWuXMbcaEQu5Q-vQpJJ7CmBIs8jZB3Vxjr_-g?purpose=inline)
-
 B. Type errors
 
 A wire carries a value incompatible with the receiving pin's type.
 
 Visualization: Highlight the wire and destination pin, show both types, and explain whether a conversion is possible. For example, “Expected a number, but this connection supplies text.”
-
-[Bolt for Ludiq](https://images.openai.com/static-rsc-4/Up8SwYf3wSn01HhtSb2-9eZhCsYmR4PTMg6RE0LuKl797fXaON_24_DDKahjb5uRTjavcYA5u-gdZWqW_xxjImZSvgcDxc3JRteeDeS0B_clF29dKVR4vpR-j5aaWKaiuAvvS2Fqh5mD8M5_7qtkQqMdQXr8Za4JAC5RZ1jjKrk?purpose=inline)
 
 C. Runtime errors
 
@@ -72,15 +66,11 @@ A graph compiles successfully but fails during execution: division by zero, inva
 
 Visualization: Mark the node that raised the exception, display the failing input values when safe, and trace the data or execution path leading to it.
 
-[【BP】Blueprint Debugger Window｜Unreal Engine 5から始める C++ & Blueprint](https://images.openai.com/static-rsc-4/A5A497RCcCY-qOYD0vuWNbvKvryh5CTe1crgsNzQPk2Qet7Sor7buMs2w4wONV0d4FeqqEdnvKQPuj5DdF9T5PBHEPyNzZyh_FYSyV4_oOp9FbWhmXOfGAV2F4AvOMp5w6G9R9k_-0JLL1P8bSjsXaNBqSYOPhn4xEQMd0sio8I?purpose=inline)
-
 D. Logical and behavioral errors
 
 The program runs without crashing but produces an incorrect result.
 
 Visualization: Compare expected and actual values, show relevant execution paths, and let users attach assertions or inspect intermediate values. These errors generally require additional intent or test information; a runtime system cannot always infer what “wrong” means.
-
-[Predictive and Live Debugging | Visual Scripting | 1.9.11](https://images.openai.com/static-rsc-4/TSxReSThWbym_PeNL5nodmkf1FTYrjBYzufCHQZocNWUMQr_sIisU282zOmaukBMhMIH0nFtkydbMin2nwev-OEmZDAvqRNbXE4mBuMEd0LEPIJYPmwte_Z9738g4h6tpOppe98IpqkPlFV6Wg6MUvtxLyK_KIG_9DpO2X97rOA?purpose=inline)
 
 E. Static warnings and suspicious patterns
 
@@ -128,18 +118,18 @@ A practical source map might look like this:
 
 ```
 {
-  "generatedRange": {
-    "startLine": 42,
-    "startColumn": 8,
-    "endLine": 42,
-    "endColumn": 19
-  },
-  "graphLocation": {
-    "nodeId": "node_add_10",
-    "pinId": "input_a",
-    "edgeId": "edge_name_to_add"
-  },
-  "diagnosticId": "TYPE_MISMATCH"
+ "generatedRange": {
+ "startLine": 42,
+ "startColumn": 8,
+ "endLine": 42,
+ "endColumn": 19
+ },
+ "graphLocation": {
+ "nodeId": "node_add_10",
+ "pinId": "input_a",
+ "edgeId": "edge_name_to_add"
+ },
+ "diagnosticId": "TYPE_MISMATCH"
 }
 ```
 
@@ -211,13 +201,9 @@ Each entry should provide:
 
 The panel and graph should stay synchronized: selecting an error highlights its graph location, while selecting a highlighted node reveals the relevant diagnostic.
 
-Research on debugging by end-user programmers has explored this combination of visual fault localization, diagnostic lists, and expandable hints. See [Interactive, Visual Fault Localization Support for End-User Programmers](https://doi.org/10.1016/j.jvlc.2004.07.001?utm_source=chatgpt.com) and [How End-User Programmers Debug Visual Web-Based Programs](https://epiclab.github.io/publications/cola19-kuttal.pdf?utm_source=chatgpt.com).&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://www.sciencedirect.com\&sz=32)
+Research on debugging by end-user programmers has explored this combination of visual fault localization, diagnostic lists, and expandable hints. See [Interactive, Visual Fault Localization Support for End-User Programmers](https://doi.org/10.1016/j.jvlc.2004.07.001?utm_source=chatgpt.com) and [How End-User Programmers Debug Visual Web-Based Programs](https://epiclab.github.io/publications/cola19-kuttal.pdf?utm_source=chatgpt.com).
 
 ScienceDirect+1
-
-
 
 ### D. Data-flow tracing and execution history
 
@@ -232,13 +218,9 @@ A useful debugger should let users inspect:
 - The first point at which an observed value diverged from an expected value.
 - The sequence of changes leading to the failure.
 
-This approach is supported by research on visual debugging for reactive programs. Hoffswell, Satyanarayan, and Heer describe techniques that combine event timelines, dependency visualization, and in-context annotations to help users trace behavior. Their evaluation found that first-time users could accurately trace errors through unfamiliar specifications.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://vis.csail.mit.edu\&sz=32)
+This approach is supported by research on visual debugging for reactive programs. Hoffswell, Satyanarayan, and Heer describe techniques that combine event timelines, dependency visualization, and in-context annotations to help users trace behavior. Their evaluation found that first-time users could accurately trace errors through unfamiliar specifications.
 
 MIT Visualization Group+1
-
-
 
 For a VPL, these ideas suggest that the editor should not merely highlight the node where an exception occurred. It should also let the user travel backward through the relevant data and execution dependencies.
 
@@ -246,27 +228,23 @@ For a VPL, these ideas suggest that the editor should not merely highlight the n
 
 A technically accurate error message can still be a poor user experience. The interface must help users find relevant evidence, understand the problem, and decide what to do next.
 
-One particularly useful finding comes from Kuttal and colleagues' 2019 study of 16 end-user programmers: participants spent 73% of their debugging time searching for relevant information. The study investigated particular web-based visual programming tasks, so the number should not be generalized to every VPL. Nevertheless, it highlights a key design opportunity: reduce the effort required to locate and connect diagnostic information.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://epiclab.github.io\&sz=32)
+One particularly useful finding comes from Kuttal and colleagues' 2019 study of 16 end-user programmers: participants spent 73% of their debugging time searching for relevant information. The study investigated particular web-based visual programming tasks, so the number should not be generalized to every VPL. Nevertheless, it highlights a key design opportunity: reduce the effort required to locate and connect diagnostic information.
 
 epiclab.github.io
 
-
-
 ### Core UX principles
 
-| Principle              | Design implication                                                                   |
+| Principle | Design implication |
 | ---------------------- | ------------------------------------------------------------------------------------ |
-| Locality               | Display the error where the user can act on it.                                      |
-| Clarity                | Explain the consequence in familiar language before presenting internal terminology. |
-| Specificity            | Identify the exact node, pin, wire, value, or execution step involved.               |
-| Actionability          | Offer plausible next steps, not just descriptions of failure.                        |
-| Context preservation   | Let users inspect errors without losing their place in the graph.                    |
-| Progressive disclosure | Keep the initial explanation concise; expose technical detail on demand.             |
-| Consistency            | Use stable meanings for severity, colors, icons, and diagnostic categories.          |
-| Accessibility          | Provide text labels, keyboard navigation, non-color cues, and screen-reader support. |
-| Trustworthiness        | Distinguish confirmed causes from suspected causes and speculative fixes.            |
+| Locality | Display the error where the user can act on it. |
+| Clarity | Explain the consequence in familiar language before presenting internal terminology. |
+| Specificity | Identify the exact node, pin, wire, value, or execution step involved. |
+| Actionability | Offer plausible next steps, not just descriptions of failure. |
+| Context preservation | Let users inspect errors without losing their place in the graph. |
+| Progressive disclosure | Keep the initial explanation concise; expose technical detail on demand. |
+| Consistency | Use stable meanings for severity, colors, icons, and diagnostic categories. |
+| Accessibility | Provide text labels, keyboard navigation, non-color cues, and screen-reader support. |
+| Trustworthiness | Distinguish confirmed causes from suspected causes and speculative fixes. |
 
 A useful principle is to minimize the distance between detecting a problem, understanding it, and correcting it. That distance is cognitive as well as spatial.
 
@@ -323,13 +301,9 @@ For data-flow and reactive systems, the editor can record a bounded execution hi
 
 The user can then step backward through the graph's execution to identify the first unexpected value.
 
-This resembles the timeline and dependency-inspection techniques developed in [Visual Debugging Techniques for Reactive Data Visualization](https://vis.csail.mit.edu/pubs/vega-debugging/?utm_source=chatgpt.com).&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://vis.csail.mit.edu\&sz=32)
+This resembles the timeline and dependency-inspection techniques developed in [Visual Debugging Techniques for Reactive Data Visualization](https://vis.csail.mit.edu/pubs/vega-debugging/?utm_source=chatgpt.com).
 
 MIT Visualization Group
-
-
 
 The challenge is deciding what to record. Full execution traces can be expensive in memory and processing time, especially for large graphs, loops, or real-time systems. Practical options include bounded trace buffers, selective recording, sampling, and re-execution when deterministic replay is possible.
 
@@ -376,8 +350,6 @@ This distinction helps preserve user control and makes the AI's limitations visi
 
 These sources provide a useful starting point for a deeper literature review.
 
-[Visual Debugging Techniques for Reactive Data Visualization | MIT Visualization Group](https://images.openai.com/static-rsc-4/3GCXIh8YMqFskyxsre6hYPq--cENngMpHahEwnfFyiAJuLo-WsAK64HAI3khBfx6l2POO052uQQSSiUVPreHaqqHSBzcN7VpPQ6LQuLbQPjj7zyCEXC6kuhC_acwUBpm5qGseLAz8FJdsWHqZ2H_8kkjQ-lgSlbtM1KeC2S3O3w?purpose=inline)
-
 Visual Debugging Techniques for Reactive Data Visualization (2016)
 
 Hoffswell, Satyanarayan, and Heer · EuroVis
@@ -385,8 +357,6 @@ Hoffswell, Satyanarayan, and Heer · EuroVis
 Investigates timelines, data-change histories, dependency relationships, and contextual annotations for understanding interactive behavior.
 
 [Paper and research materials](https://vis.csail.mit.edu/pubs/vega-debugging/?utm_source=chatgpt.com)
-
-[Augmenting Code with In Situ Visualizations to Aid Program Understanding | MIT Visualization Group](https://images.openai.com/static-rsc-4/DfBNPE_TT70cOidDCyy7CBhUdLvx8xfDc2QQZJc_k-HDKjj6h-Rw8QJIntjtugCBKW-Ayv7ygdDSDgsZS5kjyWat2_iPbYLk-FLdxgtA8cqI3UQ9simMvgI_f5E0eViLO-fcoye_yGk4KcFwOKJmDxE8DOSBwnc5g_2aa0-Dzts?purpose=inline)
 
 Augmenting Code with In Situ Visualizations to Aid Program Understanding (2018)
 
@@ -396,8 +366,6 @@ Studies how embedding runtime information directly into a representation helps u
 
 [Paper and research materials](https://vis.mit.edu/pubs/insitu-vis-debugging/?utm_source=chatgpt.com)
 
-[Using contextual knowledge in interactive fault localization | Empirical Software Engineering | Springer Nature Link](https://images.openai.com/static-rsc-4/CZD-uWXl1DXN469qhWuJ1BR-E4qANAi_mzsn1ehjYu-RFftIvTjDNzBf22f1B0K4uGZmw9F41yXOtBdIsf5X2wFVPcRfPfpozxVBcRs8537yiiJ-bibHwndhAKzH6ZFZRzdfl_aFnoQcw0nEPBRgpvsIL6x6DBfXuAMzxCI9nvc?purpose=inline)
-
 How End-User Programmers Debug Visual Web-Based Programs: An Information Foraging Theory Perspective (2019)
 
 Kuttal and colleagues · Journal of Computer Languages
@@ -406,8 +374,6 @@ Examines how end-user programmers locate and interpret debugging information, in
 
 [Read the paper](https://doi.org/10.1016/j.cola.2019.04.003?utm_source=chatgpt.com)
 
-[PPT - The Visual Code Navigator: An Interactive Toolset for Source Code Investigation PowerPoint Presentation - ID:6609824](https://images.openai.com/static-rsc-4/DA0xL0ZS97UrdT6CRz0415p8MPt0YhAmV8ieZIvSLldLHXhH_CnIE2g_4jbYg-hvUxcQ-5CcL1pl71gWmVco3zs31J302XmbWr2V7kyVyUeAlmZBqN4kxuczzAvtCEc4QyWWD2Q-NO00oBV_4JuzIbZm7mE6ZqbMfyNjBkj3FDs?purpose=inline)
-
 Interactive, Visual Fault Localization Support for End-User Programmers (2005)
 
 Journal of Visual Languages and Computing
@@ -415,8 +381,6 @@ Journal of Visual Languages and Computing
 Early work on interactive visual fault localization and human-centered debugging. Particularly relevant to the question of how users interpret and act on highlighted faults.
 
 [Read the paper](https://doi.org/10.1016/j.jvlc.2004.07.001?utm_source=chatgpt.com)
-
-[SKT Enterprise](https://images.openai.com/static-rsc-4/5b35TsW2yo0po8Tx_hs9LQqMSixudppuxWnYD1VzDUnK185s2cxpRIKAbAcJLVKLxWSRu02e_npEpJMCj3IeWOlV2OrLp3Dc6BMuKr658hiaUTe0geTQ_29ethD9UQNjjTaLA3MN6U5yHv6D_NqUEqwqsYieHdT3ZZkpkpNeOOA?purpose=inline)
 
 Debugging as Evidence-Driven Reasoning: Visualization Opportunities in Data-Intensive Programming (2026)
 
@@ -432,16 +396,16 @@ These papers address different aspects of debugging rather than providing a sing
 
 The most interesting research opportunities lie in the intersection of visual representation, compiler architecture, debugging cognition, and AI assistance.
 
-| Research question                                      | What to investigate                                                                                                    |
+| Research question | What to investigate |
 | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| How precise should highlighting be?                    | Whether highlighting a pin, wire, node, or larger region best supports different error categories.                     |
-| How should root causes be distinguished from symptoms? | How to group cascading errors without hiding independent failures.                                                     |
-| How should errors survive graph edits?                 | Stable diagnostic identity and mapping across text/graph synchronization and incremental compilation.                  |
-| How should runtime state be represented?               | Whether values, traces, timelines, or provenance views best help users find the first unexpected state.                |
-| How much explanation is enough?                        | Whether layered messages outperform a single detailed diagnostic for novice and expert users.                          |
-| When should AI suggest a repair?                       | How to balance helpful automation with user control, correctness, and confidence calibration.                          |
-| How can logical errors be detected?                    | How assertions, examples, tests, invariants, and expected outputs can support failures that do not trigger exceptions. |
-| How should uncertainty be communicated?                | How to distinguish a proven type mismatch from a likely but unconfirmed behavioral cause.                              |
+| How precise should highlighting be? | Whether highlighting a pin, wire, node, or larger region best supports different error categories. |
+| How should root causes be distinguished from symptoms? | How to group cascading errors without hiding independent failures. |
+| How should errors survive graph edits? | Stable diagnostic identity and mapping across text/graph synchronization and incremental compilation. |
+| How should runtime state be represented? | Whether values, traces, timelines, or provenance views best help users find the first unexpected state. |
+| How much explanation is enough? | Whether layered messages outperform a single detailed diagnostic for novice and expert users. |
+| When should AI suggest a repair? | How to balance helpful automation with user control, correctness, and confidence calibration. |
+| How can logical errors be detected? | How assertions, examples, tests, invariants, and expected outputs can support failures that do not trigger exceptions. |
+| How should uncertainty be communicated? | How to distinguish a proven type mismatch from a likely but unconfirmed behavioral cause. |
 
 ### Evaluating an error-visualization system
 
@@ -462,21 +426,21 @@ A controlled study could compare three conditions: ordinary textual diagnostics,
 
 ## 10. Suggested design direction
 
-For a graph editor with a synchronized textual representation, I would prioritize the following architecture:
+For a graph editor with a synchronized textual representation, the recommended approach is to prioritize the following architecture:
 
-1\. Structured diagnostic model
+1. Structured diagnostic model
 
 Every diagnostic has a stable ID, category, severity, explanation key, primary graph location, related locations, and optional runtime evidence.
 
-2\. Bidirectional location mapping
+2. Bidirectional location mapping
 
 Maintain mappings between graph IDs, textual source spans, and generated instructions. Update them incrementally as the graph changes.
 
-3\. Coordinated diagnostics UI
+3. Coordinated diagnostics UI
 
 Synchronize graph highlights, an error list, contextual explanations, and optional runtime-value inspection.
 
-4\. Validated correction workflow
+4. Validated correction workflow
 
 Allow a user to preview a proposed fix, validate it, apply it, and confirm that the diagnostic disappears or changes appropriately.
 
@@ -485,3 +449,5 @@ Start with deterministic syntax and type diagnostics. They provide a tractable w
 The key research insight: error visualization is not merely about making errors visible. It is about connecting a failure to its cause, presenting enough evidence to understand it, and making the path to a correct repair clear. The strongest VPL debugger will make those relationships explicit without overwhelming users or pretending to know more than the available evidence supports.
 
 Potential next step: narrow the research toward compiler/source-map architecture, novice-facing UX, runtime data-flow tracing, or AI-assisted diagnosis and repair.
+
+The most tractable starting point is compiler and source-map diagnostics, followed by runtime data-flow tracing and AI-assisted repair, with each explanation tied to verifiable evidence.

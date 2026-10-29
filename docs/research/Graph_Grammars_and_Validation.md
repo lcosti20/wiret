@@ -12,19 +12,13 @@ This topic connects formal language theory, type systems, constraint solving, gr
 
 ## 1. The foundations
 
-[GitHub - WilliamKarolDiCioccio/fl_nodes: A modular, scalable ecosystem for building sophisticated node-based applications in Flutter.](https://images.openai.com/static-rsc-4/nH3I271xQvKXPMMV-nM1cv_WfX4d5YcmeljmLsoVdp1dw8_tvhwI8B6COb9589Wm5EkydUZPZ1GsBwMu95CSxtd86V-Gs2wYsDuERBrVQLsdlvRfhXaORnjefGL-342Wyka8XQHj2h_BW8g1FsrGOjOtrDcdis-AAjo8WAJu_Ok?purpose=inline)
-
 Graph representation
 
 A program is represented as a graph \\(G=(V,E)\\), where \\(V\\) is the set of nodes and \\(E\\) is the set of connections. Nodes have types, ports, properties, and possibly internal state.
 
-[Frontiers | Graph Rewriting Techniques in Engineering Design](https://images.openai.com/static-rsc-4/B-CvCYu7oab_DrAGXVPMDVJoauZrDYz4fuHaOG5d_JkCU_QSsxyA7amkGPUPLtdfKqxnqXyzVu2L2rWOIsFgR8lNTVZaO8YN0nnC1G9NqsWjc82YYjoZoiyBDf7scZtEiSw6ZsaIRWjaP9ZeZORiDJwQLWLk8gh9326kBciMFCU?purpose=inline)
-
 Graph grammar
 
 A set of rules defines how graphs may be constructed or transformed. These rules can describe legal node connections, required substructures, and permitted editing operations.
-
-[How to use the switch nodes on geometry nodes? - Page 2 - Modeling - Blender Artists Community](https://images.openai.com/static-rsc-4/-c9FouNTMf0xOSMU4atKp-78FYF9h5aIbAUsLuF1G2gc5u5xJ9vuMwMTWjt82u_vTP73jtVanA4qQ11Gj11t6X54OGKkuZ-W_4X4YQourdFPGAtyriHxU2CZMEWenyup9xBndHdnwIb0diRj91viZym4hkFD0cQMCTgMu_Uw44M?purpose=inline)
 
 Validation
 
@@ -44,15 +38,15 @@ A well-designed visual programming language uses these mechanisms together rathe
 
 A useful design separates validation into layers. Each layer has different rules, computational costs, and user-facing consequences.
 
-| Layer                  | Example rule                                                    | Typical response                  |
+| Layer | Example rule | Typical response |
 | ---------------------- | --------------------------------------------------------------- | --------------------------------- |
-| Graph integrity        | Every edge references existing nodes and ports                  | Reject or repair invalid edits    |
-| Local structural rules | An input accepts only one connection                            | Prevent or replace the connection |
-| Type correctness       | A string output cannot feed an integer input without conversion | Reject, convert, or report        |
-| Graph-wide constraints | A required input must be connected                              | Warning or compile error          |
-| Dependency constraints | A forbidden cycle must not exist                                | Reject the cycle or report it     |
-| Semantic correctness   | A variable must be declared before use                          | Diagnostic                        |
-| Execution safety       | A resource must not be used after disposal                      | Static warning or runtime check   |
+| Graph integrity | Every edge references existing nodes and ports | Reject or repair invalid edits |
+| Local structural rules | An input accepts only one connection | Prevent or replace the connection |
+| Type correctness | A string output cannot feed an integer input without conversion | Reject, convert, or report |
+| Graph-wide constraints | A required input must be connected | Warning or compile error |
+| Dependency constraints | A forbidden cycle must not exist | Reject the cycle or report it |
+| Semantic correctness | A variable must be declared before use | Diagnostic |
+| Execution safety | A resource must not be used after disposal | Static warning or runtime check |
 
 Not every violation should prevent editing. A critical distinction is between an invalid graph and an incomplete graph.
 
@@ -131,13 +125,9 @@ Not every rule is best expressed as a production rule. It is useful to distingui
 3. Transformation rules: which edits are allowed and how they change the graph.
 4. Semantic rules: how graph structure corresponds to program behavior.
 
-Research on graph grammars for visual languages explores how typed and conditional graph transformations can define abstract syntax precisely.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://www.sciencedirect.com\&sz=32)
+Research on graph grammars for visual languages explores how typed and conditional graph transformations can define abstract syntax precisely.
 
 ScienceDirect+1
-
-
 
 For an ordinary node editor, a practical implementation usually combines a typed graph schema with declarative constraints and imperative validation algorithms. A full formal graph-grammar engine is most valuable when the language itself is highly structural or users can define graph transformation rules.
 
@@ -163,21 +153,21 @@ A practical language may need to support:
 - Generic types: `List<T>`, `Option<T>`, `Map<K,V>`.
 - Subtyping: a value of a derived type can be accepted where a base type is expected.
 - Union and optional types: a value may have one of several types or be absent.
-- Effect types: an operation may perform I/O, mutate state, or throw exceptions.
+- Effect types: an operation may perform the author/O, mutate state, or throw exceptions.
 - Execution-domain types: a value may be valid only in a particular runtime or execution context.
 
 The type relation should be explicit. If the language supports implicit conversion, the checker must distinguish safe conversions from potentially lossy or ambiguous ones.
 
 For example:
 
-| Output type   | Input type    | Possible result                           |
+| Output type | Input type | Possible result |
 | ------------- | ------------- | ----------------------------------------- |
-| `Int`         | `Float`       | Accept via widening                       |
-| `Float`       | `Int`         | Reject or require explicit conversion     |
-| `Dog`         | `Animal`      | Accept under nominal subtyping            |
-| `List<Int>`   | `List<Float>` | Depends on generic variance               |
-| `Option<Int>` | `Int`         | Reject unless absence is handled          |
-| `Any`         | `String`      | Accept only if the type system permits it |
+| `Int`  | `Float`  | Accept via widening |
+| `Float`  | `Int`  | Reject or require explicit conversion |
+| `Dog`  | `Animal`  | Accept under nominal subtyping |
+| `List<Int>`  | `List<Float>` | Depends on generic variance |
+| `Option<Int>` | `Int`  | Reject unless absence is handled |
+| `Any`  | `String`  | Accept only if the type system permits it |
 
 The table describes possible policies, not universal rules.
 
@@ -185,7 +175,7 @@ The table describes possible policies, not universal rules.
 
 Consider a generic `Map` node with a type signature resembling
 
-\\[ \operatorname{map} : (A\rightarrow B)\times \operatorname{List}(A) \rightarrow \operatorname{List}(B) \\]
+\\[ \operatorname{map}: (A\rightarrow B)\times \operatorname{List}(A) \rightarrow \operatorname{List}(B) \\]
 
 If a list of integers is connected to its input, the checker may infer \\(A=\texttt{Int}\\). If the supplied function accepts an integer and returns a string, it can infer \\(B=\texttt{String}\\).
 
@@ -219,14 +209,14 @@ The language must therefore identify which graph relation is being checked and w
 
 ### Common cycle policies
 
-| Graph kind              | Possible rule                                              |
+| Graph kind | Possible rule |
 | ----------------------- | ---------------------------------------------------------- |
-| Pure data flow          | No directed cycles                                         |
+| Pure data flow | No directed cycles |
 | Synchronous computation | No combinational feedback without a delay or state element |
-| Control flow            | Cycles permitted if loop semantics are defined             |
-| Build dependencies      | No cyclic dependency chains                                |
-| Resource lifecycle      | No forbidden ordering cycles                               |
-| Event system            | Feedback allowed subject to scheduling rules               |
+| Control flow | Cycles permitted if loop semantics are defined |
+| Build dependencies | No cyclic dependency chains |
+| Resource lifecycle | No forbidden ordering cycles |
+| Event system | Feedback allowed subject to scheduling rules |
 
 For a directed graph \\(G=(V,E)\\), a simple policy might require acyclicity:
 
@@ -240,13 +230,13 @@ When the user attempts to add an edge \\(u\rightarrow v\\), a new cycle is intro
 
 ```
 function canConnect(u, v):
-    if typesAreIncompatible(u.output, v.input):
-        return reject("Type mismatch")
+ if typesAreIncompatible(u.output, v.input):
+ return reject("Type mismatch")
 
-    if pathExists(v.node, u.node):
-        return reject("Connection creates a cycle")
+ if pathExists(v.node, u.node):
+ return reject("Connection creates a cycle")
 
-    return accept()
+ return accept()
 ```
 
 This simplified algorithm assumes all edges in the checked graph participate in the same acyclicity rule. A real implementation must account for edge categories, permitted feedback nodes, and existing cycles.
@@ -263,13 +253,9 @@ For example, a stateful feedback node may break the instantaneous dependency rel
 
 This is more expressive because it encodes a semantic property rather than an overly broad structural restriction.
 
-Research into graph transformation verification goes further than checking individual graphs: it can analyze the behavior of transformations, reachability, termination, and other properties of the graph rewriting system itself.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://research.utwente.nl\&sz=32)
+Research into graph transformation verification goes further than checking individual graphs: it can analyze the behavior of transformations, reachability, termination, and other properties of the graph rewriting system itself.
 
 University of Twente Research Information+1
-
-
 
 ## 6. Global constraints and graph invariants
 
@@ -325,19 +311,19 @@ An incremental validator instead tracks which facts depend on which graph elemen
 
 Suppose a user changes an output port from `Int` to `String`.
 
-1\. Graph edit
+1. Graph edit
 
 Output type changes
 
-2\. Invalidation
+2. Invalidation
 
 Mark dependent edges and constraints dirty
 
-3\. Recompute
+3. Recompute
 
 Resolve affected types and dependency rules
 
-4\. Update diagnostics
+4. Update diagnostics
 
 Mark incompatible connections and affected downstream nodes
 
@@ -373,21 +359,17 @@ A useful model distinguishes three moments:
 
 This leads to three useful editing policies.
 
-| Policy        | Behavior                                      | Best suited to                                 |
+| Policy | Behavior | Best suited to |
 | ------------- | --------------------------------------------- | ---------------------------------------------- |
-| Strict        | Invalid changes are rejected immediately      | Safety-critical structural rules               |
-| Permissive    | Invalid intermediate states are allowed       | Freeform editing and incomplete programs       |
+| Strict | Invalid changes are rejected immediately | Safety-critical structural rules |
+| Permissive | Invalid intermediate states are allowed | Freeform editing and incomplete programs |
 | Transactional | A group of changes is validated before commit | Refactoring, bulk edits, graph transformations |
 
 These policies need not be mutually exclusive. A language can enforce edge endpoint integrity strictly, allow temporarily unconnected inputs, and use transactional validation for complex refactorings.
 
-For formal graph transformation systems, preconditions, postconditions, and rule conflicts can be analyzed systematically. The AGG graph transformation environment, for example, supports graph parsing, consistency checking, and critical-pair analysis for transformation rules.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://doi.org\&sz=32)
+For formal graph transformation systems, preconditions, postconditions, and rule conflicts can be analyzed systematically. The AGG graph transformation environment, for example, supports graph parsing, consistency checking, and critical-pair analysis for transformation rules.
 
 Springer Nature Link+1
-
-
 
 ## 9. Diagnostics: validation as part of the user experience
 
@@ -405,11 +387,11 @@ port: input
 edge: edge_47
 message: Expected String, received Int.
 related:
-  - source node: add_3
-  - source port: output
+ - source node: add_3
+ - source port: output
 suggestions:
-  - Insert an Int-to-String conversion.
-  - Change the destination input type if appropriate.
+ - Insert an Int-to-String conversion.
+ - Change the destination input type if appropriate.
 ```
 
 The exact data format is an implementation choice. The important point is that diagnostics should be structured data rather than text embedded directly in the validation algorithm.
@@ -441,7 +423,7 @@ Other repairs are ambiguous. If two sources can feed an input, the validator sho
 
 ## 10. A practical validation architecture
 
-For a modern visual programming language, I would recommend a layered architecture with a single authoritative graph model and a set of composable analyses.
+For a modern visual programming language, the recommended approach is to a layered architecture with a single authoritative graph model and a set of composable analyses.
 
 Graph model
 
@@ -479,17 +461,17 @@ This architecture separates the definition of rules from the mechanisms that enf
 
 ### Important implementation decisions
 
-1\. Make graph identities stable. Nodes, ports, and edges should have identities that survive ordinary edits. Diagnostics and incremental caches can then refer to specific elements without relying on screen coordinates or list positions.
+1. Make graph identities stable. Nodes, ports, and edges should have identities that survive ordinary edits. Diagnostics and incremental caches can then refer to specific elements without relying on screen coordinates or list positions.
 
-2\. Separate model data from layout. Node position, color, and visual grouping generally should not affect semantic validation. Layout changes should not trigger a complete type-checking pass.
+2. Separate model data from layout. Node position, color, and visual grouping generally should not affect semantic validation. Layout changes should not trigger a complete type-checking pass.
 
-3\. Use declarative rules for simple constraints. Rules such as port direction, cardinality, and allowed node categories are good candidates for schemas or declarative predicates.
+3. Use declarative rules for simple constraints. Rules such as port direction, cardinality, and allowed node categories are good candidates for schemas or declarative predicates.
 
-4\. Use specialized algorithms for graph properties. Type inference, cycle detection, reachability, and control-flow analysis have different mathematical structures. A general grammar engine does not eliminate the need for specialized algorithms.
+4. Use specialized algorithms for graph properties. Type inference, cycle detection, reachability, and control-flow analysis have different mathematical structures. A general grammar engine does not eliminate the need for specialized algorithms.
 
-5\. Make the compiler authoritative. The editor should provide immediate feedback, but compilation or execution must independently ensure that the submitted program satisfies the required invariants. Editor-side validation is not a security boundary.
+5. Make the compiler authoritative. The editor should provide immediate feedback, but compilation or execution must independently ensure that the submitted program satisfies the required invariants. Editor-side validation is not a security boundary.
 
-6\. Version the language rules. If plugins or language extensions introduce new node types and constraints, the system needs a defined mechanism for composing rules, handling conflicts, and invalidating cached results.
+6. Version the language rules. If plugins or language extensions introduce new node types and constraints, the system needs a defined mechanism for composing rules, handling conflicts, and invalidating cached results.
 
 ## 11. Testing the validator itself
 
@@ -511,13 +493,9 @@ One especially valuable property is:
 
 This tests not only the correctness of the rules but also the invalidation and caching mechanisms.
 
-For transformation-heavy languages, formal verification can provide stronger guarantees. Hoare-style proof systems for graph programs, for example, express preconditions and postconditions over graph structure and attributes and establish properties of program execution.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://journals.sagepub.com\&sz=32)
+For transformation-heavy languages, formal verification can provide stronger guarantees. Hoare-style proof systems for graph programs, for example, express preconditions and postconditions over graph structure and attributes and establish properties of program execution.
 
 Christopher M. Poskitt, Detlef Plump, 2012+1
-
-
 
 ## 12. Research directions and open questions
 
@@ -563,79 +541,59 @@ A particularly useful research question is whether a grammar can be designed so 
 
 These are strong starting points for a deeper investigation.
 
-1\. Defining the abstract syntax of visual languages with advanced graph grammars
+1. Defining the abstract syntax of visual languages with advanced graph grammars
 
 Journal of Visual Languages & Computing, 2008
 
-A directly relevant study of graph grammars as a way to define the abstract syntax of visual modeling languages, including conditional and generic transformation rules.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://www.sciencedirect.com\&sz=32)
+A directly relevant study of graph grammars as a way to define the abstract syntax of visual modeling languages, including conditional and generic transformation rules.
 
 ScienceDirect
 
-
-
 [Read the paper](https://doi.org/10.1016/j.jvlc.2007.11.003?utm_source=chatgpt.com)
 
-2\. Verification Techniques for Graph Rewriting — Arend Rensink
+2. Verification Techniques for Graph Rewriting — Arend Rensink
 
 2016
 
-A conceptual introduction to verification of graph transformation systems, including termination, reachability, confluence, and behavioral properties.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://research.utwente.nl\&sz=32)
+A conceptual introduction to verification of graph transformation systems, including termination, reachability, confluence, and behavioral properties.
 
 University of Twente Research Information
 
-
-
 [Read the tutorial](https://doi.org/10.4230/DagRep.5.11.1?utm_source=chatgpt.com)
 
-3\. AGG: A Graph Transformation Environment for Modeling and Validation of Software
+3. AGG: A Graph Transformation Environment for Modeling and Validation of Software
 
 Graph transformation tools and methods
 
-Describes a practical graph transformation environment with consistency checking, graph parsing, and critical-pair analysis. Useful for studying how formal techniques translate into tooling.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://doi.org\&sz=32)
+Describes a practical graph transformation environment with consistency checking, graph parsing, and critical-pair analysis. Useful for studying how formal techniques translate into tooling.
 
 Springer Nature Link
 
-
-
 [Read the paper](https://doi.org/10.1007/978-3-540-25959-6_35?utm_source=chatgpt.com)
 
-4\. Hoare-Style Verification of Graph Programs — Christopher M. Poskitt and Detlef Plump
+4. Hoare-Style Verification of Graph Programs — Christopher M. Poskitt and Detlef Plump
 
 Fundamenta Informaticae, 2012
 
-Develops a sound proof system for partial correctness of graph programs using structural graph conditions and attributes. Particularly relevant when validation must establish properties of transformations, not just static graph shape.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://journals.sagepub.com\&sz=32)
+Develops a sound proof system for partial correctness of graph programs using structural graph conditions and attributes. Particularly relevant when validation must establish properties of transformations, not just static graph shape.
 
 Christopher M. Poskitt, Detlef Plump, 2012+1
 
-
-
 [Read the paper](https://doi.org/10.3233/FI-2012-708?utm_source=chatgpt.com)
 
-5\. Automated Formal Verification of Visual Modeling Languages by Model Checking — Dániel Varró
+5. Automated Formal Verification of Visual Modeling Languages by Model Checking — Dániel Varró
 
 Software and Systems Modeling, 2004
 
-Explores model-checking techniques for visual languages whose semantics are specified using graph transformations. Useful for understanding how to verify properties across possible transformation sequences.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://inf.mit.bme.hu\&sz=32)
+Explores model-checking techniques for visual languages whose semantics are specified using graph transformations. Useful for understanding how to verify properties across possible transformation sequences.
 
 Fault Tolerant Systems Research Group
-
-
 
 [Read the paper](https://inf.mit.bme.hu/en/research/publications/automated-formal-verification-visual-modeling-languages-model-checking?utm_source=chatgpt.com)
 
 ## 14. Recommended scope for an initial implementation
 
-If the goal is to design a practical visual programming language rather than a general-purpose graph rewriting research platform, I would start with the following scope:
+If the goal is to design a practical visual programming language rather than a general-purpose graph rewriting research platform, a suitable starting point is the following scope:
 
 1. A typed graph schema with explicit node and port definitions.
 2. Declarative connection rules, including direction and cardinality.
@@ -646,6 +604,6 @@ If the goal is to design a practical visual programming language rather than a g
 7. Incremental validation, tested against full recomputation.
 8. A compilation gate that independently verifies required invariants.
 
-Only then would I add generic type inference, extensible graph grammars, formal verification of rewriting rules, or sophisticated automated repairs.
+Only then would the author add generic type inference, extensible graph grammars, formal verification of rewriting rules, or sophisticated automated repairs.
 
 The key design principle is to make the graph's legal structure explicit, make validation rules independently testable, and treat every edit as a change that may invalidate dependent facts. That provides a strong foundation for both a responsive editor and a formally well-defined programming language.

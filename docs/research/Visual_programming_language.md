@@ -246,17 +246,15 @@ Many modern video games make use of behavior trees, which are in principle a fam
 
 ---
 
-> ChatGPT prompt: I'm doing research on Visual Programming Languages. This is a copy of the Wikipedia article on it. Can you expand on it?
-
 # Visual Programming Languages: An Expanded Research Guide
 
-Your Wikipedia snapshot is a useful starting point because it covers the major families of visual programming languages (VPLs), from educational block coding to scientific simulation, game development, multimedia, and business automation. The most productive next step is to go beyond the list of tools and examine what makes a visual language a programming language, how its computational models differ, why some visual approaches scale better than others, and what a general-purpose visual language would need to succeed.
+the Wikipedia snapshot is a useful starting point because it covers the major families of visual programming languages (VPLs), from educational block coding to scientific simulation, game development, multimedia, and business automation. The most productive next step is to go beyond the list of tools and examine what makes a visual language a programming language, how its computational models differ, why some visual approaches scale better than others, and what a general-purpose visual language would need to succeed.
 
-I'll use the article as the foundation, preserve its main distinctions, and expand it with computer science concepts, historical context, design analysis, and research questions. I'll distinguish additional analysis from claims made explicitly in the article.
+the author'll use the article as the foundation, preserve its main distinctions, and expand it with computer science concepts, historical context, design analysis, and research questions. the author'll distinguish additional analysis from claims made explicitly in the article.
 
 ## 1. What is a visual programming language?
 
-The central idea is simple: a visual programming language represents programs through graphical structures that users manipulate directly, rather than relying exclusively on textual source code. Your article identifies three broad forms:
+The central idea is simple: a visual programming language represents programs through graphical structures that users manipulate directly, rather than relying exclusively on textual source code. the article identifies three broad forms:
 
 - Icon-based languages: icons represent operations, objects, or actions.
 - Form-based languages: users configure structured fields, properties, and relationships.
@@ -264,15 +262,11 @@ The central idea is simple: a visual programming language represents programs th
 
 These categories overlap. A single environment might use blocks to express control flow, forms to configure parameters, and a node graph to process data.
 
-[What Is Scratch Online at Adrienne Maldonado blog](https://images.openai.com/static-rsc-4/HjI93ptH9OiXUzYrtQOE4BppMUKXy_HaaBuZZjPJyvGmanovvU_T49rtZv86Bob-BXBS9-PCT5zizk-18n_fpbfQ4Jm-Ii8OZBjXQFBmyY2AinflB9JICyT0d3JLunf57y-yPeVpw4WzRLWfAy4d2rs-Vyde4OPjLfnEeGwoWaI?purpose=inline)
-
 Block-based programming
 
 Programs are assembled from interlocking blocks representing operations, conditions, loops, and other language constructs. The block shapes can constrain which elements fit together.
 
 Example: Scratch and Blockly.
-
-[how to make an if statement? - Getting Started & Setup - Epic Developer Community Forums](https://images.openai.com/static-rsc-4/LnkHJXRxoXunZTCvst6Ybjg9HWYULz5G6w2jBIreU7G_QgZMZWV91W6rzLid-DLysNtmuCoPS1NoZt7pZcgoRfgjJakYOSZA14wx0fWe4KT1TkcyCjl3jNSyMBFH8Pao5WWOLIbi35LBDK7kiFViUGyQogcOMN--8cntGtb955s?purpose=inline)
 
 Node-based programming
 
@@ -280,15 +274,11 @@ Nodes represent operations, functions, or stateful components. Connections expre
 
 Example: Unreal Engine Blueprints.
 
-[PPT - LabVIEW and MatLab PowerPoint Presentation, free download - ID:6707374](https://images.openai.com/static-rsc-4/tRb94cag71X0-9bu84mnaBnBbbvGzRRd7JQC875aE22sAYrZgKBZKIwBmqyf8swLak9d80KqJ4GO2aiimkPJrE2FpBsIl0HOBVM4sA7QUN_zePOMtIx7oNElyIdKkHhPDTezz16ilwD54PRXGjqsI91DhUtpTpW3faGvu4Gn4Yo?purpose=inline)
-
 Dataflow programming
 
 A program is described through dependencies between values and operations. An operation can execute when its required inputs become available, depending on the language's execution rules.
 
 Example: LabVIEW.
-
-[Control Tutorials for MATLAB and Simulink - Suspension: Simulink Modeling](https://images.openai.com/static-rsc-4/KBfTxqrkUrSIbUyJZR6gVOyM8Ufi-zZki_wP0dj2d8RisDv-sZGR3eZ_HZ5_QKUNAypJQcQpf2yKp9U7i2nJe35a1-9IWb6N8b3dmA8TDvrWAmeq1924SuOoll_5nUObxvf6vhSY6JGX_G6VgLmIt23BeFjpvKXwNGxKpuf9yV4?purpose=inline)
 
 Model- and diagram-based programming
 
@@ -314,9 +304,9 @@ This clarifies the Wikipedia article's distinction between languages such as Scr
 
 ## 2. The three levels of visual programming: syntax, semantics, and pragmatics
 
-One of the most useful ideas in your Wikipedia article is its distinction between syntax, semantics, and pragmatics. These are not just abstract terminology; they provide a framework for evaluating whether a visual language is well designed.
+One of the most useful ideas in the Wikipedia article is its distinction between syntax, semantics, and pragmatics. These are not just abstract terminology; they provide a framework for evaluating whether a visual language is well designed.
 
-Syntax — Can I construct a valid program?
+Syntax — Can the author construct a valid program?
 
 Visual languages can enforce structural rules through block shapes, connection types, required inputs, and restricted placement. A Boolean value, for example, might fit into a condition socket but not into a connection that expects an executable statement.
 
@@ -340,13 +330,9 @@ Interlocking blocks may prevent syntax errors, but they cannot prevent a program
 
 This suggests a useful design principle: a good VPL should not merely constrain construction. It should also communicate meaning and make program behavior observable.
 
-The article's discussion of immediate feedback and online debugging is particularly relevant here. Research into visual programming has long examined program comprehension, construction, and debugging as separate problems; the evidence does not establish that every visual representation improves all three equally.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://www.sciencedirect.com\&sz=32)
+The article's discussion of immediate feedback and online debugging is particularly relevant here. Research into visual programming has long examined program comprehension, construction, and debugging as separate problems; the evidence does not establish that every visual representation improves all three equally.
 
 ScienceDirect+1
-
-
 
 ## 3. A deeper taxonomy: visual notation is not the same as computational model
 
@@ -363,15 +349,11 @@ A visual language may use a graph as its representation but implement imperative
 
 ### Major computational models
 
-[5. Tracing Code and Cannonball Motion (Repeat Until) — Computer Science 20 Saskatchewan](https://images.openai.com/static-rsc-4/zrfkFe7KLufyvaeaSK6i3Osqg-KFY1B0TJ046Cj_cQ7j8XdvNTG3byJyyGyIPXfe0oO-aJtq7oJ9fVdf2DIfoMZX4WYvw92yYV0h9ZzRNbzHAfZFXkEcQNnUwuwud6PZ1RleeQhKcJ9d1-OhQe8XhqDb8X4jEW_JGo7wx-1KbkY?purpose=inline)
-
 Imperative and control-flow programming
 
 Instructions express actions and decisions. Loops, branches, function calls, and explicit execution paths determine what happens next.
 
 Typical examples: Scratch scripts, executable flowcharts, Unreal Engine execution wires.
-
-[Filter Forge - Announcing Ultraforge - Node-Based Programming](https://images.openai.com/static-rsc-4/fq1jtrDJEn-UW1mCtzchXyusbwf4uT-vQiIPAy-24GlaRj5qB5V4VoK96wzMSAE0hxL_j9FhLvGp_9zW5hfukbQvg4gbvmjWi3_XXTjoJIjpX-w2L7dCecq4nc_3hi-hsX1Y2vBcjdHpaIZEzI2_fWyEzrX0K28QGbZiNjW4f7Y?purpose=inline)
 
 Dataflow programming
 
@@ -379,15 +361,11 @@ Operations are connected by dependencies between inputs and outputs. An operatio
 
 Typical examples: LabVIEW diagrams and many scientific or multimedia node systems.
 
-[Creating the StopWatch state machine - Magic Alf Analyst 19.0 LTR SP4 - No Magic Product Documentation](https://images.openai.com/static-rsc-4/G2eGfZWlXc1_1cQEFInIaMji36LamSSSJZc1Ng7bvqoXuKso2TN4UKahCNHL79baHtX2xgiLljpyUTFnJxneC-wTY25hU8bRs_X0wC0xUV55GxvxiB5Qq5ic2PT9eqkFJjTpZoHGvK2mr4aNpGA4DcMBpWNJ1lbLHbJQcahQY6Q?purpose=inline)
-
 State-machine programming
 
 The program is modeled as a set of states and transitions. Events, conditions, or actions determine when the system changes state.
 
 Typical examples: Stateflow, industrial controllers, and game AI state machines.
-
-[On Mouse Up node | Visual Scripting | 1.8.0](https://images.openai.com/static-rsc-4/Do8XIf1Iup3gKGWEANIL39Yk0sZtY5nPEL1QXTqlarojW9zwWZo83lStj7zdx-QotPXNELTZed6qII-rtCUNykAZEkq1dnas5O4c821rYFiAeIMnrECugUmZtmIjR1lsrzf-obyK1420Y7C_7qqN4YDqWuHb7VT1OBOsouimJuk?purpose=inline)
 
 Event-driven programming
 
@@ -395,15 +373,11 @@ Behavior is organized around events such as button presses, collisions, messages
 
 Typical examples: game scripting, GUI automation, and interactive application development.
 
-[Tutorial 25: Tracking the Position of a Color in a Movie -  Max 8 Documentation](https://images.openai.com/static-rsc-4/J-b2qJcK3Tg8LhsWoglgGH24Fc7G57RioTxWnMLvqzvNj07U7ynZ3MblZ5VB7x5r8EhX5JlRlbRKDjZsvgmzNBgzcFQva84XpTI6VJyjiHhQOkg3BzhLE2ANocDj-VxHtXLnMRUHcvT06CuOxROY9OVaBGlmYmK1ejEM0e2Wj8M?purpose=inline)
-
 Reactive and streaming programming
 
 Computation responds to changing values or streams of events. The semantics must define update propagation, ordering, and what happens when inputs change.
 
 Typical examples: signal-processing graphs, multimedia systems, and streaming data workflows.
-
-[Build your software visually based on nodes](https://images.openai.com/static-rsc-4/sCAMuGtC5rjMoOIl3LILJMhIi61bF9g-SLZrLCsaDGas9GMNOJ6zrDGcYGakOT0pMmD_zD4cuPaxL9lnoWrYky7T4hAZ486kfn5JXhIsNLmS9epqlmpd2MujnulFPa0vWFAIa6YidA-2u6JKAOijsPES78KjfAz3EacNZbY7wZ0?purpose=inline)
 
 Constraint-based and declarative programming
 
@@ -445,103 +419,73 @@ This representation can make data transformations easier to inspect. It also rai
 - Can independent operations execute in parallel?
 - What happens when a node fails or an input is missing?
 
-These are semantic questions, not merely visual-design questions. The classic literature on dataflow languages identifies a broad range of design alternatives and unresolved implementation issues.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://www.sciencedirect.com\&sz=32)
+These are semantic questions, not merely visual-design questions. The classic literature on dataflow languages identifies a broad range of design alternatives and unresolved implementation issues.
 
 ScienceDirect+1
-
-
 
 ## 4. Historical development: why visual programming evolved into many different fields
 
 Visual programming is not a recent invention, nor is it simply a teaching technique. Its development reflects several different attempts to make computation easier to construct, inspect, and communicate.
 
-[The Tremendous VR and CG Systems—of the 1960s - IEEE Spectrum](https://images.openai.com/static-rsc-4/eklTuuHOuM92VES7PLNn7db_IPfblaPLzHrOBCt466B5zKKvpFVqgfdQKEL7UzWu1fb_QQ1PcbiOqeO7I0llFaMvJzjfhlXldgVOn2XNJLIXQjyVsWB0znTesK0959KZsjedHAQ-euVmzrO5SRkIxen7blbogLXaxKYvJ91ERyM?purpose=inline)
-
 1960s–1970s: Interactive graphics and direct manipulation
 
 Early graphical computing systems demonstrated that users could interact with structured visual objects instead of treating the computer as a purely textual interface. Sketchpad is an important landmark in this broader history, although graphical interaction itself is not necessarily visual programming.
-
-[12 Visual Programming PL Visual Programming Roadmap Terminology](https://images.openai.com/static-rsc-4/qkyRLDbBsJ6pXMqHf9sK4BvjOluImQKZ1eINYUdqmM2vMcnyre6iEhGKJn0qXB5bv3al1VYgLPDsnOgMDrAQUW-gs9SWB-yY_PUSitnfcSudwaR0J1cnbCRdEfsGHhsvhKJMif8R1_dPzuxOVgWdv0JDLF7MflcVykKlU4H7LeM?purpose=inline)
 
 1970s–1980s: Graphical representations of computation
 
 Research explored representing procedures, objects, constraints, and algorithms directly through graphical structures. These projects established many questions that remain relevant: how to encode meaning visually, how to modify a program through direct manipulation, and how to keep a representation understandable.
 
-[PPT - Lesson 2 Navigating LabVIEW PowerPoint Presentation, free download - ID:2673314](https://images.openai.com/static-rsc-4/OLsUmtGPgiK3RxxH3MuD0zwjQawBEEUDXjjeWAMV6N8lUkku6a2xoIDRgJqQDFy0w7gbZ3gIkZXjMjIp5zy6rUCVA5JEf1OY5-6O2HhtXl4MhaANRJr_iUwyf9JBANcDM44B0liMIRxM_UMVnpRXtR43ubM2RZ9qDzKNx-dglP0?purpose=inline)
-
 1980s–1990s: Engineering, instrumentation, and modeling
 
 Visual programming found enduring roles in scientific computing, test instrumentation, process control, signal processing, and system simulation. In these domains, diagrams often map naturally to the systems engineers already reason about.
-
-[Coding Jadi Menyenangkan! Kenalan Yuk Sama Scratch Halaman 1 - Kompasiana.com](https://images.openai.com/static-rsc-4/esaBzHYAT1I9R3tBvtJrwKIW3HFC17xd7F2ADLuPxCBra7tYQzttJ6InoRnd19Jsdcyg5gRW5OUPMydq8IgTiK83opyyiQrWQLVIe15zROPk0LygnulJogjdh2amKmiC0uUGwa2PdwA_G-Y5eomx_pQ9HIBRS42CMU4edYTpa7A?purpose=inline)
 
 1990s–2010s: Education and accessible authoring
 
 Systems such as Scratch and Alice emphasized learning through construction, animation, storytelling, and interactive projects. Later web-based editors made these systems easier to distribute and embed in other applications.
 
-[How can I move all actors? - Blueprint - Epic Developer Community Forums](https://images.openai.com/static-rsc-4/dygEKdfTSZyZ05z-GO2E6kWO6wc6UvzfGZhYSxDap4G4G7A3CVYPMCoL0iDPPSN4S5TauS5BjPiHY0CwXDjcBPTBEpi2MJi0pxWzwBAeBuVWW3LVL6QGGFTJ2u7__IGhZCBW0tWvEI2Vx3YyOmRNBPx15np1PYrnWEw3nvBkyYw?purpose=inline)
-
 2010s–2020s: Integrated production environments
 
 Visual scripting became a standard feature of many game engines, multimedia tools, automation platforms, and application builders. These systems increasingly operate alongside textual programming rather than attempting to replace it completely.
 
-[AI-Native Tool Development | Domain-Specific AI Integration | EclipseSource](https://images.openai.com/static-rsc-4/ZRyQrBkMpMuvUzeHNwmiOvbFEB4GKjhfrYu0cRMSaF6vOndsFlOBVeQcqBirq2R9kPorRFHxEqbI7pnDgPnwKNbsoLhAGYhyaWVZrbxdsVsNE7zZ0icfCWpUHTbAVpfWjvZfDNEXdH_g6L8vf4zbEjG06Dr9o2tRcaSgaxdrVmc?purpose=inline)
-
 2020s onward: Interoperability and AI-assisted development
 
-Current research is exploring how visual programs can be generated, interpreted, repaired, and transformed by AI systems. This creates new challenges because visual programs encode relationships and structural constraints that can be lost when graphs are flattened into text.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://www.sciencedirect.com\&sz=32)
+Current research is exploring how visual programs can be generated, interpreted, repaired, and transformed by AI systems. This creates new challenges because visual programs encode relationships and structural constraints that can be lost when graphs are flattened into text.
 
 ScienceDirect
 
-
-
 This timeline is a high-level synthesis, not a claim that every field progressed in a single linear sequence. Visual programming developed along several overlapping paths, with education, engineering, computer graphics, and software development influencing one another.
 
-For deeper historical research, two useful starting points are Brad Myers's taxonomy of visual programming, programming by example, and program visualization, and the Berkeley survey by Marat Boshernitsan and Michael Downes. Both help separate related ideas that are often conflated.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://explore.metascienceobservatory.org\&sz=32)
+For deeper historical research, two useful starting points are Brad Myers's taxonomy of visual programming, programming by example, and program visualization, and the Berkeley survey by Marat Boshernitsan and Michael Downes. Both help separate related ideas that are often conflated.
 
 Meta Science Observatory+1
-
-
 
 ## 5. Where visual programming is used — and why
 
 The Wikipedia article's extensive list becomes more meaningful when organized around the kinds of problems each language is designed to express.
 
-| Domain                | Typical visual representation                  | Why it fits                                                                           |
+| Domain | Typical visual representation | Why it fits |
 | --------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------- |
-| Education             | Interlocking blocks, scripts                   | Reduces syntax overhead and supports experimentation                                  |
-| Game development      | Event graphs, execution graphs, state machines | Makes interactions, triggers, and gameplay logic inspectable                          |
-| Scientific computing  | Dataflow graphs, equations, model diagrams     | Exposes transformations and dependencies                                              |
-| Industrial automation | Ladder diagrams, function blocks, state charts | Corresponds to control systems and industrial processes                               |
-| Multimedia            | Signal graphs, effect chains, timelines        | Represents audio, video, and time-dependent transformations                           |
-| 3D modeling and VFX   | Node graphs and procedural networks            | Supports reusable, composable transformations                                         |
-| Data engineering      | Directed graphs and pipelines                  | Shows how data is acquired, transformed, and delivered                                |
-| Business applications | Forms, workflow diagrams, visual rules         | Lets domain specialists specify processes without writing every implementation detail |
-| Robotics and IoT      | Blocks, event handlers, dataflow graphs        | Connects sensors, decisions, actuators, and external systems                          |
+| Education | Interlocking blocks, scripts | Reduces syntax overhead and supports experimentation |
+| Game development | Event graphs, execution graphs, state machines | Makes interactions, triggers, and gameplay logic inspectable |
+| Scientific computing | Dataflow graphs, equations, model diagrams | Exposes transformations and dependencies |
+| Industrial automation | Ladder diagrams, function blocks, state charts | Corresponds to control systems and industrial processes |
+| Multimedia | Signal graphs, effect chains, timelines | Represents audio, video, and time-dependent transformations |
+| 3D modeling and VFX | Node graphs and procedural networks | Supports reusable, composable transformations |
+| Data engineering | Directed graphs and pipelines | Shows how data is acquired, transformed, and delivered |
+| Business applications | Forms, workflow diagrams, visual rules | Lets domain specialists specify processes without writing every implementation detail |
+| Robotics and IoT | Blocks, event handlers, dataflow graphs | Connects sensors, decisions, actuators, and external systems |
 
 The following examples from the article illustrate different design strategies.
 
 ### Education: Scratch, Snap!, and Blockly
 
-[SB3 Extensão de Arquivo | O que é um arquivo .SB3 e como abri-lo](https://images.openai.com/static-rsc-4/CCYma5ELZgODdLc_4im-lH0QSgX7zk0LIBZjR98BWRWXGaOduTUnhoQlrCt7g0aFURfa9kmVWJDl9Wvobk6opb4YapJ5Ywiq1ZkBm8wUGqHLMf7ADKdR1plDd3E3N5pY-Ytto_N9xpHUUdqBNOmfZFPdYuv1DLWbhBkS4ef2zf8?purpose=inline)
-
 Scratch
 
 A block-based environment for interactive stories, animations, games, and educational projects. Its visual structure helps introduce sequences, loops, conditions, events, variables, and abstraction.
 
-[Snap - Game Development eLC-V](https://images.openai.com/static-rsc-4/SusE7ce9uRwOtbd_H1ZNEngeL9T3A7ShVDCdymbW8asPdqOntd5s5Ko59AJ5XAUIUCyrPjrLBLTAsPznozu11NF0Kup-9ALIbAdKyit4H9tOvowB3YpduxW6zBxi6AmwKk9RGR5jZpIqzIqdeoQ0059QvLRTfeCaO5CikcJzg5M?purpose=inline)
-
 Snap!
 
 Extends the block-based approach with concepts including first-class procedures and lists. It illustrates that visual programming need not be limited to simple introductory constructs.
-
-[Cores de bloco  |  Blockly  |  Google for Developers](https://images.openai.com/static-rsc-4/ZJXKQcHwY8RQQo7yg-wZ408a62TLZmkSQEbn_N17Y1oqOerOKPjNb7_u4yYQQyZ96AIkhaoSy-F_aI5z17ADUtltyJkzeoL9uQjngawHzlDxOM6tYoc9UyrnAro4A68GUtzPGGap9qhGu9a4NFcbNWf5aHUq43FJlMBODyvhzGw?purpose=inline)
 
 Blockly
 
@@ -549,23 +493,15 @@ A library for building block-based programming editors. Unlike a complete progra
 
 A key research question is whether the skills learned through blocks transfer to other programming paradigms. Block-based systems can provide a gentler introduction to concepts, but the transition to text also involves learning different workflows, syntax, debugging practices, and ways of navigating code.
 
-A 2021 meta-analysis examined 29 empirical studies of block-based programming and found a statistically significant positive overall effect on student learning achievement, with reported effect sizes varying across educational contexts and interventions. This supports the value of block-based instruction, but does not demonstrate that visual programming is universally superior to textual programming.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://doi.org\&sz=32)
+A 2021 meta-analysis examined 29 empirical studies of block-based programming and found a statistically significant positive overall effect on student learning achievement, with reported effect sizes varying across educational contexts and interventions. This supports the value of block-based instruction, but does not demonstrate that visual programming is universally superior to textual programming.
 
 DOI
 
-
-
 ### Game development: visual scripting as production infrastructure
-
-[Blueprint classları | Unreal Engine Türkiye](https://images.openai.com/static-rsc-4/Ht6GqosWHWR5z86gTs1WHNRpzK3VYl9nSuYU43C9hwhZc05sflOWbubq3mCW-VBLoM6U1CQFy74zudbjN6AX2ihiaHbYlbTvieEBLmvkXuks85X_oPn5K39gTp2WZzx_mGzq7QCqMt4_j2GkX99QIoavtCLA_ueIqgdbHOg31N0?purpose=inline)
 
 Unreal Engine Blueprints
 
 Represents gameplay logic through interconnected nodes, with execution flow and data connections. It is integrated into a production engine rather than being merely an educational exercise.
-
-[グラフ | Visual Scripting | 1.8.0-pre.1](https://images.openai.com/static-rsc-4/evZAHJ4NfiXWdw2vuIGJ14MayvM8ev5dkt9hfTD6qUxFGIR73MJ0wVGrSS8721bm1PCwmc63DMLRlzLrubzszded5Lx1T8brUcP_Hm-36xHtnAyImZGDHzEO-NUM9Db9QM7COkhcsZRfS8RXiGTCJ7P9kSPw5MyDtuceivB2Fdk?purpose=inline)
 
 Unity Visual Scripting
 
@@ -579,19 +515,13 @@ This suggests an important distinction between a language that is easy to start 
 
 ### Scientific and engineering systems
 
-[Data Flow Programming in LabVIEW - Technical Articles](https://images.openai.com/static-rsc-4/9pOBsjBLxV86yPD-bdCliLnxGyb8jCDETJyUOuEznULIpBQQRQ25r-cyYjjCHtn39fzgJ1n1hYGaI_4GzYZj8Df6sHTv2uIgcTGIqr5UL3JUSY8IxsW9LA15qkQWlYAnm4wl2XvyQMGfw2UtMOyt4sDblaK_oHsmmrC9Lp04PYA?purpose=inline)
-
 LabVIEW
 
 Uses graphical dataflow to represent instrumentation, measurement, and engineering computation. Its domain aligns with the need to connect inputs, processing stages, and outputs.
 
-[Adding a Controller and Plant to the Simulink Model | Getting Started with Simulink, Part 2 - MATLAB & Simulink](https://images.openai.com/static-rsc-4/fFTTFgi1CRKQMb-s9gIIBxyXWfwYkw99L-uD-Qy_3U-aGN7yjMWxcVyTkSMkrDuRD_asaKUY9sy9Xppiok5lPHJymI0nZMhcoimgq6xEImimWB5phbiQpTxKUI4l4LI9RznhfRPitmSMnm2_Ri9RMJpRZVz1COLd6TDKuBqXGCU?purpose=inline)
-
 Simulink
 
 Supports modeling and simulation of dynamic systems. Diagrams can express mathematical relationships, signals, feedback loops, and interactions between system components.
-
-[GNURadio — WSDR  documentation](https://images.openai.com/static-rsc-4/cyXa_ltHbuXvKYQGoPF1V2uF3RDBHYZmFBVow7JSkNBfQkSfsXwNzoSM-EoOXKamX28N1DrQE6nnkupjeu7XFBZ5uhHAYwsjm0kM1cjj8OUE0RYMyEpDXuvYaE-_L6JoFnVGVRAvKHGCNo87DMt1-Bwxiu095bMsSqJ3zX4BKDw?purpose=inline)
 
 GNU Radio
 
@@ -601,19 +531,13 @@ These environments illustrate a broader lesson: visual programming is especially
 
 ### Multimedia and procedural content
 
-[- YouTube](https://images.openai.com/static-rsc-4/MYaHDhbWli-OtbLP7STXgtco0aEEBHQJ0Gwx2i2x2bDzzyp1tV-4FwuqTcWvXg4CnEXa_vI8i4Lptmk9PMDSs9H9LIeYHLgRlxEUWKOTylA4fZO4qm75cjwsMP3wTDS5FNIyWwFRT2NVPBhOXU4ayFH5Sj9oXRk-tSyXjh-tDHc?purpose=inline)
-
 TouchDesigner
 
 Uses networks of operators for real-time interactive graphics, video, audio, and generative media.
 
-[Creating Procedural Dice | SideFX](https://images.openai.com/static-rsc-4/aTbtu278zqc94boCkxGNAeGIzKyRz_SbdTAI3uQOcOGZhGd_eKZ6Co2rXttPHsWLBaArXEsdu8XqCOUTNHPEHxSX5NcVesBOoqOIJ9sLgIMlZsXhQNo9EJzJug-0o_g9TKsXcPE8WjnegUuOsEBWvQWs7VGK5ifaV-P4JLmpylo?purpose=inline)
-
 Houdini
 
 Uses procedural networks to construct and transform geometry, effects, simulations, and other production assets.
-
-[3d printing - How to delete / cleanup specific faces and edges using geometry nodes - Blender Stack Exchange](https://images.openai.com/static-rsc-4/v7v-1vlhkGuSllViQhFC94cJPr-ayRIwIJVLT7UJGHs2pnXvYveZ_qBukvLYrX33eG_P8_r7mHoZPBCuIEYic9FxLLIZS-dVhAf4DzkXdINB83zCFXo7w-G729LXZ3wlf56pCcSJhuPQy-3NoASh19fVLWYzgEoILQKWRPUkLOU?purpose=inline)
 
 Blender Geometry Nodes
 
@@ -625,19 +549,13 @@ This makes visual programming valuable for reproducibility and iteration. Changi
 
 ### Business automation and data integration
 
-[Node-Red flow | Aprendiendo Arduino](https://images.openai.com/static-rsc-4/G3hJh-dfXhZmFcR1PIUJ7Z1kMzXBkL2HZDI5ZC8BOWR6vgAsfObJwLKC14yQhrGp_mpRFY5ExmEOoTCU_Qccq867tuhIXRHu-i5P17gMSGtkLMW-kWgjL9p39HltLNGeHXZHB78KU0vc8VVXBsA6108bYhwPq7M_j2TCGcSDxT4?purpose=inline)
-
 Node-RED
 
 Connects services, devices, messages, and transformations through flows. It illustrates how visual programming can serve as integration infrastructure.
 
-[KNIME Analytics Platform | KNIME](https://images.openai.com/static-rsc-4/7C8w77Rr1YhVNMxbI4mye9SM1A1ZTcQze74Dry093Nx5j911x9dyZ5ISIFIh6d7xb5_gxZOc5SENQN60e43Nj3i-YeGWknbEwo8Uf8ALcyygHbbWKVEo53AV-9Z7Fkc_-qXghm3lC4dO9ZVSpJ9qXxZzLWBAnTZP9X-rM8w1yIc?purpose=inline)
-
 KNIME
 
 Uses node-based workflows for data preparation, analytics, and machine learning pipelines.
-
-[มาทำความรู้จัก alteryx แล้วการทำ Data Analytics จะง่ายกว่าที่คุณคิด | by Chanatip Jeensoontorn | MFEC | Medium](https://images.openai.com/static-rsc-4/ziMQhQvvitqG00RMccDF_Pghtigv-6tdY7fmQhLQW08DMskCaHMPeGX_bC0k7qAq41SVjH4LE3wrlzaLLke-F2BfHs51KcFhJWy4mKBtaGt0rvZrbc1aIkImUKjhoUuUinK9LkjjkTx5Ihixek3IvA2Yu-GSnHCDTT3IDwQ9Rus?purpose=inline)
 
 Alteryx Designer
 
@@ -698,26 +616,22 @@ However, this advantage diminishes if the diagram becomes too large, relies on u
 
 The most important research question is not whether visual programming is good or bad. It is which costs the representation removes, and which costs it introduces.
 
-| Challenge        | Why it matters                                                                  | Possible design response                                        |
+| Challenge | Why it matters | Possible design response |
 | ---------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| Graph complexity | Large programs require extensive navigation and create visual clutter.          | Hierarchical graphs, modules, grouping, semantic zoom           |
-| Spatial overhead | Connections, nodes, and labels occupy screen space.                             | Compact layouts, folding, minimaps, multiple views              |
-| Refactoring      | Moving or restructuring connected components can require many edits.            | First-class functions, abstraction, safe automated rewrites     |
-| Version control  | Graphical files can produce noisy diffs and merge conflicts.                    | Stable identifiers, canonical serialization, semantic diffs     |
-| Debugging        | A valid graph may still encode incorrect behavior.                              | Breakpoints, traces, value inspection, test generation          |
-| Abstraction      | Repeated patterns may become large subgraphs.                                   | Reusable functions, components, libraries, parameterized graphs |
-| Precision        | Textual code can be faster for dense symbolic expressions and repetitive edits. | Embedded expressions, text shortcuts, hybrid editing            |
-| Accessibility    | Color, spatial placement, and drag-and-drop can exclude some users.             | Keyboard navigation, screen-reader semantics, non-color cues    |
-| Portability      | A program may depend on a particular editor or runtime.                         | Open formats, documented semantics, code generation             |
-| Performance      | A visual graph may not map efficiently to the target runtime.                   | Compilation, optimization, profiling, execution planning        |
+| Graph complexity | Large programs require extensive navigation and create visual clutter. | Hierarchical graphs, modules, grouping, semantic zoom |
+| Spatial overhead | Connections, nodes, and labels occupy screen space. | Compact layouts, folding, minimaps, multiple views |
+| Refactoring | Moving or restructuring connected components can require many edits. | First-class functions, abstraction, safe automated rewrites |
+| Version control | Graphical files can produce noisy diffs and merge conflicts. | Stable identifiers, canonical serialization, semantic diffs |
+| Debugging | A valid graph may still encode incorrect behavior. | Breakpoints, traces, value inspection, test generation |
+| Abstraction | Repeated patterns may become large subgraphs. | Reusable functions, components, libraries, parameterized graphs |
+| Precision | Textual code can be faster for dense symbolic expressions and repetitive edits. | Embedded expressions, text shortcuts, hybrid editing |
+| Accessibility | Color, spatial placement, and drag-and-drop can exclude some users. | Keyboard navigation, screen-reader semantics, non-color cues |
+| Portability | A program may depend on a particular editor or runtime. | Open formats, documented semantics, code generation |
+| Performance | A visual graph may not map efficiently to the target runtime. | Compilation, optimization, profiling, execution planning |
 
-A systematic review of visual programming approaches for end-user developers highlighted a particularly important gap: many tools were studied with novices, but relatively few received formal experimental evaluation, and expressiveness was rarely evaluated. The review also identified lifecycle support, learnability, and debugging as areas requiring more attention.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://xplorestaging.ieee.org\&sz=32)
+A systematic review of visual programming approaches for end-user developers highlighted a particularly important gap: many tools were studied with novices, but relatively few received formal experimental evaluation, and expressiveness was rarely evaluated. The review also identified lifecycle support, learnability, and debugging as areas requiring more attention.
 
 IEEE Xplore
-
-
 
 ### A deeper problem: spatial organization can become accidental semantics
 
@@ -733,7 +647,7 @@ Keep program meaning explicit, and make visual organization support that meaning
 
 ## 8. How should a visual programming language be designed?
 
-If your goal is to research VPLs as a field rather than just catalog existing products, this is arguably the most important section.
+If the research goal is to research VPLs as a field rather than just catalog existing products, this is arguably the most important section.
 
 A VPL is simultaneously a language, a visual notation, an editing environment, and often a runtime. A strong design must account for all four.
 
@@ -876,11 +790,11 @@ A persistent structured representation also makes it easier to support multiple 
 
 Not necessarily. There are at least three viable strategies.
 
-| Strategy              | How it works                                                                                 | Main trade-off                                                                                     |
+| Strategy | How it works | Main trade-off |
 | --------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| Direct interpretation | The runtime executes the visual program's internal representation.                           | Straightforward semantic control, but runtime overhead may matter.                                 |
-| Compilation           | The program is translated into machine code, bytecode, or another executable representation. | Enables optimization, but requires a reliable compiler and diagnostics mapping.                    |
-| Code generation       | The program generates source code in another language.                                       | Improves interoperability, but the target language may not preserve all source-language semantics. |
+| Direct interpretation | The runtime executes the visual program's internal representation. | Straightforward semantic control, but runtime overhead may matter. |
+| Compilation | The program is translated into machine code, bytecode, or another executable representation. | Enables optimization, but requires a reliable compiler and diagnostics mapping. |
+| Code generation | The program generates source code in another language. | Improves interoperability, but the target language may not preserve all source-language semantics. |
 
 A hybrid system can support several of these approaches.
 
@@ -911,13 +825,9 @@ Large visual graphs can suffer from:
 
 These problems are not inevitable, but solving them requires language and editor design, not just a better layout algorithm.
 
-Research into general-purpose visual programming has emphasized the need for efficiency comparable to textual development environments. Envision, for example, explicitly pursued general-purpose software development and efficient visual representations.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://www.pm.inf.ethz.ch\&sz=32)
+Research into general-purpose visual programming has emphasized the need for efficiency comparable to textual development environments. Envision, for example, explicitly pursued general-purpose software development and efficient visual representations.
 
 Programming Methodology Group
-
-
 
 ### A plausible alternative: visual-first, not visual-only
 
@@ -948,13 +858,9 @@ An AI system may generate a graph, explain a program, diagnose a failed connecti
 
 A system that produces a visually plausible graph may still generate an invalid or semantically incorrect program.
 
-A 2026 survey of research on large language models and visual programming identified a mismatch between graph-structured programs and the linearized representations commonly used by AI systems. It also highlighted limited standardization in evaluation.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://www.sciencedirect.com\&sz=32)
+A 2026 survey of research on large language models and visual programming identified a mismatch between graph-structured programs and the linearized representations commonly used by AI systems. It also highlighted limited standardization in evaluation.
 
 ScienceDirect
-
-
 
 ### Promising research directions
 
@@ -984,18 +890,18 @@ This is where a research project can move beyond subjective comparisons such as 
 
 A useful evaluation should measure several independent properties.
 
-| Dimension               | Possible measures                                                                     |
+| Dimension | Possible measures |
 | ----------------------- | ------------------------------------------------------------------------------------- |
-| Learnability            | Time to complete introductory tasks; retention after a delay                          |
-| Construction efficiency | Time, number of interactions, number of corrections                                   |
-| Expressiveness          | Range and complexity of programs that can be represented naturally                    |
-| Comprehension           | Accuracy and speed when explaining an existing program                                |
-| Debuggability           | Time to locate a fault and correctness of the repair                                  |
-| Maintainability         | Cost of extending, refactoring, and understanding larger projects                     |
-| Scalability             | Performance and usability as graph size and complexity increase                       |
-| Reliability             | Frequency of runtime failures and incorrect outputs                                   |
-| Accessibility           | Success with keyboard navigation, assistive technologies, and varied visual abilities |
-| Interoperability        | Fidelity of imports, exports, translations, and version-control operations            |
+| Learnability | Time to complete introductory tasks; retention after a delay |
+| Construction efficiency | Time, number of interactions, number of corrections |
+| Expressiveness | Range and complexity of programs that can be represented naturally |
+| Comprehension | Accuracy and speed when explaining an existing program |
+| Debuggability | Time to locate a fault and correctness of the repair |
+| Maintainability | Cost of extending, refactoring, and understanding larger projects |
+| Scalability | Performance and usability as graph size and complexity increase |
+| Reliability | Frequency of runtime failures and incorrect outputs |
+| Accessibility | Success with keyboard navigation, assistive technologies, and varied visual abilities |
+| Interoperability | Fidelity of imports, exports, translations, and version-control operations |
 
 These measures should not be collapsed into a single “ease of use” score. A language might be excellent for novice construction but poor for refactoring, or highly expressive but difficult to learn.
 
@@ -1019,17 +925,13 @@ Tasks might include:
 
 The experiment should distinguish interface familiarity from the effect of the representation itself. It should also report participant backgrounds, task complexity, and uncertainty in the results.
 
-This is especially important because visual-programming research has historically contained gaps in rigorous empirical evaluation. The systematic review of end-user visual programming approaches and earlier reviews of visual programming effectiveness both provide useful starting points for understanding these methodological challenges.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://xplorestaging.ieee.org\&sz=32)
+This is especially important because visual-programming research has historically contained gaps in rigorous empirical evaluation. The systematic review of end-user visual programming approaches and earlier reviews of visual programming effectiveness both provide useful starting points for understanding these methodological challenges.
 
 IEEE Xplore+1
 
-
-
 ## 13. A practical framework for comparing languages
 
-You can use the following interactive framework to classify a VPL you encounter. The categories are deliberately independent: a system may be node-based, dataflow-oriented, statically typed, and intended for professional developers at the same time.
+The system can use the following interactive framework to classify a VPL you encounter. The categories are deliberately independent: a system may be node-based, dataflow-oriented, statically typed, and intended for professional developers at the same time.
 
 ## VPL classification worksheet
 
@@ -1105,7 +1007,7 @@ Educational
 
 Automation and integration
 
-### Your classification
+### the classification
 
 Representation: Hybrid
 
@@ -1119,7 +1021,7 @@ Typing: Static
 
 Scope: General-purpose
 
-&#x20;Copy profile
+ Copy profile
 
 For a serious comparative study, extend this worksheet with module systems, concurrency, persistence, debugging support, code generation, portability, accessibility, and empirical evidence of usability and expressiveness.
 
@@ -1127,7 +1029,7 @@ For a serious comparative study, extend this worksheet with module systems, conc
 
 The Wikipedia article is a broad catalog, but the following sources are more useful for developing a rigorous research foundation.
 
-1\. Myers — Visual Programming, Programming by Example, and Program Visualization: A Taxonomy (1986)
+1. Myers — Visual Programming, Programming by Example, and Program Visualization: A Taxonomy (1986)
 
 A foundational taxonomy that helps separate visual programming from related techniques such as programming by example and program visualization.
 
@@ -1135,7 +1037,7 @@ Best for: terminology, conceptual foundations, and history.
 
 [Read publication details](https://doi.org/10.1145/22339.22349?utm_source=chatgpt.com)
 
-2\. Boshernitsan and Downes — Visual Programming Languages: A Survey (2004)
+2. Boshernitsan and Downes — Visual Programming Languages: A Survey (2004)
 
 Reviews a broad range of visual programming approaches, their development history, and the different problems they address.
 
@@ -1143,7 +1045,7 @@ Best for: building a conceptual map of the field.
 
 [Read Berkeley technical report](https://www2.eecs.berkeley.edu/Pubs/TechRpts/2004/6201.html?utm_source=chatgpt.com)
 
-3\. Visual Languages and Computing Survey: Data Flow Visual Programming Languages (1992)
+3. Visual Languages and Computing Survey: Data Flow Visual Programming Languages (1992)
 
 Examines design alternatives, strengths, and unresolved issues in dataflow-based visual languages.
 
@@ -1151,7 +1053,7 @@ Best for: execution semantics and computational models.
 
 [Read publication details](https://doi.org/10.1016/1045-926X\(92\)90034-J?utm_source=chatgpt.com)
 
-4\. Visual Programming Languages and the Empirical Evidence For and Against (1997)
+4. Visual Programming Languages and the Empirical Evidence For and Against (1997)
 
 Reviews empirical evidence concerning the benefits and limitations of visual approaches.
 
@@ -1159,7 +1061,7 @@ Best for: methodology and evaluating claims about usability.
 
 [Read publication details](https://doi.org/10.1006/jvlc.1996.0030?utm_source=chatgpt.com)
 
-5\. Characterizing Visual Programming Approaches for End-User Developers: A Systematic Review (2021)
+5. Characterizing Visual Programming Approaches for End-User Developers: A Systematic Review (2021)
 
 Surveys tools, target audiences, interaction styles, evaluation methods, accessibility, and open research problems.
 
@@ -1167,7 +1069,7 @@ Best for: modern applications and research gaps.
 
 [Read open-access publication](https://doi.org/10.1109/ACCESS.2021.3051043?utm_source=chatgpt.com)
 
-6\. Large Language Models for Visual Programming Languages: A Systematic Analysis of Representation, Constraints, and Tasks (2026)
+6. Large Language Models for Visual Programming Languages: A Systematic Analysis of Representation, Constraints, and Tasks (2026)
 
 Examines AI approaches to graph-structured visual programs, their representations, and the challenges of preserving program structure.
 
@@ -1177,7 +1079,7 @@ Best for: current research at the intersection of VPLs and AI.
 
 ## 15. A proposed research agenda
 
-If I were turning this expanded overview into a sustained research project, I would organize it around six questions.
+For turning this expanded overview into a sustained research project, the testing plan should organize it around six questions.
 
 1. Representation and cognition: Under what conditions do graphs, blocks, diagrams, and text improve program comprehension? How do experience, task complexity, and familiarity change the results?
 2. Expressiveness and scalability: Which language features become awkward in visual form, and which benefit from spatial representation? Can hierarchical and hybrid views overcome these limits?

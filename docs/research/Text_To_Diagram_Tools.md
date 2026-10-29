@@ -8,8 +8,6 @@ The deeper research question is not merely how these tools draw diagrams. It is 
 
 ## 1. The major tools
 
-[mermaid-isomorphic in mcp-mermaid codebase.](https://images.openai.com/static-rsc-4/xChRFCpPiM6LGj7MZrgsLMZrWRHl4gjuXafGaKUQXZ3oLx2UZyPW2V85P76MOU-j8Q2WZ6gtEPtjTfPpGqR_wyUneSEsIf_3LebiF5FFV2aCUJJDhGDXr5GNdWm07SpiInLNjNet-NWsnlSLrOD5vUtVHeMa3UbdwfAgX1XcC8o?purpose=inline)
-
 Mermaid
 
 Website: [mermaid.js.org](https://mermaid.js.org/?utm_source=chatgpt.com)
@@ -18,8 +16,6 @@ A JavaScript-based diagramming system with concise syntax for flowcharts, sequen
 
 Design emphasis: easy authoring and convenient embedding in prose.
 
-[PlantUML Web Server](https://images.openai.com/static-rsc-4/eMw-6tNoKLdPMverWb-y4wKfbX-LvI56YC7eAe0gFo_em8qITPEqQ5TReVq6y0aDG_NOtrlxF1fdGZYBlbPFzm6jldxpsjruWdlKGP_DpNO5LXLg9uo4DrEs0ZL-5-eMa3hW6Urk1PyA08BZ5Bv-ujHPeCM4lARbEoOHHUMdg_Y?purpose=inline)
-
 PlantUML
 
 Website: [plantuml.com](https://plantuml.com/?utm_source=chatgpt.com)
@@ -27,8 +23,6 @@ Website: [plantuml.com](https://plantuml.com/?utm_source=chatgpt.com)
 A mature text-driven diagram generator with extensive UML support, including sequence, class, component, deployment, activity, and state diagrams. It also supports non-UML diagrams and integrates with documentation and development workflows.
 
 Design emphasis: expressive modeling conventions and established software-engineering diagrams.
-
-[Diagram as Code en 2025 : Le repas de famille des outils - DEV Community](https://images.openai.com/static-rsc-4/b_iL4om0z7-9g1o7zDSM5KK6PZqAxkAZ3RfMCszpc3tBCYJAXvQFaqcipXpbhHfS9t6OSe9-NzNVcaoy9mv_3pfg1WoM8IkRvouudp-jOWIQMWbj9sRfJJYHovSsaOjo2EnKoDTal4DG7kbJrcPICs5v3WvDYtN9zxJmfAqAxcI?purpose=inline)
 
 D2
 
@@ -46,23 +40,23 @@ Other useful comparison points include Graphviz's DOT language, Structurizr DSL 
 
 The basic architecture resembles a compiler pipeline. A textual source language is parsed into a structured representation, transformed into a graph or diagram model, laid out geometrically, and finally rendered.
 
-1\. Source text
+1. Source text
 
 Identifiers, edges, labels, styles, declarations
 
-2\. Lexing and parsing
+2. Lexing and parsing
 
 Tokens, grammar rules, syntax validation
 
-3\. Intermediate representation (IR)
+3. Intermediate representation (IR)
 
 Nodes, edges, attributes, groups, semantic types
 
-4\. Layout engine
+4. Layout engine
 
 Positions, routing, spacing, hierarchy
 
-5\. Renderer
+5. Renderer
 
 SVG, HTML, PNG, or another output format
 
@@ -72,7 +66,7 @@ This is a conceptual architecture rather than an assertion that every tool uses 
 
 Consider this Mermaid flowchart:
 
-\#chatgpt-mermaid-\_r_8g3\_{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;font-size:16px;fill:rgb(13, 13, 13);}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#chatgpt-mermaid-\_r_8g3\_ .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#chatgpt-mermaid-\_r_8g3\_ .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#chatgpt-mermaid-\_r_8g3\_ .error-icon{fill:rgb(243, 243, 243);}#chatgpt-mermaid-\_r_8g3\_ .error-text{fill:rgb(13, 13, 13);stroke:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_ .edge-thickness-normal{stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_ .edge-thickness-thick{stroke-width:3.5px;}#chatgpt-mermaid-\_r_8g3\_ .edge-pattern-solid{stroke-dasharray:0;}#chatgpt-mermaid-\_r_8g3\_ .edge-thickness-invisible{stroke-width:0;fill:none;}#chatgpt-mermaid-\_r_8g3\_ .edge-pattern-dashed{stroke-dasharray:3;}#chatgpt-mermaid-\_r_8g3\_ .edge-pattern-dotted{stroke-dasharray:2;}#chatgpt-mermaid-\_r_8g3\_ .marker{fill:rgb(143, 143, 143);stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8g3\_ .marker.cross{stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8g3\_ svg{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;font-size:16px;}#chatgpt-mermaid-\_r_8g3\_ p{margin:0;}#chatgpt-mermaid-\_r_8g3\_ .label{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_ .cluster-label text{fill:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_ .cluster-label span{color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_ .cluster-label span p{background-color:transparent;}#chatgpt-mermaid-\_r_8g3\_ .label text,#chatgpt-mermaid-\_r_8g3\_ span{fill:rgb(13, 13, 13);color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_ .node rect,#chatgpt-mermaid-\_r_8g3\_ .node circle,#chatgpt-mermaid-\_r_8g3\_ .node ellipse,#chatgpt-mermaid-\_r_8g3\_ .node polygon,#chatgpt-mermaid-\_r_8g3\_ .node path{fill:rgb(222, 234, 251);stroke:rgb(83, 154, 248);stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_ .rough-node .label text,#chatgpt-mermaid-\_r_8g3\_ .node .label text,#chatgpt-mermaid-\_r_8g3\_ .image-shape .label,#chatgpt-mermaid-\_r_8g3\_ .icon-shape .label{text-anchor:middle;}#chatgpt-mermaid-\_r_8g3\_ .node .katex path{fill:#000;stroke:#000;stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_ .rough-node .label,#chatgpt-mermaid-\_r_8g3\_ .node .label,#chatgpt-mermaid-\_r_8g3\_ .image-shape .label,#chatgpt-mermaid-\_r_8g3\_ .icon-shape .label{text-align:center;}#chatgpt-mermaid-\_r_8g3\_ .node.clickable{cursor:pointer;}#chatgpt-mermaid-\_r_8g3\_ .root .anchor path{fill:rgb(143, 143, 143)!important;stroke-width:0;stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8g3\_ .arrowheadPath{fill:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8g3\_ .edgePath .path{stroke:rgb(143, 143, 143);stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_ .flowchart-link{stroke:rgb(143, 143, 143);fill:none;}#chatgpt-mermaid-\_r_8g3\_ .edgeLabel{background-color:rgb(252, 252, 252);text-align:center;}#chatgpt-mermaid-\_r_8g3\_ .edgeLabel p{background-color:rgb(252, 252, 252);}#chatgpt-mermaid-\_r_8g3\_ .edgeLabel rect{opacity:0.5;background-color:rgb(252, 252, 252);fill:rgb(252, 252, 252);}#chatgpt-mermaid-\_r_8g3\_ .labelBkg{background-color:rgba(252, 252, 252, 0.5);}#chatgpt-mermaid-\_r_8g3\_ .cluster rect{fill:rgb(243, 243, 243);stroke:rgba(0, 0, 0, 0.1);stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_ .cluster text{fill:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_ .cluster span{color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_ div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;font-size:12px;background:rgb(243, 243, 243);border:1px solid rgba(0, 0, 0, 0.1);border-radius:2px;pointer-events:none;z-index:100;}#chatgpt-mermaid-\_r_8g3\_ .flowchartTitleText{text-anchor:middle;font-size:18px;fill:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_ rect.text{fill:none;stroke-width:0;}#chatgpt-mermaid-\_r_8g3\_ .icon-shape,#chatgpt-mermaid-\_r_8g3\_ .image-shape{background-color:rgb(252, 252, 252);text-align:center;}#chatgpt-mermaid-\_r_8g3\_ .icon-shape p,#chatgpt-mermaid-\_r_8g3\_ .image-shape p{background-color:rgb(252, 252, 252);padding:2px;}#chatgpt-mermaid-\_r_8g3\_ .icon-shape .label rect,#chatgpt-mermaid-\_r_8g3\_ .image-shape .label rect{opacity:0.5;background-color:rgb(252, 252, 252);fill:rgb(252, 252, 252);}#chatgpt-mermaid-\_r_8g3\_ .label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#chatgpt-mermaid-\_r_8g3\_ .node .label-icon path{fill:currentColor;stroke:revert;stroke-width:revert;}#chatgpt-mermaid-\_r_8g3\_ .node .neo-node{stroke:rgb(83, 154, 248);}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].node rect,#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].cluster rect,#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].node polygon{stroke:url(#chatgpt-mermaid-\_r_8g3\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].swimlane.cluster rect{filter:none;}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].node path{stroke:url(#chatgpt-mermaid-\_r_8g3\_-gradient);stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].node .outer-path{filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].node .neo-line path{stroke:rgb(83, 154, 248);filter:none;}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].node circle{stroke:url(#chatgpt-mermaid-\_r_8g3\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].node circle .state-start{fill:#000000;}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].icon-shape .icon{fill:url(#chatgpt-mermaid-\_r_8g3\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].icon-shape .icon-neo path{stroke:url(#chatgpt-mermaid-\_r_8g3\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8g3\_ .node text{font-size:14px;font-weight:600;letter-spacing:normal;fill:rgb(0, 79, 153);}#chatgpt-mermaid-\_r_8g3\_ .edgeLabels text{font-size:13px;font-weight:600;letter-spacing:-0.08px;fill:rgb(0, 79, 153);}#chatgpt-mermaid-\_r_8g3\_ .node tspan[font-weight="normal"],#chatgpt-mermaid-\_r_8g3\_ .edgeLabels tspan[font-weight="normal"]{font-weight:600;}#chatgpt-mermaid-\_r_8g3\_ .edgeLabel .label rect{opacity:1;rx:13px;ry:13px;fill:rgb(245, 250, 255);stroke:rgb(206, 219, 229);stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_ .node rect,#chatgpt-mermaid-\_r_8g3\_ .node circle,#chatgpt-mermaid-\_r_8g3\_ .node ellipse,#chatgpt-mermaid-\_r_8g3\_ .node polygon,#chatgpt-mermaid-\_r_8g3\_ .node path{fill:rgb(229, 243, 255);stroke:rgba(0, 0, 0, 0.1);stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_ .node rect{rx:16px;ry:16px;}#chatgpt-mermaid-\_r_8g3\_ .mermaid-decision .label-container{fill:rgb(245, 250, 255);stroke:rgb(206, 219, 229);stroke-dasharray:2px,2px;}#chatgpt-mermaid-\_r_8g3\_ .edgePaths .flowchart-link{stroke:rgb(143, 143, 143);stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;}#chatgpt-mermaid-\_r_8g3\_ .marker{fill:rgb(143, 143, 143);stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8g3\_ :root{--mermaid-font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;}ClientAPIDatabase
+\#chatgpt-mermaid-\_r_8g3\_{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;font-size:16px;fill:rgb(13, 13, 13);}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#chatgpt-mermaid-\_r_8g3\_.edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#chatgpt-mermaid-\_r_8g3\_.edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#chatgpt-mermaid-\_r_8g3\_.error-icon{fill:rgb(243, 243, 243);}#chatgpt-mermaid-\_r_8g3\_.error-text{fill:rgb(13, 13, 13);stroke:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_.edge-thickness-normal{stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_.edge-thickness-thick{stroke-width:3.5px;}#chatgpt-mermaid-\_r_8g3\_.edge-pattern-solid{stroke-dasharray:0;}#chatgpt-mermaid-\_r_8g3\_.edge-thickness-invisible{stroke-width:0;fill:none;}#chatgpt-mermaid-\_r_8g3\_.edge-pattern-dashed{stroke-dasharray:3;}#chatgpt-mermaid-\_r_8g3\_.edge-pattern-dotted{stroke-dasharray:2;}#chatgpt-mermaid-\_r_8g3\_.marker{fill:rgb(143, 143, 143);stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8g3\_.marker.cross{stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8g3\_ svg{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;font-size:16px;}#chatgpt-mermaid-\_r_8g3\_ p{margin:0;}#chatgpt-mermaid-\_r_8g3\_.label{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_.cluster-label text{fill:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_.cluster-label span{color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_.cluster-label span p{background-color:transparent;}#chatgpt-mermaid-\_r_8g3\_.label text,#chatgpt-mermaid-\_r_8g3\_ span{fill:rgb(13, 13, 13);color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_.node rect,#chatgpt-mermaid-\_r_8g3\_.node circle,#chatgpt-mermaid-\_r_8g3\_.node ellipse,#chatgpt-mermaid-\_r_8g3\_.node polygon,#chatgpt-mermaid-\_r_8g3\_.node path{fill:rgb(222, 234, 251);stroke:rgb(83, 154, 248);stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_.rough-node.label text,#chatgpt-mermaid-\_r_8g3\_.node.label text,#chatgpt-mermaid-\_r_8g3\_.image-shape.label,#chatgpt-mermaid-\_r_8g3\_.icon-shape.label{text-anchor:middle;}#chatgpt-mermaid-\_r_8g3\_.node.katex path{fill:#000;stroke:#000;stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_.rough-node.label,#chatgpt-mermaid-\_r_8g3\_.node.label,#chatgpt-mermaid-\_r_8g3\_.image-shape.label,#chatgpt-mermaid-\_r_8g3\_.icon-shape.label{text-align:center;}#chatgpt-mermaid-\_r_8g3\_.node.clickable{cursor:pointer;}#chatgpt-mermaid-\_r_8g3\_.root.anchor path{fill:rgb(143, 143, 143)!important;stroke-width:0;stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8g3\_.arrowheadPath{fill:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8g3\_.edgePath.path{stroke:rgb(143, 143, 143);stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_.flowchart-link{stroke:rgb(143, 143, 143);fill:none;}#chatgpt-mermaid-\_r_8g3\_.edgeLabel{background-color:rgb(252, 252, 252);text-align:center;}#chatgpt-mermaid-\_r_8g3\_.edgeLabel p{background-color:rgb(252, 252, 252);}#chatgpt-mermaid-\_r_8g3\_.edgeLabel rect{opacity:0.5;background-color:rgb(252, 252, 252);fill:rgb(252, 252, 252);}#chatgpt-mermaid-\_r_8g3\_.labelBkg{background-color:rgba(252, 252, 252, 0.5);}#chatgpt-mermaid-\_r_8g3\_.cluster rect{fill:rgb(243, 243, 243);stroke:rgba(0, 0, 0, 0.1);stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_.cluster text{fill:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_.cluster span{color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_ div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;font-size:12px;background:rgb(243, 243, 243);border:1px solid rgba(0, 0, 0, 0.1);border-radius:2px;pointer-events:none;z-index:100;}#chatgpt-mermaid-\_r_8g3\_.flowchartTitleText{text-anchor:middle;font-size:18px;fill:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_ rect.text{fill:none;stroke-width:0;}#chatgpt-mermaid-\_r_8g3\_.icon-shape,#chatgpt-mermaid-\_r_8g3\_.image-shape{background-color:rgb(252, 252, 252);text-align:center;}#chatgpt-mermaid-\_r_8g3\_.icon-shape p,#chatgpt-mermaid-\_r_8g3\_.image-shape p{background-color:rgb(252, 252, 252);padding:2px;}#chatgpt-mermaid-\_r_8g3\_.icon-shape.label rect,#chatgpt-mermaid-\_r_8g3\_.image-shape.label rect{opacity:0.5;background-color:rgb(252, 252, 252);fill:rgb(252, 252, 252);}#chatgpt-mermaid-\_r_8g3\_.label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#chatgpt-mermaid-\_r_8g3\_.node.label-icon path{fill:currentColor;stroke:revert;stroke-width:revert;}#chatgpt-mermaid-\_r_8g3\_.node.neo-node{stroke:rgb(83, 154, 248);}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].node rect,#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].cluster rect,#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].node polygon{stroke:url(#chatgpt-mermaid-\_r_8g3\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].swimlane.cluster rect{filter:none;}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].node path{stroke:url(#chatgpt-mermaid-\_r_8g3\_-gradient);stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].node.outer-path{filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].node.neo-line path{stroke:rgb(83, 154, 248);filter:none;}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].node circle{stroke:url(#chatgpt-mermaid-\_r_8g3\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].node circle.state-start{fill:#000000;}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].icon-shape.icon{fill:url(#chatgpt-mermaid-\_r_8g3\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].icon-shape.icon-neo path{stroke:url(#chatgpt-mermaid-\_r_8g3\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8g3\_.node text{font-size:14px;font-weight:600;letter-spacing:normal;fill:rgb(0, 79, 153);}#chatgpt-mermaid-\_r_8g3\_.edgeLabels text{font-size:13px;font-weight:600;letter-spacing:-0.08px;fill:rgb(0, 79, 153);}#chatgpt-mermaid-\_r_8g3\_.node tspan[font-weight="normal"],#chatgpt-mermaid-\_r_8g3\_.edgeLabels tspan[font-weight="normal"]{font-weight:600;}#chatgpt-mermaid-\_r_8g3\_.edgeLabel.label rect{opacity:1;rx:13px;ry:13px;fill:rgb(245, 250, 255);stroke:rgb(206, 219, 229);stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_.node rect,#chatgpt-mermaid-\_r_8g3\_.node circle,#chatgpt-mermaid-\_r_8g3\_.node ellipse,#chatgpt-mermaid-\_r_8g3\_.node polygon,#chatgpt-mermaid-\_r_8g3\_.node path{fill:rgb(229, 243, 255);stroke:rgba(0, 0, 0, 0.1);stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_.node rect{rx:16px;ry:16px;}#chatgpt-mermaid-\_r_8g3\_.mermaid-decision.label-container{fill:rgb(245, 250, 255);stroke:rgb(206, 219, 229);stroke-dasharray:2px,2px;}#chatgpt-mermaid-\_r_8g3\_.edgePaths.flowchart-link{stroke:rgb(143, 143, 143);stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;}#chatgpt-mermaid-\_r_8g3\_.marker{fill:rgb(143, 143, 143);stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8g3\_:root{--mermaid-font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;}ClientAPIDatabase
 
 The parser needs to recognize several different concepts:
 
@@ -82,13 +76,9 @@ The parser needs to recognize several different concepts:
 - `-->` represents directed relationships.
 - The repeated identifier `B` refers to the same node, rather than creating a new node.
 
-The syntax therefore carries both structural information and presentation hints. Mermaid's official documentation describes the separation between node identifiers, labels, links, shapes, and grouping constructs.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://mermaid.js.org\&sz=32)
+The syntax therefore carries both structural information and presentation hints. Mermaid's official documentation describes the separation between node identifiers, labels, links, shapes, and grouping constructs.
 
 Mermaid+1
-
-
 
 ### Stage 2: Constructing a graph
 
@@ -96,17 +86,17 @@ A simplified intermediate representation might be:
 
 ```
 {
-  "kind": "flowchart",
-  "direction": "LR",
-  "nodes": [
-    {"id": "A", "label": "Client", "shape": "rect"},
-    {"id": "B", "label": "API", "shape": "rect"},
-    {"id": "C", "label": "Database", "shape": "cylinder"}
-  ],
-  "edges": [
-    {"from": "A", "to": "B", "directed": true},
-    {"from": "B", "to": "C", "directed": true}
-  ]
+ "kind": "flowchart",
+ "direction": "LR",
+ "nodes": [
+ {"id": "A", "label": "Client", "shape": "rect"},
+ {"id": "B", "label": "API", "shape": "rect"},
+ {"id": "C", "label": "Database", "shape": "cylinder"}
+ ],
+ "edges": [
+ {"from": "A", "to": "B", "directed": true},
+ {"from": "B", "to": "C", "directed": true}
+ ]
 }
 ```
 
@@ -127,13 +117,9 @@ The layout engine must decide:
 - How to route edges around nodes.
 - How to balance compactness against readability.
 
-Mermaid's flowchart documentation, for example, describes layout-engine choices and configuration options.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://mermaid.js.org\&sz=32)
+Mermaid's flowchart documentation, for example, describes layout-engine choices and configuration options.
 
 Mermaid+1
-
-
 
 This division is fundamental: the graph defines what is connected; the layout determines how those connections look.
 
@@ -141,22 +127,18 @@ It also explains why the same source can render differently across versions, con
 
 ## 3. Comparing the language designs
 
-| Dimension                  | Mermaid                          | PlantUML                                          | D2                                           |
+| Dimension | Mermaid | PlantUML | D2 |
 | -------------------------- | -------------------------------- | ------------------------------------------------- | -------------------------------------------- |
-| Core style                 | Diagram-specific textual syntax  | Diagram-specific directives and modeling notation | Declarative diagram DSL                      |
-| Common use                 | Documentation and quick diagrams | UML and software modeling                         | Architecture and system diagrams             |
-| Diagram types              | Broad collection                 | Broad collection, especially UML                  | General diagrams and structured systems      |
-| Node and edge declarations | Compact, often symbol-driven     | Varies by diagram type                            | Explicit declarations and relationships      |
-| Visual styling             | Themes, classes, directives      | Skin parameters, styles, stereotypes              | Style properties and configuration           |
-| Main trade-off             | Some syntax is context-sensitive | Different diagram types have distinct conventions | More explicit structure can mean more syntax |
+| Core style | Diagram-specific textual syntax | Diagram-specific directives and modeling notation | Declarative diagram DSL |
+| Common use | Documentation and quick diagrams | UML and software modeling | Architecture and system diagrams |
+| Diagram types | Broad collection | Broad collection, especially UML | General diagrams and structured systems |
+| Node and edge declarations | Compact, often symbol-driven | Varies by diagram type | Explicit declarations and relationships |
+| Visual styling | Themes, classes, directives | Skin parameters, styles, stereotypes | Style properties and configuration |
+| Main trade-off | Some syntax is context-sensitive | Different diagram types have distinct conventions | More explicit structure can mean more syntax |
 
-This comparison is qualitative, not a benchmark. Each tool has exceptions and capabilities that extend beyond the generalizations in the table. PlantUML's language reference documents its range of UML and non-UML diagrams, while D2's documentation describes it as a text-based diagram DSL.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://pdf.plantuml.net\&sz=32)
+This comparison is qualitative, not a benchmark. Each tool has exceptions and capabilities that extend beyond the generalizations in the table. PlantUML's language reference documents its range of UML and non-UML diagrams, while D2's documentation describes it as a text-based diagram DSL.
 
 pdf.plantuml.net+1
-
-
 
 ### Example: one graph, three notations
 
@@ -164,7 +146,7 @@ Suppose the intended diagram is a client calling an API, which reads from a data
 
 ### Mermaid
 
-\#chatgpt-mermaid-\_r_8gu\_{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;font-size:16px;fill:rgb(13, 13, 13);}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#chatgpt-mermaid-\_r_8gu\_ .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#chatgpt-mermaid-\_r_8gu\_ .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#chatgpt-mermaid-\_r_8gu\_ .error-icon{fill:rgb(243, 243, 243);}#chatgpt-mermaid-\_r_8gu\_ .error-text{fill:rgb(13, 13, 13);stroke:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_ .edge-thickness-normal{stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_ .edge-thickness-thick{stroke-width:3.5px;}#chatgpt-mermaid-\_r_8gu\_ .edge-pattern-solid{stroke-dasharray:0;}#chatgpt-mermaid-\_r_8gu\_ .edge-thickness-invisible{stroke-width:0;fill:none;}#chatgpt-mermaid-\_r_8gu\_ .edge-pattern-dashed{stroke-dasharray:3;}#chatgpt-mermaid-\_r_8gu\_ .edge-pattern-dotted{stroke-dasharray:2;}#chatgpt-mermaid-\_r_8gu\_ .marker{fill:rgb(143, 143, 143);stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8gu\_ .marker.cross{stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8gu\_ svg{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;font-size:16px;}#chatgpt-mermaid-\_r_8gu\_ p{margin:0;}#chatgpt-mermaid-\_r_8gu\_ .label{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_ .cluster-label text{fill:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_ .cluster-label span{color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_ .cluster-label span p{background-color:transparent;}#chatgpt-mermaid-\_r_8gu\_ .label text,#chatgpt-mermaid-\_r_8gu\_ span{fill:rgb(13, 13, 13);color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_ .node rect,#chatgpt-mermaid-\_r_8gu\_ .node circle,#chatgpt-mermaid-\_r_8gu\_ .node ellipse,#chatgpt-mermaid-\_r_8gu\_ .node polygon,#chatgpt-mermaid-\_r_8gu\_ .node path{fill:rgb(222, 234, 251);stroke:rgb(83, 154, 248);stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_ .rough-node .label text,#chatgpt-mermaid-\_r_8gu\_ .node .label text,#chatgpt-mermaid-\_r_8gu\_ .image-shape .label,#chatgpt-mermaid-\_r_8gu\_ .icon-shape .label{text-anchor:middle;}#chatgpt-mermaid-\_r_8gu\_ .node .katex path{fill:#000;stroke:#000;stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_ .rough-node .label,#chatgpt-mermaid-\_r_8gu\_ .node .label,#chatgpt-mermaid-\_r_8gu\_ .image-shape .label,#chatgpt-mermaid-\_r_8gu\_ .icon-shape .label{text-align:center;}#chatgpt-mermaid-\_r_8gu\_ .node.clickable{cursor:pointer;}#chatgpt-mermaid-\_r_8gu\_ .root .anchor path{fill:rgb(143, 143, 143)!important;stroke-width:0;stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8gu\_ .arrowheadPath{fill:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8gu\_ .edgePath .path{stroke:rgb(143, 143, 143);stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_ .flowchart-link{stroke:rgb(143, 143, 143);fill:none;}#chatgpt-mermaid-\_r_8gu\_ .edgeLabel{background-color:rgb(252, 252, 252);text-align:center;}#chatgpt-mermaid-\_r_8gu\_ .edgeLabel p{background-color:rgb(252, 252, 252);}#chatgpt-mermaid-\_r_8gu\_ .edgeLabel rect{opacity:0.5;background-color:rgb(252, 252, 252);fill:rgb(252, 252, 252);}#chatgpt-mermaid-\_r_8gu\_ .labelBkg{background-color:rgba(252, 252, 252, 0.5);}#chatgpt-mermaid-\_r_8gu\_ .cluster rect{fill:rgb(243, 243, 243);stroke:rgba(0, 0, 0, 0.1);stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_ .cluster text{fill:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_ .cluster span{color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_ div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;font-size:12px;background:rgb(243, 243, 243);border:1px solid rgba(0, 0, 0, 0.1);border-radius:2px;pointer-events:none;z-index:100;}#chatgpt-mermaid-\_r_8gu\_ .flowchartTitleText{text-anchor:middle;font-size:18px;fill:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_ rect.text{fill:none;stroke-width:0;}#chatgpt-mermaid-\_r_8gu\_ .icon-shape,#chatgpt-mermaid-\_r_8gu\_ .image-shape{background-color:rgb(252, 252, 252);text-align:center;}#chatgpt-mermaid-\_r_8gu\_ .icon-shape p,#chatgpt-mermaid-\_r_8gu\_ .image-shape p{background-color:rgb(252, 252, 252);padding:2px;}#chatgpt-mermaid-\_r_8gu\_ .icon-shape .label rect,#chatgpt-mermaid-\_r_8gu\_ .image-shape .label rect{opacity:0.5;background-color:rgb(252, 252, 252);fill:rgb(252, 252, 252);}#chatgpt-mermaid-\_r_8gu\_ .label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#chatgpt-mermaid-\_r_8gu\_ .node .label-icon path{fill:currentColor;stroke:revert;stroke-width:revert;}#chatgpt-mermaid-\_r_8gu\_ .node .neo-node{stroke:rgb(83, 154, 248);}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].node rect,#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].cluster rect,#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].node polygon{stroke:url(#chatgpt-mermaid-\_r_8gu\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].swimlane.cluster rect{filter:none;}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].node path{stroke:url(#chatgpt-mermaid-\_r_8gu\_-gradient);stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].node .outer-path{filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].node .neo-line path{stroke:rgb(83, 154, 248);filter:none;}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].node circle{stroke:url(#chatgpt-mermaid-\_r_8gu\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].node circle .state-start{fill:#000000;}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].icon-shape .icon{fill:url(#chatgpt-mermaid-\_r_8gu\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].icon-shape .icon-neo path{stroke:url(#chatgpt-mermaid-\_r_8gu\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8gu\_ .node text{font-size:14px;font-weight:600;letter-spacing:normal;fill:rgb(0, 79, 153);}#chatgpt-mermaid-\_r_8gu\_ .edgeLabels text{font-size:13px;font-weight:600;letter-spacing:-0.08px;fill:rgb(0, 79, 153);}#chatgpt-mermaid-\_r_8gu\_ .node tspan[font-weight="normal"],#chatgpt-mermaid-\_r_8gu\_ .edgeLabels tspan[font-weight="normal"]{font-weight:600;}#chatgpt-mermaid-\_r_8gu\_ .edgeLabel .label rect{opacity:1;rx:13px;ry:13px;fill:rgb(245, 250, 255);stroke:rgb(206, 219, 229);stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_ .node rect,#chatgpt-mermaid-\_r_8gu\_ .node circle,#chatgpt-mermaid-\_r_8gu\_ .node ellipse,#chatgpt-mermaid-\_r_8gu\_ .node polygon,#chatgpt-mermaid-\_r_8gu\_ .node path{fill:rgb(229, 243, 255);stroke:rgba(0, 0, 0, 0.1);stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_ .node rect{rx:16px;ry:16px;}#chatgpt-mermaid-\_r_8gu\_ .mermaid-decision .label-container{fill:rgb(245, 250, 255);stroke:rgb(206, 219, 229);stroke-dasharray:2px,2px;}#chatgpt-mermaid-\_r_8gu\_ .edgePaths .flowchart-link{stroke:rgb(143, 143, 143);stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;}#chatgpt-mermaid-\_r_8gu\_ .marker{fill:rgb(143, 143, 143);stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8gu\_ :root{--mermaid-font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;}ClientAPIDatabase
+\#chatgpt-mermaid-\_r_8gu\_{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;font-size:16px;fill:rgb(13, 13, 13);}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#chatgpt-mermaid-\_r_8gu\_.edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#chatgpt-mermaid-\_r_8gu\_.edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#chatgpt-mermaid-\_r_8gu\_.error-icon{fill:rgb(243, 243, 243);}#chatgpt-mermaid-\_r_8gu\_.error-text{fill:rgb(13, 13, 13);stroke:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_.edge-thickness-normal{stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_.edge-thickness-thick{stroke-width:3.5px;}#chatgpt-mermaid-\_r_8gu\_.edge-pattern-solid{stroke-dasharray:0;}#chatgpt-mermaid-\_r_8gu\_.edge-thickness-invisible{stroke-width:0;fill:none;}#chatgpt-mermaid-\_r_8gu\_.edge-pattern-dashed{stroke-dasharray:3;}#chatgpt-mermaid-\_r_8gu\_.edge-pattern-dotted{stroke-dasharray:2;}#chatgpt-mermaid-\_r_8gu\_.marker{fill:rgb(143, 143, 143);stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8gu\_.marker.cross{stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8gu\_ svg{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;font-size:16px;}#chatgpt-mermaid-\_r_8gu\_ p{margin:0;}#chatgpt-mermaid-\_r_8gu\_.label{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_.cluster-label text{fill:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_.cluster-label span{color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_.cluster-label span p{background-color:transparent;}#chatgpt-mermaid-\_r_8gu\_.label text,#chatgpt-mermaid-\_r_8gu\_ span{fill:rgb(13, 13, 13);color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_.node rect,#chatgpt-mermaid-\_r_8gu\_.node circle,#chatgpt-mermaid-\_r_8gu\_.node ellipse,#chatgpt-mermaid-\_r_8gu\_.node polygon,#chatgpt-mermaid-\_r_8gu\_.node path{fill:rgb(222, 234, 251);stroke:rgb(83, 154, 248);stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_.rough-node.label text,#chatgpt-mermaid-\_r_8gu\_.node.label text,#chatgpt-mermaid-\_r_8gu\_.image-shape.label,#chatgpt-mermaid-\_r_8gu\_.icon-shape.label{text-anchor:middle;}#chatgpt-mermaid-\_r_8gu\_.node.katex path{fill:#000;stroke:#000;stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_.rough-node.label,#chatgpt-mermaid-\_r_8gu\_.node.label,#chatgpt-mermaid-\_r_8gu\_.image-shape.label,#chatgpt-mermaid-\_r_8gu\_.icon-shape.label{text-align:center;}#chatgpt-mermaid-\_r_8gu\_.node.clickable{cursor:pointer;}#chatgpt-mermaid-\_r_8gu\_.root.anchor path{fill:rgb(143, 143, 143)!important;stroke-width:0;stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8gu\_.arrowheadPath{fill:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8gu\_.edgePath.path{stroke:rgb(143, 143, 143);stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_.flowchart-link{stroke:rgb(143, 143, 143);fill:none;}#chatgpt-mermaid-\_r_8gu\_.edgeLabel{background-color:rgb(252, 252, 252);text-align:center;}#chatgpt-mermaid-\_r_8gu\_.edgeLabel p{background-color:rgb(252, 252, 252);}#chatgpt-mermaid-\_r_8gu\_.edgeLabel rect{opacity:0.5;background-color:rgb(252, 252, 252);fill:rgb(252, 252, 252);}#chatgpt-mermaid-\_r_8gu\_.labelBkg{background-color:rgba(252, 252, 252, 0.5);}#chatgpt-mermaid-\_r_8gu\_.cluster rect{fill:rgb(243, 243, 243);stroke:rgba(0, 0, 0, 0.1);stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_.cluster text{fill:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_.cluster span{color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_ div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;font-size:12px;background:rgb(243, 243, 243);border:1px solid rgba(0, 0, 0, 0.1);border-radius:2px;pointer-events:none;z-index:100;}#chatgpt-mermaid-\_r_8gu\_.flowchartTitleText{text-anchor:middle;font-size:18px;fill:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_ rect.text{fill:none;stroke-width:0;}#chatgpt-mermaid-\_r_8gu\_.icon-shape,#chatgpt-mermaid-\_r_8gu\_.image-shape{background-color:rgb(252, 252, 252);text-align:center;}#chatgpt-mermaid-\_r_8gu\_.icon-shape p,#chatgpt-mermaid-\_r_8gu\_.image-shape p{background-color:rgb(252, 252, 252);padding:2px;}#chatgpt-mermaid-\_r_8gu\_.icon-shape.label rect,#chatgpt-mermaid-\_r_8gu\_.image-shape.label rect{opacity:0.5;background-color:rgb(252, 252, 252);fill:rgb(252, 252, 252);}#chatgpt-mermaid-\_r_8gu\_.label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#chatgpt-mermaid-\_r_8gu\_.node.label-icon path{fill:currentColor;stroke:revert;stroke-width:revert;}#chatgpt-mermaid-\_r_8gu\_.node.neo-node{stroke:rgb(83, 154, 248);}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].node rect,#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].cluster rect,#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].node polygon{stroke:url(#chatgpt-mermaid-\_r_8gu\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].swimlane.cluster rect{filter:none;}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].node path{stroke:url(#chatgpt-mermaid-\_r_8gu\_-gradient);stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].node.outer-path{filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].node.neo-line path{stroke:rgb(83, 154, 248);filter:none;}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].node circle{stroke:url(#chatgpt-mermaid-\_r_8gu\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].node circle.state-start{fill:#000000;}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].icon-shape.icon{fill:url(#chatgpt-mermaid-\_r_8gu\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].icon-shape.icon-neo path{stroke:url(#chatgpt-mermaid-\_r_8gu\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8gu\_.node text{font-size:14px;font-weight:600;letter-spacing:normal;fill:rgb(0, 79, 153);}#chatgpt-mermaid-\_r_8gu\_.edgeLabels text{font-size:13px;font-weight:600;letter-spacing:-0.08px;fill:rgb(0, 79, 153);}#chatgpt-mermaid-\_r_8gu\_.node tspan[font-weight="normal"],#chatgpt-mermaid-\_r_8gu\_.edgeLabels tspan[font-weight="normal"]{font-weight:600;}#chatgpt-mermaid-\_r_8gu\_.edgeLabel.label rect{opacity:1;rx:13px;ry:13px;fill:rgb(245, 250, 255);stroke:rgb(206, 219, 229);stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_.node rect,#chatgpt-mermaid-\_r_8gu\_.node circle,#chatgpt-mermaid-\_r_8gu\_.node ellipse,#chatgpt-mermaid-\_r_8gu\_.node polygon,#chatgpt-mermaid-\_r_8gu\_.node path{fill:rgb(229, 243, 255);stroke:rgba(0, 0, 0, 0.1);stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_.node rect{rx:16px;ry:16px;}#chatgpt-mermaid-\_r_8gu\_.mermaid-decision.label-container{fill:rgb(245, 250, 255);stroke:rgb(206, 219, 229);stroke-dasharray:2px,2px;}#chatgpt-mermaid-\_r_8gu\_.edgePaths.flowchart-link{stroke:rgb(143, 143, 143);stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;}#chatgpt-mermaid-\_r_8gu\_.marker{fill:rgb(143, 143, 143);stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8gu\_:root{--mermaid-font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;}ClientAPIDatabase
 
 Compact, graph-oriented, and easy to embed in Markdown.
 
@@ -196,7 +178,7 @@ The important observation is that a diagram's abstract meaning is not identical 
 
 Text-to-diagram languages are programming languages in a broad sense, but they are usually optimized for describing a visual artifact rather than specifying executable behavior.
 
-This distinction is especially important if you are researching AI-friendly syntax, bidirectional text–graph synchronization, or visual programming languages.
+This distinction is especially important If the project is researching AI-friendly syntax, bidirectional text–graph synchronization, or visual programming languages.
 
 ### 4.1 They often mix semantics and presentation
 
@@ -220,22 +202,22 @@ A more expressive language might separate these concerns:
 
 ```
 nodes:
-  - id: client
-    type: application
-  - id: api
-    type: service
-  - id: database
-    type: database
+ - id: client
+ type: application
+ - id: api
+ type: service
+ - id: database
+ type: database
 
 edges:
-  - from: client
-    to: api
-    relation: invokes
-    protocol: HTTPS
-  - from: api
-    to: database
-    relation: queries
-    protocol: SQL
+ - from: client
+ to: api
+ relation: invokes
+ protocol: HTTPS
+ - from: api
+ to: database
+ relation: queries
+ protocol: SQL
 ```
 
 This is illustrative YAML, not a standard diagram format. Its advantage is that relationships become machine-readable facts rather than visual conventions alone.
@@ -246,13 +228,9 @@ Research question: Should a diagram language define a domain model first and tre
 
 Compact syntax is convenient for humans, but punctuation can have several competing interpretations.
 
-Mermaid's flowchart documentation warns about certain uses of `end` and about identifiers beginning with `o` or `x` adjacent to particular edge operators.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://mermaid.js.org\&sz=32)
+Mermaid's flowchart documentation warns about certain uses of `end` and about identifiers beginning with `o` or `x` adjacent to particular edge operators.
 
 Mermaid+1
-
-
 
 These are small examples of a general issue: a language designed around convenient punctuation may become harder to parse, generate, and transform reliably.
 
@@ -315,13 +293,9 @@ For example, a language could distinguish between:
 
 These are different failure classes and should be reported separately.
 
-Graphviz's DOT documentation provides a useful point of comparison because it defines a formal grammar for graph, node, edge, attribute, and subgraph constructs.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://graphviz.org\&sz=32)
+Graphviz's DOT documentation provides a useful point of comparison because it defines a formal grammar for graph, node, edge, attribute, and subgraph constructs.
 
 Graphviz+1
-
-
 
 ## 5. The deeper language-design trade-offs
 
@@ -391,11 +365,11 @@ The main difficulty is deciding what belongs in the canonical model. If the mode
 
 A well-designed IR may therefore separate at least three layers:
 
-| Layer              | Responsibility                                           |
+| Layer | Responsibility |
 | ------------------ | -------------------------------------------------------- |
-| Semantic model     | Entities, relationships, types, constraints              |
+| Semantic model | Entities, relationships, types, constraints |
 | Presentation model | Layout preferences, styles, grouping, visual annotations |
-| Source mapping     | Original syntax, comments, formatting, source locations  |
+| Source mapping | Original syntax, comments, formatting, source locations |
 
 This is similar in spirit to compiler architectures that distinguish an abstract syntax tree from a lower-level intermediate representation and generated output. It is not necessary for every diagram tool, but it is particularly valuable for editors that must support reliable round-tripping.
 
@@ -405,13 +379,13 @@ This is where text-to-diagram tools become especially interesting.
 
 A normal renderer implements a function:
 
-\\[ R : S \rightarrow V \\]
+\\[ R: S \rightarrow V \\]
 
 where \\(S\\) is source text and \\(V\\) is a visual diagram.
 
 A bidirectional editor needs an additional transformation:
 
-\\[ U : (S,V') \rightarrow S' \\]
+\\[ U: (S,V') \rightarrow S' \\]
 
 Here, \\(V'\\) is the diagram after a user edits it visually, and \\(S'\\) is the updated source.
 
@@ -439,17 +413,17 @@ LLMs introduce a different set of design requirements. They are good at generati
 
 A diagram DSL designed for reliable AI generation could prioritize the following.
 
-| Design feature              | Why it helps                                                                  |
+| Design feature | Why it helps |
 | --------------------------- | ----------------------------------------------------------------------------- |
-| Explicit declarations       | Makes entities and their types easier to identify                             |
-| Stable IDs                  | Prevents accidental renaming and duplicate nodes                              |
-| Uniform syntax              | Reduces the number of special cases a model must learn                        |
-| Clear escaping rules        | Prevents labels from interfering with grammar                                 |
-| Schema validation           | Detects invalid node types and relationships                                  |
-| Structured diagnostics      | Enables targeted repair rather than full regeneration                         |
-| Canonical formatting        | Makes generated changes easier to review                                      |
-| Incremental editing         | Allows a model to change one relationship without rewriting the whole diagram |
-| Deterministic serialization | Reduces noisy diffs and inconsistent outputs                                  |
+| Explicit declarations | Makes entities and their types easier to identify |
+| Stable IDs | Prevents accidental renaming and duplicate nodes |
+| Uniform syntax | Reduces the number of special cases a model must learn |
+| Clear escaping rules | Prevents labels from interfering with grammar |
+| Schema validation | Detects invalid node types and relationships |
+| Structured diagnostics | Enables targeted repair rather than full regeneration |
+| Canonical formatting | Makes generated changes easier to review |
+| Incremental editing | Allows a model to change one relationship without rewriting the whole diagram |
+| Deterministic serialization | Reduces noisy diffs and inconsistent outputs |
 
 One particularly useful approach is to separate graph generation from visual styling.
 
@@ -515,21 +489,13 @@ For a serious experiment, use the same collection of diagram tasks across langua
 
 ## 10. Further reading and related projects
 
-[Graphviz](https://images.openai.com/static-rsc-4/yLvDPzx9MxHVryTAai9v3yO9EIoS0T_ISKkdO5zlKwlI4yJmmMcEklMhd9fz1i0FE0s48GwEJsNp1fzOIqLDWHlWlVEs5je4hh-A5e4FUXcgUJQxttp3NBuvMeQrH2wiel84tJxsRCP_ZPpZhLJd6y0ZEdCu0pbLZTMuAyas6dk?purpose=inline)
-
 Graphviz DOT
 
 A useful baseline for studying explicit graph declarations, attributes, subgraphs, and formal grammar.
 
-[DOT language reference](https://graphviz.org/doc/info/lang.html?utm_source=chatgpt.com)&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://graphviz.org\&sz=32)
+[DOT language reference](https://graphviz.org/doc/info/lang.html?utm_source=chatgpt.com)
 
 Graphviz
-
-
-
-[Dokumentation von Softwarearchitektur mit C4](https://images.openai.com/static-rsc-4/q2DzLvdTBfrHrqpaFS-u-37rgnMfXalpSkEz027FW3AkJcFgT4qvQwqDP5B675889Yz1JG8FHvRrl-ogIGXMBMfQRfolAlPHLQ_xu-8Lapm2eZzRYbBnxs88ENxA_ne2Xswk7rybq-llPA4Ty1irnBwlqUxbP06nqQMNsEQtInE?purpose=inline)
 
 Structurizr DSL
 
@@ -537,33 +503,21 @@ Worth investigating when diagrams should be views of a shared architecture model
 
 [DSL documentation](https://docs.structurizr.com/dsl?utm_source=chatgpt.com)
 
-[PlantUML：一款让你爽到起飞的高效代码绘制时序图工具-CSDN博客](https://images.openai.com/static-rsc-4/tnPhVdi4Zg4kFd94GdG9DXQ2FJlmGCTcpAYMrEsdbhip3CISPnmYj6LCRw_5M8RyvIGfNUkgmTmH4ZGNIPXR-NXko8YQoW4ZmmpFi1CCNzcsH7qOEKiW_HBpVlYHfV62BByu6dGaMOgn6sPBeDIZmbj-mMrnpuV10aB69JKn7i0?purpose=inline)
-
 PlantUML sequence diagrams
 
 Particularly useful for examining how a domain-specific grammar represents interactions, ordering, conditional branches, and parallel behavior.
 
-[Sequence diagram reference](https://plantuml.com/sequence-diagram?utm_source=chatgpt.com)&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://plantuml.com\&sz=32)
+[Sequence diagram reference](https://plantuml.com/sequence-diagram?utm_source=chatgpt.com)
 
 PlantUML.com
-
-
-
-[Generate Diagram From Text Pin On Digitalisering](https://images.openai.com/static-rsc-4/mZ5pNOoz6PeIvQBDBkFyD2stAawTrIq5pSpx_9EpgaSZ52YDWMnw-zFwGvDTUseYkQV6HdNg2Horf-UPVtLBaZOgpeZLF_f8l-hvu0xjEKTw_Zu0dsa9eARxncU68o0w2FH-5cM1h9Qdd0sIihVkfV3J9S5VF2vZa33RsEM7c1c?purpose=inline)
 
 D2 connections and object declarations
 
 Useful for studying how identifiers, labels, nested objects, and edges can be expressed in a declarative DSL.
 
-[Connections reference](https://d2lang.com/tour/connections?utm_source=chatgpt.com)&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://d2lang.com\&sz=32)
+[Connections reference](https://d2lang.com/tour/connections?utm_source=chatgpt.com)
 
 D2 Documentation
-
-
 
 ## 11. A possible research direction
 

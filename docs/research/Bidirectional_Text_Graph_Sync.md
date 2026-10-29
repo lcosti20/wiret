@@ -9,15 +9,11 @@ For a VS Code extension that edits a visual programming language, this means:
 - Editing the text file updates the graph, including its nodes, edges, labels, and properties.
 - Undo, redo, validation, and error reporting work coherently across both editing modes.
 
-This is a well-established area of software architecture, closely related to bidirectional transformations, model-driven engineering, live programming, and synchronized concrete syntaxes. Research on synchronized textual and graphical editors specifically addresses preserving layout, handling invalid intermediate text, and maintaining a consistent underlying model.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://repository.tudelft.nl\&sz=32)
+This is a well-established area of software architecture, closely related to bidirectional transformations, model-driven engineering, live programming, and synchronized concrete syntaxes. Research on synchronized textual and graphical editors specifically addresses preserving layout, handling invalid intermediate text, and maintaining a consistent underlying model.
 
 TU Delft Repository+1
 
-
-
-Your proposed topic can be developed into a technical specification for a live-synchronization subsystem, rather than merely a feature description.
+The topic is best developed as a technical specification for a live-synchronization subsystem rather than as a feature description.
 
 ## 1. The core concept
 
@@ -49,23 +45,19 @@ There are three main architectural approaches:
 2. Text as source of truth: The graph is derived from the text, and visual actions generate source edits. This works especially well when the text file is the canonical, version-controlled artifact.
 3. Synchronized representations: Each editor has its own representation, and a synchronization engine reconciles changes between them.
 
-For a VS Code extension, a hybrid of the first and second approaches is often the strongest design: VS Code's `TextDocument` is the canonical persisted artifact, while a shared semantic model provides the graph editor with a stable, structured view of it. VS Code's custom editor documentation explicitly requires webview-originated edits to update the document and document changes to update the webview.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://code.visualstudio.com\&sz=32)
+For a VS Code extension, a hybrid of the first and second approaches is often the strongest design: VS Code's `TextDocument` is the canonical persisted artifact, while a shared semantic model provides the graph editor with a stable, structured view of it. VS Code's custom editor documentation explicitly requires webview-originated edits to update the document and document changes to update the webview.
 
 Visual Studio Code Extension API+1
-
-
 
 ## 2. What exactly gets synchronized?
 
 It helps to distinguish three kinds of state.
 
-| State category     | Examples                                                    | Expected behavior                                                           |
+| State category | Examples | Expected behavior |
 | ------------------ | ----------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Semantic state     | Nodes, edges, expressions, inputs, outputs, execution order | Must remain semantically consistent                                         |
+| Semantic state | Nodes, edges, expressions, inputs, outputs, execution order | Must remain semantically consistent |
 | Presentation state | Node coordinates, dimensions, collapsed state, edge routing | Must persist and synchronize if represented in the document or its metadata |
-| Editor state       | Cursor, selection, zoom, pan, hover, active tool            | Usually local to the editor, except when explicitly linked                  |
+| Editor state | Cursor, selection, zoom, pan, hover, active tool | Usually local to the editor, except when explicitly linked |
 
 This distinction is particularly important for visual programming languages.
 
@@ -81,19 +73,19 @@ Consider a simple visual program:
 
 ```
 graph Workflow {
-    Start -> Validate
-    Validate -> Process
-    Process -> End
+ Start -> Validate
+ Validate -> Process
+ Process -> End
 }
 ```
 
 The graph editor represents these declarations as nodes and edges. A more complete format might also store node positions:
 
 ```
-node Start   { x: 100, y: 80 }
+node Start { x: 100, y: 80 }
 node Validate { x: 300, y: 80 }
 node Process { x: 300, y: 220 }
-node End     { x: 500, y: 220 }
+node End { x: 500, y: 220 }
 
 edge Start -> Validate
 edge Validate -> Process
@@ -113,13 +105,9 @@ When a user drags `Process` to a new position, the extension should:
 5. Apply that edit through VS Code's document-editing API.
 6. Update any other views of the same document.
 
-The crucial optimization is minimal edits rather than whole-file replacement. Rewriting the entire file on every drag can cause cursor jumps, lost formatting, noisy Git diffs, and interference with simultaneous text editing. VS Code's custom editor guidance recommends minimal workspace edits.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://code.visualstudio.com\&sz=32)
+The crucial optimization is minimal edits rather than whole-file replacement. Rewriting the entire file on every drag can cause cursor jumps, lost formatting, noisy Git diffs, and interference with simultaneous text editing. VS Code's custom editor guidance recommends minimal workspace edits.
 
 Visual Studio Code Extension API+1
-
-
 
 For example, if only the position changes, the desired result is conceptually:
 
@@ -145,13 +133,9 @@ The graph should not be destroyed and rebuilt from scratch after every keystroke
 
 A key complication is that source code is frequently incomplete while being edited. A user might temporarily delete a closing brace or type half of an edge declaration. The graph should handle this gracefully, retaining the last valid structure where possible and clearly distinguishing stale elements from currently valid ones.
 
-VS Code's custom editor guidance explicitly warns that document contents may be invalid during editing, and research on synchronized editors treats error recovery and layout preservation as core problems.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://code.visualstudio.com\&sz=32)
+VS Code's custom editor guidance explicitly warns that document contents may be invalid during editing, and research on synchronized editors treats error recovery and layout preservation as core problems.
 
 Visual Studio Code Extension API+1
-
-
 
 ## 4. The synchronization engine
 
@@ -195,19 +179,19 @@ This separation prevents the graph renderer from becoming entangled with source-
 
 One of the most important implementation problems is the feedback loop.
 
-1\. User moves a node
+1. User moves a node
 
 The graph sends a position change.
 
-2\. Extension edits the text
+2. Extension edits the text
 
 VS Code emits a document-change event.
 
-3\. Graph receives the document update
+3. Graph receives the document update
 
 Without safeguards, the graph may emit another change.
 
-4\. Feedback loop
+4. Feedback loop
 
 Repeated updates, redundant writes, or rendering churn.
 
@@ -225,23 +209,19 @@ A simple conceptual protocol might look like this:
 type SyncOrigin = "text" | "graph" | "undo" | "external";
 
 interface SyncUpdate {
-  documentUri: string;
-  baseRevision: number;
-  revision: number;
-  origin: SyncOrigin;
-  operations: GraphOperation[];
+ documentUri: string;
+ baseRevision: number;
+ revision: number;
+ origin: SyncOrigin;
+ operations: GraphOperation[];
 }
 ```
 
 This is illustrative TypeScript, not a built-in VS Code API. The important idea is that each update carries enough information to determine which document it affects, which state it was based on, and whether it has already been applied.
 
-Origin tracking alone is not sufficient: updates can be delayed, duplicated, or superseded. It should be combined with state comparison and revision checks. VS Code's own custom editor documentation specifically warns about loops caused by propagating a graph edit back into the graph through document-change events.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://code.visualstudio.com\&sz=32)
+Origin tracking alone is not sufficient: updates can be delayed, duplicated, or superseded. It should be combined with state comparison and revision checks. VS Code's own custom editor documentation specifically warns about loops caused by propagating a graph edit back into the graph through document-change events.
 
 Visual Studio Code Extension API+1
-
-
 
 ## 6. The hardest design decisions
 
@@ -253,8 +233,8 @@ For example:
 
 ```
 node n17 {
-    operation: Add
-    inputs: [n12.output, n14.output]
+ operation: Add
+ inputs: [n12.output, n14.output]
 }
 ```
 
@@ -289,23 +269,19 @@ If the user drags the node, a naïve serializer might regenerate the entire file
 
 There are three common strategies:
 
-| Strategy                                           | Benefits                                               | Limitations                                             |
+| Strategy | Benefits | Limitations |
 | -------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------- |
-| Whole-document serialization                       | Simple; guarantees canonical formatting                | Can destroy comments, formatting, and source stability  |
-| Source-range patching                              | Preserves unrelated text; produces small diffs         | Requires reliable source locations and patch management |
-| Concrete syntax tree (CST) or lossless syntax tree | Can preserve comments, whitespace, and original syntax | More complex parser and transformation infrastructure   |
+| Whole-document serialization | Simple; guarantees canonical formatting | Can destroy comments, formatting, and source stability |
+| Source-range patching | Preserves unrelated text; produces small diffs | Requires reliable source locations and patch management |
+| Concrete syntax tree (CST) or lossless syntax tree | Can preserve comments, whitespace, and original syntax | More complex parser and transformation infrastructure |
 
 Recommendation: Use source-range patching backed by a lossless syntax representation when possible. If the language is deliberately canonical and formatting preservation is not a requirement, whole-document serialization may be a reasonable simpler choice.
 
 A hybrid is also viable: preserve source text for existing elements, generate canonical text for new elements, and provide an explicit formatting command.
 
-The trade-off between textual layout preservation and graphical layout preservation is a documented concern in bidirectional editor research.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://repository.tudelft.nl\&sz=32)
+The trade-off between textual layout preservation and graphical layout preservation is a documented concern in bidirectional editor research.
 
 TU Delft Repository+1
-
-
 
 ### 6.3 Where should node positions live?
 
@@ -313,15 +289,11 @@ A visual editor has information that a conventional program representation may n
 
 There are three common choices.
 
-[How to create a node graph editor? - Visualization - Julia Programming Language](https://images.openai.com/static-rsc-4/-wczJ42gqIa215Qrkk9eGzAl30apdZ3qx6JTCPgzlueZQVo8QohsT9QtDPGVNcRHooxh5AdreM7VQTid0XaSLsPrHV2v6iKXSWnFZmIXAsp5teRxdZtyxDewzFH02ITsoWV5yFcLh4pMGXsF6WWqAmdRAOESyvA9e94kf5RDwn0?purpose=inline)
-
 Option A — Inline metadata
 
 Store coordinates alongside node declarations.
 
 Best when the language is designed for visual editing and a single portable file is desirable. Layout changes create source diffs.
-
-[Importing drawer open animation from Blender, animation works, but doesn't move skeletal mesh forward - Character & Animation - Epic Developer Community Forums](https://images.openai.com/static-rsc-4/W7kGQ9JiWJC_u2MufsZOqnuOe8-BIAVXInzfWdNR8AEUyYUzzlY1QbgRTycyqNP0Ot-jcf0UBVR2OIc6sWgCqcm6nNnJbFS6LGG9hBdq9FWPg9xjHF2F6FJHtxwCSMWliZJnGGvBDfLX1MvKPn-QRMYqkxqiWhwC5pt8zYa3o7o?purpose=inline)
 
 Option B — Sidecar layout file
 
@@ -329,15 +301,13 @@ Store layout in a companion file, such as `program.graph.json`.
 
 Best when semantic source should remain clean and layout should be versioned separately. Requires reliable association between the files.
 
-[Visual node graph with ImGui | Guillaume's graphics blog](https://images.openai.com/static-rsc-4/mNhI6P8jfO5LpIheRHVVeiDSkwiHlp1rkbd2yYx57rA7xcP65V8pVEB2dqivvx7RclM1faSd562AgcZ7KGvltBVg_c8AuVnzgo3wLBQF0vOaJCilPz6TbTcD9m2J5IHZLOjWF5ednt2P1fHMTcMAMm3nXbOHhnhvD_wcuNPcgdw?purpose=inline)
-
 Option C — Derived layout
 
 Recalculate positions using an automatic layout engine.
 
 Best for generated diagrams or disposable views. Poor for users who expect their carefully arranged graphs to persist.
 
-For a visual programming language where users manually arrange nodes, I would favor persistent layout metadata, either inline or in a sidecar file. Automatic layout should be an explicit command or mode, not something that unexpectedly rearranges the graph after each source edit.
+For a visual programming language where users manually arrange nodes, the preferred approach is persistent layout metadata, either inline or in a sidecar file. Automatic layout should be an explicit command or mode, not something that unexpectedly rearranges the graph after each source edit.
 
 ## 7. Bidirectional transformation laws
 
@@ -382,23 +352,15 @@ Here, \\(S\\) represents reconciliation of a representation with the current doc
 
 An unrelated edit should not unnecessarily change unrelated parts of the other representation. For example, renaming one node should not reset the entire graph layout.
 
-These properties are more useful than merely checking whether the two views look similar. They can be translated into automated tests and serve as a foundation for evaluating competing synchronization architectures. Bidirectional transformation research provides a formal basis for these concerns.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://www.cs.cornell.edu\&sz=32)
+These properties are more useful than merely checking whether the two views look similar. They can be translated into automated tests and serve as a foundation for evaluating competing synchronization architectures. Bidirectional transformation research provides a formal basis for these concerns.
 
 Cornell Computer Science+1
 
-
-
 ## 8. Implementation architecture for VS Code
 
-For an extension, I would start with a `CustomTextEditorProvider` if the graph is an editable visual representation of a text file. It uses VS Code's `TextDocument` as the document model, allowing ordinary text editing, document synchronization, and familiar editor behavior to participate in the same workflow.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://code.visualstudio.com\&sz=32)
+For an extension, a suitable starting point is a `CustomTextEditorProvider` if the graph is an editable visual representation of a text file. It uses VS Code's `TextDocument` as the document model, allowing ordinary text editing, document synchronization, and familiar editor behavior to participate in the same workflow.
 
 Visual Studio Code Extension API+1
-
-
 
 A possible implementation stack is:
 
@@ -430,30 +392,26 @@ The division of responsibilities is important:
 - The synchronization core decides which updates are necessary.
 - The renderer consumes model updates without emitting new user-edit operations for programmatic changes.
 
-If the language is complex, a language server may also provide parsing, validation, and semantic analysis. It is not required for synchronization itself, and adding one should be justified by the language's needs. VS Code supports incremental document synchronization for language servers.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://code.visualstudio.com\&sz=32)
+If the language is complex, a language server may also provide parsing, validation, and semantic analysis. It is not required for synchronization itself, and adding one should be justified by the language's needs. VS Code supports incremental document synchronization for language servers.
 
 Visual Studio Code Extension API+1
-
-
 
 ## 9. Performance and correctness under real editing
 
 Live synchronization introduces problems that do not appear in a one-time compiler or diagram renderer.
 
-| Problem                         | Recommended approach                                                       |
+| Problem | Recommended approach |
 | ------------------------------- | -------------------------------------------------------------------------- |
-| Rapid node dragging             | Coalesce intermediate position updates; commit sensible edit units         |
-| Fast text typing                | Debounce expensive work where appropriate; parse incrementally if feasible |
-| Invalid intermediate syntax     | Recover partial structure or retain a clearly marked last-valid graph      |
-| Stale asynchronous parsing      | Reject results based on obsolete document revisions                        |
-| Large graphs                    | Reconcile only changed model elements; virtualize rendering if necessary   |
-| Concurrent text and graph edits | Use revision checks and reconcile or reject stale graph operations         |
-| Undo/redo                       | Make document edits participate in VS Code's undo stack                    |
-| File reload or external edits   | Reparse and reconcile against the new authoritative document               |
-| Multiple graph views            | Broadcast updates to every view of the same document                       |
-| Deleted or renamed nodes        | Maintain stable IDs and update references consistently                     |
+| Rapid node dragging | Coalesce intermediate position updates; commit sensible edit units |
+| Fast text typing | Debounce expensive work where appropriate; parse incrementally if feasible |
+| Invalid intermediate syntax | Recover partial structure or retain a clearly marked last-valid graph |
+| Stale asynchronous parsing | Reject results based on obsolete document revisions |
+| Large graphs | Reconcile only changed model elements; virtualize rendering if necessary |
+| Concurrent text and graph edits | Use revision checks and reconcile or reject stale graph operations |
+| Undo/redo | Make document edits participate in VS Code's undo stack |
+| File reload or external edits | Reparse and reconcile against the new authoritative document |
+| Multiple graph views | Broadcast updates to every view of the same document |
+| Deleted or renamed nodes | Maintain stable IDs and update references consistently |
 
 A particularly important distinction is between debouncing and correctness. Debouncing reduces unnecessary work, but it does not prevent stale results or resolve conflicting edits. Revision checks and a clear ordering model are still necessary.
 
@@ -463,7 +421,7 @@ For node dragging, the editor might update the visual position continuously whil
 
 A strong test suite should verify more than whether moving a node changes a line of text.
 
-I would organize testing into five layers:
+the testing plan should organize testing into five layers:
 
 1. Parser and serializer tests: Valid syntax, comments, formatting, missing IDs, invalid edges, and round trips.
 2. Operation tests: Moving, renaming, adding, connecting, and deleting graph elements.
@@ -486,15 +444,11 @@ This can expose bugs that ordinary example-based tests miss, especially around I
 
 These projects and resources offer useful points of comparison.
 
-[ИИ-агенты как на ладони — профильные открытые инструменты с графическим интерфейсом / Хабр](https://images.openai.com/static-rsc-4/Qg9DKIynF1OtKAhRcgDoArOnFeJ0OqhgS7iHAT1WgdGZGev_1Y2VW9Ws0AmsQdSW3-uXUEyVVvh_QeQbbrIBiMVZ2iJacSvhOndfWqnK_TqHXlfyDE_GoTnlHolBrMQHkaQbVPJjx6yI8U-f0y5w5uxga5HzoVH7vlul4vELwX4?purpose=inline)
-
 LangGraph Sync
 
 An implementation focused on keeping a LangGraph-style visual workflow and its Python source synchronized. It describes graph operations being translated into deterministic source mutations. Particularly relevant if the visual programming language has a Python-based textual representation.
 
 Source: [GitHub repository](https://github.com/kammeows/langgraph-sync?utm_source=chatgpt.com)
-
-[Mermaid NG — Visual Editor - Visual Studio Marketplace](https://images.openai.com/static-rsc-4/-VijyYaYDgwAahK_UpRTX-UERlDJ1qLjF7DzIwhVrKyDvqhy62g1vsmW3QBbzUNB8MhiLAxHlUISqZKhUmLcWE7BDOmYMtfZv2pJyoOoA4PeWidVGDHaSShl574gzy8mfD_QqxhaVG_n07HLU6E6rboQp-BaKeJAscXqwJz6xgc?purpose=inline)
 
 Flowmo Flowchart Editor
 
@@ -502,15 +456,11 @@ A VS Code extension that describes bidirectional synchronization between a drag-
 
 Source: [Marketplace listing](https://marketplace.visualstudio.com/items?itemName=flowmo.flowmo-flowchart-editor\&utm_source=chatgpt.com)
 
-[Servers & Integrations · Eclipse Graphical Language Server Platform](https://images.openai.com/static-rsc-4/J8PUuyDswc6DcmdJwhxA2grMWnPERi8yjg5DgvyHcw5DmF9_GNbsxwrzk8eRb103Eh_K2193R8MBJXsqZX4xnpACQ54tD9h2cCHJSUAZMBvp4PNikhFFOw2Q9tRvycuTpyEqMZjzIg_b678lllCdvWTu5vq_jEB9y5_2vR9OnZw?purpose=inline)
-
 Eclipse GLSP
 
 A framework for graphical modeling tools that can connect diagrams with textual language services, including navigation between diagram elements and their textual implementations. Useful when the extension grows into a full language tooling platform.
 
 Source: [Architecture and features](https://eclipsesource.com/blogs/2021/02/10/web-based-diagram-editor-features-in-eclipse-glsp/?utm_source=chatgpt.com)
-
-[Applied use of Ehrenfeucht Fraisse Games — Model Transformation | by Victor Morgante | Medium](https://images.openai.com/static-rsc-4/mxi-o-qkIs86lMMel2Q6jG5UBCoo7LWo8nOGAjTiuz293u96969sNIjyuQmLbyUZ6tsp5TZsdIUziRbtnGhQilYgb5dhUWypaWcj7cA8SWYGwPcNF-M3Lj-P26GHQ6TnUcZFvQ51nA0vs_uxAiweFLDAEWbmP1C2hYgy4eZBD5s?purpose=inline)
 
 Robust Real-Time Synchronization between Textual and Graphical Editors
 
@@ -520,7 +470,7 @@ Source: [TU Delft repository record](https://repository.tudelft.nl/record/uuid:b
 
 ## 12. A proposed research definition
 
-Here is a more complete replacement for your original TODO note.
+A more complete replacement for the original TODO note is provided below.
 
 ## Bidirectional Text–Graph Synchronization
 
@@ -536,7 +486,7 @@ The central engineering challenges are bidirectional transformation correctness,
 
 The most important question is not simply how to make the graph update when the text changes. It is what the synchronization system guarantees when either representation changes.
 
-For a rigorous design, I would investigate these questions first:
+For a rigorous design, research should investigate these questions first:
 
 - Is the text file the canonical representation, or is the semantic model authoritative?
 - Must comments and formatting survive graph edits exactly?

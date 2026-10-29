@@ -20,33 +20,25 @@ The central design question is: What is the execution model of the graph, and wh
 
 State is any information that influences future computation or describes the current condition of a running program. It is useful to distinguish several categories.
 
-[Examples — QtNodes 3.0 documentation](https://images.openai.com/static-rsc-4/WMzxR9swfcHTsbtrNiB2GLry7FZdSmsuSvCFLBpuvm6MBx1ACuxMr9Iu_ht58XEd6qbIIw5sWcCUiKPYFn2lSnLi9tFFvlXkEM70Be6ytuvCwZze0y8F5mKlRXznrfudehD8sJMQQWqvCXP_8jxQdkjwmPNBoav7rw7oXYyBQLo?purpose=inline)
-
-1\. Data values
+1. Data values
 
 Values passed between nodes, such as numbers, strings, vectors, objects, and Boolean flags. These might be calculated on demand or stored temporarily.
 
 Example: a node calculates `health - damage` and sends the result to another node.
 
-[Game Development Series Part 2: Choosing a Game Engine - Wasil Zafar](https://images.openai.com/static-rsc-4/2RfEGENTtdsF40r9A8b60QPg-QmKftBoK4xuIi3CRrkzJfwu4mPbgdqqSbEQFWXD1o4FdsLBbZzjGh8weXfNrgEka2L0KIK6a_1JTcxpPdXBH_2EvcOJ2rj4bdnBnZ_sqAEydGtj8f1e2bCT_iC6pRdlPquLMq6zpbrZsh0MU9c?purpose=inline)
-
-2\. Execution state
+2. Execution state
 
 Information about which operations are ready, running, completed, suspended, or failed.
 
 Example: an execution wire triggers a node that waits for an animation to finish before continuing.
 
-[The Three 'R's of Distributed Event Processing](https://images.openai.com/static-rsc-4/hcM66Nz5_eFzJAp5wZsV0dgwMYE_W81vkwuNmqMblYYwK8CgPlPxMZQMxd5hONpMsaZ4JA4DQa2d8uNARrEN2Cq-tjyuJyKE8m-BOmltKqManZlsrbaqaH0DazFhBkXfmXh97fHtI4p0FabSoIWAmuMOkqf92IxhPpWhM7NcNog?purpose=inline)
-
-3\. Persistent program state
+3. Persistent program state
 
 Values retained across execution steps, events, or function calls.
 
 Example: a counter retains its value between button clicks, or an object's position persists between frames.
 
-[Signals vs Query-Based Compilers](https://images.openai.com/static-rsc-4/y1fYNS6J4-H72XUrExENa2X6hn05tFFhf58zKgaFZEBBUP0Aw2ZDeu82xm_2VyJScWgBfHx0--12KNs219lj6tHjLBtIwltcQwNUiG1aNqwBocG1lF4p7O17Tk_Tw_5pw7aDmJaskqhlgOwrofu0lD1pftXy1-joL4w25MbBZM0?purpose=inline)
-
-4\. Dependency and invalidation state
+4. Dependency and invalidation state
 
 Information about which outputs depend on which inputs, which calculations are stale, and what must be recomputed after a change.
 
@@ -58,8 +50,6 @@ These categories overlap, but they should not automatically be treated as one me
 
 One of the most important distinctions in visual programming is between dataflow and control flow.
 
-[Vector+vector changed name - Blueprint - Epic Developer Community Forums](https://images.openai.com/static-rsc-4/mOi_1KSRD0L19Cc-Yf25NcLhyfdGxqA1V8V5mHkyL776FS4-uJF4gTI2gxc2VJJqV9wsTJ-PohVoluyxd_6IRTqNe21ogDyNcM1DhaOrpBsZrFeOuG36cszu6tNEXlL1TLTvM4HzMUa6XR-YMVB_Zx0k98ddXvj_Z6_yl3T5xWQ?purpose=inline)
-
 Dataflow
 
 A wire expresses a relationship between values. The receiving node obtains an input value from a producer.
@@ -67,8 +57,6 @@ A wire expresses a relationship between values. The receiving node obtains an in
 - What value is supplied?
 - When is it calculated?
 - Is it cached or recomputed?
-
-[Flow Control and Functions — tharle VFX](https://images.openai.com/static-rsc-4/O4v8ljByZPRyLIfLrlUV8-qzyRrJoOOtSgH8ylMq86euHRCaAOPk2tHMgK15ZLa1QHQo1nBiAU_tFh-UwaVlJhu5QyKi4hSo4J9SqIbXOJmx9-4xkOGOrSLX7ulP3E6EAQpjN-xFuRvPieVYf-fzPXZgscuzOAlwLrof1En0Li0?purpose=inline)
 
 Control flow
 
@@ -90,11 +78,11 @@ These relationships have different semantics. A value being available does not n
 
 ### Three common execution models
 
-| Model               | How computation proceeds                                            | Typical use                                           |
+| Model | How computation proceeds | Typical use |
 | ------------------- | ------------------------------------------------------------------- | ----------------------------------------------------- |
-| Pull-based          | A consumer requests a value from its dependencies.                  | Expressions, lazy evaluation, spreadsheet-like graphs |
-| Push-based          | A producer propagates new values to dependent nodes.                | Reactive interfaces, live previews, event propagation |
-| Scheduled execution | A runtime schedules nodes or tasks according to control-flow rules. | Visual scripting, workflow graphs, game logic         |
+| Pull-based | A consumer requests a value from its dependencies. | Expressions, lazy evaluation, spreadsheet-like graphs |
+| Push-based | A producer propagates new values to dependent nodes. | Reactive interfaces, live previews, event propagation |
+| Scheduled execution | A runtime schedules nodes or tasks according to control-flow rules. | Visual scripting, workflow graphs, game logic |
 
 A language can combine all three. For example, an event may schedule a node, that node may pull its inputs, and its output may then push an update to a reactive display.
 
@@ -139,8 +127,6 @@ This distinction becomes especially important when the same node is activated mo
 
 Different visual programming languages make different choices about where state lives and when it changes.
 
-[Formelverweise zu Vorgänger und Nachfolger in Excel anzeigen | Controlling | Haufe](https://images.openai.com/static-rsc-4/TgNuUAuDXWbU00INKTjC320wP4_vke_CglriophmZKy8_EyUETLAT-DPeXLlnv-Iki_I0B1n88Ak8fm1OVqLp4vUGtfPAzvGyh2wU_lNjpf4nM2sxuzFmjozShIZcZmPd0YH4uzX3ezVQz9OvghP7mDPHSlG_hi1bVBvQSNgtpU?purpose=inline)
-
 A. Demand-driven evaluation
 
 A node computes its value when a consumer requests it. Results may be cached until an input changes.
@@ -149,23 +135,15 @@ Common in expression graphs, formula editors, and shader-style computation.
 
 Key question: when is a cached value invalidated?
 
-[Frontiers | Bonsai: an event-based framework for processing and controlling data streams](https://images.openai.com/static-rsc-4/IWMdKjaASpLH86-0VUeK6GTwkKX2pnXEZtXFs8VJVbS43TPxvtVBnM55uXqRPlXsKz0-0FAqYsSck9JoVfz0DSF8HiFzc7wezfxLTbd28c2jPNg-FtceXCY5oITWon7W6nB0pEBLXxGNZb8aeb5Q7rrw3wH9FGx9SWvs8YQsT88?purpose=inline)
-
 B. Reactive state propagation
 
 A change in a source propagates to dependent nodes, which update their outputs or trigger downstream work.
 
-Common in reactive interfaces and interactive data visualization. Reactive Vega, for example, treats data, interaction events, and rendered elements as parts of a streaming dataflow system.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://idl.cs.washington.edu\&sz=32)
+Common in reactive interfaces and interactive data visualization. Reactive Vega, for example, treats data, interaction events, and rendered elements as parts of a streaming dataflow system.
 
 UW Interactive Data Lab+1
 
-
-
 Key question: how are dependencies, batching, and recomputation managed?
-
-[Using the Flow Control macros in UE4 | by Alexandre Lombard | Medium](https://images.openai.com/static-rsc-4/qrxhh0Wg_7hy8pMrRk4SzO720TdTKKsnWfkHPgZplBEsuoWQeGoN-NbLucR0PeKFeWHoCYfTpDFBsYlLEJgQAOYms4O7VfVDEfKVMq35WaTKYVjZsvyHsxTcq_P5VPFCDi3xk7rps7MlB3kFPhIYjWv9JuL3Ibp1RmLBrEox4dw?purpose=inline)
 
 C. Imperative, event-driven execution
 
@@ -175,17 +153,11 @@ Common in game logic, automation, and interactive applications.
 
 Key question: which state changes are allowed, and in what order?
 
-[Actor Model in Nutshell. Actor Model is a conceptual concurrent… | by Krishna Kumar Tiwari | Medium](https://images.openai.com/static-rsc-4/k-qsejBMMnoWwvPrE23HQu9fX8xIrKcNo0l6NUDC2Ki1G4oPQGQ4MZZql9ccG45fKmdDiG-XvBm4YRhj2m78rIO5B5CziGcvWe5HinzyF-kYXL7zsb_DBdgtpZ7jmH4XQlq7swu7WvlYqMOsTuMhfXxxaQqc0VKy_L4vjnaoinw?purpose=inline)
-
 D. Message-driven asynchronous execution
 
-Nodes exchange messages or events, often through queues. Different nodes may process messages concurrently, so receiving the same sequence does not guarantee that independent branches finish in the same order.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://github.com\&sz=32)
+Nodes exchange messages or events, often through queues. Different nodes may process messages concurrently, so receiving the same sequence does not guarantee that independent branches finish in the same order.
 
 GitHub+1
-
-
 
 Key question: how are ordering, backpressure, failures, and concurrent updates handled?
 
@@ -197,23 +169,23 @@ The most useful way to reason about state management is to follow a value throug
 
 Suppose a visual program receives a button-click event, starts a network request, and displays the returned data.
 
-1\. Event received
+1. Event received
 
 Click event, activation ID 42
 
-2\. Request activated
+2. Request activated
 
 Execution state: running
 
-3\. Request suspended
+3. Request suspended
 
 Waiting for an external result
 
-4\. Result received
+4. Result received
 
 Activation 42 resumes with its result
 
-5\. State committed
+5. State committed
 
 Data stored and display updated
 
@@ -256,7 +228,7 @@ Cancellation, failure, and completion should be distinguishable. Otherwise, down
 
 ## 6. Sequential versus asynchronous execution
 
-This is the heart of your original research note.
+This is the heart of the original research note.
 
 ### Sequential execution
 
@@ -264,11 +236,11 @@ In a sequential model, operations follow a defined order:
 
 ```
 Read health
-    ↓
+ ↓
 Subtract damage
-    ↓
+ ↓
 Store new health
-    ↓
+ ↓
 Check whether health <= 0
 ```
 
@@ -281,9 +253,9 @@ However, sequential execution does not necessarily mean that the whole program r
 Now consider a graph that starts two requests:
 
 ```
-                 ┌── Fetch profile ───┐
-Button clicked ──┤                    ├── Combine results
-                 └── Fetch inventory ─┘
+ ┌── Fetch profile ───┐
+Button clicked ──┤ ├── Combine results
+ └── Fetch inventory ─┘
 ```
 
 Both requests can be in flight at the same time. The profile might finish before the inventory, or vice versa.
@@ -307,8 +279,8 @@ Without an explicit policy, the older result might overwrite the newer one.
 A robust runtime can use a monotonically increasing request generation:
 
 ```
-Search "cat"          generation 1
-Search "caterpillar"  generation 2
+Search "cat" generation 1
+Search "caterpillar" generation 2
 
 Result generation 2 → accept
 Result generation 1 → discard as stale
@@ -316,27 +288,23 @@ Result generation 1 → discard as stale
 
 Other valid policies include cancelling the older request or displaying all results with their query identities. The important thing is to make the policy explicit.
 
-Asynchronous dataflow research provides useful concepts here: message ordering, timestamps, progress tracking, and the distinction between data arrival and computation completion. Timely Dataflow, for example, uses timestamps and progress information to reason about which inputs may still arrive.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://timelydataflow.github.io\&sz=32)
+Asynchronous dataflow research provides useful concepts here: message ordering, timestamps, progress tracking, and the distinction between data arrival and computation completion. Timely Dataflow, for example, uses timestamps and progress information to reason about which inputs may still arrive.
 
 timelydataflow\.github.io+1
-
-
 
 ## 7. Persistent state, transient values, and activation-local state
 
 A language should specify the lifetime and ownership of its values.
 
-| State category      | Lifetime                                                  | Example                         |
+| State category | Lifetime | Example |
 | ------------------- | --------------------------------------------------------- | ------------------------------- |
-| Input value         | Until replaced or invalidated                             | Current slider value            |
-| Activation-local    | One invocation                                            | Damage amount for one collision |
-| Persistent variable | Across invocations                                        | Player health                   |
-| Cached result       | Until invalidated or evicted                              | Previously computed path        |
-| Event or message    | Until consumed, processed, or expired according to policy | Button click                    |
-| Stream state        | Across a sequence of messages                             | Running average                 |
-| Runtime state       | For as long as the relevant task exists                   | Pending asynchronous request    |
+| Input value | Until replaced or invalidated | Current slider value |
+| Activation-local | One invocation | Damage amount for one collision |
+| Persistent variable | Across invocations | Player health |
+| Cached result | Until invalidated or evicted | Previously computed path |
+| Event or message | Until consumed, processed, or expired according to policy | Button click |
+| Stream state | Across a sequence of messages | Running average |
+| Runtime state | For as long as the relevant task exists | Pending asynchronous request |
 
 This matters especially when a graph is reentrant—that is, when a new activation can begin before an earlier activation has finished.
 
@@ -344,12 +312,12 @@ For example, a node that stores a single mutable `currentRequest` variable may w
 
 ```
 Activation 41:
-    query = "cat"
-    request = pending
+ query = "cat"
+ request = pending
 
 Activation 42:
-    query = "caterpillar"
-    request = pending
+ query = "caterpillar"
+ request = pending
 ```
 
 Each invocation owns its own local inputs and pending work, while shared state is updated according to a separate, explicit policy.
@@ -358,7 +326,7 @@ A good rule is: values should have a defined owner, lifetime, and update policy.
 
 ## 8. The relationship between ASTs and runtime state
 
-Your note links to the [Abstract syntax tree](https://en.wikipedia.org/wiki/Abstract_syntax_tree?utm_source=chatgpt.com). ASTs are relevant, but they solve a different problem.
+the note links to the [Abstract syntax tree](https://en.wikipedia.org/wiki/Abstract_syntax_tree?utm_source=chatgpt.com). ASTs are relevant, but they solve a different problem.
 
 An AST represents the syntactic structure of a program. Runtime state describes what happens when that program executes.
 
@@ -428,10 +396,10 @@ For example:
 
 ```
 Previous value ──┐
-                 ├── Add ──> Next value
-Input ───────────┘                │
-    ▲                             │
-    └──── State / Delay ◄─────────┘
+ ├── Add ──> Next value
+Input ───────────┘ │
+ ▲ │
+ └──── State / Delay ◄─────────┘
 ```
 
 The delay makes the temporal boundary visible. This is especially valuable in simulations, signal processing, and reactive graphs.
@@ -446,22 +414,18 @@ Suppose an event updates both a player's health and a health-bar display. Should
 
 There are several possible models.
 
-| Model                 | Behavior                                                    | Trade-off                                                            |
+| Model | Behavior | Trade-off |
 | --------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------- |
-| Immediate mutation    | Each write becomes visible immediately.                     | Simple, but intermediate states can leak into other computations.    |
-| Transactional update  | Related changes are committed together.                     | More predictable, but requires transaction boundaries.               |
-| Snapshot evaluation   | Nodes read a consistent snapshot of state.                  | Good for deterministic evaluation, but may delay visibility.         |
+| Immediate mutation | Each write becomes visible immediately. | Simple, but intermediate states can leak into other computations. |
+| Transactional update | Related changes are committed together. | More predictable, but requires transaction boundaries. |
+| Snapshot evaluation | Nodes read a consistent snapshot of state. | Good for deterministic evaluation, but may delay visibility. |
 | Event-sourced updates | State is derived by applying an ordered sequence of events. | Supports replay and auditing, but requires event history management. |
 
 A language might use immediate mutation for local imperative operations while using transactional updates for reactive recomputation.
 
-For reactive graphs, a common approach is to batch changes and evaluate their downstream consequences in a defined update cycle. Reactive Vega illustrates why dependency tracking and incremental propagation matter: its architecture can update affected data and visualization elements without recomputing the entire system.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://idl.cs.washington.edu\&sz=32)
+For reactive graphs, a common approach is to batch changes and evaluate their downstream consequences in a defined update cycle. Reactive Vega illustrates why dependency tracking and incremental propagation matter: its architecture can update affected data and visualization elements without recomputing the entire system.
 
 UW Interactive Data Lab+1
-
-
 
 This leads to several essential questions:
 
@@ -476,7 +440,7 @@ These are semantic questions, not merely implementation details.
 
 ## 11. A proposed state-management architecture
 
-If you are researching or designing a visual programming language, I would separate state management into five cooperating subsystems.
+If the project is researching or designing a visual programming language, the recommended approach is to separate state management into five cooperating subsystems.
 
 ### 1. State store
 
@@ -508,33 +472,33 @@ A conceptual implementation might include structures like these:
 
 ```
 Graph
-    nodes
-    edges
-    node_definitions
-    dependency_index
+ nodes
+ edges
+ node_definitions
+ dependency_index
 
 Runtime
-    persistent_store
-    activation_table
-    ready_queue
-    pending_tasks
-    event_queues
-    dependency_versions
+ persistent_store
+ activation_table
+ ready_queue
+ pending_tasks
+ event_queues
+ dependency_versions
 
 Activation
-    activation_id
-    node_id
-    input_values
-    local_state
-    status
-    continuation
-    error
+ activation_id
+ node_id
+ input_values
+ local_state
+ status
+ continuation
+ error
 
 Value
-    type
-    payload
-    version
-    provenance
+ type
+ payload
+ version
+ provenance
 ```
 
 This is illustrative rather than a required architecture.
@@ -564,7 +528,7 @@ For example, a node might currently display `75`, while an older asynchronous ac
 
 ## 13. Research questions and design checklist
 
-The following questions can help turn your research note into a concrete specification.
+The following questions can help turn the research note into a concrete specification.
 
 ## Specification checklist
 
@@ -616,53 +580,33 @@ These resources offer complementary perspectives on the problem.
 
 [Dataflow programming](https://en.wikipedia.org/wiki/Dataflow_programming?utm_source=chatgpt.com)
 
-A broad introduction to graphs of computations, input availability, parallel execution, and state in dataflow systems.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://en.wikipedia.org\&sz=32)
+A broad introduction to graphs of computations, input availability, parallel execution, and state in dataflow systems.
 
 Wikipedia
 
-
-
 [Dataflow Process Networks — Edward A. Lee](https://ptolemy.berkeley.edu/publications/papers/94/processNets/?utm_source=chatgpt.com)
 
-A foundational treatment of concurrent processes, FIFO communication channels, actor firings, and formal execution models.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://ptolemy.berkeley.edu\&sz=32)
+A foundational treatment of concurrent processes, FIFO communication channels, actor firings, and formal execution models.
 
 Ptolemy Project
 
-
-
 [Timely Dataflow: Core Concepts](https://timelydataflow.github.io/timely-dataflow/chapter_1/chapter_1.html?utm_source=chatgpt.com)
 
-Explains timestamps, progress tracking, and reasoning about the order and completeness of asynchronous computation.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://timelydataflow.github.io\&sz=32)
+Explains timestamps, progress tracking, and reasoning about the order and completeness of asynchronous computation.
 
 timelydataflow\.github.io
 
-
-
 [Reactive Vega — A Streaming Dataflow Architecture for Declarative Interactive Visualization](https://vis.csail.mit.edu/pubs/reactive-vega.pdf?utm_source=chatgpt.com)
 
-A practical research example of managing interaction events, data dependencies, incremental updates, and rendering within a reactive graph.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://idl.cs.washington.edu\&sz=32)
+A practical research example of managing interaction events, data dependencies, incremental updates, and rendering within a reactive graph.
 
 UW Interactive Data Lab+1
 
-
-
 [Semantics of multiway dataflow constraint systems](https://doi.org/10.1016/j.jlamp.2020.100634?utm_source=chatgpt.com)
 
-Explores formal semantics for selecting operations based on global state and update history, especially for interactive user interfaces.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://www.sciencedirect.com\&sz=32)
+Explores formal semantics for selecting operations based on global state and update history, especially for interactive user interfaces.
 
 ScienceDirect
-
-
 
 ## Conclusion
 
@@ -670,4 +614,4 @@ The key to state management in visual graphs is to define the relationship betwe
 
 A wire alone does not tell you whether a value is persistent, whether an operation executes immediately, whether an update is atomic, or whether an asynchronous result still belongs to the current computation. Those properties belong to the language's execution semantics.
 
-For a research project, I would make the next step a formal model of the runtime: define the graph state, activation state, transition rules, and observable effects. Once those are explicit, questions about asynchronous execution, reactive propagation, cycles, debugging, and optimization become much easier to investigate systematically.
+For a research project, The next step is a formal model of the runtime: define the graph state, activation state, transition rules, and observable effects. Once those are explicit, questions about asynchronous execution, reactive propagation, cycles, debugging, and optimization become much easier to investigate systematically.

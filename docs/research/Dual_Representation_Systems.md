@@ -33,7 +33,7 @@ to:
 
 ```
 let score = 10;
-score = score + ;
+score = score +;
 ```
 
 The second version is temporarily invalid JavaScript. A conventional parser may reject the expression, leaving a block editor unable to reconstruct the program.
@@ -46,23 +46,17 @@ This is the central issue of dual representation design: a program can be incomp
 
 There are several ways to synchronize text and visual representations. They differ in which representation is authoritative, how they preserve invalid text, and whether they support unrestricted source code.
 
-[ブロックを組み合わせてレトロゲーム開発！ ～Microsoft、「MakeCode Arcade」を一般公開 - 窓の杜](https://images.openai.com/static-rsc-4/vsygxBiBWHlkRuKGKpG9fmCKyUFDCUReD1ekKYChOLroCPVPQPMz_jO30zJId29es3wuKf2nO2HNoahs_QYvFmkSUTJ3SlKpZsrZ9Q4f_nay8bzrAmJU4A-v2c6VrhufRjO4jFo2q-ztefGOvrdsE5wJsZaVNzxkKV_y4fmvjf0?purpose=inline)
-
 A. Translate between text and blocks
 
 The system converts a supported subset of source code into visual blocks and generates source code from those blocks.
 
 Best for educational programming and constrained languages. Translation may fail when the text exceeds the visual language's capabilities.
 
-[大人向けScratch講師養成講座を学ぼう！](https://images.openai.com/static-rsc-4/Fdm1bcRGYEzc18D9ljaRtk0tfsS1Z73AuuB1pTrrbEiyz60QJwk_rtMWyO1MbHsMtvbL3qVWFEbjAIOjt-mXL62ixfF4UaXgGKNr7y-YHme2huJo86mjbmFcVcGhKUkLQcG3gUgIHdyZJOiiFm9Ly5desGttWQ1R745sb2wU180?purpose=inline)
-
 B. Use a shared semantic model
 
 Both editors operate on a common abstract syntax tree (AST), typed graph, or intermediate representation (IR). An edit in one view updates the shared model, which then updates the other view.
 
 Best when both interfaces have comparable expressive power. Invalid intermediate text still needs special treatment.
-
-[How can I move all actors? - Blueprint - Epic Developer Community Forums](https://images.openai.com/static-rsc-4/dygEKdfTSZyZ05z-GO2E6kWO6wc6UvzfGZhYSxDap4G4G7A3CVYPMCoL0iDPPSN4S5TauS5BjPiHY0CwXDjcBPTBEpi2MJi0pxWzwBAeBuVWW3LVL6QGGFTJ2u7__IGhZCBW0tWvEI2Vx3YyOmRNBPx15np1PYrnWEw3nvBkyYw?purpose=inline)
 
 C. Keep source text and visual structure together
 
@@ -89,7 +83,7 @@ The parser recognizes a complete expression; the visual editor can render it nor
 State 2 — Incomplete edit
 
 ```
-total = price + ;
+total = price +;
 ```
 
 The expression is invalid, but the source must be retained exactly as entered.
@@ -112,37 +106,33 @@ These conditions require different responses. Treating all three as generic conv
 
 ### Five strategies for handling invalid text
 
-1\. Preserve the last valid visual state
+1. Preserve the last valid visual state
 
 Continue displaying the last successfully generated graph while the text is invalid. Mark it as stale and show a diagnostic.
 
 This is simple and safe, but the graph no longer represents the current source. The UI must make that distinction unmistakable.
 
-2\. Use error-tolerant parsing
+2. Use error-tolerant parsing
 
 Parse incomplete input into an error-recovering syntax tree with missing nodes, error nodes, or explicit holes. Render valid regions and preserve the invalid region in a placeholder.
 
 This offers a more live, synchronized experience, but requires a parser and renderer designed to handle malformed input.
 
-3\. Use opaque text blocks
+3. Use opaque text blocks
 
-When code cannot be translated into ordinary visual blocks, display a special block containing the original text. MakeCode documents this approach for JavaScript that cannot be represented with its normal blocks.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://bedrock.makecode.com\&sz=32)
+When code cannot be translated into ordinary visual blocks, display a special block containing the original text. MakeCode documents this approach for JavaScript that cannot be represented with its normal blocks.
 
 Microsoft MakeCode for Minecraft Add-Ons+1
 
-
-
 This is excellent for unsupported but valid code. For malformed text, the opaque block must also preserve the exact source without claiming the code is valid.
 
-4\. Synchronize only valid regions
+4. Synchronize only valid regions
 
 Keep independently parseable statements or subtrees synchronized, while isolating broken regions. If one expression becomes invalid, unrelated functions and blocks can still update.
 
 This is useful for large programs, but requires stable identities and careful tracking of which regions depend on each other.
 
-5\. Use an editable intermediate representation
+5. Use an editable intermediate representation
 
 Represent the program using a tolerant syntax tree or graph that can contain incomplete constructs, missing operands, unresolved references, and source fragments. Both interfaces edit that representation.
 
@@ -167,13 +157,13 @@ For example, converting source code to an AST and regenerating it can discard co
 
 A well-designed system should aim for several laws.
 
-| Law                      | Desired behavior                                                                        |
+| Law | Desired behavior |
 | ------------------------ | --------------------------------------------------------------------------------------- |
-| Text round-trip          | Converting supported text to a visual form and back preserves its meaning.              |
-| Visual round-trip        | Converting a visual program to text and back preserves its structure and behavior.      |
-| Edit stability           | A small edit does not unnecessarily rewrite unrelated regions.                          |
-| Information preservation | Comments, unsupported constructs, and source fragments are not silently lost.           |
-| Convergence              | After an edit settles, both representations agree wherever synchronization is possible. |
+| Text round-trip | Converting supported text to a visual form and back preserves its meaning. |
+| Visual round-trip | Converting a visual program to text and back preserves its structure and behavior. |
+| Edit stability | A small edit does not unnecessarily rewrite unrelated regions. |
+| Information preservation | Comments, unsupported constructs, and source fragments are not silently lost. |
+| Convergence | After an edit settles, both representations agree wherever synchronization is possible. |
 
 These laws need careful interpretation. Exact textual equality is usually unrealistic when a generator reformats code. A better requirement is either exact preservation of untouched source regions or semantic equivalence, depending on the design.
 
@@ -181,7 +171,7 @@ The theory of bidirectional transformations is useful because it forces the desi
 
 ## 5. A recommended architecture: source-preserving, error-tolerant synchronization
 
-For a new dual representation editor, I would recommend combining a source-preserving text model, an error-tolerant syntax tree, and a structured visual graph.
+For a new dual representation editor, the recommended approach is to combining a source-preserving text model, an error-tolerant syntax tree, and a structured visual graph.
 
 The crucial design choice is that parsing failure must not be a synchronization failure. The system should have a valid internal state even when the user's program is invalid.
 
@@ -224,7 +214,7 @@ This resembles techniques used in modern language tooling, but the requirements 
 For the text:
 
 ```
-total = price + ;
+total = price +;
 ```
 
 an error-tolerant parser could produce the following conceptual structure:
@@ -259,19 +249,19 @@ A practical solution is to track the origin and version of every edit.
 
 ```
 Text edit
-   |
-   v
+ |
+ v
 Update source document
-   |
-   v
+ |
+ v
 Parse and reconcile
-   |
-   v
+ |
+ v
 Update visual projection
-   |
-   +-- Mark update as derived from text
-   |
-   v
+ |
+ +-- Mark update as derived from text
+ |
+ v
 Do not treat derived update as a new graph edit
 ```
 
@@ -292,13 +282,13 @@ These principles are particularly important if the text editor uses an increment
 
 There are three common policies, each with different trade-offs.
 
-| Policy                                | Advantages                                                                           | Main drawback                                                     |
+| Policy | Advantages | Main drawback |
 | ------------------------------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| Text is authoritative                 | Preserves arbitrary source and works naturally with conventional programming tools   | Visual edits must be translated back into text carefully          |
-| Graph is authoritative                | Guarantees that the primary program model remains structurally valid                 | Arbitrary textual edits may be rejected or difficult to represent |
-| Shared model with source preservation | Supports both interfaces while retaining comments, formatting, and invalid fragments | More complex reconciliation and data structures                   |
+| Text is authoritative | Preserves arbitrary source and works naturally with conventional programming tools | Visual edits must be translated back into text carefully |
+| Graph is authoritative | Guarantees that the primary program model remains structurally valid | Arbitrary textual edits may be rejected or difficult to represent |
+| Shared model with source preservation | Supports both interfaces while retaining comments, formatting, and invalid fragments | More complex reconciliation and data structures |
 
-For a system that permits unrestricted textual editing, I recommend the third policy.
+For a system that permits unrestricted textual editing, the recommendation is to the third policy.
 
 The source document is authoritative for the exact text the user entered. A shared, error-tolerant model is authoritative for the structure that the system has successfully understood. The visual view is a projection of that model, not a replacement for the source.
 
@@ -310,49 +300,31 @@ For a constrained educational language whose text syntax is deliberately isomorp
 
 The following are useful starting points for a literature review.
 
-[Coding in JavaScript](https://images.openai.com/static-rsc-4/9W8aIywqYMEPLq8xl8Ee-di6f4AbNATAla8BcwigFAmoAPEWG8lK2SFigUPVO64dmXpIIf-abB9jZIO8gAscGBG3T1Mypxb2fqPyQEcHgxAW8i2CbjcRKw8oXHGwqJ_LQiHcM-CgwgqhB1dSFNh88YdQrz_oXkJe4bfzSE99ppU?purpose=inline)
-
 Microsoft MakeCode / PXT
 
-A particularly useful practical reference for unsupported constructs. Its documented approach uses opaque JavaScript blocks when code cannot be represented by normal blocks, preserving the code when switching views. It also demonstrates that syntactic validity alone does not guarantee visual representability.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://bedrock.makecode.com\&sz=32)
+A particularly useful practical reference for unsupported constructs. Its documented approach uses opaque JavaScript blocks when code cannot be represented by normal blocks, preserving the code when switching views. It also demonstrates that syntactic validity alone does not guarantee visual representability.
 
 Microsoft MakeCode for Minecraft Add-Ons+1
-
-
 
 Study: source preservation, language subsets, and conversion limitations.
 
 [JavaScript blocks documentation](https://bedrock.makecode.com/blocks/javascript-blocks?utm_source=chatgpt.com)
 
-[Ricardo Moran | This is just a place for me to publish some of the stuff I made. Other projects can be found on my github page.](https://images.openai.com/static-rsc-4/0dhpt6K8cmxjxSXS9_nMepsJQCDtv-7lwxqua0NsUwNicSC8q0-tX9ehx0Qxg8Qg_u5NYE11tH2MjMUehq8v4nalTR_8vZSGinOwahONEL5Ir8ivCoJkkANaPft1ew_O3MvLpu8jzLWuqPtHw8GCEKsxMkGBNTjECl5A-hd1UEM?purpose=inline)
-
 Blockly and AST-based conversion
 
-A 2025 paper by Anahide Silahli, Jose Pablo De la Rosa Gutierrez, and Thiago Rocha Silva describes a dual editor for a domain-specific language, using Blockly code generators in one direction and AST-based conversion in the other. Its application domain is behavior-driven development scenarios for robotics.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://portal.findresearcher.sdu.dk\&sz=32)
+A 2025 paper by Anahide Silahli, Jose Pablo De la Rosa Gutierrez, and Thiago Rocha Silva describes a dual editor for a domain-specific language, using Blockly code generators in one direction and AST-based conversion in the other. Its application domain is behavior-driven development scenarios for robotics.
 
 University of Southern Denmark
-
-
 
 Study: real-time synchronization, AST conversion, and evaluation in an end-user programming context.
 
 [Read the 2025 paper](https://doi.org/10.1007/978-3-031-95452-8_8?utm_source=chatgpt.com)
 
-[App Inventor - Proje Örneği 1 - Buton Uygulaması](https://images.openai.com/static-rsc-4/KAf2JLhcQVZhkejdrhevri05faoyQOq8Nl_PNxBsUJd-baQsK5ZBmLKrhU0LllhPUedE4CyKbhdoDyZLU_xIkGKPVV29bu9cQGOyMY8eImfS2OOQ2vnseIGz0Jj51oJP1aqfbf9fbDBMw11W7a-9W-8nm37ovxAVopsQxP0TZWQ?purpose=inline)
-
 Venbrace and MIT App Inventor
 
-Huang and Turbak's design work explores a textual notation that corresponds closely to App Inventor's visual blocks, including representations for larger parts of a project. Its emphasis on a predictable, fully braced syntax illustrates how language design itself can make bidirectional conversion easier.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://cs.wellesley.edu\&sz=32)
+Huang and Turbak's design work explores a textual notation that corresponds closely to App Inventor's visual blocks, including representations for larger parts of a project. Its emphasis on a predictable, fully braced syntax illustrates how language design itself can make bidirectional conversion easier.
 
 Wellesley
-
-
 
 Study: syntax isomorphism, language design, project-wide representation, and user evaluation.
 
@@ -360,27 +332,19 @@ Study: syntax isomorphism, language design, project-wide representation, and use
 
 Tiled Grace and frame-based editing
 
-These systems explore hybrids that bring structured editing affordances into text-based programming. They are useful comparisons because they question whether users need two entirely separate representations or would benefit from a single editor combining the advantages of both.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://cs.wellesley.edu\&sz=32)
+These systems explore hybrids that bring structured editing affordances into text-based programming. They are useful comparisons because they question whether users need two entirely separate representations or would benefit from a single editor combining the advantages of both.
 
 Wellesley+1
 
-
-
 Study: hybrid interfaces, syntax-error prevention, and structured text editing.
 
-A broader literature review by Yuhan Lin and David Weintrop analyzed 46 block-based environments and classified approaches to transitioning between blocks and text. It provides a useful taxonomy for situating a new dual representation system within existing work.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://www.sciencedirect.com\&sz=32)
+A broader literature review by Yuhan Lin and David Weintrop analyzed 46 block-based environments and classified approaches to transitioning between blocks and text. It provides a useful taxonomy for situating a new dual representation system within existing work.
 
 ScienceDirect+1
 
-
-
 ## 9. A research agenda
 
-For a research project specifically focused on preventing synchronization errors, I would investigate the following questions.
+For a research project specifically focused on preventing synchronization errors, research should investigate the following questions.
 
 RQ1 — Error-tolerant synchronization
 
@@ -414,21 +378,21 @@ Measure accidental data loss, recovery time, perceived reliability, and user und
 
 ### Suggested evaluation metrics
 
-| Metric                      | What it measures                                                                          |
+| Metric | What it measures |
 | --------------------------- | ----------------------------------------------------------------------------------------- |
-| Source preservation rate    | Percentage of user-entered source retained after repeated view switches and edits         |
-| Semantic round-trip rate    | Percentage of supported programs that preserve behavior through conversions               |
-| Recovery latency            | Time between repairing invalid text and restoring synchronization                         |
-| Unaffected-node stability   | Percentage of unrelated graph nodes that retain their identity and state                  |
-| Silent-loss rate            | Number of cases where source or visual information disappears without an explicit warning |
-| Synchronization convergence | Whether the representations agree after editing stops                                     |
-| Interaction cost            | Extra actions needed to recover, resolve a conflict, or switch views                      |
+| Source preservation rate | Percentage of user-entered source retained after repeated view switches and edits |
+| Semantic round-trip rate | Percentage of supported programs that preserve behavior through conversions |
+| Recovery latency | Time between repairing invalid text and restoring synchronization |
+| Unaffected-node stability | Percentage of unrelated graph nodes that retain their identity and state |
+| Silent-loss rate | Number of cases where source or visual information disappears without an explicit warning |
+| Synchronization convergence | Whether the representations agree after editing stops |
+| Interaction cost | Extra actions needed to recover, resolve a conflict, or switch views |
 
 Tests should include incomplete expressions, unmatched delimiters, partially typed declarations, unsupported language constructs, comments between statements, changes to nested expressions, and edits made while the parser is still processing a previous version.
 
 ## 10. A concrete implementation plan
 
-For a prototype, I would implement these features in the following order:
+For a prototype, the architecture should be implemented these features in the following order:
 
 1. Define the representable language subset. Specify which text constructs map to which visual nodes and which must remain opaque.
 2. Implement round-trip conversion. Verify that valid programs survive text-to-graph-to-text and graph-to-text-to-graph transformations.

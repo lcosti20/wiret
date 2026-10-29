@@ -8,12 +8,6 @@ The central idea is to treat VS Code as the host application and embed a special
 
 For example, imagine a visual programming language where a user can drag a node onto a canvas, connect its output to another node, and immediately see the corresponding source text update. Editing that source text should also update the canvas.
 
-[Mermaid NG — Visual Editor - Visual Studio Marketplace](https://images.openai.com/static-rsc-4/-VijyYaYDgwAahK_UpRTX-UERlDJ1qLjF7DzIwhVrKyDvqhy62g1vsmW3QBbzUNB8MhiLAxHlUISqZKhUmLcWE7BDOmYMtfZv2pJyoOoA4PeWidVGDHaSShl574gzy8mfD_QqxhaVG_n07HLU6E6rboQp-BaKeJAscXqwJz6xgc?purpose=inline)
-
-[拡張機能（文章・資料・図作成）｜VS Codeエディタ入門](https://images.openai.com/static-rsc-4/H-y7TX6ErRPBRQxg48rCXnB42iyWhALhlxGrdWdFcUhCJpgYNfedkDMX5TK7S9VXLqdHyIvjmSB3WYwp3gmiFHsPDCsZV4wnJinBgQ4QchKS_4y30RoMy9XYgkjmtfWfIOUFFez3XQl7SF2X_JZo8uQmCU-Sq9_3jxGzWlgRTtY?purpose=inline)
-
-[A diagram editor framework for VS Code](https://images.openai.com/static-rsc-4/OtudYSqu-cTwCGW17rMVsBBZOFfqYF7Zt_r4UHRG-SYd1PqaxnDVClJ9SolpBFEl4OYAVl3WU_nbJXWyCXKX9_FepVsyEeDnWn0sDOlzFcLZ6hDiY6K8wAi1AzI8pUTkEWm3AKE5LnSgBNiY5V87N8x1NzCssNtyPgEYDFzNhxY?purpose=inline)
-
 7
 
 VS Code provides two closely related technologies for this:
@@ -47,11 +41,11 @@ Text representation · File on disk · VS Code document model · Undo/redo
 
 These layers have distinct responsibilities.
 
-| Layer          | Primary responsibility                                                       |
+| Layer | Primary responsibility |
 | -------------- | ---------------------------------------------------------------------------- |
-| Webview        | Rendering, pointer interaction, visual layout, temporary UI state            |
+| Webview | Rendering, pointer interaction, visual layout, temporary UI state |
 | Extension host | Coordinating edits, validation, VS Code integration, lifecycle and messaging |
-| Text document  | Persisted program or diagram representation, save state and document history |
+| Text document | Persisted program or diagram representation, save state and document history |
 
 A fourth logical layer is often worth introducing: a shared semantic model. It represents the actual nodes, edges, identifiers, properties, and relationships independently of both the text syntax and the visual layout.
 
@@ -61,45 +55,35 @@ This separation prevents the graph renderer from becoming tightly coupled to the
 
 There are three main approaches, and they solve different problems.
 
-[Graphical VS Code extensions with Eclipse Sprotty | TypeFox](https://images.openai.com/static-rsc-4/K5XFPhO7RlTK2GUOpD7hz-jvuhZ9RRj5W8O6sVhngV8lO06cfbVW_djGDFVyL6bpehzVI9aBsBImeAj5bEDSIxlacDZiVuCUbDjfhrzof1z9lDHIAga1GS-tfVYY9I1YeGOXEcKq_CsWEVZbv-ZoObzGyw30S0fGCkvgBbmIU1M?purpose=inline)
-
 A. Standalone Webview Panel
 
 Custom UI, not a file editor
 
 Use `vscode.window.createWebviewPanel()` when building a visualization, dashboard, debugger, or graph explorer that doesn't need to own the editing experience for a particular file.
 
-Trade-off: You must implement your own file association and synchronization if the panel edits a document.
-
-[Coco AI v0.10 Released](https://images.openai.com/static-rsc-4/ZtPPYJ2F0uMp8HUDiXEW9qp4p1a9wcIOlJP69BXVONd3tVvCyxYtKCT_4tSvZUU_I_fbR9dBws6P-l-UKvVKivM7PVH0d4R7CangG7fFqZdIq7Jb537OLNCF2Vj6vFIjdpk1z9uFhWlEGINkrDToTicTt3bIx8b4qbT07dSvbMA?purpose=inline)
+Trade-off: You must implement the own file association and synchronization if the panel edits a document.
 
 B. `CustomTextEditorProvider`
 
 Best for text-based graph languages
 
-Use this when the underlying resource is a text file, such as `.wiret`, `.graph`, `.json`, or a custom DSL. VS Code maintains the `TextDocument`, handles standard text editing and undo/redo, and provides the usual save and backup behavior.
+Use this when the underlying resource is a text file, such as `.graph`, `.json`, or a custom DSL. VS Code maintains the `TextDocument`, handles standard text editing and undo/redo, and provides the usual save and backup behavior.
 
-Trade-off: Your extension must translate visual operations into text edits and translate text changes back into visual state.
-
-[Editor Interface | PlayCanvas Developer Site](https://images.openai.com/static-rsc-4/V3H4COhPeZCScCvozU-3vc0G2ZoSYryHybuUHG8XdloZZhq_RTtJ664-GTCQlT6a2ls9hKZPsZDdlTY7dArh8JnDetrJZnrlbCK-ZhXFYz8HWiJ61a6ub06MY0o68l4YwX1XuRrXhdRGf7byxU7Wzmk8pWPRwn_VredPLuV1hqQ?purpose=inline)
+Trade-off: the extension must translate visual operations into text edits and translate text changes back into visual state.
 
 C. `CustomEditorProvider`
 
 Custom document model
 
-Use this when the resource is binary or when your application genuinely needs to own the document model—for example, a proprietary graph database file or a binary visual asset.
+Use this when the resource is binary or when the application genuinely needs to own the document model—for example, a proprietary graph database file or a binary visual asset.
 
 Trade-off: You must implement more document lifecycle, save, backup, dirty-state, and potentially undo/redo behavior yourself.
 
-The official guidance is straightforward: for a text-based format, prefer `CustomTextEditorProvider`; for a custom binary document, use `CustomEditorProvider`.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://code.visualstudio.com\&sz=32)
+The official guidance is straightforward: for a text-based format, prefer `CustomTextEditorProvider`; for a custom binary document, use `CustomEditorProvider`.
 
 Visual Studio Code Extension API+1
 
-
-
-For a visual programming language whose canonical representation is text, I'd start with a custom text editor rather than inventing a parallel document system.
+For a visual programming language whose canonical representation is text, the author'd start with a custom text editor rather than inventing a parallel document system.
 
 ### What a custom text editor provides
 
@@ -107,67 +91,59 @@ The provider API has one particularly important method:
 
 ```
 resolveCustomTextEditor(
-  document: vscode.TextDocument,
-  webviewPanel: vscode.WebviewPanel,
-  token: vscode.CancellationToken
+ document: vscode.TextDocument,
+ webviewPanel: vscode.WebviewPanel,
+ token: vscode.CancellationToken
 ): void | Thenable<void>
 ```
 
 This method connects a text document to a webview. The extension initializes the webview, sends the initial document state, listens for webview messages, and observes changes to the underlying document.
 
-VS Code also permits the same resource to have multiple editor instances. If a user splits the editor, each view has its own webview, but the views share the same underlying `TextDocument`. That distinction is fundamental to correct synchronization.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://code.visualstudio.com\&sz=32)
+VS Code also permits the same resource to have multiple editor instances. If a user splits the editor, each view has its own webview, but the views share the same underlying `TextDocument`. That distinction is fundamental to correct synchronization.
 
 Visual Studio Code Extension API+1
 
-
-
 ## 4. Bundling React, Svelte, or vanilla JavaScript
 
-A webview is essentially a sandboxed browser surface embedded in VS Code. It can render sophisticated web applications, but it is not a normal webpage and cannot directly access the extension API. Communication takes place through message passing.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://github.com\&sz=32)
+A webview is essentially a sandboxed browser surface embedded in VS Code. It can render sophisticated web applications, but it is not a normal webpage and cannot directly access the extension API. Communication takes place through message passing.
 
 GitHub+1
-
-
 
 A typical extension project might look like this:
 
 ```
-my-graph-extension/
+the author's-graph-extension/
 ├── package.json
 ├── tsconfig.json
 ├── esbuild.mjs
 ├── src/
-│   ├── extension.ts
-│   ├── graphEditorProvider.ts
-│   ├── documentController.ts
-│   ├── parser.ts
-│   ├── serializer.ts
-│   └── webview/
-│       ├── main.tsx
-│       ├── App.tsx
-│       ├── GraphCanvas.tsx
-│       ├── graphModel.ts
-│       └── styles.css
+│ ├── extension.ts
+│ ├── graphEditorProvider.ts
+│ ├── documentController.ts
+│ ├── parser.ts
+│ ├── serializer.ts
+│ └── webview/
+│ ├── main.tsx
+│ ├── App.tsx
+│ ├── GraphCanvas.tsx
+│ ├── graphModel.ts
+│ └── styles.css
 └── dist/
-    ├── extension.js
-    └── webview/
-        ├── main.js
-        └── main.css
+ ├── extension.js
+ └── webview/
+ ├── main.js
+ └── main.css
 ```
 
 The extension host and webview are two distinct JavaScript execution environments. A bundler such as esbuild or webpack produces separate bundles for them.
 
-| Concern     | Extension host                                 | Webview                               |
+| Concern | Extension host | Webview |
 | ----------- | ---------------------------------------------- | ------------------------------------- |
-| Runtime     | Node.js-based extension environment            | Browser-like webview environment      |
-| Entry point | `extension.ts`                                 | `main.tsx` or `main.ts`               |
-| VS Code API | Full supported extension API                   | Limited `acquireVsCodeApi()` bridge   |
+| Runtime | Node.js-based extension environment | Browser-like webview environment |
+| Entry point | `extension.ts`  | `main.tsx` or `main.ts`  |
+| VS Code API | Full supported extension API | Limited `acquireVsCodeApi()` bridge |
 | File access | VS Code workspace APIs and permitted Node APIs | No direct arbitrary filesystem access |
-| Main task   | Document management and synchronization        | Visual interaction and rendering      |
+| Main task | Document management and synchronization | Visual interaction and rendering |
 
 ### Register the custom editor
 
@@ -177,23 +153,23 @@ A simplified `package.json` contribution looks like this:
 
 ```
 {
-  "activationEvents": [
-    "onCustomEditor:wiret.graphEditor"
-  ],
-  "contributes": {
-    "customEditors": [
-      {
-        "viewType": "wiret.graphEditor",
-        "displayName": "Wiret Graph Editor",
-        "selector": [
-          {
-            "filenamePattern": "*.wiret"
-          }
-        ],
-        "priority": "default"
-      }
-    ]
-  }
+ "activationEvents": [
+ "onCustomEditor:graphEditor"
+ ],
+ "contributes": {
+ "customEditors": [
+ {
+ "viewType": "graphEditor",
+ "displayName": "Graph Editor",
+ "selector": [
+ {
+ "filenamePattern": "*.graph"
+ }
+ ],
+ "priority": "default"
+ }
+ ]
+ }
 }
 ```
 
@@ -201,20 +177,20 @@ The provider must register the same view type:
 
 ```
 context.subscriptions.push(
-  vscode.window.registerCustomEditorProvider(
-    "wiret.graphEditor",
-    new GraphEditorProvider(context),
-    {
-      webviewOptions: {
-        retainContextWhenHidden: false
-      },
-      supportsMultipleEditorsPerDocument: true
-    }
-  )
+ vscode.window.registerCustomEditorProvider(
+ "graphEditor",
+ new GraphEditorProvider(context),
+ {
+ webviewOptions: {
+ retainContextWhenHidden: false
+ },
+ supportsMultipleEditorsPerDocument: true
+ }
+ )
 );
 ```
 
-The exact activation configuration may depend on the VS Code version and manifest setup. The `viewType` must match between the contribution and registration. Supporting multiple editors is appropriate only if your document controller and synchronization logic can safely maintain several views.
+The exact activation configuration may depend on the VS Code version and manifest setup. The `viewType` must match between the contribution and registration. Supporting multiple editors is appropriate only if the document controller and synchronization logic can safely maintain several views.
 
 ### Generate secure webview HTML
 
@@ -224,44 +200,44 @@ The extension constructs HTML that loads its compiled assets through webview-app
 const webview = panel.webview;
 
 webview.options = {
-  enableScripts: true,
-  localResourceRoots: [
-    vscode.Uri.joinPath(context.extensionUri, "dist", "webview")
-  ]
+ enableScripts: true,
+ localResourceRoots: [
+ vscode.Uri.joinPath(context.extensionUri, "dist", "webview")
+ ]
 };
 
 const scriptUri = webview.asWebviewUri(
-  vscode.Uri.joinPath(
-    context.extensionUri,
-    "dist",
-    "webview",
-    "main.js"
-  )
+ vscode.Uri.joinPath(
+ context.extensionUri,
+ "dist",
+ "webview",
+ "main.js"
+ )
 );
 
 const nonce = getNonce();
 
 panel.webview.html = `
-  <!DOCTYPE html>
-  <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <meta
-        http-equiv="Content-Security-Policy"
-        content="default-src 'none';
-          script-src 'nonce-${nonce}';
-          style-src ${webview.cspSource};
-          img-src ${webview.cspSource} data:;
-          font-src ${webview.cspSource};"
-      >
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Wiret Graph Editor</title>
-    </head>
-    <body>
-      <div id="root"></div>
-      <script nonce="${nonce}" src="${scriptUri}"></script>
-    </body>
-  </html>
+ <!DOCTYPE html>
+ <html lang="en">
+ <head>
+ <meta charset="UTF-8">
+ <meta
+ http-equiv="Content-Security-Policy"
+ content="default-src 'none';
+ script-src 'nonce-${nonce}';
+ style-src ${webview.cspSource};
+ img-src ${webview.cspSource} data:;
+ font-src ${webview.cspSource};"
+ >
+ <meta name="viewport" content="width=device-width, initial-scale=1.0">
+ <title>Graph Editor</title>
+ </head>
+ <body>
+ <div id="root"></div>
+ <script nonce="${nonce}" src="${scriptUri}"></script>
+ </body>
+ </html>
 `;
 ```
 
@@ -275,13 +251,9 @@ Important implementation rules:
 - Avoid inline scripts and `eval()`-dependent bundler output.
 - Treat every message received from the webview as untrusted input; validate its shape and permissions before applying edits.
 
-These restrictions are not merely deployment inconveniences. They encourage a clean separation between the UI and the privileged extension host. The [official Webview API guide](https://code.visualstudio.com/api/extension-guides/webview?utm_source=chatgpt.com) explains the security model and resource-loading requirements.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://github.com\&sz=32)
+These restrictions are not merely deployment inconveniences. They encourage a clean separation between the UI and the privileged extension host. The [official Webview API guide](https://code.visualstudio.com/api/extension-guides/webview?utm_source=chatgpt.com) explains the security model and resource-loading requirements.
 
 GitHub+1
-
-
 
 ## 5. Bidirectional synchronization: the central engineering problem
 
@@ -300,10 +272,10 @@ Consider a small graph:
 
 ```
 graph Example {
-  node input  { type: "Number", x: 80,  y: 100 }
-  node output { type: "Display", x: 320, y: 100 }
+ node input { type: "Number", x: 80, y: 100 }
+ node output { type: "Display", x: 320, y: 100 }
 
-  edge input.value -> output.value
+ edge input.value -> output.value
 }
 ```
 
@@ -311,24 +283,24 @@ The parser converts this into a model that the canvas can render:
 
 ```
 interface GraphDocument {
-  nodes: Map<string, GraphNode>;
-  edges: Map<string, GraphEdge>;
+ nodes: Map<string, GraphNode>;
+ edges: Map<string, GraphEdge>;
 }
 
 interface GraphNode {
-  id: string;
-  type: string;
-  x: number;
-  y: number;
-  properties: Record<string, unknown>;
+ id: string;
+ type: string;
+ x: number;
+ y: number;
+ properties: Record<string, unknown>;
 }
 
 interface GraphEdge {
-  id: string;
-  sourceNode: string;
-  sourcePort: string;
-  targetNode: string;
-  targetPort: string;
+ id: string;
+ sourceNode: string;
+ sourcePort: string;
+ targetNode: string;
+ targetPort: string;
 }
 ```
 
@@ -352,16 +324,16 @@ The webview sends a semantic operation rather than a complete serialized documen
 
 ```
 {
-  type: "graph/patch",
-  revision: 12,
-  operations: [
-    {
-      op: "setNodePosition",
-      id: "input",
-      x: 80,
-      y: 180
-    }
-  ]
+ type: "graph/patch",
+ revision: 12,
+ operations: [
+ {
+ op: "setNodePosition",
+ id: "input",
+ x: 80,
+ y: 180
+ }
+ ]
 }
 ```
 
@@ -380,9 +352,9 @@ A conceptual example:
 const edit = new vscode.WorkspaceEdit();
 
 edit.replace(
-  document.uri,
-  positionPropertyRange,
-  "x: 80, y: 180"
+ document.uri,
+ positionPropertyRange,
+ "x: 80, y: 180"
 );
 
 await vscode.workspace.applyEdit(edit);
@@ -400,34 +372,30 @@ The extension subscribes to `workspace.onDidChangeTextDocument`. When the underl
 
 ```
 const subscription =
-  vscode.workspace.onDidChangeTextDocument(event => {
-    if (event.document.uri.toString() !== document.uri.toString()) {
-      return;
-    }
+ vscode.workspace.onDidChangeTextDocument(event => {
+ if (event.document.uri.toString() !== document.uri.toString()) {
+ return;
+ }
 
-    const graph = parseGraph(event.document.getText());
+ const graph = parseGraph(event.document.getText());
 
-    for (const panel of panelsForDocument(document.uri)) {
-      panel.webview.postMessage({
-        type: "graph/replace",
-        revision: getCurrentRevision(document.uri),
-        graph: serializeForWebview(graph)
-      });
-    }
-  });
+ for (const panel of panelsForDocument(document.uri)) {
+ panel.webview.postMessage({
+ type: "graph/replace",
+ revision: getCurrentRevision(document.uri),
+ graph: serializeForWebview(graph)
+ });
+ }
+ });
 ```
 
 This illustrates the flow rather than a complete implementation. A production implementation needs document-scoped revision tracking, disposal of subscriptions, parse-error handling, and a policy for updating views while an edit is still in progress.
 
 The crucial detail is that a change caused by the visual editor also triggers the document-change event. The extension must not treat that notification as an entirely new user operation and send it back as another edit.
 
-The official custom-editor documentation explicitly warns about this feedback loop and recommends handling invalid document states gracefully.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://code.visualstudio.com\&sz=32)
+The official custom-editor documentation explicitly warns about this feedback loop and recommends handling invalid document states gracefully.
 
 Visual Studio Code Extension API+1
-
-
 
 ### 5.4 Avoid synchronization loops
 
@@ -461,13 +429,9 @@ For simple single-user editing, serializing edits through one extension-host con
 
 ## 6. Messaging between the webview and extension
 
-The webview bridge is asynchronous and message-based. The extension can call `webview.postMessage(...)`; inside the webview, the UI obtains the VS Code API using `acquireVsCodeApi()` and sends messages using `postMessage(...)`.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://github.com\&sz=32)
+The webview bridge is asynchronous and message-based. The extension can call `webview.postMessage(...)`; inside the webview, the UI obtains the VS Code API using `acquireVsCodeApi()` and sends messages using `postMessage(...)`.
 
 GitHub+1
-
-
 
 Initialize the API once:
 
@@ -475,16 +439,16 @@ Initialize the API once:
 const vscode = acquireVsCodeApi();
 
 vscode.postMessage({
-  type: "graph/ready",
-  protocolVersion: 1
+ type: "graph/ready",
+ protocolVersion: 1
 });
 
 window.addEventListener("message", event => {
-  const message = event.data;
+ const message = event.data;
 
-  if (message.type === "graph/replace") {
-    renderGraph(message.graph);
-  }
+ if (message.type === "graph/replace") {
+ renderGraph(message.graph);
+ }
 });
 ```
 
@@ -492,19 +456,19 @@ The extension receives the message:
 
 ```
 panel.webview.onDidReceiveMessage(message => {
-  if (!isValidGraphMessage(message)) {
-    return;
-  }
+ if (!isValidGraphMessage(message)) {
+ return;
+ }
 
-  switch (message.type) {
-    case "graph/ready":
-      sendInitialGraph();
-      break;
+ switch (message.type) {
+ case "graph/ready":
+ sendInitialGraph();
+ break;
 
-    case "graph/patch":
-      applyGraphOperations(message);
-      break;
-  }
+ case "graph/patch":
+ applyGraphOperations(message);
+ break;
+ }
 });
 ```
 
@@ -514,38 +478,38 @@ These snippets are illustrative; `isValidGraphMessage`, `renderGraph`, `sendInit
 
 A message schema should include at least:
 
-| Field             | Purpose                                    |
+| Field | Purpose |
 | ----------------- | ------------------------------------------ |
-| `type`            | Message kind, such as `graph/patch`        |
-| `protocolVersion` | Detect incompatible extension/UI versions  |
-| `requestId`       | Correlate request and response when needed |
-| `revision`        | Detect stale state                         |
-| `payload`         | Validated operation or state data          |
+| `type`  | Message kind, such as `graph/patch`  |
+| `protocolVersion` | Detect incompatible extension/UI versions |
+| `requestId`  | Correlate request and response when needed |
+| `revision`  | Detect stale state |
+| `payload`  | Validated operation or state data |
 
 For example:
 
 ```
 type GraphMessage =
-  | {
-      type: "graph/ready";
-      protocolVersion: number;
-    }
-  | {
-      type: "graph/patch";
-      revision: number;
-      operationId: string;
-      operations: GraphOperation[];
-    }
-  | {
-      type: "graph/replace";
-      revision: number;
-      graph: SerializedGraph;
-    }
-  | {
-      type: "graph/error";
-      requestId?: string;
-      message: string;
-    };
+ | {
+ type: "graph/ready";
+ protocolVersion: number;
+ }
+ | {
+ type: "graph/patch";
+ revision: number;
+ operationId: string;
+ operations: GraphOperation[];
+ }
+ | {
+ type: "graph/replace";
+ revision: number;
+ graph: SerializedGraph;
+ }
+ | {
+ type: "graph/error";
+ requestId?: string;
+ message: string;
+ };
 ```
 
 Use runtime validation as well as TypeScript types. TypeScript types disappear at runtime, so they do not validate incoming messages from a webview.
@@ -556,8 +520,6 @@ For large graphs, avoid posting a full snapshot after every pointer movement. Pr
 
 The webview is just the container. The canvas technology determines how easy it is to implement selection, panning, zooming, connections, accessibility, and large graphs.
 
-[Examples - React Flow](https://images.openai.com/static-rsc-4/8PuK4RYSC4qKkjML7hVAxwdSPH86PnLr_YQ078XQzkjx4hqe9C271dv72KU8KtFOczQPjls_uKFTNR4ZvPnRyhWBRfiRhVQxzub-OXhTVzdpYdsjxqUOmUF6FVljnTUUe-Mh_nQFJ4qapGS9KBzg0tuvujrsM_7Ylcz89KdmTlI?purpose=inline)
-
 React Flow
 
 React · Node editors · Interactive diagrams
@@ -565,8 +527,6 @@ React · Node editors · Interactive diagrams
 A strong starting point for node-based programming tools. It supplies node and edge abstractions, connection handling, viewport controls, and customizable node components.
 
 Website: [React Flow](https://reactflow.dev/?utm_source=chatgpt.com)
-
-[Overview - Svelte Flow](https://images.openai.com/static-rsc-4/UufXh7fho08NiMXZUVHmpmYncCV8Yh9F7QlDrDmyPu9ccExschfQjcrUhXlXFqt5DPkxmcO0SCl5_vj-SuqcG6c5XokbuFD3swO6hqIb5gBAWr-OWzGhAgUic4EIsxDxod04lNNkzwDZ6Ys-8q3HoJTAaAT6rUMlyN0lGQZQ814?purpose=inline)
 
 Svelte Flow
 
@@ -584,15 +544,13 @@ SVG works well for moderately sized graphs, particularly when individual nodes a
 
 Reference: [MDN SVG documentation](https://developer.mozilla.org/en-US/docs/Web/SVG?utm_source=chatgpt.com)
 
-[Synergy Codes — Webbook: Building usable and accessible diagrams with React Flow](https://images.openai.com/static-rsc-4/HvJicsVrpW2iWjNB9a0foMoP2FVtvGAWfkKxabTfSEI9IWHuXrlz5C2s-K9BxpQ30fNNRmOhikXzIvKu-h-klpobXRcVB_-_cW-nX_dCZsN-PG9Q4YcI33QU_HjAGa1WoipnwSNLH-NHCUVSBZtvNsrc0Wt3F9ryYX4JDTRr0r0?purpose=inline)
-
 Canvas or WebGL
 
 Large graphs · Custom rendering
 
 Consider Canvas 2D or WebGL when the graph has many thousands of visible primitives or when you need custom rendering and hit-testing. You will need to implement more of the interaction and accessibility behavior yourself.
 
-For a first implementation, I'd choose React Flow or Svelte Flow unless you have a specific requirement that demands a custom renderer.
+For a first implementation, the author'd choose React Flow or Svelte Flow unless you have a specific requirement that demands a custom renderer.
 
 One caveat: graph performance is not determined only by the rendering engine. Unnecessary component re-renders, expensive edge routing, layout calculations, and repeated parsing can become bottlenecks long before raw drawing performance does.
 
@@ -623,13 +581,9 @@ A good implementation distinguishes three performance concerns.
 - Be cautious with `retainContextWhenHidden: true`. It can preserve webview state but increases memory use.
 - Persist enough state to restore the view when its webview is recreated.
 
-The official documentation cautions that webviews have meaningful resource costs and should be used where native VS Code APIs are insufficient.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://github.com\&sz=32)
+The official documentation cautions that webviews have meaningful resource costs and should be used where native VS Code APIs are insufficient.
 
 GitHub+1
-
-
 
 ## 9. Undo, redo, and multiple views
 
@@ -648,28 +602,24 @@ There is an important distinction between transient canvas interactions and comm
 - Pressing Undo should revert that committed change and update the graph.
 - Undoing a textual change should also update the graph.
 
-With `CustomEditorProvider`, the extension instead reports edits using `onDidChangeCustomDocument`. Implementing `CustomDocumentEditEvent` allows VS Code to invoke the extension's undo and redo callbacks. A content-change event alone marks the document dirty but does not provide undo/redo support.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://code.visualstudio.com\&sz=32)
+With `CustomEditorProvider`, the extension instead reports edits using `onDidChangeCustomDocument`. Implementing `CustomDocumentEditEvent` allows VS Code to invoke the extension's undo and redo callbacks. A content-change event alone marks the document dirty but does not provide undo/redo support.
 
 Visual Studio Code Extension API+1
 
-
-
 ### Multiple views of one file
 
-Imagine a user opens `example.wiret` in two split editor groups.
+Imagine a user opens `example.graph` in two split editor groups.
 
 Both webviews must show the same committed graph, but their viewport state can differ.
 
-| State                    | Shared across views? |
+| State | Shared across views? |
 | ------------------------ | -------------------- |
-| Nodes, edges, properties | Yes                  |
-| Committed node positions | Yes                  |
-| Undo/redo results        | Yes                  |
-| Zoom level and pan       | Usually no           |
-| Current selection        | Usually no           |
-| Temporary drag preview   | No                   |
+| Nodes, edges, properties | Yes |
+| Committed node positions | Yes |
+| Undo/redo results | Yes |
+| Zoom level and pan | Usually no |
+| Current selection | Usually no |
+| Temporary drag preview | No |
 
 This suggests maintaining two state stores:
 
@@ -704,7 +654,7 @@ For a visual programming language, consider defining explicit rules about which 
 
 ## 11. Recommended implementation roadmap
 
-I'd build the extension in stages rather than starting with a fully featured canvas.
+the author'd build the extension in stages rather than starting with a fully featured canvas.
 
 1. Register a custom text editor. Open a sample file and render a static graph in the webview.
 2. Implement parsing and validation. Convert the source file into a stable semantic graph model and display syntax errors.
@@ -717,16 +667,16 @@ I'd build the extension in stages rather than starting with a fully featured can
 
 ### Suggested test matrix
 
-| Test                        | Expected result                                        |
+| Test | Expected result |
 | --------------------------- | ------------------------------------------------------ |
-| Drag a node                 | Correct text changes; one logical undo step            |
-| Edit source externally      | Canvas updates without losing view state unnecessarily |
-| Undo and redo               | Both source and graph stay consistent                  |
-| Introduce invalid syntax    | Clear error state; no destructive rewrite              |
-| Split editor                | Both views reflect the same document                   |
-| Close and reopen editor     | Graph reconstructs from saved document                 |
-| Rapidly move many nodes     | UI stays responsive; no stale commits                  |
-| Save while a view is hidden | Latest committed document is saved correctly           |
+| Drag a node | Correct text changes; one logical undo step |
+| Edit source externally | Canvas updates without losing view state unnecessarily |
+| Undo and redo | Both source and graph stay consistent |
+| Introduce invalid syntax | Clear error state; no destructive rewrite |
+| Split editor | Both views reflect the same document |
+| Close and reopen editor | Graph reconstructs from saved document |
+| Rapidly move many nodes | UI stays responsive; no stale commits |
+| Save while a view is hidden | Latest committed document is saved correctly |
 
 ## 12. Further research directions
 
@@ -739,7 +689,7 @@ For a research project, these are particularly useful topics to investigate next
 - AI-friendly syntax design: choosing stable identifiers, explicit structure, and localized edits so both LLMs and graphical tools can modify the source reliably.
 - Language Server Protocol (LSP): keeping diagnostics, completions, definitions, and references available even when the main editor surface is graphical.
 
-These topics connect naturally to your broader investigation of bidirectional text/graph synchronization: the custom editor API supplies the integration boundary, but the language representation and synchronization algorithm determine how reliable the editor actually is.
+These topics connect naturally to the broader investigation of bidirectional text/graph synchronization: the custom editor API supplies the integration boundary, but the language representation and synchronization algorithm determine how reliable the editor actually is.
 
 ## Official documentation and references
 

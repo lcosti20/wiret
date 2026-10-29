@@ -55,55 +55,35 @@ A useful architecture separates these responsibilities rather than embedding all
 
 There are several ways to encode the same visual program. It is important to distinguish the schema language from the document encoding: JSON Schema describes JSON data, whereas Protocol Buffers defines both a schema language and serialization encodings.
 
-[\[VSCode\] Json 예쁘게 보기](https://images.openai.com/static-rsc-4/JpXvnL5ElzlFDB9Q3B7ymmiFjIQRVCAgMvdRP40_G2fmePHTlbNYclqTFFVRhTsr8fceDpd09vbEjfhNralRCgXdwUhTMh5kgC5mH-qtqt5kYVQVhycLDbylDTmurs4ozsRqwucq_3KU30uqhw7Z76Ar2USmxEDokIuMgPOF36w?purpose=inline)
-
 JSON + JSON Schema
 
 Strong default for structured storage
 
-JSON stores the document; JSON Schema describes and validates its structure. The format is widely supported and easy to inspect, generate, and process.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://json-schema.org\&sz=32)
+JSON stores the document; JSON Schema describes and validates its structure. The format is widely supported and easy to inspect, generate, and process.
 
 json-schema.org+1
 
-
-
 Best when interoperability, editor tooling, and straightforward implementation matter more than minimizing file size.
-
-[Protocol Buffers Tutorial: Part 1 — Getting Started with Protobuf Basics | by CodeAddict | Medium](https://images.openai.com/static-rsc-4/3svFT6YL7C964iAwwwAmhD9ze3DTfagCNTOS2ZQCeaTjqLveh1vuQn8b9s9N8LYnihlrbOpn2R6IxUjIKng0VuCnNyqkhC7d3xhwTkTVQfDjwrdfYP5JJlR4JxiLtHH0dtDO_zFLKUHvUjFZxSG6AvIkPDuYdeXGJ3vICiL68MA?purpose=inline)
 
 Protocol Buffers (Protobuf)
 
 Strong for compact data exchange
 
-A typed schema defines messages, which can be encoded into a compact binary representation or mapped to JSON. Stable field numbers and compatibility rules support schema evolution.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://protobuf.com\&sz=32)
+A typed schema defines messages, which can be encoded into a compact binary representation or mapped to JSON. Stable field numbers and compatibility rules support schema evolution.
 
 protobuf.com+1
 
-
-
 Best when efficient network transfer, generated types, and strict message contracts are priorities. Binary output is less convenient for ordinary Git diffs.
-
-[How to enable JSON or YAML validation with JSON Schemas in IntelliJ | Quentin's blog](https://images.openai.com/static-rsc-4/pRlU835N2bEcR5LXTdFlNXbl6lrg2NJyxVMm1756ofMzqR1vGckg4TU7QKDK0N0789HWbfDwK2a65Ii5BkLAGDRfkzbEB3jTCMcRk11KxxFJ2J-8zzNJtPjtkshH-kWhT9QR-uIbhCmD7aAYdbDRONl-fDYHkclQpFj43d99Uio?purpose=inline)
 
 YAML
 
 Human-oriented configuration
 
-YAML provides indentation-based structured data and supports features such as aliases. It can reduce punctuation and visual noise, but its parsing rules and presentation flexibility require careful constraints when deterministic output is important.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://www.ietf.org\&sz=32)
+YAML provides indentation-based structured data and supports features such as aliases. It can reduce punctuation and visual noise, but its parsing rules and presentation flexibility require careful constraints when deterministic output is important.
 
 IETF
 
-
-
 Best when people manually author configuration or relatively small graph documents. Restricting the accepted YAML subset can make tooling more predictable.
-
-[Toml - IntelliJ IDEs Plugin | Marketplace](https://images.openai.com/static-rsc-4/M-Ge6bbeMFFrgJTfCkmQE6gUI0HhjM8fo7PAmR-Pvv4v8w3k-UzB_K6V2qWDcRwXsf7GQPw2AmOCDB4-OBs5vXr0TLOD8QDTJbKWNBU_Baw0YAPRqqIE7-CTosLZeJaBm3jT9ROc34Jhv13A5Pip92yWuSUJyVMLoTN-hETQ7eo?purpose=inline)
 
 TOML
 
@@ -111,15 +91,11 @@ TOML is designed for readable configuration, with explicit key-value pairs and t
 
 Best for project settings, compiler options, and editor preferences rather than a complete visual program.
 
-[Vector arDSL - Visual Studio Marketplace](https://images.openai.com/static-rsc-4/bINh9fTVqcs1Yw8Xcd8DKROHFvup1-hQ-Gs-hUnUaT9T1EzCCFKu7J7TNecPtYDE6n-mG04V7hz8cw9s88JbO8uiWrPc5BRySLwW1rbGw8B-UqJ7quHZGlz5mahGd9z_e7ySFyUp4ukMCPCCF_-9gzZEYQ430ctrAwJEPeFcMsU?purpose=inline)
-
 Custom textual syntax
 
 A purpose-built language can represent nodes, connections, and values using domain-specific constructs instead of generic data structures.
 
 Best when the textual representation is itself a first-class programming language, particularly when developers and AI systems are expected to edit it directly. It requires more investment in grammar design, diagnostics, tooling, and migration.
-
-[A Proposal for GraphQL Response Optimization With CBOR, Protocol Buffer, Cap’n Proto or Another Serialization Format | by Frank Moreno | The Startup | Medium](https://images.openai.com/static-rsc-4/GYhCNz48znp_u9s31cMitSfEP7BR_Ct5WAL5Xs0McfXNwqhfY26DIYX0OTeqkTnJvrtzK9LJfG9Kku-x9EhbxWLbFZMRBjsqc2hwo7MyB92jEq470HOfmrr5U-5oQWE7WzUsgp9VAwMkmKCq5snnRV7mxEiv8URTbi6WDEcTwSQ?purpose=inline)
 
 CBOR and other compact encodings
 
@@ -129,16 +105,16 @@ Best when size or parsing performance is more important than native text diffs. 
 
 ### Comparative evaluation
 
-| Criterion             | JSON + schema                     | Protobuf binary                  | YAML                              | Custom text                  |
+| Criterion | JSON + schema | Protobuf binary | YAML | Custom text |
 | --------------------- | --------------------------------- | -------------------------------- | --------------------------------- | ---------------------------- |
-| Human readability     | Good                              | Poor                             | Very good                         | Potentially excellent        |
-| Git diffs             | Good with canonicalization        | Poor without decoding            | Good with normalization           | Excellent if designed for it |
-| Structural validation | Strong with JSON Schema           | Strong, typed messages           | Requires schema/tooling           | Depends on implementation    |
-| Type safety           | Runtime schema validation         | Generated typed structures       | External validation needed        | Grammar and semantic checks  |
-| Schema evolution      | Explicit versioning and migration | Mature compatibility conventions | Explicit versioning and migration | Entirely design-dependent    |
-| AI generation         | Good                              | Poor for raw binary              | Good                              | Potentially excellent        |
-| Implementation effort | Low–medium                        | Medium                           | Low–medium                        | High                         |
-| Compactness           | Moderate                          | Excellent                        | Moderate                          | Variable                     |
+| Human readability | Good | Poor | Very good | Potentially excellent |
+| Git diffs | Good with canonicalization | Poor without decoding | Good with normalization | Excellent if designed for it |
+| Structural validation | Strong with JSON Schema | Strong, typed messages | Requires schema/tooling | Depends on implementation |
+| Type safety | Runtime schema validation | Generated typed structures | External validation needed | Grammar and semantic checks |
+| Schema evolution | Explicit versioning and migration | Mature compatibility conventions | Explicit versioning and migration | Entirely design-dependent |
+| AI generation | Good | Poor for raw binary | Good | Potentially excellent |
+| Implementation effort | Low–medium | Medium | Low–medium | High |
+| Compactness | Moderate | Excellent | Moderate | Variable |
 
 These are general tendencies, not guarantees. For example, a well-canonicalized JSON document can have excellent diffs, while a custom language with unstable generated identifiers can produce terrible ones.
 
@@ -188,28 +164,28 @@ There are two principal representation strategies.
 
 ```
 {
-  "format": "example-graph",
-  "version": 1,
-  "nodes": [
-    {
-      "id": "a",
-      "type": "constant",
-      "value": 6
-    },
-    {
-      "id": "b",
-      "type": "constant",
-      "value": 7
-    },
-    {
-      "id": "mul",
-      "type": "multiply"
-    }
-  ],
-  "edges": [
-    {"from": ["a", "value"], "to": ["mul", "a"]},
-    {"from": ["b", "value"], "to": ["mul", "b"]}
-  ]
+ "format": "example-graph",
+ "version": 1,
+ "nodes": [
+ {
+ "id": "a",
+ "type": "constant",
+ "value": 6
+ },
+ {
+ "id": "b",
+ "type": "constant",
+ "value": 7
+ },
+ {
+ "id": "mul",
+ "type": "multiply"
+ }
+ ],
+ "edges": [
+ {"from": ["a", "value"], "to": ["mul", "a"]},
+ {"from": ["b", "value"], "to": ["mul", "b"]}
+ ]
 }
 ```
 
@@ -230,16 +206,16 @@ Disadvantages:
 
 ```
 {
-  "nodes": [
-    {
-      "id": "mul",
-      "type": "multiply",
-      "inputs": {
-        "a": {"from": ["a", "value"]},
-        "b": {"from": ["b", "value"]}
-      }
-    }
-  ]
+ "nodes": [
+ {
+ "id": "mul",
+ "type": "multiply",
+ "inputs": {
+ "a": {"from": ["a", "value"]},
+ "b": {"from": ["b", "value"]}
+ }
+ }
+ ]
 }
 ```
 
@@ -298,13 +274,9 @@ JSON Schema can enforce rules such as:
 - A numeric field contains a number.
 - A property is required or has an allowed value.
 
-However, many graph invariants are cross-referential or semantic. For example, JSON Schema alone is not the right place to implement a complete graph type checker that resolves node references, checks every connection, and infers generic types. JSON Schema is primarily a declarative mechanism for validating document structure and constraints.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://json-schema.org\&sz=32)
+However, many graph invariants are cross-referential or semantic. For example, JSON Schema alone is not the right place to implement a complete graph type checker that resolves node references, checks every connection, and infers generic types. JSON Schema is primarily a declarative mechanism for validating document structure and constraints.
 
 json-schema.org+1
-
-
 
 Use a layered validation pipeline:
 
@@ -323,11 +295,11 @@ Identifiers are among the most consequential decisions in a graph format because
 
 Consider three common approaches:
 
-| Identifier strategy   | Example               | Main trade-off                                                               |
+| Identifier strategy | Example | Main trade-off |
 | --------------------- | --------------------- | ---------------------------------------------------------------------------- |
-| Sequential IDs        | `node-1`, `node-2`    | Readable, but insertion and regeneration policies can cause churn            |
-| Random persistent IDs | `n-7f2c...`           | Stable across edits, but verbose and less readable                           |
-| Content-derived IDs   | Hash of node contents | Useful for immutable data, but difficult when nodes are edited or duplicated |
+| Sequential IDs | `node-1`, `node-2`  | Readable, but insertion and regeneration policies can cause churn |
+| Random persistent IDs | `n-7f2c...`  | Stable across edits, but verbose and less readable |
+| Content-derived IDs | Hash of node contents | Useful for immutable data, but difficult when nodes are edited or duplicated |
 
 For editable graph nodes, persistent identity is usually preferable to identity derived from content. If a node changes from multiplying two values to adding them, it is still the same logical node. Its identity should not need to change.
 
@@ -376,15 +348,11 @@ This is related to, but not identical to, byte-for-byte preservation of the orig
 5. Stable omission or inclusion rules for default values.
 6. No duplicate representations of the same fact.
 
-The JSON Canonicalization Scheme (JCS), specified by [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785.html?utm_source=chatgpt.com), standardizes a deterministic JSON representation useful for hashing and signing. It does not, by itself, establish semantic equivalence between different graph documents or determine the correct ordering of graph nodes.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://www.rfc-editor.org\&sz=32)
+The JSON Canonicalization Scheme (JCS), specified by [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785.html?utm_source=chatgpt.com), standardizes a deterministic JSON representation useful for hashing and signing. It does not, by itself, establish semantic equivalence between different graph documents or determine the correct ordering of graph nodes.
 
 RFC Editor+1
 
-
-
-For Git, a pretty-printed canonical format is often more useful than compact canonical JSON. You can apply deterministic ordering while retaining indentation and line breaks designed for human review.
+For Git, a pretty-printed canonical format is often more useful than compact canonical JSON. The system can apply deterministic ordering while retaining indentation and line breaks designed for human review.
 
 ### Example: noisy versus meaningful diffs
 
@@ -395,8 +363,8 @@ A poor serializer might regenerate every node ID, reorder the entire node array,
 A well-designed serializer would ideally show only:
 
 ```
--      "value": 6
-+      "value": 8
+- "value": 6
++ "value": 8
 ```
 
 The goal is to minimize irrelevant changes, not necessarily the total number of changed bytes.
@@ -459,10 +427,10 @@ For example:
 
 ```
 {
-  "format": "example-graph",
-  "schemaVersion": 2,
-  "languageVersion": "1.4",
-  "nodes": []
+ "format": "example-graph",
+ "schemaVersion": 2,
+ "languageVersion": "1.4",
+ "nodes": []
 }
 ```
 
@@ -490,13 +458,13 @@ For example:
 
 ```
 v1 document
-    ↓
+ ↓
 v1 → v2 migration
-    ↓
+ ↓
 current graph model
-    ↓
+ ↓
 structural and semantic validation
-    ↓
+ ↓
 editor or compiler
 ```
 
@@ -510,13 +478,9 @@ Compatibility should be evaluated across at least three dimensions:
 - Write compatibility: Can an implementation emit documents an older implementation understands?
 - Round-trip compatibility: Can an implementation load and save a document without losing its meaning or unsupported data?
 
-Protobuf is instructive here: its evolution rules include stable field numbers and reserved deleted fields. Its unknown-field behavior also shows why merely accepting an unfamiliar field is not sufficient if a later transformation drops it.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://protobuf.dev\&sz=32)
+Protobuf is instructive here: its evolution rules include stable field numbers and reserved deleted fields. Its unknown-field behavior also shows why merely accepting an unfamiliar field is not sufficient if a later transformation drops it.
 
 Protocol Buffers Documentation+1
-
-
 
 For a visual language, unknown node types and extension fields deserve particular attention. An editor might be able to preserve an unfamiliar node as an opaque object even if it cannot execute or display that node correctly.
 
@@ -535,11 +499,11 @@ The format must define what happens in these cases.
 
 There are three broad strategies.
 
-| Strategy              | Behavior                                    | Risk                                                           |
+| Strategy | Behavior | Risk |
 | --------------------- | ------------------------------------------- | -------------------------------------------------------------- |
-| Reject unknown data   | Refuse to load the document                 | Prevents accidental corruption, but limits interoperability    |
-| Ignore unknown data   | Load recognized fields and discard the rest | Opening and saving can destroy information                     |
-| Preserve unknown data | Retain unrecognized fields or opaque nodes  | More implementation complexity, but better round-trip behavior |
+| Reject unknown data | Refuse to load the document | Prevents accidental corruption, but limits interoperability |
+| Ignore unknown data | Load recognized fields and discard the rest | Opening and saving can destroy information |
+| Preserve unknown data | Retain unrecognized fields or opaque nodes | More implementation complexity, but better round-trip behavior |
 
 For extensible visual programming environments, preservation is generally the most useful strategy for noncritical extensions, with explicit restrictions on whether the document can be edited or executed.
 
@@ -611,14 +575,14 @@ The model produces a set of operations against an existing graph:
 
 ```
 {
-  "operations": [
-    {
-      "op": "set_property",
-      "node": "n42",
-      "property": "value",
-      "value": 8
-    }
-  ]
+ "operations": [
+ {
+ "op": "set_property",
+ "node": "n42",
+ "property": "value",
+ "value": 8
+ }
+ ]
 }
 ```
 
@@ -647,63 +611,63 @@ The following is a conceptual JSON Schema fragment for a graph document. It demo
 
 ```
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "required": ["format", "schemaVersion", "nodes", "edges"],
-  "properties": {
-    "format": {
-      "const": "example-graph"
-    },
-    "schemaVersion": {
-      "type": "integer",
-      "minimum": 1
-    },
-    "nodes": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["id", "type"],
-        "properties": {
-          "id": {"type": "string", "minLength": 1},
-          "type": {"type": "string", "minLength": 1},
-          "properties": {"type": "object"},
-          "position": {
-            "type": "object",
-            "properties": {
-              "x": {"type": "number"},
-              "y": {"type": "number"}
-            },
-            "required": ["x", "y"]
-          }
-        }
-      }
-    },
-    "edges": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["from", "to"],
-        "properties": {
-          "from": {
-            "$ref": "#/$defs/endpoint"
-          },
-          "to": {
-            "$ref": "#/$defs/endpoint"
-          }
-        }
-      }
-    }
-  },
-  "$defs": {
-    "endpoint": {
-      "type": "object",
-      "required": ["node", "pin"],
-      "properties": {
-        "node": {"type": "string"},
-        "pin": {"type": "string"}
-      }
-    }
-  }
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "type": "object",
+ "required": ["format", "schemaVersion", "nodes", "edges"],
+ "properties": {
+ "format": {
+ "const": "example-graph"
+ },
+ "schemaVersion": {
+ "type": "integer",
+ "minimum": 1
+ },
+ "nodes": {
+ "type": "array",
+ "items": {
+ "type": "object",
+ "required": ["id", "type"],
+ "properties": {
+ "id": {"type": "string", "minLength": 1},
+ "type": {"type": "string", "minLength": 1},
+ "properties": {"type": "object"},
+ "position": {
+ "type": "object",
+ "properties": {
+ "x": {"type": "number"},
+ "y": {"type": "number"}
+ },
+ "required": ["x", "y"]
+ }
+ }
+ }
+ },
+ "edges": {
+ "type": "array",
+ "items": {
+ "type": "object",
+ "required": ["from", "to"],
+ "properties": {
+ "from": {
+ "$ref": "#/$defs/endpoint"
+ },
+ "to": {
+ "$ref": "#/$defs/endpoint"
+ }
+ }
+ }
+ }
+ },
+ "$defs": {
+ "endpoint": {
+ "type": "object",
+ "required": ["node", "pin"],
+ "properties": {
+ "node": {"type": "string"},
+ "pin": {"type": "string"}
+ }
+ }
+ }
 }
 ```
 
@@ -711,17 +675,13 @@ This schema checks that the document has the expected shape. It does not guarant
 
 A production schema would also need to specify unknown-field handling, extension points, node-specific variants, numeric constraints, and version-dependent rules.
 
-For current JSON Schema guidance, consult the [official specification](https://json-schema.org/specification?utm_source=chatgpt.com).&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://json-schema.org\&sz=32)
+For current JSON Schema guidance, consult the [official specification](https://json-schema.org/specification?utm_source=chatgpt.com).
 
 Specification [#section]+1
 
-
-
 ## 14. A recommended architecture
 
-For a text-based visual programming language intended for Git, IDE integration, and AI-assisted editing, I would start with this architecture:
+For a text-based visual programming language intended for Git, IDE integration, and AI-assisted editing, a suitable starting point is this architecture:
 
 ### Canonical text document
 
@@ -757,18 +717,18 @@ For incremental editing, the parser may additionally maintain source spans or a 
 
 A schema and serializer should be tested as rigorously as a compiler.
 
-| Test                       | Required property                                                             |
+| Test | Required property |
 | -------------------------- | ----------------------------------------------------------------------------- |
-| Round-trip test            | Serialize → deserialize → serialize produces stable output                    |
-| Semantic preservation      | Saving and reopening preserves graph meaning                                  |
-| Canonicalization           | Equivalent graphs produce identical canonical output                          |
-| Diff quality               | Small edits produce localized diffs                                           |
-| Migration                  | Historical documents migrate without unintended semantic changes              |
-| Unknown-field preservation | Supported extension data survives an edit/save cycle                          |
-| Invalid-reference testing  | Missing nodes and pins produce clear diagnostics                              |
-| Fuzz testing               | Malformed or adversarial input does not crash the parser                      |
-| Large-graph testing        | Load, validation, serialization, and editing remain practical at target scale |
-| Cross-version testing      | Documents behave predictably across supported implementations                 |
+| Round-trip test | Serialize → deserialize → serialize produces stable output |
+| Semantic preservation | Saving and reopening preserves graph meaning |
+| Canonicalization | Equivalent graphs produce identical canonical output |
+| Diff quality | Small edits produce localized diffs |
+| Migration | Historical documents migrate without unintended semantic changes |
+| Unknown-field preservation | Supported extension data survives an edit/save cycle |
+| Invalid-reference testing | Missing nodes and pins produce clear diagnostics |
+| Fuzz testing | Malformed or adversarial input does not crash the parser |
+| Large-graph testing | Load, validation, serialization, and editing remain practical at target scale |
+| Cross-version testing | Documents behave predictably across supported implementations |
 
 Round-trip tests deserve special care. Byte-for-byte equality is not always the right criterion when the parser intentionally normalizes formatting. Instead, test both canonical output stability and semantic equivalence.
 
@@ -785,7 +745,7 @@ These metrics make the trade-offs measurable instead of relying only on subjecti
 
 ## 16. Final recommendation
 
-For most new text-based visual programming languages, I would choose a canonical, human-readable text format backed by an explicit, versioned graph schema.
+For most new text-based visual programming languages, the recommended approach is to choose a canonical, human-readable text format backed by an explicit, versioned graph schema.
 
 The concrete implementation depends on whether the text syntax itself is intended to be the language's primary interface.
 

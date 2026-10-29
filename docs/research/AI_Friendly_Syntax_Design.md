@@ -14,23 +14,23 @@ This does not mean making a language that only machines can read. The goal is to
 
 ## 1. Goals of AI-friendly syntax
 
-1\. Minimize hallucinations and generation errors
+1. Minimize hallucinations and generation errors
 
 Make invalid or unintended constructs difficult to express. Reduce ambiguity between similar constructs, encourage explicit references to declarations, and use grammar rules that help models distinguish valid syntax from plausible inventions.
 
-2\. Reduce token consumption
+2. Reduce token consumption
 
 Represent common operations compactly without introducing excessive punctuation, repetitive boilerplate, or verbose syntax that consumes context-window space. Optimize for actual tokenizer behavior rather than character count alone.
 
-3\. Improve structural predictability
+3. Improve structural predictability
 
 Use consistent rules for declarations, expressions, control flow, types, imports, and error handling. A model should be able to infer what can appear next from the local syntactic context.
 
-4\. Support incremental generation and repair
+4. Support incremental generation and repair
 
 Favor structures that can be completed in small, coherent steps, with clear boundaries between constructs. When a model makes a mistake, the compiler or parser should identify a localized error and help the model correct it.
 
-5\. Make code easy to inspect and transform
+5. Make code easy to inspect and transform
 
 Prefer explicit relationships between declarations and uses, stable formatting, machine-readable structure, and local edits that do not require extensive rewriting of unrelated code.
 
@@ -40,14 +40,14 @@ These goals can conflict. A very compact syntax may be harder to disambiguate; a
 
 A useful AI-friendly language must address several layers of correctness.
 
-| Layer                   | What can go wrong?                                      | Relevant design strategies                             |
+| Layer | What can go wrong? | Relevant design strategies |
 | ----------------------- | ------------------------------------------------------- | ------------------------------------------------------ |
-| Lexical                 | Incorrect identifiers, delimiters, or literals          | Consistent tokens, unambiguous delimiters              |
-| Syntactic               | Missing arguments, malformed blocks, invalid ordering   | Predictable grammar, explicit structure                |
-| Name resolution         | Undefined variables or nonexistent functions            | Scoped declarations, explicit imports, symbol checking |
-| Type correctness        | Incompatible values or invalid operations               | Strong static typing, inference with clear constraints |
-| Semantic correctness    | Code compiles but implements the wrong behavior         | Contracts, invariants, tests, specifications           |
-| Operational correctness | Unexpected side effects, resource leaks, unsafe actions | Effect tracking, ownership rules, runtime checks       |
+| Lexical | Incorrect identifiers, delimiters, or literals | Consistent tokens, unambiguous delimiters |
+| Syntactic | Missing arguments, malformed blocks, invalid ordering | Predictable grammar, explicit structure |
+| Name resolution | Undefined variables or nonexistent functions | Scoped declarations, explicit imports, symbol checking |
+| Type correctness | Incompatible values or invalid operations | Strong static typing, inference with clear constraints |
+| Semantic correctness | Code compiles but implements the wrong behavior | Contracts, invariants, tests, specifications |
+| Operational correctness | Unexpected side effects, resource leaks, unsafe actions | Effect tracking, ownership rules, runtime checks |
 
 Syntax can directly improve the first two layers and indirectly support the others. It cannot, by itself, eliminate semantic hallucinations.
 
@@ -66,7 +66,7 @@ Many languages support multiple equivalent forms. This flexibility is useful for
 Consider three ways of expressing a function in different languages:
 
 ```
-def add(a, b):    return a + b
+def add(a, b): return a + b
 ```
 
 ```
@@ -75,7 +75,7 @@ const add = (a, b) => a + b;
 
 ```
 fn add(a: i32, b: i32) -> i32 {
-    a + b
+ a + b
 }
 ```
 
@@ -102,7 +102,7 @@ A more predictable design might require:
 
 ```
 if (condition) {
-    action()
+ action()
 }
 ```
 
@@ -186,8 +186,8 @@ For example, a language could represent an HTTP response as a tagged union:
 
 ```
 Response =
-    Ok(value: Data)
-  | Failed(error: NetworkError)
+ Ok(value: Data)
+ | Failed(error: NetworkError)
 ```
 
 Code consuming this response would have to handle the relevant variants explicitly, rather than assuming every request succeeds.
@@ -246,13 +246,9 @@ A language should ideally support:
 - Stable syntax-tree nodes during edits.
 - Well-defined recovery from malformed code.
 
-This principle is supported by research on grammar-constrained generation: formal grammars can restrict an LLM's output to valid continuations. But this guarantee depends on the grammar, tokenizer alignment, and decoding implementation.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://aclanthology.org\&sz=32)
+This principle is supported by research on grammar-constrained generation: formal grammars can restrict an LLM's output to valid continuations. But this guarantee depends on the grammar, tokenizer alignment, and decoding implementation.
 
 ACL Anthology+1
-
-
 
 ## 4. Token efficiency: optimize the right thing
 
@@ -334,14 +330,14 @@ Any proposal claiming token savings should be evaluated with the actual tokenize
 
 A reasonable benchmark would report:
 
-| Metric                        | What it reveals                      |
+| Metric | What it reveals |
 | ----------------------------- | ------------------------------------ |
-| Characters and bytes          | Physical source size                 |
-| Model tokens                  | Actual context and generation cost   |
+| Characters and bytes | Physical source size |
+| Model tokens | Actual context and generation cost |
 | Tokens to first valid program | Efficiency of incremental generation |
-| Tokens spent on repairs       | Cost of correcting mistakes          |
-| Successful tasks per token    | Practical efficiency                 |
-| Total inference latency       | Runtime implications                 |
+| Tokens spent on repairs | Cost of correcting mistakes |
+| Successful tasks per token | Practical efficiency |
+| Total inference latency | Runtime implications |
 
 A language should not be optimized around one tokenizer unless it is explicitly intended for one model or model family.
 
@@ -355,14 +351,14 @@ The following profile combines the principles above into a hypothetical language
 module geometry
 
 type Point = {
-    x: Float
-    y: Float
+ x: Float
+ y: Float
 }
 
 fn distance(a: Point, b: Point) -> Float {
-    let dx: Float = a.x - b.x
-    let dy: Float = a.y - b.y
-    return sqrt(dx * dx + dy * dy)
+ let dx: Float = a.x - b.x
+ let dy: Float = a.y - b.y
+ return sqrt(dx * dx + dy * dy)
 }
 ```
 
@@ -381,13 +377,13 @@ The syntax is deliberately conventional. A new language does not necessarily nee
 
 ```
 fn classify(value: Int) -> String {
-    if (value < 0) {
-        return "negative"
-    } else if (value == 0) {
-        return "zero"
-    } else {
-        return "positive"
-    }
+ if (value < 0) {
+ return "negative"
+ } else if (value == 0) {
+ return "zero"
+ } else {
+ return "positive"
+ }
 }
 ```
 
@@ -397,10 +393,10 @@ A language might also require exhaustive pattern matching when branching on a cl
 
 ```
 fn describe(result: Result<Int, Error>) -> String {
-    match result {
-        Ok(value) => "success"
-        Err(error) => "failure"
-    }
+ match result {
+ Ok(value) => "success"
+ Err(error) => "failure"
+ }
 }
 ```
 
@@ -410,11 +406,11 @@ Here, the compiler could reject a missing variant. That is more valuable than a 
 
 ```
 fn load_config(path: Path) -> IO<Result<Config, ConfigError>> {
-    // Read and parse the configuration file.
+ // Read and parse the configuration file.
 }
 ```
 
-This is illustrative notation for a function whose execution performs I/O and may fail. It shows how a language could distinguish effects and error outcomes in the function's type.
+This is illustrative notation for a function whose execution performs the author/O and may fail. It shows how a language could distinguish effects and error outcomes in the function's type.
 
 An effect system is not mandatory for AI-friendly syntax, and a type annotation does not automatically prove correct error handling. The benefit comes from compiler-enforced rules that make the relevant behaviors visible and verifiable.
 
@@ -426,19 +422,19 @@ For example, a simplified representation of a function call might look like:
 
 ```
 {
-  "kind": "Call",
-  "callee": {
-    "kind": "Name",
-    "name": "sqrt"
-  },
-  "arguments": [
-    {
-      "kind": "Binary",
-      "operator": "*",
-      "left": {"kind": "Name", "name": "dx"},
-      "right": {"kind": "Name", "name": "dx"}
-    }
-  ]
+ "kind": "Call",
+ "callee": {
+ "kind": "Name",
+ "name": "sqrt"
+ },
+ "arguments": [
+ {
+ "kind": "Binary",
+ "operator": "*",
+ "left": {"kind": "Name", "name": "dx"},
+ "right": {"kind": "Name", "name": "dx"}
+ }
+ ]
 }
 ```
 
@@ -455,13 +451,9 @@ A promising design would support both:
 
 AI-friendly syntax should not be studied independently of the tools used to generate it.
 
-Grammar-constrained decoding combines a language model with a parser or grammar engine. At each generation step, the system restricts which next tokens are allowed, aiming to ensure that the final output conforms to a specified grammar. Research has demonstrated this approach for structured outputs and has explored ways to improve how the constraints interact with the model's probability distribution.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://aclanthology.org\&sz=32)
+Grammar-constrained decoding combines a language model with a parser or grammar engine. At each generation step, the system restricts which next tokens are allowed, aiming to ensure that the final output conforms to a specified grammar. Research has demonstrated this approach for structured outputs and has explored ways to improve how the constraints interact with the model's probability distribution.
 
 ACL Anthology+1
-
-
 
 Task and program context
 
@@ -489,21 +481,17 @@ A crucial design opportunity is to make the language's grammar easy for such sys
 
 ### Three levels of generation constraints
 
-| Level                   | Constraint                            | What it can prevent                                                |
+| Level | Constraint | What it can prevent |
 | ----------------------- | ------------------------------------- | ------------------------------------------------------------------ |
-| 1. Syntactic            | Formal grammar and parser state       | Missing delimiters, invalid statement forms                        |
-| 2. Name- and type-aware | Scope, declarations, type information | Undefined names, incompatible argument types                       |
-| 3. Semantic             | Contracts, invariants, domain rules   | Some invalid states and behavior that violates formal requirements |
+| 1. Syntactic | Formal grammar and parser state | Missing delimiters, invalid statement forms |
+| 2. Name- and type-aware | Scope, declarations, type information | Undefined names, incompatible argument types |
+| 3. Semantic | Contracts, invariants, domain rules | Some invalid states and behavior that violates formal requirements |
 
 The second level is especially important. A program can be syntactically valid while referring to a nonexistent function or passing the wrong type of argument.
 
-In a 2025 PLDI paper, Type-Constrained Code Generation with Language Models, researchers demonstrated a method that incorporates type-system constraints into generation. Their experiments reported that type-constrained generation reduced compilation errors by more than half across the evaluated synthesis, translation, and repair tasks. These are results for their method and experimental setting, not a guarantee for every language or model.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://doi.org\&sz=32)
+In a 2025 PLDI paper, Type-Constrained Code Generation with Language Models, researchers demonstrated a method that incorporates type-system constraints into generation. Their experiments reported that type-constrained generation reduced compilation errors by more than half across the evaluated synthesis, translation, and repair tasks. These are results for their method and experimental setting, not a guarantee for every language or model.
 
 DOI+1
-
-
 
 This suggests an important research direction: design languages whose grammar, symbol resolution, and type system can all provide useful feedback during incremental generation.
 
@@ -584,15 +572,15 @@ A rigorous experiment would compare multiple language designs while holding othe
 
 Useful metrics include:
 
-| Metric                  | Measurement                                         |
+| Metric | Measurement |
 | ----------------------- | --------------------------------------------------- |
-| Syntax validity         | Percentage of outputs accepted by the parser        |
-| Type correctness        | Percentage accepted by the type checker             |
-| Functional correctness  | Percentage passing behavioral tests                 |
-| Hallucinated references | Frequency of nonexistent symbols and APIs           |
-| Repair cost             | Additional generations or tokens needed for success |
-| Token efficiency        | Successful tasks per generated token                |
-| Human usability         | Comprehension, editability, and review time         |
+| Syntax validity | Percentage of outputs accepted by the parser |
+| Type correctness | Percentage accepted by the type checker |
+| Functional correctness | Percentage passing behavioral tests |
+| Hallucinated references | Frequency of nonexistent symbols and APIs |
+| Repair cost | Additional generations or tokens needed for success |
+| Token efficiency | Successful tasks per generated token |
+| Human usability | Comprehension, editability, and review time |
 
 It is important to distinguish pass rate from pass rate per token. A design might produce fewer tokens but also more failed programs. Conversely, a more explicit syntax might increase initial token usage while substantially improving success rates.
 
@@ -620,13 +608,9 @@ False confidence. A compiler-valid program may still implement the wrong algorit
 
 Constraint overhead. Parsing, type-aware decoding, and maintaining symbol environments can increase generation latency and implementation complexity.
 
-Distribution distortion. Restricting the model's candidate tokens can change the relative probabilities of valid outputs, so guaranteeing syntactic validity does not guarantee the highest-quality result. This is a documented concern in research on grammar-constrained and grammar-aligned decoding.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://papers.nips.cc\&sz=32)
+Distribution distortion. Restricting the model's candidate tokens can change the relative probabilities of valid outputs, so guaranteeing syntactic validity does not guarantee the highest-quality result. This is a documented concern in research on grammar-constrained and grammar-aligned decoding.
 
 NeurIPS Papers+1
-
-
 
 Human usability. A language that is easy for a model to generate may be unpleasant for people to maintain. Human readability, debugging, and code review should remain explicit evaluation criteria.
 
@@ -650,8 +634,6 @@ These questions connect language design to compiler construction, programming-la
 
 The following papers provide a useful foundation for research in this area.
 
-[Grammar-Constrained Decoding for Structured NLP Tasks without Finetuning - ACL Anthology](https://images.openai.com/static-rsc-4/k692H_TvXf_szp-Ew3U2LhThgtvGJaQc1f8yE1rBAAYlzgLeXYK8e994nGjMJqRJ12bciAgagbRg4nl0DoHsJDwndmbUoQbYQvjNw18U9QVDOLS6KSTfAOVAacStBRzXVbcKMtv4Z47MqgUnJVp0Y-5L-x5zzFWd9zHQSyKmJLw?purpose=inline)
-
 Grammar-Constrained Decoding for Structured NLP Tasks without Finetuning (2023)
 
 Geng, Josifoski, Peyrard, and West · EMNLP
@@ -659,8 +641,6 @@ Geng, Josifoski, Peyrard, and West · EMNLP
 Explains how formal grammars can constrain LLM output and improve adherence to structured formats.
 
 [Read the paper](https://aclanthology.org/2023.emnlp-main.674/?utm_source=chatgpt.com)
-
-[NeurIPS Poster Grammar-Aligned Decoding](https://images.openai.com/static-rsc-4/iMO89f1fp7JC1-vScmcuh8J1UmYPmvETNPlTdfdJ-Of-qkhyhCCLBPHBxpHNo1FrVgkPwL7sOMFhxdwkd3xXUyOmagfDd_UDIvSNC8cqPdkQurRVfleknEmGQ-cbF1mr9-s-wYtGrlh8hnHIBymnvnkb9zFtdKLsB6i2URBHhUI?purpose=inline)
 
 Grammar-Aligned Decoding (2024)
 
@@ -670,8 +650,6 @@ Investigates the distributional effects of constrained generation and the challe
 
 [Read the paper](https://papers.nips.cc/paper_files/paper/2024/hash/2bdc2267c3d7d01523e2e17ac0a754f3-Abstract-Conference.html?utm_source=chatgpt.com)
 
-[LLMs generate safer code with new algorithms | Martin Vechev posted on the topic | LinkedIn](https://images.openai.com/static-rsc-4/P7PN5fDtLoxxsbonOP6Ek8txmXZ0powbwjwee_1UyBmEl0Y285z3yTfJIwv-K4w_vYWH8k4wz41fQmrW5g1oLJ2pnE3Csuv0wo6CEUGJe17rNm3T64zT4GfmsuQRr2mb6rWMrUNQDpq9K6TNRJLTL0SYKINETiWkbLi3zHK6Tpg?purpose=inline)
-
 Type-Constrained Code Generation with Language Models (2025)
 
 Mündler, He, Wang, Sen, Song, and Vechev · PLDI
@@ -679,8 +657,6 @@ Mündler, He, Wang, Sen, Song, and Vechev · PLDI
 Particularly relevant to language design because it explores how type information can constrain code generation beyond syntax alone.
 
 [Read the paper](https://doi.org/10.1145/3729274?utm_source=chatgpt.com)
-
-[Paper page - Flexible and Efficient Grammar-Constrained Decoding](https://images.openai.com/static-rsc-4/TsVuSxubuEgcWybXSTbmGbQbLOHnP2pW2f3aNI-7ZmP2XOLmDTJ9AzdbTXtFUiK5j4TsNmAo7YRj3_Z1N2beC_494DjLT6UjKftYWzBE8i9xXIqHKDe1ZYlEacM3iTA-U3mTorw5dfWyO6IeaVYCvAZlXCzsXBP0Jhwufw70-UY?purpose=inline)
 
 Flexible and Efficient Grammar-Constrained Decoding (2025)
 
