@@ -1,171 +1,132 @@
 # Wiret
-A text-based visual scripting language
 
-## Why Wiret exists
+Wiret is a text-first visual programming language designed to keep the strengths of graph-based authoring while making programs readable, reviewable, and tool-friendly.
 
-Wiret is designed for a very specific problem: visual scripting is powerful for authoring graphs, but it is awkward for version control, automated review, tooling, and AI-assisted generation. Most visual languages are stored in editor-private formats or binary layouts, which makes them hard to diff, hard to validate, and hard to reason about outside an IDE.
+Instead of treating a visual editor as the source of truth, Wiret stores graphs as canonical text. That means you get the benefits of visual workflows without sacrificing version control, static validation, compiler tooling, and AI-friendly authoring.
 
-Wiret aims to keep the strengths of a visual graph language while making the source form readable, stable, and tool-friendly.
+## Why Wiret?
 
-### The core idea
+Most visual scripting systems are excellent for authoring, but awkward for:
 
-A Wiret program is a graph, but the graph is serialized as text.
+- code review and diffs in Git
+- automated validation and CI
+- canonical serialization
+- editor portability
+- LLM-assisted generation and editing
+- compiler verification and runtime safety
 
-This gives Wiret several benefits:
+Wiret was designed to address exactly that gap. It keeps the graph model, but makes the underlying representation explicit, deterministic, and human-readable.
 
-- Git-friendly diffs: node additions, removals, and rewires are plain-text changes
-- Canonical output: the same graph serializes the same way everywhere
-- Better collaboration: layout metadata and semantic metadata are separated cleanly
-- Easier LLM workflows: prompts and code generators can inspect or create graph logic as text
-- Editor portability: the text form is not tied to one proprietary editor format
-- Verification and tooling: the compiler can parse, validate, lower, and verify the graph before execution
+## Core ideas
 
-## Design rationale
+- Text is the source of truth
+- Graph semantics are explicit
+- Types, pins, conversion rules, and execution wiring are all visible
+- Layout and editor metadata are separated from runtime meaning
+- Serialization is canonical, stable, and diff-friendly
+- The language is meant to compile, verify, and run, not just draw boxes
 
-### 1. Text-first, not editor-first
+## Features
 
-The source of truth is text, not the graph editor state.
+- Graph-based programming with a text representation
+- Strongly typed semantics
+- Explicit data and execution flow
+- Deterministic canonical formatting
+- Compiler and verifier pipeline
+- Editor/debugger prototype built in Python/Tkinter
+- Support for standard-library-style macros and reusable graph logic
+- Bytecode generation and interpreter runtime
 
-This is a deliberate choice. Editor metadata should describe presentation and not define meaning. A graph editor may move nodes around, change colors, or collapse sections without changing the program semantics. That separation is essential for sensible collaboration and stable diffs.
+## Repository layout
 
-By storing graphs as text, Wiret avoids the usual problem that visual scripting systems are “easy to edit” but hard to review or merge.
+- `docs/reference.md` — language reference and design notes
+- `prototype/` — prototype editor, compiler, runtime, examples, and tests
+- `LICENSE` — MIT license
+- `README.md` — project overview
 
-### 2. Graph semantics are explicit
+## Prototype status
 
-Wiret does not rely on hidden editor inference or implicit layout behavior.
+This repo contains a working prototype of the language and tooling, built around the draft reference specification in `docs/reference.md`.
 
-Inputs and outputs are explicit. Types are explicit. Node IDs are stable. Conversions are explicit. Exec wiring is explicit. This keeps the language precise enough to compile and verify.
+It includes:
 
-The goal is to be expressive without being ambiguous. A graph written in Wiret should not rely on editor interpretation to be valid.
+- a Tkinter visual graph editor
+- a text parser and source serializer
+- compiler and bytecode generation
+- validation and diagnostics
+- a reference VM for execution and debugging
+- sample lessons and example programs
 
-### 3. A graph is still a program, not just a diagram
+## Quick start
 
-A visual scripting language is often criticized because it can become little more than drag-and-drop orchestration. Wiret is designed to be capable of general programming, not merely event flow or toy automation.
+Requirements:
 
-That means it includes:
+- Python 3.10+
+- Tkinter (for the editor UI)
 
-- typed values
-- structured data types
-- functions and events
-- dispatchers and interfaces
-- containers and standard library primitives
-- macro expansion and compile-time inlining
-- host-native integration through imports and registered functions
+Run the prototype:
 
-It is still graph-native, but it is not restricted to a purely visual scripting mindset.
+```bash
+cd prototype
+python3 wiret_editor.py
+```
 
-### 4. Metadata is part of the source model
+Open a sample graph or run from the CLI:
 
-Wiret distinguishes between semantic attributes and editor metadata.
+```bash
+cd prototype
+python3 wiret_editor.py examples/demo.wiret
+python3 wiretc.py run examples/demo.wiret Main
+python3 -m unittest discover tests
+```
 
-Examples:
+## Example workflow
 
-- `@pure`, `@export`, `@count`, `@disabled` affect semantics
-- `@ed(...)`, `@doc(...)`, `@category(...)` help tooling and editors
+The prototype supports a full loop of editing and execution:
 
-This separation makes source control safer. A contributor can move a node or change its color without accidentally altering the runtime behavior.
+```text
+graph editor <-> demo.wiret --compile--> demo.wbc --load/verify/link--> VM
+```
 
-### 5. Canonical serialization matters
+This enables:
 
-A text format is only useful if multiple tools write the same bytes for the same graph.
+- editing a graph in the UI
+- syncing the graph back to canonical source text
+- compiling to bytecode
+- loading and verifying the compiled form
+- stepping or running the program in a debugger
 
-Wiret therefore defines a canonical form:
+## Design principles
 
-- deterministic ordering
-- stable attribute order
-- node IDs drive ordering and merge behavior
-- formatter output is normalized
-- semantic and layout hashes can be computed from the canonical text
+Wiret intentionally favors explicitness over implicit behavior:
 
-This is crucial for:
+- explicit types instead of hidden inference
+- explicit conversions instead of magical coercion
+- stable IDs and metadata instead of editor-only assumptions
+- deterministic output instead of ad hoc formatting
+- verification and toolability instead of permissive ambiguity
 
-- clean Git diffs
-- merge tooling
-- CI validation
-- editor/editor synchronization
-- stable AI generation output
+This makes the source form more reliable in code review, testing, and long-term engineering workflows.
 
-## Design trade-offs
+## Contribution areas
 
-### Trade-off: explicitness vs convenience
-
-Wiret prefers explicitness over magical inference.
-
-Examples:
-
-- type arguments are always written
-- conversion nodes are visible and explicit
-- data and exec flows are distinct
-- default values are not silently relied upon unless the graph clearly names them
-
-This makes the language slightly more verbose than an editor that guesses missing data, but it is far easier to compile and review.
-
-### Trade-off: graph readability vs compiler simplicity
-
-The language favors a canonical, graph-IR-like syntax rather than a visually “pretty” free-form layout.
-
-This means the file may not always be the most human-pleasant representation for a graph editor. But it does make the graph machine-readable, diffable, and reliable.
-
-### Trade-off: rich metadata vs simple semantics
-
-Wiret includes editor metadata and reflection metadata intentionally, which means the language has more surface area than a minimal DSL.
-
-This increases design complexity, but it enables:
-
-- UI tooling
-- node labels and comments
-- stable editor state
-- rich host reflection
-
-Without this metadata layer, a text-based graph language would be difficult to use effectively in real editors.
-
-### Trade-off: compact binary format vs human readability
-
-The bytecode format is intentionally compact and structured, inspired by WASM and JVM-style design.
-
-This is good for runtime efficiency and verification, but it means the source format and the runtime representation are not identical. That gap is expected: source is for humans and tools, bytecode is for execution, verification, and embedding.
-
-### Trade-off: strong typing vs low-friction authoring
-
-Wiret is strongly typed and verified.
-
-This is sometimes more demanding than ad hoc visual scripting, especially for non-programmers. However, it is necessary to make the language safe to embed, deterministic to run, and dependable in large collaborative codebases.
-
-## Contributor guidance
-
-When contributing to Wiret, keep these principles in mind:
-
-- preserve the separation of semantic vs editor metadata
-- favor explicit types and explicit conversions over implicit behavior
-- keep node IDs stable and descriptive
-- keep the canonical formatting rules intact
-- prefer metadata and attributes that survive round-trips
-- avoid hidden editor-only assumptions in the compiler
-- ensure any design addition remains compatible with verification and bytecode generation
-
-## Suggested contribution areas
-
-Good first contributions include:
+Good places to contribute include:
 
 - grammar and parser improvements
-- canonical formatter fixes
-- validation diagnostics
+- formatter and canonicalization fixes
+- validation and diagnostics
 - type-checking rules
 - bytecode verifier enhancements
-- standard-library macro definitions
-- debugger metadata support
-- editor integration and source export tools
+- standard library macro definitions
+- editor integration and source export tooling
+- debugger and runtime experiences
+
+## License
+
+This project is licensed under the MIT License. See the `LICENSE` file for details.
 
 ## Summary
 
-Wiret is designed to be the textual representation of a visual programming language without losing the discipline required for serious engineering.
+Wiret is a practical experiment in making visual programming behave like a real software artifact: readable, reviewable, robust, and compiler-friendly.
 
-The project makes deliberate trade-offs:
-
-- explicit over implicit
-- deterministic over ad hoc
-- stable over editor-private
-- verified over permissive
-- text-first over UI-first
-
-That is what makes Wiret practical as a source format, a compiler target, and an embeddable runtime language.
+It aims to be the textual representation of a graph language without sacrificing the discipline required for serious engineering.
