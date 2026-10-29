@@ -1,0 +1,61 @@
+wiret 1
+module lessons.arrays
+
+extern func host.Log(message: string)
+
+func Main() {
+  local scores: array<i32>
+  local total: i32
+  node add = ArrayAdd<i32> scores (item: 25) -> loop
+  node count = ArrayLength<i32>(array: list.value)
+  node count_text = Convert<i32, string>(value: count.length)
+  node entry = Entry -> start
+  node final = GetLocal total
+  node item_text = Convert<i32, string>(value: loop.item)
+  node keep = SetLocal total (value: plus.result)
+  node line = Call std.string.Concat(a: part2.result, b: item_text.result)
+  node list = GetLocal scores
+  node loop = Macro std.flow.ForEach<i32>(array: list.value) { each -> say, done -> report }
+  node make = MakeArray<i32>(item0: 12, item1: 30, item2: 7) @count(3)
+  node old = GetLocal total
+  node part1 = Call std.string.Concat(a: "Item ", b: pos_text.result)
+  node part2 = Call std.string.Concat(a: part1.result, b: " is ")
+  node plus = Add<i32>(a: old.value, b: loop.item)
+  node pos_text = Convert<i32, string>(value: loop.index)
+  node report = Call host.Log(message: report_line.result)
+  node report_line = Call std.string.Concat(a: report_start.result, b: total_text.result)
+  node report_start = Call std.string.Concat(a: count_text.result, b: " scores, total ")
+  node say = Call host.Log(message: line.result) -> keep
+  node start = SetLocal scores (value: make.result) -> add
+  node total_text = Convert<i32, string>(value: final.value)
+  notes {
+    note add_note on add "ArrayAdd puts one more item on the end of the array. scores now holds 4 items."
+    note intro "Lesson 7: Arrays. An array is one variable that holds a list of values, in order. MakeArray builds a list from the items wired into it. Each item has a position (its index), and positions start at 0, not 1."
+    note loop_note on loop "ForEach runs 'each' once for every item. item is the value, index is its position. After the last item it follows 'done'."
+    note try_it "Try it: (1) Step (F11) and watch scores in the Variables panel of the Debugger tab. (2) Add a fifth score with another ArrayAdd. (3) Use ArrayGet<i32> to print only the first score (index 0). (4) Ask ArrayGet for index 10 and read the error message."
+  }
+  layout {
+    add at (420, 0)
+    count at (820, 560)
+    count_text at (1020, 560)
+    entry at (0, 0)
+    final at (1020, 700)
+    item_text at (820, 300)
+    keep at (1560, 0)
+    line at (1040, 420)
+    list at (420, 180)
+    loop at (640, 0)
+    make at (200, 180)
+    old at (1300, 220)
+    part1 at (1040, 140)
+    part2 at (1040, 280)
+    plus at (1480, 160)
+    pos_text at (820, 170)
+    report at (1660, 520)
+    report_line at (1420, 640)
+    report_start at (1220, 560)
+    say at (1300, 0)
+    start at (200, 0)
+    total_text at (1220, 700)
+  }
+}

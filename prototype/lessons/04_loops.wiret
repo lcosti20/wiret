@@ -1,0 +1,39 @@
+wiret 1
+module lessons.loops
+
+extern func host.Log(message: string)
+
+func Main() {
+  local total: i32
+  node count = Macro std.flow.ForRange(first: 1, last: 5) { each -> say, done -> report }
+  node entry = Entry -> count
+  node final = GetLocal total
+  node keep = SetLocal total (value: plus.result)
+  node line = Call std.string.Concat(a: "Counting: ", b: num_text.result)
+  node num_text = Convert<i32, string>(value: count.index)
+  node old = GetLocal total
+  node plus = Add<i32>(a: old.value, b: count.index)
+  node report = Call host.Log(message: report_line.result)
+  node report_line = Call std.string.Concat(a: "Total: ", b: total_text.result)
+  node say = Call host.Log(message: line.result) -> keep
+  node total_text = Convert<i32, string>(value: final.value)
+  notes {
+    note intro "Lesson 4: Loops. ForRange runs the 'each' path once for every number from first to last. index is the current number. When the 'each' path reaches its end, the loop goes round again. After the last number it follows 'done'."
+    note keep_note on keep "Adds index to the running total each time round."
+    note try_it "Try it: (1) Turn on Animate and press Run to watch the loop go round. (2) Count to 10 instead of 5. (3) What total do you get for 1 to 100?"
+  }
+  layout {
+    count at (200, 0)
+    entry at (0, 0)
+    final at (560, 600)
+    keep at (1160, 0)
+    line at (560, 190)
+    num_text at (380, 230)
+    old at (820, 290)
+    plus at (1000, 130)
+    report at (1240, 480)
+    report_line at (980, 560)
+    say at (820, 0)
+    total_text at (740, 600)
+  }
+}

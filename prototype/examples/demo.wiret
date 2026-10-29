@@ -1,0 +1,119 @@
+wiret 1
+module game.demo @id("mod_k3f9")
+
+extern func host.Log(message: string) @capability("console.write")
+
+var runs: i32 = 0
+
+macro DoOnce(in: exec, reset: exec) -> (out: exec) {
+  state fired: bool
+  node check = Branch(cond: flag.value) { else -> mark }
+  node clear = SetState fired (value: false)
+  node entry = Entry { in -> check, reset -> clear }
+  node fire = Exit out
+  node flag = GetState fired
+  node mark = SetState fired (value: true) -> fire
+}
+
+macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, index: i32) {
+  local i: i32
+  node bump = SetLocal i (value: nxt.result) -> test
+  node cmp = Le<i32>(a: cur.value, b: entry.last)
+  node cur = GetLocal i
+  node each_out = Exit each (index: cur.value)
+  node entry = Entry -> init
+  node finish = Exit done
+  node init = SetLocal i (value: entry.first) -> test
+  node nxt = Add<i32>(a: cur.value, b: 1)
+  node seq = Sequence { then0 -> each_out, then1 -> bump } @count(2)
+  node test = Branch(cond: cmp.result) { then -> seq, else -> finish }
+}
+
+func Clamp01(v: f32) -> (result: f32) @pure {
+  node entry = Entry -> ret
+  node hi = Min<f32>(a: lo.result, b: 1.0)
+  node lo = Max<f32>(a: entry.v, b: 0.0)
+  node ret = Return(result: hi.result)
+}
+
+func Divide(a: i32, b: i32) -> (result: i32) {
+  node entry = Entry -> ret
+  node q = Div<i32>(a: entry.a, b: entry.b)
+  node ret = Return(result: q.result)
+}
+
+func Fib(n: i32) -> (result: i32) @pure {
+  node entry = Entry -> is_base
+  node f1 = Call Fib(n: n1.result)
+  node f2 = Call Fib(n: n2.result)
+  node is_base = Branch(cond: lt.result) { then -> ret_n, else -> ret_sum }
+  node lt = Lt<i32>(a: entry.n, b: 2)
+  node n1 = Sub<i32>(a: entry.n, b: 1)
+  node n2 = Sub<i32>(a: entry.n, b: 2)
+  node ret_n = Return(result: entry.n)
+  node ret_sum = Return(result: sum.result)
+  node sum = Add<i32>(a: f1.result, b: f2.result)
+}
+
+func Main() @id("fn_main") {
+  node count_run = SetVar runs (value: runs_inc.result) -> hello
+  node entry = Entry -> count_run
+  node fib = Call Fib(n: loop.index)
+  node fib_text = Convert<i32, string>(value: fib.result)
+  node hello = Call host.Log(message: "Hello from Wiret!") -> loop
+  node idx_text = Convert<i32, string>(value: loop.index)
+  node is_even = Eq<i32>(a: rem2.result, b: 0)
+  node line1 = Call std.string.Concat(a: "Fib(", b: idx_text.result)
+  node line2 = Call std.string.Concat(a: line1.result, b: ") = ")
+  node line3 = Call std.string.Concat(a: line2.result, b: fib_text.result)
+  node log_fib = Call host.Log(message: line3.result)
+  node log_sum = Call host.Log(message: msg.result) -> ret
+  node loop = Macro ForRange(first: 1, last: 10) { each -> parity, done -> sum }
+  node msg = Call std.string.Concat(a: "SumTo(100) = ", b: sum_text.result)
+  node parity = Branch(cond: is_even.result) { then -> log_fib }
+  node rem2 = Rem<i32>(a: loop.index, b: 2)
+  node ret = Return
+  node runs_inc = Add<i32>(a: runs_now.value, b: 1)
+  node runs_now = GetVar runs
+  node sum = Call SumTo(n: 100) -> log_sum
+  node sum_text = Convert<i32, string>(value: sum.total)
+  notes {
+    note overview "Logs Fib(i) for the even numbers 1..10, then SumTo(100)."
+    note why_slot on fib_text "fib is pure: it is re-evaluated at log_fib's evaluation point."
+  }
+  layout {
+    count_run at (200, 0)
+    entry at (0, 0)
+    fib at (960, 320)
+    fib_text at (1160, 320)
+    hello at (420, 0) [label = "Say hello"]
+    idx_text at (960, 440)
+    is_even at (800, 220)
+    line1 at (1160, 440)
+    line2 at (1400, 440)
+    line3 at (1400, 320)
+    log_fib at (1240, 0)
+    log_sum at (1460, -280)
+    loop at (680, 0)
+    msg at (1420, -120)
+    parity at (960, 0)
+    rem2 at (640, 220)
+    ret at (1720, -280)
+    runs_inc at (150, 140)
+    runs_now at (-20, 140)
+    sum at (960, -200)
+    sum_text at (1200, -120)
+    box report "Report each even Fibonacci number" at (930, -40) size (760, 600) [color = "#2E86C1", members = [fib, fib_text, idx_text, line1, line2, line3, log_fib, parity]]
+  }
+}
+
+func SumTo(n: i32) -> (total: i32) {
+  local acc: i32
+  node add = SetLocal acc (value: sum.result)
+  node cur = GetLocal acc
+  node entry = Entry -> loop
+  node loop = Macro ForRange(first: 1, last: entry.n) { each -> add, done -> ret }
+  node ret = Return(total: total.value)
+  node sum = Add<i32>(a: cur.value, b: loop.index)
+  node total = GetLocal acc
+}

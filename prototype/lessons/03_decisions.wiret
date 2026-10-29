@@ -1,0 +1,45 @@
+wiret 1
+module lessons.decisions
+
+extern func host.Log(message: string)
+
+func CheckAge(age: i32) @doc("Prints whether a person of this age is an adult or a child.") {
+  node adult = Call host.Log(message: adult_line.result)
+  node adult_line = Call std.string.Concat(a: age_text.result, b: " is an adult.")
+  node age_text = Convert<i32, string>(value: entry.age)
+  node child = Call host.Log(message: child_line.result)
+  node child_line = Call std.string.Concat(a: age_text.result, b: " is a child.")
+  node decide = Branch(cond: grown.result) { then -> adult, else -> child }
+  node entry = Entry -> decide
+  node grown = Ge<i32>(a: entry.age, b: 18)
+  notes {
+    note intro "CheckAge asks one question: is age at least 18? Branch follows 'then' when the answer is true and 'else' when it is false."
+  }
+  layout {
+    adult at (900, -120)
+    adult_line at (560, -200)
+    age_text at (300, 320)
+    child at (900, 120)
+    child_line at (560, 260)
+    decide at (420, 0)
+    entry at (0, 0)
+    grown at (200, 160)
+  }
+}
+
+func Main() {
+  node entry = Entry -> first
+  node first = Call CheckAge(age: 12) -> second
+  node second = Call CheckAge(age: 30) -> third
+  node third = Call CheckAge(age: 18)
+  notes {
+    note intro "Lesson 3: Decisions. Main asks CheckAge about three ages. Double-click a CheckAge node to see how it decides."
+    note try_it "Try it: (1) Predict the three lines before you press Run. (2) Change 18 to 21 inside CheckAge. (3) Use Step (F11) and watch which way the Branch goes."
+  }
+  layout {
+    entry at (0, 0)
+    first at (220, 0)
+    second at (480, 0)
+    third at (740, 0)
+  }
+}

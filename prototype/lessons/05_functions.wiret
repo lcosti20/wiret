@@ -1,0 +1,43 @@
+wiret 1
+module lessons.functions
+
+extern func host.Log(message: string)
+
+func Main() {
+  node entry = Entry -> loop
+  node loop = Macro std.flow.ForRange(first: 1, last: 5) { each -> say }
+  node n_text = Convert<i32, string>(value: loop.index)
+  node part1 = Call std.string.Concat(a: n_text.result, b: " squared is ")
+  node part2 = Call std.string.Concat(a: part1.result, b: sq_text.result)
+  node say = Call host.Log(message: part2.result)
+  node sq_text = Convert<i32, string>(value: squared.result)
+  node squared = Call Square(x: loop.index)
+  notes {
+    note intro "Lesson 5: Functions. Square is a function: a small graph with a name, an input (x) and a result. Main uses it like any other node. Double-click it to look inside."
+    note try_it "Try it: (1) Step (F11) into Square and look at the call stack in the Debugger tab. (2) Make a Cube function: Graph → New function…, type  Cube(x: i32) -> (result: i32) @pure  and build x × x × x. (3) Print cubes as well as squares."
+  }
+  layout {
+    entry at (0, 0)
+    loop at (200, 0)
+    n_text at (380, 160)
+    part1 at (620, 120)
+    part2 at (860, 200)
+    say at (980, 0)
+    sq_text at (580, 300)
+    squared at (380, 260)
+  }
+}
+
+func Square(x: i32) -> (result: i32) @pure @doc("Multiplies a number by itself.") {
+  node entry = Entry -> ret
+  node ret = Return(result: times.result)
+  node times = Mul<i32>(a: entry.x, b: entry.x)
+  notes {
+    note intro "@pure means Square only calculates: the same x always gives the same result, and it changes nothing else. That is why it has no white arrows on the outside."
+  }
+  layout {
+    entry at (0, 0)
+    ret at (440, 0)
+    times at (220, 140)
+  }
+}

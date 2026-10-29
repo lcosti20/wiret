@@ -1,0 +1,79 @@
+wiret 1
+module std.flow
+
+macro DoN(in: exec, reset: exec, n: i32) -> (out: exec, counter: i32) @doc("Lets execution through at most n times, until reset.") {
+  state count: i32
+  node add = Add<i32>(a: cur.value, b: 1)
+  node bump = SetState count (value: add.result) -> fire
+  node clear = SetState count (value: 0)
+  node cur = GetState count
+  node entry = Entry { in -> test, reset -> clear }
+  node fire = Exit out (counter: cur.value)
+  node more = Lt<i32>(a: cur.value, b: entry.n)
+  node test = Branch(cond: more.result) { then -> bump }
+}
+
+macro DoOnce(in: exec, reset: exec) -> (out: exec) @doc("Lets execution through once, until reset.") {
+  state fired: bool
+  node check = Branch(cond: flag.value) { else -> mark }
+  node clear = SetState fired (value: false)
+  node entry = Entry { in -> check, reset -> clear }
+  node fire = Exit out
+  node flag = GetState fired
+  node mark = SetState fired (value: true) -> fire
+}
+
+macro FlipFlop(in: exec) -> (a: exec, b: exec, is_a: bool) @doc("Alternates between output a and output b each time it runs.") {
+  state on_b: bool
+  node check = Branch(cond: flag.value) { then -> to_a, else -> to_b }
+  node entry = Entry -> check
+  node exit_a = Exit a (is_a: true)
+  node exit_b = Exit b
+  node flag = GetState on_b
+  node to_a = SetState on_b (value: false) -> exit_a
+  node to_b = SetState on_b (value: true) -> exit_b
+}
+
+macro ForEach<T>(in: exec, array: array<T>) -> (each: exec, done: exec, item: T, index: i32) @doc("Loops over an array: runs 'each' once for every item, in order (index counts 0, 1, 2, ...), then runs 'done'.") {
+  local i: i32
+  node bump = SetLocal i (value: nxt.result) -> test
+  node cmp = Lt<i32>(a: cur.value, b: len.length)
+  node cur = GetLocal i
+  node each_out = Exit each (item: got.item, index: cur.value)
+  node entry = Entry -> init
+  node finish = Exit done
+  node got = ArrayGet<T>(array: entry.array, index: cur.value)
+  node init = SetLocal i (value: 0) -> test
+  node len = ArrayLength<T>(array: entry.array)
+  node nxt = Add<i32>(a: cur.value, b: 1)
+  node seq = Sequence { then0 -> each_out, then1 -> bump } @count(2)
+  node test = Branch(cond: cmp.result) { then -> seq, else -> finish }
+}
+
+macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, index: i32) @doc("Runs 'each' once for every number from first to last (inclusive), then runs 'done'.") {
+  local i: i32
+  node bump = SetLocal i (value: nxt.result) -> test
+  node cmp = Le<i32>(a: cur.value, b: entry.last)
+  node cur = GetLocal i
+  node each_out = Exit each (index: cur.value)
+  node entry = Entry -> init
+  node finish = Exit done
+  node init = SetLocal i (value: entry.first) -> test
+  node nxt = Add<i32>(a: cur.value, b: 1)
+  node seq = Sequence { then0 -> each_out, then1 -> bump } @count(2)
+  node test = Branch(cond: cmp.result) { then -> seq, else -> finish }
+}
+
+macro Repeat(in: exec, times: i32) -> (body: exec, done: exec, index: i32) @doc("Runs 'body' the given number of times (index counts 0, 1, 2, ...), then runs 'done'.") {
+  local i: i32
+  node body_out = Exit body (index: cur.value)
+  node bump = SetLocal i (value: nxt.result) -> test
+  node cmp = Lt<i32>(a: cur.value, b: entry.times)
+  node cur = GetLocal i
+  node entry = Entry -> init
+  node finish = Exit done
+  node init = SetLocal i (value: 0) -> test
+  node nxt = Add<i32>(a: cur.value, b: 1)
+  node seq = Sequence { then0 -> body_out, then1 -> bump } @count(2)
+  node test = Branch(cond: cmp.result) { then -> seq, else -> finish }
+}

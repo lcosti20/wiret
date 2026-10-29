@@ -1,0 +1,46 @@
+wiret 1
+module lessons.fizzbuzz
+
+extern func host.Log(message: string)
+
+func Main() {
+  node buzz = Call host.Log(message: "Buzz")
+  node check15 = Branch(cond: is15.result) { then -> fizzbuzz, else -> check3 }
+  node check3 = Branch(cond: is3.result) { then -> fizz, else -> check5 }
+  node check5 = Branch(cond: is5.result) { then -> buzz, else -> number }
+  node entry = Entry -> loop
+  node fizz = Call host.Log(message: "Fizz")
+  node fizzbuzz = Call host.Log(message: "FizzBuzz")
+  node is15 = Eq<i32>(a: r15.result, b: 0)
+  node is3 = Eq<i32>(a: r3.result, b: 0)
+  node is5 = Eq<i32>(a: r5.result, b: 0)
+  node loop = Macro std.flow.ForRange(first: 1, last: 15) { each -> check15 }
+  node num_text = Convert<i32, string>(value: loop.index)
+  node number = Call host.Log(message: num_text.result)
+  node r15 = Rem<i32>(a: loop.index, b: 15)
+  node r3 = Rem<i32>(a: loop.index, b: 3)
+  node r5 = Rem<i32>(a: loop.index, b: 5)
+  notes {
+    note intro "Lesson 6: Challenge, FizzBuzz. For 1 to 15, print Fizz for multiples of 3, Buzz for multiples of 5, FizzBuzz for multiples of both, and otherwise the number. Rem gives the remainder: a number is a multiple of 3 when the remainder after dividing by 3 is 0."
+    note order on check15 "Why check 15 first? 15 is a multiple of 3 too. If check3 came first, 15 would only print Fizz."
+    note try_it "Try it: (1) Predict the output, then Run. (2) Swap the order of check15 and check3 and see what breaks. (3) Add 'Bang' for multiples of 7."
+  }
+  layout {
+    buzz at (1620, 180)
+    check15 at (560, 0)
+    check3 at (920, 120)
+    check5 at (1280, 240)
+    entry at (0, 0)
+    fizz at (1280, 40)
+    fizzbuzz at (920, -140)
+    is15 at (440, 220)
+    is3 at (800, 320)
+    is5 at (1160, 440)
+    loop at (200, 0)
+    num_text at (1440, 520)
+    number at (1620, 360)
+    r15 at (260, 220)
+    r3 at (620, 320)
+    r5 at (980, 440)
+  }
+}
