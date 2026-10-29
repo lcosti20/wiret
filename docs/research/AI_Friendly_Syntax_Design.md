@@ -1,5 +1,4 @@
-  
-   ---
+---
 title: "AI-Friendly Syntax Design"
 document_type: "Research note"
 formatted: 2026-10-28
@@ -75,16 +74,16 @@ Consider three ways of expressing a function in different languages:
 
 ```python
 def add(a, b):
-	return a + b
+    return a + b
 ```
 
 ```javascript
 const add = (a, b) => a + b;
 ```
 
-```text
+```rust
 fn add(a: i32, b: i32) -> i32 {
-   a + b
+    a + b
 }
 ```
 

@@ -145,11 +145,14 @@ is the smallest $S$-indexed family of disjoint sets closed under the following t
 
 1. **Variables are ASTs**
    If $x\in X_s$, then $x\in A[X]_s$.
-
+   
 2. **Operators combine ASTs**
    If $o$ is an operator of arity $(s_1,\dots,s_n)_s$ and $a_i\in A[X]_{s_i}$ for every $1\le i\le n$, then
-
-   $$ o(a_1;\dots;a_n)\in A[X]_s. $$
+   
+   $$
+   o(a_1;\dots;a_n)\in A[X]_s.
+   $$
+   
 In other words, an AST is either a variable of a given sort or the application of an operator to a correctly sorted tuple of subtrees.
 
 ## See Also
@@ -427,11 +430,11 @@ $$
 
 We can define operators such as:
 
-- **`Number :** () → Expr`
-- **`Add :** (Expr, Expr) → Expr`
-- **`Multiply :** (Expr, Expr) → Expr`
-- **`Return :** Expr → Stmt`
-- **`Block :** Stmt* → Stmt`
+- **`Number :** () → Expr`**
+- **`Add :** (Expr, Expr) → Expr`**
+- **`Multiply :** (Expr, Expr) → Expr`**
+- **`Return :** Expr → Stmt`**
+- **`Block :** Stmt* → Stmt`**
 
 Here, `Stmt*` denotes zero or more statements. The notation is schematic; actual formal definitions may encode literals and variables differently.
 

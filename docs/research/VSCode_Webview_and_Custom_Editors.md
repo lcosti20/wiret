@@ -189,20 +189,21 @@ A simplified `package.json` contribution looks like this:
 
 The provider must register the same view type:
 
-```text
+```javascript
 context.subscriptions.push(
- vscode.window.registerCustomEditorProvider(
- "graphEditor",
- new GraphEditorProvider(context),
- {
- webviewOptions: {
- retainContextWhenHidden: false
- },
- supportsMultipleEditorsPerDocument: true
- }
- )
-);
-```
+  vscode.window.registerCustomEditorProvider(
+    "graphEditor",
+    new GraphEditorProvider(context),
+    {
+      webviewOptions: {
+        retainContextWhenHidden: false
+      },
+      supportsMultipleEditorsPerDocument: tr
+
+ 
+
+
+
 
 The exact activation configuration may depend on the VS Code version and manifest setup. The `viewType` must match between the contribution and registration. Supporting multiple editors is appropriate only if the document controller and synchronization logic can safely maintain several views.
 
@@ -338,14 +339,14 @@ The webview sends a semantic operation rather than a complete serialized documen
 
 ```json
 {
-  type: "graph/patch",
-  revision: 12,
-  operations: [
+  "type": "graph/patch",
+  "revision": 12,
+  "operations": [
     {
-      op: "setNodePosition",
-      id: "input",
-      x: 80,
-      y: 180
+      "op": "setNodePosition",
+      "id": "input",
+      "x": 80,
+      "y": 180
     }
   ]
 }
@@ -386,21 +387,19 @@ The extension subscribes to `workspace.onDidChangeTextDocument`. When the underl
 
 ```javascript
 const subscription =
- vscode.workspace.onDidChangeTextDocument(event => {
- if (event.document.uri.toString() !== document.uri.toString()) {
- return;
- }
-
- const graph = parseGraph(event.document.getText());
-
- for (const panel of panelsForDocument(document.uri)) {
- panel.webview.postMessage({
- type: "graph/replace",
- revision: getCurrentRevision(document.uri),
- graph: serializeForWebview(graph)
- });
- }
- });
+  vscode.workspace.onDidChangeTextDocument(event => {
+    if (event.document.uri.toString() !== document.uri.toString()) {
+      return;
+    }
+    const graph = parseGraph(event.document.getText());
+    for (const panel of panelsForDocument(document.uri)) {
+      panel.webview.postMessage({
+        type: "graph/replace",
+        revision: getCurrentRevision(document.uri),
+        graph: serializeForWebview(graph)
+      });
+    }
+  });
 ```
 
 This illustrates the flow rather than a complete implementation. A production implementation needs document-scoped revision tracking, disposal of subscriptions, parse-error handling, and a policy for updating views while an edit is still in progress.
@@ -495,26 +494,26 @@ For example:
 
 ```typescript
 type GraphMessage =
- | {
- type: "graph/ready";
- protocolVersion: number;
- }
- | {
- type: "graph/patch";
- revision: number;
- operationId: string;
- operations: GraphOperation[];
- }
- | {
- type: "graph/replace";
- revision: number;
- graph: SerializedGraph;
- }
- | {
- type: "graph/error";
- requestId?: string;
- message: string;
- };
+  | {
+    type: "graph/ready",
+    protocolVersion: number,
+  }
+  | {
+    type: "graph/patch",
+    revision: number,
+    operationId: string,
+    operations: GraphOperation[],
+  }
+  | {
+    type: "graph/replace",
+    revision: number,
+    graph: SerializedGraph,
+  }
+  | {
+    type: "graph/error",
+    requestId?: string,
+    message: string,
+  };
 ```
 
 Use runtime validation as well as TypeScript types. TypeScript types disappear at runtime, so they do not validate incoming messages from a webview.

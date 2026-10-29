@@ -162,7 +162,7 @@ A game engine needs to expose more than simple numbers and strings. Consider an 
 
 ```text
 struct Entity {
- float health;
+    float health;
 };
 ```
 
@@ -837,19 +837,19 @@ public:
 
 The generated C ABI should expose an explicit interface:
 
-```text
+```c
 typedef uint64_t EngineEntityHandle;
 
 typedef enum EngineStatus {
- ENGINE_OK = 0,
- ENGINE_INVALID_HANDLE = 1,
- ENGINE_INVALID_ARGUMENT = 2,
- ENGINE_INTERNAL_ERROR = 3
+    ENGINE_OK = 0,
+    ENGINE_INVALID_HANDLE = 1,
+    ENGINE_INVALID_ARGUMENT = 2,
+    ENGINE_INTERNAL_ERROR = 3
 } EngineStatus;
 
 EngineStatus engine_entity_set_health(
- EngineEntityHandle entity,
- float health
+    EngineEntityHandle entity,
+    float health
 );
 ```
 
