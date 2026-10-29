@@ -1,10 +1,6 @@
-*(Snapshot of [Markup language – Wikipedia](https://en.wikipedia.org/wiki/Markup_language) as of 27 October 2026)*
+# Abstract Syntax Trees
 
----
-
-# Abstract Syntax Tree (AST)
-
-**Source**: [Wikipedia – Abstract syntax tree](https://en.wikipedia.org/wiki/Abstract_syntax_tree)
+**Source**: [Wikipedia – Abstract syntax tree](https://en.wikipedia.org/wiki/Abstract_syntax_tree)  
 **Note**: This article historically lacked sufficient inline citations (as of February 2013). Content has been cleaned and restructured for LLM consumption.
 
 ---
@@ -28,10 +24,10 @@ An abstract syntax tree for the following code implementing the Euclidean algori
 
 ```text
 while b != 0:
- if a > b:
- a:= a - b
- else:
- b:= b - a
+    if a > b:
+        a := a - b
+    else:
+        b := b - a
 return a
 ```
 
@@ -107,7 +103,7 @@ Let \( S \) be a set of *sorts* (syntactic categories). An *arity* is a tuple
 also written \( (s_1,\dots,s_n)_s \). More precisely the set of all arities is
 
 \[
-\mathrm{Arity}(S):= \coprod_{n\in\mathbb{N}} S^{n+1}.
+\mathrm{Arity}(S) := \coprod_{n\in\mathbb{N}} S^{n+1}.
 \]
 
 Let \( O = \{O_\alpha\}_{\alpha\in\mathrm{Arity}(S)} \) be an \(\mathrm{Arity}(S)\)-indexed family of disjoint sets of *operators*. If an operator \( o \) has arity \( (s_1,\dots,s_n)_s \) we say that \( o \) has sort \( s \) and takes \( n \) arguments of sorts \( s_1,\dots,s_n \).
@@ -122,15 +118,15 @@ A[X] = \{A[X]_s\}_{s\in S}
 
 is the smallest \( S \)-indexed family of disjoint sets closed under the following two rules:
 
-1. **Variables are ASTs**
- If \( x\in X_s \), then \( x\in A[X]_s \).
+1. **Variables are ASTs**  
+   If \( x\in X_s \), then \( x\in A[X]_s \).
 
-2. **Operators combine ASTs**
- If \( o \) is an operator of arity \( (s_1,\dots,s_n)_s \) and \( a_i\in A[X]_{s_i} \) for every \( 1\le i\le n \), then
+2. **Operators combine ASTs**  
+   If \( o \) is an operator of arity \( (s_1,\dots,s_n)_s \) and \( a_i\in A[X]_{s_i} \) for every \( 1\le i\le n \), then
 
- \[
- o(a_1;\dots;a_n)\in A[X]_s.
- \]
+   \[
+   o(a_1;\dots;a_n)\in A[X]_s.
+   \]
 
 In other words, an AST is either a variable of a given sort or the application of an operator to a correctly sorted tuple of subtrees.
 
@@ -178,19 +174,13 @@ In other words, an AST is either a variable of a given sort or the application o
 - AST Explorer – web tool for visualizing ASTs of many languages (JavaScript, Python, Go, Java, …)
 - OMG Architecture-Driven Modernization: Abstract Syntax Tree Metamodeling (ASTM) standard
 
----
-
-*Converted and cleaned for LLM-friendly consumption from the English Wikipedia article “Abstract syntax tree”.*
-
----
-
-# Abstract Syntax Trees (ASTs): An Expanded Guide
+## Abstract Syntax Trees: Practical Design and Applications
 
 An abstract syntax tree (AST) is a structured representation of the meaningful syntactic elements of a program. It converts source code from a sequence of characters into a hierarchy of objects that a compiler, interpreter, code editor, or analysis tool can inspect and manipulate.
 
-the supplied Wikipedia article covers the definition, compiler applications, formal mathematical model, AST differencing, and clone detection. the author'll use those topics as the foundation, then expand into practical implementation, design trade-offs, modern tooling, and connections to visual programming and AI-friendly language design.
+The foundational material covers AST definitions, compiler applications, formal properties, AST differencing, and clone detection. The following sections extend these topics into implementation, design trade-offs, modern tooling, and connections to visual programming and AI-friendly language design.
 
-## 1. The central idea
+### 1. The central idea
 
 Consider this expression:
 
@@ -230,59 +220,59 @@ The complete tree is conceptually:
 Assignment
 ├── Name("result")
 └── Add
- ├── Name("price")
- └── Multiply
- ├── Name("tax")
- └── Name("rate")
+    ├── Name("price")
+    └── Multiply
+        ├── Name("tax")
+        └── Name("rate")
 ```
 
 This representation makes operator precedence explicit. A tool does not need to rediscover the meaning of the expression by examining the original characters every time it processes the tree.
 
 The AST is not the program's entire meaning, however. Determining whether `price`, `tax`, and `rate` are defined, whether their types support the operators, or whether an operation has side effects may require further analysis.
 
-## 2. How source code becomes an AST
+### 2. How source code becomes an AST
 
 A conventional compiler or language tool often uses a pipeline like this:
 
-### 1
+#### 1
 
-### Source text
+#### Source text
 
 Characters, whitespace, comments, punctuation
 
-### 2
+#### 2
 
-### Lexical analysis
+#### Lexical analysis
 
 Tokens such as identifiers, numbers and operators
 
-### 3
+#### 3
 
-### Parsing
+#### Parsing
 
 Grammar rules establish the hierarchical structure
 
-### 4
+#### 4
 
-### AST construction
+#### AST construction
 
 Create nodes for meaningful language constructs
 
-### 5
+#### 5
 
-### Semantic analysis
+#### Semantic analysis
 
 Resolve names, check types and enforce constraints
 
-### 6
+#### 6
 
-### Transformation or execution
+#### Transformation or execution
 
 Optimize, interpret, generate code or edit the program
 
 These are conceptual stages, not a universal mandatory sequence. Some parsers construct AST nodes directly while parsing; some languages interleave parsing and semantic checks; and some tools use intermediate representations between stages.
 
-### Lexing versus parsing
+#### Lexing versus parsing
 
 For example:
 
@@ -302,25 +292,25 @@ INTEGER(5)
 
 The parser then identifies the assignment and its expression. The AST generally retains the meaningful constructs and their relationships rather than the entire token stream.
 
-### AST versus concrete syntax tree
+#### AST versus concrete syntax tree
 
 A concrete syntax tree (CST), also called a parse tree, represents the grammar structures used to recognize the input. An AST simplifies this into the constructs needed by later tools.
 
-| Property | Concrete syntax tree | Abstract syntax tree |
+| Property                | Concrete syntax tree                     | Abstract syntax tree                   |
 | ----------------------- | ---------------------------------------- | -------------------------------------- |
-| Main purpose | Represent parsed grammatical structure | Represent meaningful program structure |
-| Grammar details | Usually retained | Often collapsed or omitted |
-| Punctuation | May appear explicitly | Often omitted |
-| Comments and formatting | Can be preserved in suitable CST designs | Often not preserved directly |
-| Common uses | Parsing, format-preserving editing | Compilation, analysis, transformation |
+| Main purpose            | Represent parsed grammatical structure   | Represent meaningful program structure |
+| Grammar details         | Usually retained                         | Often collapsed or omitted             |
+| Punctuation             | May appear explicitly                    | Often omitted                          |
+| Comments and formatting | Can be preserved in suitable CST designs | Often not preserved directly           |
+| Common uses             | Parsing, format-preserving editing       | Compilation, analysis, transformation  |
 
 The distinction is not absolute. Some CSTs discard comments, and some ASTs preserve comments and formatting metadata. What matters is the representation's intended purpose.
 
-## 3. Anatomy of an AST
+### 3. Anatomy of an AST
 
 An AST is more than a collection of nested objects. Its design defines how a language's constructs are represented and what operations can be performed reliably on them.
 
-### Node types
+#### Node types
 
 A typical programming-language AST contains several categories of nodes:
 
@@ -342,9 +332,9 @@ Modules, classes, function bodies, parameter lists and sequences of statements.
 
 These are conceptual categories, not a universal schema. Each language decides which constructs deserve distinct node types.
 
-### Fixed-arity and variable-arity nodes
+#### Fixed-arity and variable-arity nodes
 
-The article's formal discussion of arities is particularly useful here. An operator's arity is the number of arguments it accepts.
+The article's formal discussion of arities is particularly useful here. An operator's arity is the number of arguments it accepts.&#x20;
 
 Abstract_syntax_tree.md
 
@@ -358,21 +348,21 @@ A simplified schema might look like this:
 
 ```
 type Expr =
- | { kind: "Number"; value: number }
- | { kind: "Name"; name: string }
- | { kind: "Binary"; op: "+" | "-" | "*" | "/";
- left: Expr; right: Expr }
- | { kind: "Call"; callee: Expr; args: Expr[] };
+  | { kind: "Number"; value: number }
+  | { kind: "Name"; name: string }
+  | { kind: "Binary"; op: "+" | "-" | "*" | "/";
+      left: Expr; right: Expr }
+  | { kind: "Call"; callee: Expr; args: Expr[] };
 
 type Stmt =
- | { kind: "Let"; name: string; value: Expr }
- | { kind: "Return"; value: Expr | null }
- | { kind: "Block"; statements: Stmt[] };
+  | { kind: "Let"; name: string; value: Expr }
+  | { kind: "Return"; value: Expr | null }
+  | { kind: "Block"; statements: Stmt[] };
 ```
 
 This example uses a tagged union: each node carries a `kind` identifying its structure, and its fields depend on that kind. The type system can help reject malformed trees before they reach later compiler stages.
 
-### Source locations and metadata
+#### Source locations and metadata
 
 A practical AST frequently carries metadata in addition to its structural children:
 
@@ -397,15 +387,15 @@ Useful metadata includes:
 
 Not every AST should store all of this. A small expression evaluator may need only node kinds and child references. A full IDE needs much richer source mapping and semantic information.
 
-## 4. ASTs in compilers and interpreters
+### 4. ASTs in compilers and interpreters
 
-the article describes ASTs as an important product of parsing and a basis for semantic analysis and code generation.
+The source material describes ASTs as an important product of parsing and a basis for semantic analysis and code generation.&#x20;
 
 Abstract_syntax_tree.md
 
- Let's expand on what that means in practice.
+&#x20;Let's expand on what that means in practice.
 
-### Semantic analysis
+#### Semantic analysis
 
 Syntactic validity does not guarantee that a program makes sense.
 
@@ -417,17 +407,17 @@ This may be syntactically valid even if `unknown_function` has never been define
 
 For example, a compiler might annotate a call node with a resolved function symbol and its return type. Those annotations let subsequent passes reason about the program without repeating the same name-resolution work.
 
-### Interpretation
+#### Interpretation
 
 An interpreter can evaluate AST nodes directly. A simplified evaluator might follow rules like these:
 
 ```
-def evaluate(node, environment): if node.kind == "Number": return node.value if node.kind == "Name": return environment[node.name] if node.kind == "Binary": left = evaluate(node.left, environment) right = evaluate(node.right, environment) if node.op == "+": return left + right if node.op == "*": return left * right raise ValueError("Unsupported expression")
+def evaluate(node, environment):    if node.kind == "Number":        return node.value    if node.kind == "Name":        return environment[node.name]    if node.kind == "Binary":        left = evaluate(node.left, environment)        right = evaluate(node.right, environment)        if node.op == "+":            return left + right        if node.op == "*":            return left * right    raise ValueError("Unsupported expression")
 ```
 
 This is illustrative pseudocode: a real evaluator must define error handling, operator semantics, evaluation order and all supported node kinds.
 
-### Code generation and intermediate representations
+#### Code generation and intermediate representations
 
 Compilers do not necessarily translate an AST straight into machine instructions. They often transform it into a lower-level intermediate representation (IR), where control flow, data dependencies and machine-independent optimizations are easier to express.
 
@@ -435,21 +425,23 @@ For instance, a source-level loop might become a collection of basic blocks conn
 
 The stages can therefore be understood as different views of the same program:
 
-| Representation | Main concern |
+| Representation              | Main concern                                             |
 | --------------------------- | -------------------------------------------------------- |
-| Source text | What the programmer wrote |
-| AST | Which language constructs are nested within which others |
-| Typed or annotated AST | What names and expressions mean under language rules |
-| Intermediate representation | How computation and control flow can be transformed |
-| Machine code or bytecode | How the program is executed |
+| Source text                 | What the programmer wrote                                |
+| AST                         | Which language constructs are nested within which others |
+| Typed or annotated AST      | What names and expressions mean under language rules     |
+| Intermediate representation | How computation and control flow can be transformed      |
+| Machine code or bytecode    | How the program is executed                              |
 
-The exact boundaries vary by compiler. CPython, for example, parses Python into an AST, transforms it into an instruction sequence, constructs a control-flow graph, performs optimizations and emits bytecode.
+The exact boundaries vary by compiler. CPython, for example, parses Python into an AST, transforms it into an instruction sequence, constructs a control-flow graph, performs optimizations and emits bytecode.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://github.com\&sz=32)
 
 GitHub+1
 
-## 5. A formal perspective: ASTs as typed terms
+### 5. A formal perspective: ASTs as typed terms
 
-The supplied article gives a mathematical definition based on sorts, operators, arities and variables.
+The supplied article gives a mathematical definition based on sorts, operators, arities and variables.&#x20;
 
 Abstract_syntax_tree.md
 
@@ -461,21 +453,21 @@ Suppose the sorts are:
 
 We can define operators such as:
 
-- `Number: () → Expr`
-- `Add: (Expr, Expr) → Expr`
-- `Multiply: (Expr, Expr) → Expr`
-- `Return: Expr → Stmt`
-- `Block: Stmt* → Stmt`
+- `Number : () → Expr`
+- `Add : (Expr, Expr) → Expr`
+- `Multiply : (Expr, Expr) → Expr`
+- `Return : Expr → Stmt`
+- `Block : Stmt* → Stmt`
 
 Here, `Stmt*` denotes zero or more statements. The notation is schematic; actual formal definitions may encode literals and variables differently.
 
 An expression such as \\(2 + 3 \times 4\\) becomes:
 
-\\[ \operatorname{Add}\bigl( \operatorname{Number}(2), \operatorname{Multiply}( \operatorname{Number}(3), \operatorname{Number}(4) ) \bigr) \\]
+\\[ \operatorname{Add}\bigl(   \operatorname{Number}(2),   \operatorname{Multiply}(     \operatorname{Number}(3),     \operatorname{Number}(4)   ) \bigr) \\]
 
 The important point is that the tree's shape encodes the grouping. The multiplication node is nested inside the addition node's right operand.
 
-### Why sorts matter
+#### Why sorts matter
 
 Sorts constrain which operators can receive which children. A `Return` node expects an expression, while an `Add` node expects two expressions.
 
@@ -487,22 +479,22 @@ This gives a distinction between three kinds of correctness:
 
 These levels overlap, but they are not interchangeable. A well-formed AST can still contain a reference to an undefined variable or a type-invalid operation.
 
-## 6. AST differencing, transformations and code clones
+### 6. AST differencing, transformations and code clones
 
-The Wikipedia article highlights AST differencing and clone detection as applications beyond conventional compilation.
+The Wikipedia article highlights AST differencing and clone detection as applications beyond conventional compilation.&#x20;
 
 Abstract_syntax_tree.md
 
-### Tree differencing
+#### Tree differencing
 
 Consider two versions of a function:
 
 ```
-def calculate(x): return x + 1
+def calculate(x):    return x + 1
 ```
 
 ```
-def calculate(x): return x * 2
+def calculate(x):    return x * 2
 ```
 
 A line-based diff sees a changed line. An AST differencer can identify a more precise change:
@@ -510,20 +502,22 @@ A line-based diff sees a changed line. An AST differencer can identify a more pr
 ```
 Update BinaryExpression.operator
 From: "+"
-To: "*"
+To:   "*"
 
 Update NumericLiteral
 From: 1
-To: 2
+To:   2
 ```
 
-That structural edit script is useful for code review, refactoring analysis, automated repair and mining software evolution. Research on GumTree and related algorithms emphasizes that detecting moves and matching corresponding nodes can make these scripts better reflect developers' changes.
+That structural edit script is useful for code review, refactoring analysis, automated repair and mining software evolution. Research on GumTree and related algorithms emphasizes that detecting moves and matching corresponding nodes can make these scripts better reflect developers' changes.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://doi.org\&sz=32)
 
 DOI+1
 
 However, a structural edit script is not automatically a semantic explanation. Replacing `+` with `*` may have very different consequences depending on operand types and program context.
 
-### Clone detection
+#### Clone detection
 
 Two fragments can differ textually but share a similar AST structure:
 
@@ -539,7 +533,7 @@ A structural detector can recognize the shared pattern by treating identifiers a
 
 More sophisticated detectors can normalize literals, compare subtrees, or combine syntax with control-flow and data-flow information.
 
-### Program transformations
+#### Program transformations
 
 An AST can also serve as a target for refactoring rules:
 
@@ -551,22 +545,22 @@ An AST can also serve as a target for refactoring rules:
 
 A safe transformation should preserve language constraints and, where required, program behavior. Merely producing a tree that satisfies the schema is not enough.
 
-## 7. Important design trade-offs
+### 7. Important design trade-offs
 
 An AST is a design choice, not simply the inevitable output of a parser. Different representations suit different tasks.
 
-| Design decision | Option A | Option B |
+| Design decision | Option A                      | Option B                                 |
 | --------------- | ----------------------------- | ---------------------------------------- |
 | Source fidelity | Abstract tree; discard trivia | Preserve tokens, comments and formatting |
-| Mutability | Mutable nodes | Immutable snapshots |
-| Relationships | Strict tree | Shared nodes or graph references |
-| Semantic data | Separate analysis tables | Annotations attached to nodes |
-| Error handling | Reject invalid syntax | Represent incomplete or erroneous syntax |
-| Node identity | Structural equality | Stable identity across edits |
+| Mutability      | Mutable nodes                 | Immutable snapshots                      |
+| Relationships   | Strict tree                   | Shared nodes or graph references         |
+| Semantic data   | Separate analysis tables      | Annotations attached to nodes            |
+| Error handling  | Reject invalid syntax         | Represent incomplete or erroneous syntax |
+| Node identity   | Structural equality           | Stable identity across edits             |
 
 Each choice has consequences.
 
-### Abstractness versus source fidelity
+#### Abstractness versus source fidelity
 
 A conventional AST might treat these expressions as structurally equivalent:
 
@@ -580,11 +574,13 @@ x+y
 
 That is useful for semantic analysis, but a formatter or refactoring tool may need to preserve the original spacing and comments.
 
-Some tools therefore retain concrete syntax information alongside abstract structure. Microsoft's Roslyn syntax trees, for example, preserve tokens, whitespace, comments and other trivia, and can reproduce the original source text.
+Some tools therefore retain concrete syntax information alongside abstract structure. Microsoft's Roslyn syntax trees, for example, preserve tokens, whitespace, comments and other trivia, and can reproduce the original source text.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://learn.microsoft.com\&sz=32)
 
 Microsoft Learn+1
 
-### Mutable versus immutable trees
+#### Mutable versus immutable trees
 
 A mutable AST allows a transformation to change a node in place. This is straightforward, but shared references can make it difficult to reason about which analyses remain valid after a change.
 
@@ -592,7 +588,7 @@ An immutable AST creates a new version when edited. This supports safe sharing a
 
 Neither strategy is universally superior. The choice depends on the expected editing workload, performance requirements and API design.
 
-### Trees versus graphs
+#### Trees versus graphs
 
 A conventional AST has a single parent for each non-root node. However, compiler systems often need relationships that do not fit a tree:
 
@@ -605,7 +601,7 @@ These relationships can be maintained in side tables or represented in additiona
 
 This distinction matters: an AST, a semantic graph and a control-flow graph are related representations, not interchangeable names for the same structure.
 
-## 8. ASTs in editors and interactive programming
+### 8. ASTs in editors and interactive programming
 
 ASTs are especially important when source code must be analyzed while the user is actively editing it.
 
