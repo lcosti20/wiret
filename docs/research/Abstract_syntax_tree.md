@@ -131,11 +131,11 @@ $$
 \mathrm{Arity}(S) := \coprod_{n\in\mathbb{N}} S^{n+1}.
 $$
 
-Let $O = \{O_\alpha\}_{\alpha\in\mathrm{Arity}(S)}$ be an \(\mathrm{Arity}(S)\)-indexed family of disjoint sets of *operators*. If an operator $o$ has arity $(s_1,\dots,s_n)_s$ we say that $o$ has sort $s$ and takes $n$ arguments of sorts $s_1,\dots,s_n$.
+Let $O = \{O_\alpha\}_{\alpha\in\mathrm{Arity}(S)}$ be an $\(\mathrm{Arity}(S)\)$-indexed family of disjoint sets of *operators*. If an operator $o$ has arity $(s_1,\dots,s_n)_s$ we say that $o$ has sort $s$ and takes $n$ arguments of sorts $s_1,\dots,s_n$.
 
 ### Abstract Syntax Trees
 
-Fix a finite set of sorts $S$ and an \(\mathrm{Arity}(S)\)-indexed family of operators $O$. Let $X = \{X_s\}_{s\in S}$ be an $S$-indexed family of disjoint sets of *variables*. The family of abstract syntax trees
+Fix a finite set of sorts $S$ and an $\(\mathrm{Arity}(S)\)$-indexed family of operators $O$. Let $X = \{X_s\}_{s\in S}$ be an $S$-indexed family of disjoint sets of *variables*. The family of abstract syntax trees
 
 $$
 A[X] = \{A[X]_s\}_{s\in S}
@@ -144,14 +144,14 @@ $$
 is the smallest $S$-indexed family of disjoint sets closed under the following two rules:
 
 1. **Variables are ASTs**
-   If $x\in X_s$, then $x\in A[X]_s$.
+   If $x\in X\_s$, then $x\in A[X]\_s$.
    
 2. **Operators combine ASTs**
-   If $o$ is an operator of arity $(s_1,\dots,s_n)_s$ and $a_i\in A[X]_{s_i}$ for every $1\le i\le n$, then
+   If $o$ is an operator of arity $(s\_1,\dots,s\_n)\_s$ and $a\_i\in A[X]\_{s\_i}$ for every $1\le i\le n$, then
    
-   $$
-   o(a_1;\dots;a_n)\in A[X]_s.
-   $$
+$$
+o(a_1;\dots;a_n)\in A[X]_s.
+$$
    
 In other words, an AST is either a variable of a given sort or the application of an operator to a correctly sorted tuple of subtrees.
 
@@ -414,8 +414,6 @@ The stages can therefore be understood as different views of the same program:
 
 The exact boundaries vary by compiler. CPython, for example, parses Python into an AST, transforms it into an instruction sequence, constructs a control-flow graph, performs optimizations and emits bytecode.
 
-*Source: GitHub (+1 more)*
-
 ### 5. A formal perspective: ASTs as typed terms
 
 The source article gives a mathematical definition based on sorts, operators, arities and variables.
@@ -441,7 +439,13 @@ Here, `Stmt*` denotes zero or more statements. The notation is schematic; actual
 An expression such as $2 + 3 \times 4$ becomes:
 
 $$
-\mathrm{Add}\bigl(   \mathrm{Number}(2),   \mathrm{Multiply}(     \mathrm{Number}(3),     \mathrm{Number}(4)   ) \bigr)
+\mathrm{Add}\bigl(
+   \mathrm{Number}(2),
+   \mathrm{Multiply}(
+     \mathrm{Number}(3),
+     \mathrm{Number}(4)
+   )
+ \bigr)
 $$
 
 The important point is that the tree's shape encodes the grouping. The multiplication node is nested inside the addition node's right operand.
@@ -489,8 +493,6 @@ To:   2
 ```
 
 That structural edit script is useful for code review, refactoring analysis, automated repair and mining software evolution. Research on GumTree and related algorithms emphasizes that detecting moves and matching corresponding nodes can make these scripts better reflect developers' changes.
-
-*Source: DOI (+1 more)*
 
 However, a structural edit script is not automatically a semantic explanation. Replacing `+` with `*` may have very different consequences depending on operand types and program context.
 
@@ -552,8 +554,6 @@ x+y
 That is useful for semantic analysis, but a formatter or refactoring tool may need to preserve the original spacing and comments.
 
 Some tools therefore retain concrete syntax information alongside abstract structure. Microsoft's Roslyn syntax trees, for example, preserve tokens, whitespace, comments and other trivia, and can reproduce the original source text.
-
-*Source: Microsoft Learn (+1 more)*
 
 #### Mutable versus immutable trees
 

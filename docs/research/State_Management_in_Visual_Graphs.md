@@ -154,8 +154,6 @@ A change in a source propagates to dependent nodes, which update their outputs o
 
 Common in reactive interfaces and interactive data visualization. Reactive Vega, for example, treats data, interaction events, and rendered elements as parts of a streaming dataflow system.
 
-*Source: UW Interactive Data Lab (+1 more)*
-
 **Key question:** how are dependencies, batching, and recomputation managed?
 
 **C. Imperative, event-driven execution**
@@ -169,8 +167,6 @@ Common in game logic, automation, and interactive applications.
 **D. Message-driven asynchronous execution**
 
 Nodes exchange messages or events, often through queues. Different nodes may process messages concurrently, so receiving the same sequence does not guarantee that independent branches finish in the same order.
-
-*Source: GitHub (+1 more)*
 
 **Key question:** how are ordering, backpressure, failures, and concurrent updates handled?
 
@@ -285,8 +281,6 @@ Result generation 1 → discard as stale
 Other valid policies include cancelling the older request or displaying all results with their query identities. The important thing is to make the policy explicit.
 
 Asynchronous dataflow research provides useful concepts here: message ordering, timestamps, progress tracking, and the distinction between data arrival and computation completion. Timely Dataflow, for example, uses timestamps and progress information to reason about which inputs may still arrive.
-
-*Source: timelydataflow.github.io (+1 more)*
 
 ## 7. Persistent state, transient values, and activation-local state
 
@@ -410,8 +404,6 @@ There are several possible models.
 A language might use immediate mutation for local imperative operations while using transactional updates for reactive recomputation.
 
 For reactive graphs, a common approach is to batch changes and evaluate their downstream consequences in a defined update cycle. Reactive Vega illustrates why dependency tracking and incremental propagation matter: its architecture can update affected data and visualization elements without recomputing the entire system.
-
-*Source: UW Interactive Data Lab (+1 more)*
 
 This leads to several essential questions:
 
@@ -567,7 +559,7 @@ These resources offer complementary perspectives on the problem.
 - [Dataflow programming](https://en.wikipedia.org/wiki/Dataflow_programming) — A broad introduction to graphs of computations, input availability, parallel execution, and state in dataflow systems. *(Wikipedia).*
 - [Dataflow Process Networks — Edward A. Lee](https://ptolemy.berkeley.edu/publications/papers/94/processNets/) — A foundational treatment of concurrent processes, FIFO communication channels, actor firings, and formal execution models. *(Ptolemy Project).*
 - [Timely Dataflow: Core Concepts](https://timelydataflow.github.io/timely-dataflow/chapter_1/chapter_1.html) — Explains timestamps, progress tracking, and reasoning about the order and completeness of asynchronous computation. *(timelydataflow\.github.io).*
-- [Reactive Vega — A Streaming Dataflow Architecture for Declarative Interactive Visualization](https://vis.csail.mit.edu/pubs/reactive-vega.pdf) — A practical research example of managing interaction events, data dependencies, incremental updates, and rendering within a reactive graph. *(UW Interactive Data Lab (+1 more)).*
+- [Reactive Vega — A Streaming Dataflow Architecture for Declarative Interactive Visualization](https://vis.csail.mit.edu/pubs/reactive-vega.pdf) — A practical research example of managing interaction events, data dependencies, incremental updates, and rendering within a reactive graph.
 - [Semantics of multiway dataflow constraint systems](https://doi.org/10.1016/j.jlamp.2020.100634) — Explores formal semantics for selecting operations based on global state and update history, especially for interactive user interfaces. *(ScienceDirect).*
 
 ## Conclusion

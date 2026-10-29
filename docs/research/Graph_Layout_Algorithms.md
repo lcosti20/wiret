@@ -12,8 +12,6 @@ The central challenge is that a graph's logical structure does not uniquely dete
 
 For research into graph editors and visual programming languages, three particularly important technologies are Graphviz, Eclipse Layout Kernel (ELK), and the family of Sugiyama-style layered algorithms. They address overlapping but distinct needs: graph rendering, interactive diagram layout, and hierarchical arrangement of directed graphs.
 
-*Source: Graphviz (+2 more)*
-
 ## Contents
 
 - [1. What a graph layout algorithm does](#1-what-a-graph-layout-algorithm-does)
@@ -85,8 +83,6 @@ The Sugiyama method is one of the most important algorithms for directed graph d
 
 Its traditional pipeline has five phases: cycle removal, layer assignment, crossing minimization, node positioning, and edge routing.
 
-*Source: PGF/TikZ Manual (+1 more)*
-
 *Figure: layered (Sugiyama-style) layout pipeline*
 
 - **Input graph** — Nodes, edges, sizes, constraints
@@ -112,7 +108,12 @@ The important distinction is that the algorithm changes its internal representat
 Each node receives a layer or rank. For a simple directed acyclic graph, a useful baseline is:
 
 $$
-r(v)= \begin{cases} 0 & \text{if }v\text{ has no predecessors}\\\ 1+\max\limits_{u\to v}r(u) & \text{otherwise} \end{cases}
+r(v)= \begin{cases}
+  0 &
+    \text{if }v\text{ has no predecessors}\\\
+  1+\max\limits_{u\to v}r(u) &
+    \text{otherwise}
+\end{cases}
 $$
 
 This assigns each node to a layer one greater than its deepest predecessor.
@@ -124,8 +125,6 @@ For example:
 - **Layer 2:** output nodes
 
 More sophisticated methods optimize graph height, edge lengths, and overall width. ELK Layered supports multiple strategies, including network-simplex-based layer assignment.
-
-*Source: Eclipse Foundation (+1 more)*
 
 ### Phase 3: Crossing minimization
 
@@ -163,12 +162,10 @@ Typical routing styles include:
 
 In technical node editors, orthogonal routing can be especially useful because connections look structured and can respect port constraints. ELK Layered supports all of these broad routing styles.
 
-*Source: Eclipse Foundation (+1 more)*
-
 ## 4. Comparing Graphviz, ELK, and other tools
 
-- **Graphviz** — *Best for general graph rendering and batch generation.* A mature graph visualization toolkit with multiple layout engines. Its `dot` engine specializes in hierarchical directed graphs; `neato` and `fdp` handle spring or force-based layouts, while `sfdp` targets larger graphs and `circo` and `twopi` offer circular and radial arrangements. *Source: Graphviz (+2 more)* [Layout engines documentation](https://graphviz.org/docs/layouts/)
-- **Eclipse Layout Kernel (ELK)** — *Best for structured interactive diagram editors.* Provides algorithms and infrastructure for diagram applications. ELK Layered supports ports, multiple edges, labels, nested graphs, and different routing styles, making it particularly relevant to node-based programming interfaces. *Source: Eclipse Foundation (+1 more)* [ELK Layered reference](https://eclipse.dev/elk/reference/algorithms/org-eclipse-elk-layered.html)
+- **Graphviz** — *Best for general graph rendering and batch generation.* A mature graph visualization toolkit with multiple layout engines. Its `dot` engine specializes in hierarchical directed graphs; `neato` and `fdp` handle spring or force-based layouts, while `sfdp` targets larger graphs and `circo` and `twopi` offer circular and radial arrangements. [Layout engines documentation](https://graphviz.org/docs/layouts/)
+- **Eclipse Layout Kernel (ELK)** — *Best for structured interactive diagram editors.* Provides algorithms and infrastructure for diagram applications. ELK Layered supports ports, multiple edges, labels, nested graphs, and different routing styles, making it particularly relevant to node-based programming interfaces. [ELK Layered reference](https://eclipse.dev/elk/reference/algorithms/org-eclipse-elk-layered.html)
 - **D3.js force simulation** — *Best for browser-based exploratory networks.* Offers a flexible force simulation for applications that want to control node motion, forces, and simulation behavior directly. It is well suited to exploratory networks, but it does not automatically provide all the diagram-specific routing and layered constraints of a specialized layout engine. [D3 force documentation](https://d3js.org/d3-force)
 
 **Dagre**
@@ -215,8 +212,6 @@ Possible strategies include:
 - Use prior positions as reference points during optimization.
 
 ELK exposes interactive layout configuration, including a reference-point option, although the exact behavior depends on the selected algorithm and its configuration.
-
-*Source: Eclipse Foundation (+1 more)*
 
 ### Stability versus optimality
 

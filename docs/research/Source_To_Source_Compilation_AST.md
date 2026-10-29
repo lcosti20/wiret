@@ -461,8 +461,6 @@ When the browser reports an error in generated JavaScript, you want to identify 
 
 Standard JavaScript source maps map generated code positions back to original source positions. The format is specified by [ECMA-426](https://tc39.es/ecma426/).
 
-*Source: Ecma International (+1 more)*
-
 However, the compiler has a further challenge: a visual graph may not have ordinary source-file locations for every node.
 
 The recommendation is to assign stable identifiers to source-level constructs:

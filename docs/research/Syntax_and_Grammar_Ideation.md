@@ -82,8 +82,6 @@ One of the most important decisions is to separate the way a graph is written fr
 
 Research on visual-language design distinguishes concrete syntax, the notation users see, from abstract syntax, the underlying computer-interpretable structure. This distinction is useful because one graph can have multiple textual representations and multiple graphical presentations.
 
-*Source: ScienceDirect (+1 more)*
-
 Consider the following three notations.
 
 **Style A · Explicit declarations**
@@ -432,8 +430,6 @@ could be syntactically valid but semantically invalid if `result` has no `missin
 
 This separation prevents the grammar from becoming entangled with every detail of type checking and graph validation. Formal specifications of visual languages likewise emphasize the value of defining structure and meaning precisely.
 
-*Source: ScienceDirect (+1 more)*
-
 ## 7. Syntax decisions that deserve deliberate experimentation
 
 Beyond basic node and edge declarations, several decisions can have a disproportionate effect on the language's usability.
@@ -515,8 +511,6 @@ Formatting should ideally be independent of graph semantics. Indentation, blank 
 
 Graph-description languages such as Graphviz DOT offer useful precedents for declarations, attributes, ports, and subgraphs. They can serve as a reference point without dictating the syntax of a programming-oriented graph DSL.
 
-*Source: Graphviz (+1 more)*
-
 ## 8. AI-friendly syntax and grammar
 
 If the language is intended to be written by LLMs as well as humans, syntax ideation needs an additional dimension: how reliably can a model generate, modify, and repair valid graph programs?
@@ -524,8 +518,6 @@ If the language is intended to be written by LLMs as well as humans, syntax idea
 A notation that is pleasant for a human expert is not necessarily the notation that produces the fewest errors in AI-generated output.
 
 Research and existing tools offer useful starting points. For example, yUML publishes an AI-oriented DSL reference intended for use in model prompts, while keeping its formal grammars as the authoritative definition of valid syntax.
-
-*Source: yuml (+1 more)*
 
 ### Design principles for AI-generated syntax
 
@@ -618,8 +610,6 @@ One subtle issue is that structural equivalence is not textual equality. A forma
 
 This is another reason to distinguish the graph's abstract structure from its textual representation.
 
-*Source: web.engr.oregonstate.edu (+1 more)*
-
 ## 10. A practical syntax ideation workflow
 
 The recommended approach is to treat the design as a series of small, testable experiments rather than attempting to invent the entire language at once.
@@ -662,6 +652,16 @@ The most interesting questions are not necessarily which particular keyword to c
 - **Syntax evolution:** How can new node types and language features be added without breaking old programs or existing editor integrations?
 
 These questions connect syntax design to compiler construction, graph theory, programming-language usability, AI-assisted coding, and the engineering of synchronized editing environments.
+
+## Sources and verification status
+
+This note is a design-ideation document rather than a sourced literature review. References that support its factual claims:
+
+- [The DOT Language (Graphviz)](https://graphviz.org/doc/info/lang.html) — grammar for nodes, edges, graphs, subgraphs, and attributes.
+- [yUML](https://yuml.me/) — the diagram DSL discussed in the AI-friendly syntax section; check its current documentation for the AI-oriented reference.
+- [Grammar-Constrained Decoding for Structured NLP Tasks without Finetuning](https://aclanthology.org/2023.emnlp-main.674/) (EMNLP 2023), [Grammar-Aligned Decoding](https://papers.nips.cc/paper_files/paper/2024/hash/2bdc2267c3d7d01523e2e17ac0a754f3-Abstract-Conference.html) (NeurIPS 2024), and [Type-Constrained Code Generation with Language Models](https://doi.org/10.1145/3729274) (PLDI 2025) — evidence on constrained generation; their results apply to the evaluated settings, not to every syntax or model.
+
+The claims about concrete versus abstract syntax, formal specification of visual languages, and abstract structure versus textual representation were previously attributed to unnamed sources. They are unsourced here and should be linked to specific papers before being used as evidence.
 
 ## Recommended direction
 

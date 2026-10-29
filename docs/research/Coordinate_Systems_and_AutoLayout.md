@@ -173,8 +173,6 @@ Nodes are arranged in ranks, often from left to right or top to bottom. The algo
 
 Good for dataflow graphs, execution pipelines, and dependency graphs. See Graphviz [dot layout](https://graphviz.org/docs/layouts/dot/) and [ELK Layered](https://eclipse.dev/elk/reference/algorithms/org-eclipse-elk-layered.html).
 
-*Source: Graphviz (+1 more)*
-
 **Force-directed layout**
 
 Nodes behave as if connected by springs and repelling one another. The algorithm seeks a visually balanced arrangement rather than a strict execution direction.
@@ -204,8 +202,6 @@ A layered algorithm often follows these stages:
 5. **Edge routing:** Calculate paths between ports, including bends and orthogonal segments.
 
 The Eclipse Layout Kernel documents these stages in its [Layered algorithm overview](https://eclipse.dev/elk/blog/posts/2025/25-08-21-layered.html).
-
-*Source: Eclipse Foundation (+1 more)*
 
 This pipeline has an important design implication: node positions are the output of a process with multiple competing objectives. A layout algorithm may reduce crossings but produce an unnecessarily wide graph. It may compact the graph but disrupt familiar node positions.
 
@@ -396,8 +392,6 @@ The first is essential. The second is valuable for canonical layouts and stable 
 If deterministic geometry matters, the specification should define stable node ordering, tie-breaking rules, algorithm configuration, numeric precision, and versioning. A random seed alone is not sufficient.
 
 Graphviz's documentation, for example, distinguishes graph semantics from layout engines and supports explicit position attributes for relevant engines. See its [position attribute documentation](https://graphviz.org/docs/attrs/pos/) and [dot layout documentation](https://graphviz.org/docs/layouts/dot/).
-
-*Source: Graphviz (+2 more)*
 
 A practical design is to make the layout engine and its configuration identifiable in the saved metadata, while allowing the editor to migrate old layout files when the engine changes.
 

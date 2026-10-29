@@ -95,8 +95,6 @@ The engine or library author writes a C-compatible adapter that registers functi
 
 Lua's official manual documents the C API used by the host program to interact with the interpreter.
 
-*Source: Lua (+1 more)*
-
 **B. Dynamic native FFI**
 
 The scripting environment dynamically loads native libraries, resolves symbols, and uses type declarations to call functions directly. A separate wrapper for every function may not be necessary.
@@ -113,15 +111,11 @@ The engine exposes a selected API through metadata, reflection, or generated wra
 
 Unreal Engine's `UFUNCTION` and `BlueprintCallable` mechanism is a practical example of exposing selected C++ functions to Blueprint graphs.
 
-*Source: Epic Developer Community (+1 more)*
-
 These approaches are not mutually exclusive. A game engine could expose most gameplay functions through reflection, provide generated wrappers for frequently used APIs, and reserve dynamic FFI for advanced native integrations.
 
 ## 4. Lua: the practical model for a game engine
 
 Lua is especially relevant because it is designed to be embedded in applications. The host application controls the interpreter and chooses which C functions to make available.
-
-*Source: Lua (+1 more)*
 
 ### 4.1 Registering a native function
 
@@ -152,8 +146,6 @@ local result = add(20, 22)
 
 The adapter `l_add` does not have the same signature as an ordinary C function like `int add(int, int)`. Instead, it follows Lua's C-function protocol: it receives a `lua_State`, reads arguments from the Lua stack, pushes results onto that stack, and returns the number of results.
 
-*Source: Lua (+1 more)*
-
 This distinction is important: the binding adapter is itself a function in the runtime's calling convention. It mediates between two different execution models.
 
 ### 4.2 Exposing engine objects
@@ -174,8 +166,6 @@ print(player:get_health())
 ```
 
 The Lua value `player` generally should not be a copy of the native object. Instead, it can be userdata that represents or references the engine-owned entity. Metatables can define operations and behavior for that userdata.
-
-*Source: Lua (+1 more)*
 
 A robust engine binding needs to determine:
 
@@ -205,11 +195,7 @@ These three targets have different constraints, even when the source language is
 
 The C ABI is a common interoperability target because C has a relatively stable binary interface across supported platforms. C++ does not have one universally consistent ABI across popular compiler implementations, so exporting a narrow C-compatible interface is often preferable.
 
-*Source: Microsoft Learn (+1 more)*
-
 For C#,.NET supports Platform Invocation Services (P/Invoke) for native calls. Modern.NET also supports source-generated interop through `LibraryImport`, reducing some runtime stub-generation overhead and making interop code more explicit.
-
-*Source: Microsoft Learn (+1 more)*
 
 One important distinction: calling a C function from a C# application and exposing C# engine objects to Lua are different problems. The latter requires a managed-runtime bridge, which may use reflection, generated wrappers, or an engine-specific embedding layer.
 
@@ -231,8 +217,6 @@ The foreign function and the scripting runtime may represent the same logical va
 | `void` return | No return value |
 
 The mapping is not always one-to-one. A C string is not the same as an arbitrary Unicode string, and a native pointer is not automatically a safe object reference. Struct layout, alignment, encoding, nullability, and ownership all matter..NET's native interop guidance emphasizes matching native signatures and choosing appropriate representations.
-
-*Source: Microsoft Learn (+1 more)*
 
 ### 6.2 Memory ownership and lifetimes
 
@@ -375,8 +359,6 @@ The metadata allows the editor to create a node with four inputs and an executio
 
 This approach has a close real-world analogue in Unreal Engine's reflection system: C++ declarations annotated with `UFUNCTION` metadata can be exposed to Blueprint graphs, while specifiers control how those functions are presented and used.
 
-*Source: Epic Developer Community (+1 more)*
-
 ## 9. Design questions for an AI-friendly FFI
 
 If an LLM is generating the text representation of a graph, an FFI schema should minimize the amount of information the model must infer.
@@ -451,17 +433,25 @@ These are useful primary sources for deepening the research.
 
 The canonical starting point for embedding Lua, registering native functions, managing the Lua stack, and exposing userdata.
 
-- [Lua 5.5 Reference Manual](https://www.lua.org/manual/5.5/manual.html) — *Unreal Engine — Reflection and Blueprint exposure.* A real example of native engine functions being exposed as typed visual-programming nodes.
+- [Lua 5.5 Reference Manual](https://www.lua.org/manual/5.5/manual.html) — Lua language, C API, embedding, stack operations, userdata, errors, and coroutines.
 
-[UFunctions](https://dev.epicgames.com/documentation/unreal-engine/ufunctions-in-unreal-engine)
+**Unreal Engine — Reflection and Blueprint exposure**
 
-- [Reflection System](https://dev.epicgames.com/documentation/unreal-engine/reflection-system-in-unreal-engine) — *.NET — Native interoperability.* Useful for understanding managed-to-native marshaling, ABI constraints, source-generated bindings, and lifetime safety.
+A real example of native engine functions being exposed as typed visual-programming nodes.
 
-[Native interoperability ABI support](https://learn.microsoft.com/dotnet/standard/native-interop/abi-support)
+- [UFunctions in Unreal Engine](https://dev.epicgames.com/documentation/unreal-engine/ufunctions-in-unreal-engine) — how reflected C++ functions can be exposed to Blueprint Visual Scripting.
+- [Reflection System in Unreal Engine](https://dev.epicgames.com/documentation/unreal-engine/reflection-system-in-unreal-engine) — `UCLASS`, `UFUNCTION`, `UPROPERTY`, and engine/editor metadata.
 
-- [Native interoperability best practices](https://learn.microsoft.com/dotnet/standard/native-interop/best-practices) — *Foreign function interface — General overview.* A broader taxonomy of mechanisms for invoking functions across programming language boundaries.
+**.NET — Native interoperability**
 
-[Wikipedia overview](https://en.wikipedia.org/wiki/Foreign_function_interface)
+Useful for understanding managed-to-native marshaling, ABI constraints, source-generated bindings, and lifetime safety.
+
+- [Native interoperability ABI support](https://learn.microsoft.com/dotnet/standard/native-interop/abi-support) — managed/native calling conventions, supported signatures, and ABI compatibility.
+- [Native interoperability best practices](https://learn.microsoft.com/dotnet/standard/native-interop/best-practices) — marshaling, resource lifetime, and safe interop design.
+
+**Foreign function interface — General overview**
+
+- [Foreign function interface (Wikipedia)](https://en.wikipedia.org/wiki/Foreign_function_interface) — a broader taxonomy of mechanisms for invoking functions across programming language boundaries. Orientation only; prefer the primary sources above for design decisions.
 
 ## 12. Open research directions
 
@@ -492,8 +482,6 @@ The design takes inspiration from three established approaches:
 - **C# interop:** using declared signatures, generated marshaling code, and a defined native ABI.
 
 Lua's C API provides a well-established model for exchanging values between a host and an embedded interpreter. Unreal's reflection system shows how function metadata can drive a visual programming environment..NET's native interoperability guidance recommends a C ABI for many native interop scenarios, particularly because C++ does not have a universally consistent ABI across compilers.
-
-*Source: Lua (+2 more)*
 
 The proposal combines these ideas into a system with five central properties:
 
@@ -568,8 +556,6 @@ Lua gives the host application control over the interpreter and its exposed APIs
 
 Unreal's `UFUNCTION` declarations and specifiers expose selected functions to reflection and, where appropriate, Blueprint graphs. The engine can use metadata to create callable nodes, display parameter pins, and enforce engine-specific conventions.
 
-*Source: Epic Developer Community (+1 more)*
-
 **Strengths**
 
 - Native declarations can drive visual-node generation.
@@ -590,8 +576,6 @@ Unreal's `UFUNCTION` declarations and specifiers expose selected functions to re
 **Primary model: ABI declarations and runtime bridges**
 
 .NET P/Invoke describes how managed code invokes native functions. On.NET 7 and later, `LibraryImport` can use source generation to produce interop stubs. Microsoft's guidance recommends matching native signatures and using appropriate lifetime-management types such as `SafeHandle` for owned unmanaged resources.
-
-*Source: Microsoft Learn (+1 more)*
 
 **Strengths**
 
@@ -822,8 +806,6 @@ The native backend should provide a stable C ABI around the selected C++ impleme
 
 Microsoft's.NET ABI documentation explicitly recommends C-compatible exports for many C++ interoperability scenarios because C++ does not define one universal ABI across the major supported compiler implementations.
 
-*Source: Microsoft Learn (+1 more)*
-
 #### 6.1 Example native implementation
 
 The internal engine implementation can remain idiomatic C++:
@@ -896,8 +878,6 @@ static int l_set_health(lua_State *L)
 The body is intentionally schematic: the implementation must define the exact userdata layout, handle lookup, error conversion, and stack protocol.
 
 Lua's official manual specifies that a C function called by Lua receives arguments on the Lua stack and returns its results by pushing values and returning a result count.
-
-*Source: Lua (+1 more)*
 
 The important distinction is that the Lua adapter is not the engine API itself. It is one implementation of the binding contract.
 
@@ -988,8 +968,6 @@ internal static partial class NativeEngine
 
 This example shows the opposite direction: managed C# calling a native C ABI function. It illustrates the value of generated interop declarations, but it is not itself a native-to-managed bridge.
 
-*Source: Microsoft Learn (+1 more)*
-
 To expose managed functions to a native caller, the engine must supply the appropriate hosting or unmanaged-callable mechanism.
 
 #### 7.3 Do not equate C# reflection with native interop
@@ -1050,8 +1028,6 @@ The recommendation is to use named wrappers for normal scripts and reserving gen
 #### 8.2 The scripting representation of engine objects
 
 Lua's full userdata is useful for representing engine-managed objects because the host controls the underlying memory and can define behavior through metatables. Light userdata, by contrast, is a raw pointer value and does not provide the same owned-memory or finalization behavior.
-
-*Source: Lua (+1 more)*
 
 The engine should therefore expose an `Entity` userdata that wraps an opaque handle or managed reference rather than treating an arbitrary native pointer as a normal script value.
 
@@ -1474,17 +1450,21 @@ The following primary references are the best starting points for validating and
 
 **Lua and embedded scripting**
 
-- [Lua 5.5 Reference Manual](https://www.lua.org/manual/5.5/manual.html) — C API, value stack, userdata, error handling, garbage collection, and coroutines. *(Unreal reflection and visual nodes).*
+**Lua and embedded scripting**
 
-- [UFunctions in Unreal Engine](https://dev.epicgames.com/documentation/unreal-engine/ufunctions-in-unreal-engine)
+- [Lua 5.5 Reference Manual](https://www.lua.org/manual/5.5/manual.html) — C API, value stack, userdata, error handling, garbage collection, and coroutines.
+- [Luau sandboxing](https://luau.org/sandbox/) — embedding and sandbox mechanisms. Its documentation cautions that sandbox safety depends on the exposed host API and is not a formal proof.
 
-- [Reflection System in Unreal Engine](https://dev.epicgames.com/documentation/unreal-engine/reflection-system-in-unreal-engine) — Native function metadata, Blueprint exposure, and engine-managed reflection. *(C# and native ABI interoperability).*
+**Unreal reflection and visual nodes**
 
-- [Native interoperability ABI support](https://learn.microsoft.com/dotnet/standard/native-interop/abi-support)
+- [UFunctions in Unreal Engine](https://dev.epicgames.com/documentation/unreal-engine/ufunctions-in-unreal-engine) — exposing reflected C++ functions to Blueprint Visual Scripting.
+- [Reflection System in Unreal Engine](https://dev.epicgames.com/documentation/unreal-engine/reflection-system-in-unreal-engine) — native function metadata, Blueprint exposure, and engine-managed reflection.
 
-- [Native interoperability best practices](https://learn.microsoft.com/dotnet/standard/native-interop/best-practices)
+**C# and native ABI interoperability**
 
-- [P/Invoke source generation](https://learn.microsoft.com/dotnet/standard/native-interop/pinvoke-source-generation) — ABI compatibility, signature declarations, marshaling, generated stubs, and resource lifetime.
+- [Native interoperability ABI support](https://learn.microsoft.com/dotnet/standard/native-interop/abi-support) — managed/native calling conventions and ABI compatibility.
+- [Native interoperability best practices](https://learn.microsoft.com/dotnet/standard/native-interop/best-practices) — marshaling, signature declarations, and resource lifetime.
+- [P/Invoke source generation](https://learn.microsoft.com/dotnet/standard/native-interop/pinvoke-source-generation) — generated interop stubs and the supported source-generation workflow.
 
 ### 17. Open design decisions
 

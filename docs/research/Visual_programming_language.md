@@ -191,7 +191,7 @@ Many modern video games make use of behavior trees, which are in principle a fam
 ### Systems / simulation
 
 - Analytica — a commercial visual language for decision models based on influence diagrams.
-- BPEL (Business Process Execution Language) — currently a Graphical user based Programming Language used to create orchestration logic for data and web services. It is based on XML, but has a graphical interface for faster coding.
+- **WS-BPEL/BPEL (Business Process Execution Language)** — an XML-based language standardized by OASIS (WS-BPEL 2.0, 2007) for specifying executable and abstract business processes that orchestrate Web services. Some development environments provide graphical authoring tools, but BPEL itself is not inherently a graphical programming language. See the [OASIS WS-BPEL 2.0 specification](https://docs.oasis-open.org/wsbpel/2.0/OS/wsbpel-v2.0-OS.html).
 - DRAKON — a graphical algorithmic language, a free and open source algorithmic visual programming and modeling language developed as part of the defunct Soviet Union Buran space program
 - Flowcode is a graphical programming language to program embedded microprocessors
 - Function block diagrams — used in programmable logic controllers
@@ -359,8 +359,6 @@ This suggests a useful design principle: a good VPL should not merely constrain 
 
 The article's discussion of immediate feedback and online debugging is particularly relevant here. Research into visual programming has long examined program comprehension, construction, and debugging as separate problems; the evidence does not establish that every visual representation improves all three equally.
 
-*Source: ScienceDirect (+1 more)*
-
 ### 3. A deeper taxonomy: visual notation is not the same as computational model
 
 The Wikipedia article lists blocks, flowcharts, node graphs, dataflow, state machines, spreadsheets, timelines, and spatial programming. This is a useful catalog, but the categories mix different dimensions.
@@ -438,8 +436,6 @@ This representation can make data transformations easier to inspect. It also rai
 
 These are semantic questions, not merely visual-design questions. The classic literature on dataflow languages identifies a broad range of design alternatives and unresolved implementation issues.
 
-*Source: ScienceDirect (+1 more)*
-
 ### 4. Historical development: why visual programming evolved into many different fields
 
 Visual programming is not a recent invention, nor is it simply a teaching technique. Its development reflects several different attempts to make computation easier to construct, inspect, and communicate.
@@ -473,8 +469,6 @@ Current research is exploring how visual programs can be generated, interpreted,
 This timeline is a high-level synthesis, not a claim that every field progressed in a single linear sequence. Visual programming developed along several overlapping paths, with education, engineering, computer graphics, and software development influencing one another.
 
 For deeper historical research, two useful starting points are Brad Myers's taxonomy of visual programming, programming by example, and program visualization, and the Berkeley survey by Marat Boshernitsan and Michael Downes. Both help separate related ideas that are often conflated.
-
-*Source: Meta Science Observatory (+1 more)*
 
 ### 5. Where visual programming is used — and why
 
@@ -931,8 +925,6 @@ Tasks might include:
 The experiment should distinguish interface familiarity from the effect of the representation itself. It should also report participant backgrounds, task complexity, and uncertainty in the results.
 
 This is especially important because visual-programming research has historically contained gaps in rigorous empirical evaluation. The systematic review of end-user visual programming approaches and earlier reviews of visual programming effectiveness both provide useful starting points for understanding these methodological challenges.
-
-*Source: IEEE Xplore (+1 more)*
 
 ### 13. A practical framework for comparing languages
 

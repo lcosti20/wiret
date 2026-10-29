@@ -90,8 +90,6 @@ The parser needs to recognize several different concepts:
 
 The syntax therefore carries both structural information and presentation hints. Mermaid's official documentation describes the separation between node identifiers, labels, links, shapes, and grouping constructs.
 
-*Source: Mermaid (+1 more)*
-
 ### Stage 2: Constructing a graph
 
 A simplified intermediate representation might be:
@@ -151,8 +149,6 @@ The layout engine must decide:
 
 Mermaid's flowchart documentation, for example, describes layout-engine choices and configuration options.
 
-*Source: Mermaid (+1 more)*
-
 This division is fundamental: the graph defines what is connected; the layout determines how those connections look.
 
 It also explains why the same source can render differently across versions, configuration settings, fonts, or layout engines without changing the underlying graph.
@@ -169,8 +165,6 @@ It also explains why the same source can render differently across versions, con
 | Main trade-off | Some syntax is context-sensitive | Different diagram types have distinct conventions | More explicit structure can mean more syntax |
 
 This comparison is qualitative, not a benchmark. Each tool has exceptions and capabilities that extend beyond the generalizations in the table. PlantUML's language reference documents its range of UML and non-UML diagrams, while D2's documentation describes it as a text-based diagram DSL.
-
-*Source: pdf.plantuml.net (+1 more)*
 
 ### Example: one graph, three notations
 
@@ -267,8 +261,6 @@ Compact syntax is convenient for humans, but punctuation can have several compet
 
 Mermaid's flowchart documentation warns about certain uses of `end` and about identifiers beginning with `o` or `x` adjacent to particular edge operators.
 
-*Source: Mermaid (+1 more)*
-
 These are small examples of a general issue: a language designed around convenient punctuation may become harder to parse, generate, and transform reliably.
 
 Potential consequences include:
@@ -331,8 +323,6 @@ For example, a language could distinguish between:
 These are different failure classes and should be reported separately.
 
 Graphviz's DOT documentation provides a useful point of comparison because it defines a formal grammar for graph, node, edge, attribute, and subgraph constructs.
-
-*Source: Graphviz (+1 more)*
 
 ## 5. The deeper language-design trade-offs
 

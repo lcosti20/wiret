@@ -144,8 +144,6 @@ Each node has a stable identifier, and each independent property occupies its ow
 
 This is already a major improvement. Git's ordinary three-way merge can combine independent changes when their edited regions do not overlap. Git also supports custom merge drivers for formats that require more specialized logic.
 
-*Source: gitattributes Documentation (+1 more)*
-
 ### Recommended syntax properties
 
 | Design choice | Why it matters |
@@ -218,8 +216,6 @@ For a graph editor, the CRDT might represent:
 
 Structured CRDT libraries such as Automerge provide maps, lists, text, and conflict handling. Their behavior differs by data type: for example, independent map properties can merge while concurrent assignments to the same property may retain multiple conflicting values internally but expose a deterministic winner by default.
 
-*Source: automerge.org (+2 more)*
-
 ### Example: two developers move different nodes
 
 Suppose the initial state is:
@@ -274,8 +270,6 @@ A common misconception is that adopting a CRDT eliminates the need for Git. It d
 | Conflict-free result guaranteed? | No | Convergence is guaranteed under the CRDT's assumptions; semantic validity is not |
 
 Git's documented custom merge drivers provide an extension point for language-specific merging. Automerge, by contrast, provides structured replicated data and conflict handling.
-
-*Source: gitattributes Documentation (+2 more)*
 
 ### A hybrid architecture
 
@@ -371,8 +365,6 @@ Even without a live CRDT, a graph language can substantially improve Git merging
 
 Git supports custom merge drivers configured through `.gitattributes` and the repository's Git configuration. A driver receives the common ancestor, the current version, and the other branch's version, and can produce a merged file or report a conflict.
 
-*Source: gitattributes Documentation (+1 more)*
-
 The driver could:
 
 1. Parse all three versions into graph models.
@@ -464,7 +456,7 @@ Then evaluate a CRDT-enabled implementation separately, using concurrent collabo
 
 A practical reference for structured collaborative state, conflict retention, map semantics, lists, and collaborative text.
 
-- **[Document model](https://automerge.org/docs/reference/documents/) · [Conflict semantics](https://automerge.org/docs/reference/documents/conflicts/)** — *Peritext: A CRDT for Collaborative Rich Text Editing (2022).* A peer-reviewed study of how to preserve editing intent when concurrent operations interact. Although it concerns rich text rather than graphs, its treatment of stable anchors and intent preservation is relevant to structured source formats. *Source: Martin Kleppmann’s publications (+1 more)* [Read the paper](https://doi.org/10.1145/3555644)
+- **[Document model](https://automerge.org/docs/reference/documents/) · [Conflict semantics](https://automerge.org/docs/reference/documents/conflicts/)** — *Peritext: A CRDT for Collaborative Rich Text Editing (2022).* A peer-reviewed study of how to preserve editing intent when concurrent operations interact. Although it concerns rich text rather than graphs, its treatment of stable anchors and intent preservation is relevant to structured source formats. [Read the paper](https://doi.org/10.1145/3555644)
 
 **CRDT fundamentals**
 

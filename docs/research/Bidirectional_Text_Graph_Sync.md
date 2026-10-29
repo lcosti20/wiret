@@ -17,8 +17,6 @@ For a VS Code extension that edits a visual programming language, this means:
 
 This is a well-established area of software architecture, closely related to bidirectional transformations, model-driven engineering, live programming, and synchronized concrete syntaxes. Research on synchronized textual and graphical editors specifically addresses preserving layout, handling invalid intermediate text, and maintaining a consistent underlying model.
 
-*Source: TU Delft Repository (+1 more)*
-
 The topic is best developed as a technical specification for a live-synchronization subsystem rather than as a feature description.
 
 ## Contents
@@ -55,8 +53,6 @@ There are three main architectural approaches:
 3. **Synchronized representations:** Each editor has its own representation, and a synchronization engine reconciles changes between them.
 
 For a VS Code extension, a hybrid of the first and second approaches is often the strongest design: VS Code's `TextDocument` is the canonical persisted artifact, while a shared semantic model provides the graph editor with a stable, structured view of it. VS Code's custom editor documentation explicitly requires webview-originated edits to update the document and document changes to update the webview.
-
-*Source: Visual Studio Code Extension API (+1 more)*
 
 ## 2. What exactly gets synchronized?
 
@@ -116,8 +112,6 @@ When a user drags `Process` to a new position, the extension should:
 
 The crucial optimization is minimal edits rather than whole-file replacement. Rewriting the entire file on every drag can cause cursor jumps, lost formatting, noisy Git diffs, and interference with simultaneous text editing. VS Code's custom editor guidance recommends minimal workspace edits.
 
-*Source: Visual Studio Code Extension API (+1 more)*
-
 For example, if only the position changes, the desired result is conceptually:
 
 ```text
@@ -143,8 +137,6 @@ The graph should not be destroyed and rebuilt from scratch after every keystroke
 A key complication is that source code is frequently incomplete while being edited. A user might temporarily delete a closing brace or type half of an edge declaration. The graph should handle this gracefully, retaining the last valid structure where possible and clearly distinguishing stale elements from currently valid ones.
 
 VS Code's custom editor guidance explicitly warns that document contents may be invalid during editing, and research on synchronized editors treats error recovery and layout preservation as core problems.
-
-*Source: Visual Studio Code Extension API (+1 more)*
 
 ## 4. The synchronization engine
 
@@ -204,8 +196,6 @@ This is illustrative TypeScript, not a built-in VS Code API. The important idea 
 
 Origin tracking alone is not sufficient: updates can be delayed, duplicated, or superseded. It should be combined with state comparison and revision checks. VS Code's own custom editor documentation specifically warns about loops caused by propagating a graph edit back into the graph through document-change events.
 
-*Source: Visual Studio Code Extension API (+1 more)*
-
 ## 6. The hardest design decisions
 
 ### 6.1 Stable identity
@@ -263,8 +253,6 @@ There are three common strategies:
 A hybrid is also viable: preserve source text for existing elements, generate canonical text for new elements, and provide an explicit formatting command.
 
 The trade-off between textual layout preservation and graphical layout preservation is a documented concern in bidirectional editor research.
-
-*Source: TU Delft Repository (+1 more)*
 
 ### 6.3 Where should node positions live?
 
@@ -343,13 +331,9 @@ An unrelated edit should not unnecessarily change unrelated parts of the other r
 
 These properties are more useful than merely checking whether the two views look similar. They can be translated into automated tests and serve as a foundation for evaluating competing synchronization architectures. Bidirectional transformation research provides a formal basis for these concerns.
 
-*Source: Cornell Computer Science (+1 more)*
-
 ## 8. Implementation architecture for VS Code
 
 For an extension, a suitable starting point is a `CustomTextEditorProvider` if the graph is an editable visual representation of a text file. It uses VS Code's `TextDocument` as the document model, allowing ordinary text editing, document synchronization, and familiar editor behavior to participate in the same workflow.
-
-*Source: Visual Studio Code Extension API (+1 more)*
 
 A possible implementation stack is:
 
@@ -371,8 +355,6 @@ The division of responsibilities is important:
 - The renderer consumes model updates without emitting new user-edit operations for programmatic changes.
 
 If the language is complex, a language server may also provide parsing, validation, and semantic analysis. It is not required for synchronization itself, and adding one should be justified by the language's needs. VS Code supports incremental document synchronization for language servers.
-
-*Source: Visual Studio Code Extension API (+1 more)*
 
 ## 9. Performance and correctness under real editing
 

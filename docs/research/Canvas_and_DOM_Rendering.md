@@ -77,8 +77,6 @@ With DOM and SVG, graphical objects are represented by browser-managed elements.
 
 With Canvas, the application manages its own graphical scene and draws pixels directly. With WebGL, it can additionally use GPU buffers and shaders to render large batches of geometry. These approaches remove much of the per-element DOM overhead, but transfer more responsibility to the application.
 
-*Source: MDN (+2 more)*
-
 | Dimension | DOM / SVG | Canvas 2D | WebGL |
 | --- | --- | --- | --- |
 | Per-object overhead | Higher | Low at rendering surface level | Low with batching |
@@ -122,7 +120,10 @@ However, a Canvas implementation does not automatically become cheap: it still h
 A useful conceptual model is:
 
 $$
-T_{\text{frame}} = T_{\text{state}}+ T_{\text{geometry}}+ T_{\text{draw}}+ T_{\text{composite}}
+T_{\text{frame}} = T_{\text{state}} +
+   T_{\text{geometry}} +
+   T_{\text{draw}} +
+   T_{\text{composite}}
 $$
 
 Where:
@@ -313,8 +314,6 @@ Accessibility should be part of the architecture rather than a fallback added af
 Canvas 2D is often the right next step when SVG becomes expensive. It offers a comparatively simple drawing API and works well for many graph workloads, especially when combined with culling, batching, caching, and a DOM overlay.
 
 WebGL becomes attractive when the application needs to render large amounts of geometry, repeated shapes, dense connections, or animated visualizations. GPU batching can reduce per-object submission overhead substantially.
-
-*Source: MDN (+1 more)*
 
 However, moving work to the GPU does not make every operation faster.
 

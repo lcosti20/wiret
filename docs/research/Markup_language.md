@@ -328,8 +328,6 @@ The three traditional categories describe markup's purpose. Another useful class
 
 The boundaries overlap. SVG, for example, describes graphics using XML syntax; MathML represents mathematical content; and HTML can combine text, images, audio, video, and interactive controls. The HTML standard defines both document semantics and extensive browser behavior.
 
-*Source: W3C (+2 more)*
-
 A language's classification therefore depends on what aspect we are examining. XML is a syntax and metalanguage, while SVG is a domain-specific vocabulary built on that syntax. Markdown is a lightweight authoring language, while HTML is the web document language it commonly generates.
 
 #### 3.1 Markup languages versus metalanguages
@@ -409,8 +407,6 @@ Markup adds **structure** to content.
 The source is readable without being rendered. Its brevity makes it attractive for notes, documentation, source-code repositories, and collaborative writing.
 
 However, the original Markdown ecosystem developed multiple implementations with differing interpretations of ambiguous syntax. CommonMark addresses this problem by defining a more precise specification and a conformance test suite.
-
-*Source: spec.commonmark.org (+1 more)*
 
 #### 4.3 Command-based syntax
 
@@ -575,8 +571,6 @@ A recipe document encoded in XML could be transformed into HTML for a website, P
 
 Likewise, a Markdown document can be converted to HTML. A stylesheet can determine how structured elements are displayed in a browser. CSS is specifically designed to control aspects of web-document presentation such as typography, colors, and spacing.
 
-*Source: W3C (+1 more)*
-
 This ability to separate a source document from its output is one of the most important practical benefits of markup.
 
 ### 7. Major markup languages in greater depth
@@ -590,8 +584,6 @@ The original article concentrates on the historical development of SGML, HTML, X
 HTML is the core markup language of the Web. It defines elements for headings, paragraphs, links, images, forms, tables, and many other document and interface components.
 
 Unlike a completely user-defined XML vocabulary, HTML has a standardized set of element names and defined browser-processing behavior. Modern HTML is maintained as a living standard.
-
-*Source: HTML Living Standard (+1 more)*
 
 **Best suited for:** web pages, browser-based documents, and web application structure.
 
@@ -616,8 +608,6 @@ Markdown prioritizes human-readable source. Authors can create headings, lists, 
 Its simplicity makes it popular for software documentation, notes, readme files, and collaborative writing. Different implementations may support different extensions, so compatibility requires attention to the dialect or specification being used.
 
 **Best suited for:** documentation, technical notes, and relatively simple structured writing.
-
-*Source: spec.commonmark.org (+1 more)*
 
 ### TeX and LaTeX
 
@@ -844,7 +834,7 @@ For research beyond the Wikipedia article, these specifications and documentatio
 A precise specification for Markdown syntax, useful for studying ambiguity, parsing, and interoperability.
 
 - [CSS — W3C](https://www.w3.org/Style/CSS/) — Documentation on the language used to control the presentation of web documents.
-- [TEI Guidelines](https://www.tei-c.org/guidelines/) — A substantial reference for scholarly text encoding and the modeling of complex textual features. These sources complement the historical overview with primary technical material. *(W3C (+3 more)).*
+- [TEI Guidelines](https://www.tei-c.org/guidelines/) — A substantial reference for scholarly text encoding and the modeling of complex textual features. These sources complement the historical overview with primary technical material.
 
 ### Conclusion
 

@@ -184,8 +184,6 @@ The panel and graph should stay synchronized: selecting an error highlights its 
 
 Research on debugging by end-user programmers has explored this combination of visual fault localization, diagnostic lists, and expandable hints. See [Interactive, Visual Fault Localization Support for End-User Programmers](https://doi.org/10.1016/j.jvlc.2004.07.001) and [How End-User Programmers Debug Visual Web-Based Programs](https://epiclab.github.io/publications/cola19-kuttal.pdf).
 
-*Source: ScienceDirect (+1 more)*
-
 ### D. Data-flow tracing and execution history
 
 A runtime error is often difficult to understand because the bad value originated several nodes upstream.
@@ -200,8 +198,6 @@ A useful debugger should let users inspect:
 - The sequence of changes leading to the failure.
 
 This approach is supported by research on visual debugging for reactive programs. Hoffswell, Satyanarayan, and Heer describe techniques that combine event timelines, dependency visualization, and in-context annotations to help users trace behavior. Their evaluation found that first-time users could accurately trace errors through unfamiliar specifications.
-
-*Source: MIT Visualization Group (+1 more)*
 
 For a VPL, these ideas suggest that the editor should not merely highlight the node where an exception occurred. It should also let the user travel backward through the relevant data and execution dependencies.
 
@@ -327,7 +323,7 @@ These sources provide a useful starting point for a deeper literature review.
 - **Augmenting Code with In Situ Visualizations to Aid Program Understanding (2018)** — *Hoffswell, Satyanarayan, and Heer · CHI.* Studies how embedding runtime information directly into a representation helps users understand program behavior. Its findings are relevant to showing values and state directly on graph nodes. [Paper and research materials](https://vis.mit.edu/pubs/insitu-vis-debugging/)
 - **How End-User Programmers Debug Visual Web-Based Programs: An Information Foraging Theory Perspective (2019)** — *Kuttal and colleagues · Journal of Computer Languages.* Examines how end-user programmers locate and interpret debugging information, including the value of to-fix lists, informative cues, and hints. [Read the paper](https://doi.org/10.1016/j.cola.2019.04.003)
 - **Interactive, Visual Fault Localization Support for End-User Programmers (2005)** — *Journal of Visual Languages and Computing.* Early work on interactive visual fault localization and human-centered debugging. Particularly relevant to the question of how users interpret and act on highlighted faults. [Read the paper](https://doi.org/10.1016/j.jvlc.2004.07.001)
-- **Debugging as Evidence-Driven Reasoning: Visualization Opportunities in Data-Intensive Programming (2026)** — *Chen, Zhu, and Faust.* A recent research direction focused on aligning evidence across artifacts, comparing expected and observed states, and tracing state changes through workflows. [Read the preprint](https://arxiv.org/abs/2606.30884)
+- **Debugging as Evidence-Driven Reasoning: Visualization Opportunities in Data-Intensive Programming (2026)** — *Chen, Zhu, and Faust.* *arXiv preprint, submitted 29 June 2026 (cs.HC); not peer-reviewed as of this writing.* A recent research direction focused on aligning evidence across artifacts, comparing expected and observed states, and tracing state changes through workflows. Treat its claims as preliminary. [Read the preprint](https://arxiv.org/abs/2606.30884)
 
 These papers address different aspects of debugging rather than providing a single, complete error-visualization architecture. Together, they offer a useful foundation for studying fault localization, runtime observability, information-seeking behavior, and evidence-based diagnosis.
 

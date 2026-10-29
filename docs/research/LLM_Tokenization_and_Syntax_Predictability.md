@@ -213,8 +213,6 @@ However, the model does not automatically know which continuations are formally 
 
 Research on grammar-constrained generation demonstrates that a model can be paired with a parser or automaton that restricts the available continuations to those that preserve grammatical validity. The challenge includes aligning character-level grammar rules with tokenizers whose tokens may span multiple characters or structural boundaries.
 
-*Source: Google Research (+1 more)*
-
 This gives us two complementary strategies:
 
 - **Design for predictability:** Make the common valid continuation easy for the model to learn.
@@ -259,8 +257,6 @@ Does the graph actually perform the intended computation?
 These layers are not always strictly sequential—some checks can happen together—but the distinction is valuable for language design.
 
 A 2025 paper, Type-Constrained Code Generation with Language Models, demonstrates the potential of enforcing type constraints in addition to syntax. Its evaluation reports substantial reductions in compilation errors and improvements in functional correctness across several code-generation tasks.
-
-*Source: DOI (+1 more)*
 
 The implication for an AI-friendly intermediate representation is important: the ideal format should not merely be easy to generate; it should also be easy to validate.
 
@@ -332,7 +328,10 @@ This is compact, but the meaning of `C`, `A`, `v`, and `E` must be learned or lo
 The design goal should be to minimize total cost, not just character count:
 
 $$
-\text{Total cost} = \text{generation cost} +\text{validation cost} +\text{repair cost} +\text{interpretation cost}
+\text{Total cost} = \text{generation cost}
+  +\text{validation cost}
+  +\text{repair cost}
+  +\text{interpretation cost}
 $$
 
 This is a conceptual model rather than a standardized metric, but it helps explain why the shortest syntax is not necessarily the best.
@@ -433,8 +432,9 @@ The following works provide a useful starting point for grounding the research i
 
 - [Automata-based Constraints for Language Model Decoding](https://research.google/pubs/automata-based-constraints-for-language-model-decoding/) — *Terry Koo, Frederick Liu, and Luheng He · 2024.* Explores automata-based methods for constraining LLM output to formal languages, including structured data and schema-guided generation. Particularly relevant to syntax enforcement and tokenizer/grammar alignment. *(Google Research).*
 - [Grammar-Aligned Decoding](https://mlanthology.org/neurips/2024/park2024neurips-grammaraligned/) — *NeurIPS 2024.* Studies how grammar-constrained decoding can distort the language model's original probability distribution. Important because enforcing validity can sometimes affect output quality. *(ML Anthology).*
-- [Type-Constrained Code Generation with Language Models](https://doi.org/10.1145/3729274) — *Niels Mündler and colleagues · PLDI 2025.* Extends constrained generation from syntax to type correctness. Relevant to the distinction between easy-to-parse syntax and semantically valid graph connections. *(DOI (+1 more)).*
-- [CRANE: Reasoning with Constrained LLM Generation](https://proceedings.mlr.press/v267/banerjee25a.html) — *ICML 2025.* Investigates the relationship between output constraints and reasoning capabilities. Useful for evaluating whether an overly restrictive grammar limits the model's ability to construct a correct solution. *(Proceedings of Machine Learning Research).*
+- [Type-Constrained Code Generation with Language Models](https://doi.org/10.1145/3729274) — *Niels Mündler and colleagues · PLDI 2025.* Extends constrained generation from syntax to type correctness. Relevant to the distinction between easy-to-parse syntax and semantically valid graph connections.
+- [CRANE: Reasoning with Constrained LLM Generation](https://proceedings.mlr.press/v267/banerjee25a.html) — *ICML 2025.* Investigates the relationship between output constraints and reasoning capabilities. Useful for evaluating whether an overly restrictive grammar limits the model's ability to construct a correct solution.
+- [Large Language Models for Visual Programming Languages: A Systematic Analysis of Representation, Constraints, and Tasks](https://doi.org/10.1016/j.sysarc.2026.103968) — *Zhang, Chen, Zhou, and Wen · Journal of Systems Architecture, 2026.* A systematic review of LLM work on visual programming languages, reported to cover 41 studies from 2022–2025. *Verification note: taken from the fact-check report; the publisher page could not be retrieved, so confirm details before citing.* *(Proceedings of Machine Learning Research).*
 
 ## 11. Conclusions and open questions
 

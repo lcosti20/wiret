@@ -9,6 +9,8 @@ formatted: 2026-10-28
 
 > **Structure of this document.** Part I follows the Wikipedia article ([Intermediate representation](https://en.wikipedia.org/wiki/Intermediate_representation)). The section titled *Extended Analysis* is supplementary explanation added for research purposes; it is not part of the Wikipedia text.
 
+> **Historical material.** Part I is derived from Wikipedia text and retrieval dates from 2015–2016. Statements about specific toolchains (LLVM bitcode distribution, PNaCl, llvm-gcc, HSA IL) describe the state of the field at that time and are marked as historical where they appear. For current behavior, use the [LLVM Language Reference](https://llvm.org/docs/LangRef.html), the [GCC GIMPLE documentation](https://gcc.gnu.org/onlinedocs/gccint/GIMPLE.html), and the [MLIR documentation](https://mlir.llvm.org/docs/).
+
 > **"Intermediate form" redirects here.** For the use of the term in biology, see [Transitional fossil](https://en.wikipedia.org/wiki/Transitional_fossil).
 
 An **intermediate representation** (IR) is the data structure or code used internally by a compiler or virtual machine to represent source code. An IR is designed to be conducive to further processing, such as optimization and translation. A "good" IR must be accurate – capable of representing the source code without loss of information – and independent of any particular source or target language. An IR may take one of several forms: an in-memory data structure, or a special tuple- or stack-based code readable by the program. In the latter case it is also called an intermediate language.
@@ -76,7 +78,7 @@ GCC supports generating these IRs, as a final target:
 - HSA Intermediate Layer
 - LLVM Intermediate Representation (converted from GIMPLE in the now-defunct llvm-gcc which uses LLVM optimizers and codegen)
 
-The LLVM compiler framework is based on the LLVM IR intermediate language, of which the compact, binary serialized representation is also referred to as "bitcode" and has been productized by Apple. Like GIMPLE Bytecode, LLVM Bitcode is useful in link-time optimization. Like GCC, LLVM also targets some IRs meant for direct distribution, including Google's PNaCl IR and SPIR. A further development within LLVM is the use of Multi-Level Intermediate Representation (MLIR) with the potential to generate code for different heterogeneous targets, and to combine the outputs of different compilers.
+The LLVM compiler framework is based on the LLVM IR intermediate language, of which the compact, binary serialized representation is also referred to as "bitcode" and was productized by Apple *[historical: Apple's App Store bitcode submission has since been deprecated]*. Like GIMPLE Bytecode, LLVM Bitcode is useful in link-time optimization. Like GCC, LLVM also targets some IRs meant for direct distribution, including Google's PNaCl IR *[historical: PNaCl has been superseded by WebAssembly]* and SPIR. A further development within LLVM is the use of Multi-Level Intermediate Representation (MLIR) with the potential to generate code for different heterogeneous targets, and to combine the outputs of different compilers.
 
 The ILOC intermediate language is used in classes on compiler design as a simple target language.
 
@@ -109,6 +111,14 @@ Static analysis tools often use an intermediate representation. For instance, Ra
 8. "CISC 471 Compiler Design" by Uli Kremer.
 9. Radare2 Contributors. "ESIL". Radare2 Project. Archived from the original on 18 August 2015. Retrieved 17 June 2015.
 10. Sebastian Porst (7 March 2010). "The REIL language – Part I". zynamics.com. Retrieved 17 June 2015.
+
+*References 1–10 are the original Wikipedia references with 2015–2016 retrieval dates; they are retained for provenance and have not been re-checked against current sources.*
+
+### Current references
+
+- LLVM Project. [LLVM Language Reference Manual](https://llvm.org/docs/LangRef.html).
+- LLVM Project. [MLIR documentation](https://mlir.llvm.org/docs/).
+- GCC Internals. [GIMPLE](https://gcc.gnu.org/onlinedocs/gccint/GIMPLE.html).
 
 ## External links
 
@@ -360,8 +370,6 @@ SSA is particularly useful for sparse conditional constant propagation, dead-cod
 
 LLVM IR is SSA-based, and GCC uses an SSA form of GIMPLE for important optimization passes.
 
-*Source: LLVM (+1 more)*
-
 One subtlety: SSA makes ordinary value dependencies explicit, but it does not automatically eliminate all complications caused by memory. If two pointers may refer to the same location, stores and loads still require alias analysis and memory-dependence reasoning.
 
 #### 3.5 Stack-based and register-based bytecode
@@ -430,8 +438,6 @@ Dataflow graphs are especially useful for:
 A graph does not necessarily mean the program is free of control flow. Real dataflow systems may have conditional execution, loops, mutable state, and memory effects. Some use acyclic graphs for individual computations and separate mechanisms for loops and control.
 
 MLIR, discussed below, supports dataflow-oriented representations alongside conventional control flow.
-
-*Source: MLIR (+1 more)*
 
 #### 3.7 Structured, domain-specific, and polyhedral IRs
 
@@ -532,8 +538,6 @@ The source article mentions GCC, LLVM, MLIR, and bytecode systems. Comparing the
 
 The GNU Compiler Collection (GCC) uses three major intermediate representations: GENERIC, GIMPLE, and RTL.
 
-*Source: GCC (+1 more)*
-
 **GENERIC**
 
 A language-independent representation that serves as an interface between language frontends and subsequent compiler stages.
@@ -559,8 +563,6 @@ Official references: [GIMPLE documentation](https://gcc.gnu.org/onlinedocs/gccin
 #### 5.2 LLVM: a common low-level representation
 
 LLVM centers on LLVM IR, an SSA-based, typed, low-level representation designed to support optimization and code generation across multiple source languages and targets.
-
-*Source: LLVM (+1 more)*
 
 LLVM IR exists in three equivalent forms:
 
@@ -588,15 +590,11 @@ The IR is more explicit than C about types, values, and operations, but it does 
 
 LLVM also illustrates why a low-level IR still needs rich semantics. Integer arithmetic, pointer operations, memory accesses, atomic operations, and undefined behavior all affect which transformations are valid. The IR is not simply a list of arithmetic instructions.
 
-*Source: LLVM (+1 more)*
-
 Official reference: [LLVM Language Reference Manual](https://llvm.org/docs/LangRef.html).
 
 #### 5.3 MLIR: multiple abstraction levels in one framework
 
 MLIR takes a different approach. Instead of requiring every operation to be translated into one common, low-level instruction vocabulary as early as possible, it supports multiple abstraction levels within a shared IR framework.
-
-*Source: MLIR (+1 more)*
 
 MLIR organizes extensible operations, types, and attributes into dialects. A dialect defines the vocabulary and semantics for a particular domain or compiler level.
 
@@ -752,8 +750,6 @@ IRs are increasingly important in systems that compile computations to GPUs, spe
 A domain-specific IR may represent tensor shapes, parallel iteration spaces, data layouts, synchronization, and memory movement. Those concepts can be essential for selecting an efficient hardware implementation.
 
 MLIR's design explicitly targets this kind of multilevel compilation, including high-level dataflow graphs and lower-level target-specific operations.
-
-*Source: MLIR (+1 more)*
 
 ### 8. IR design trade-offs worth studying
 

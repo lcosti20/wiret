@@ -86,8 +86,6 @@ For example, one script call that asks the engine to move an actor is generally 
 
 Lua is a useful reference for a lightweight, embeddable language. It compiles source to bytecode and executes it using a register-based virtual machine. Its C API lets an application expose carefully selected host functionality.
 
-*Source: Lua (+1 more)*
-
 **Lesson:** Keep the language runtime independent from the engine, and provide a deliberately designed host API rather than exposing the entire engine indiscriminately.
 
 **Unreal Engine Blueprints — VM with native engine integration**
@@ -101,8 +99,6 @@ Blueprint nodes execute through a virtual machine and can invoke native C++ func
 **Unity scripting backends — managed code and AOT compilation**
 
 Unity documents the distinction between runtime JIT compilation and the IL2CPP pipeline, which converts C# intermediate language to C++ and then compiles it to native code. AOT is required on some target platforms where runtime code generation is unavailable.
-
-*Source: Unity Docs (+1 more)*
 
 **Lesson:** A language that relies on runtime code generation may encounter platform restrictions even when it works perfectly in the desktop editor.
 

@@ -141,8 +141,6 @@ Not every rule is best expressed as a production rule. It is useful to distingui
 
 Research on graph grammars for visual languages explores how typed and conditional graph transformations can define abstract syntax precisely.
 
-*Source: ScienceDirect (+1 more)*
-
 For an ordinary node editor, a practical implementation usually combines a typed graph schema with declarative constraints and imperative validation algorithms. A full formal graph-grammar engine is most valuable when the language itself is highly structural or users can define graph transformation rules.
 
 ## 4. Type checking for graph connections
@@ -192,7 +190,11 @@ The table describes possible policies, not universal rules.
 **Consider a generic `Map` node with a type signature resembling**
 
 $$
-\mathrm{map}: (A\rightarrow B)\times \mathrm{List}(A) \rightarrow \mathrm{List}(B)
+\mathrm{map}:
+   (A\rightarrow B)\times
+   \mathrm{List}(A)
+   \rightarrow
+   \mathrm{List}(B)
 $$
 
 If a list of integers is connected to its input, the checker may infer $A=\texttt{Int}$. If the supplied function accepts an integer and returns a string, it can infer $B=\texttt{String}$.
@@ -278,8 +280,6 @@ For example, a stateful feedback node may break the instantaneous dependency rel
 This is more expressive because it encodes a semantic property rather than an overly broad structural restriction.
 
 Research into graph transformation verification goes further than checking individual graphs: it can analyze the behavior of transformations, reachability, termination, and other properties of the graph rewriting system itself.
-
-*Source: University of Twente Research Information (+1 more)*
 
 ## 6. Global constraints and graph invariants
 
@@ -381,8 +381,6 @@ This leads to three useful editing policies.
 These policies need not be mutually exclusive. A language can enforce edge endpoint integrity strictly, allow temporarily unconnected inputs, and use transactional validation for complex refactorings.
 
 For formal graph transformation systems, preconditions, postconditions, and rule conflicts can be analyzed systematically. The AGG graph transformation environment, for example, supports graph parsing, consistency checking, and critical-pair analysis for transformation rules.
-
-*Source: Springer Nature Link (+1 more)*
 
 ## 9. Diagnostics: validation as part of the user experience
 
@@ -487,8 +485,6 @@ This tests not only the correctness of the rules but also the invalidation and c
 
 For transformation-heavy languages, formal verification can provide stronger guarantees. Hoare-style proof systems for graph programs, for example, express preconditions and postconditions over graph structure and attributes and establish properties of program execution.
 
-*Source: Christopher M. Poskitt, Detlef Plump, 2012 (+1 more)*
-
 ## 12. Research directions and open questions
 
 The most interesting research problems arise when formal correctness must coexist with a highly interactive programming experience.
@@ -547,7 +543,7 @@ These are strong starting points for a deeper investigation.
 
 4. Hoare-Style Verification of Graph Programs — Christopher M. Poskitt and Detlef Plump
 
-- **Fundamenta Informaticae, 2012** Develops a sound proof system for partial correctness of graph programs using structural graph conditions and attributes. Particularly relevant when validation must establish properties of transformations, not just static graph shape. *Source: Christopher M. Poskitt, Detlef Plump, 2012 (+1 more)* [Read the paper](https://doi.org/10.3233/FI-2012-708)
+- **Fundamenta Informaticae, 2012** Develops a sound proof system for partial correctness of graph programs using structural graph conditions and attributes. Particularly relevant when validation must establish properties of transformations, not just static graph shape. *Poskitt and Plump (2012).* [Read the paper](https://doi.org/10.3233/FI-2012-708)
 
 5. Automated Formal Verification of Visual Modeling Languages by Model Checking — Dániel Varró
 

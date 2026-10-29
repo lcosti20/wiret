@@ -138,8 +138,6 @@ This offers a more live, synchronized experience, but requires a parser and rend
 
 When code cannot be translated into ordinary visual blocks, display a special block containing the original text. MakeCode documents this approach for JavaScript that cannot be represented with its normal blocks.
 
-*Source: Microsoft MakeCode for Minecraft Add-Ons (+1 more)*
-
 This is excellent for unsupported but valid code. For malformed text, the opaque block must also preserve the exact source without claiming the code is valid.
 
 4. Synchronize only valid regions
@@ -306,8 +304,6 @@ The following are useful starting points for a literature review.
 
 A particularly useful practical reference for unsupported constructs. Its documented approach uses opaque JavaScript blocks when code cannot be represented by normal blocks, preserving the code when switching views. It also demonstrates that syntactic validity alone does not guarantee visual representability.
 
-*Source: Microsoft MakeCode for Minecraft Add-Ons (+1 more)*
-
 Study: source preservation, language subsets, and conversion limitations.
 
 [JavaScript blocks documentation](https://bedrock.makecode.com/blocks/javascript-blocks)
@@ -328,13 +324,9 @@ Huang and Turbak's design work explores a textual notation that corresponds clos
 
 These systems explore hybrids that bring structured editing affordances into text-based programming. They are useful comparisons because they question whether users need two entirely separate representations or would benefit from a single editor combining the advantages of both.
 
-*Source: Wellesley (+1 more)*
-
 Study: hybrid interfaces, syntax-error prevention, and structured text editing.
 
 A broader literature review by Yuhan Lin and David Weintrop analyzed 46 block-based environments and classified approaches to transitioning between blocks and text. It provides a useful taxonomy for situating a new dual representation system within existing work.
-
-*Source: ScienceDirect (+1 more)*
 
 ## 9. A research agenda
 

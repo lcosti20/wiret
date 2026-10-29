@@ -256,8 +256,6 @@ A language should ideally support:
 
 This principle is supported by research on grammar-constrained generation: formal grammars can restrict an LLM's output to valid continuations. But this guarantee depends on the grammar, tokenizer alignment, and decoding implementation.
 
-*Source: ACL Anthology (+1 more)*
-
 ## 4. Token efficiency: optimize the right thing
 
 Token consumption is an important consideration, but the shortest source code is not necessarily the most token-efficient or reliable source code.
@@ -287,7 +285,11 @@ The second representation is shorter in characters, but it introduces abbreviati
 A useful proposed metric is effective token cost:
 
 $$
-C_{\mathrm{effective}} = C_{\mathrm{source}} + C_{\mathrm{context}} + C_{\mathrm{repair}} + C_{\mathrm{verification}}
+C_{\mathrm{effective}} =
+   C_{\mathrm{source}} +
+   C_{\mathrm{context}} +
+   C_{\mathrm{repair}} +
+   C_{\mathrm{verification}}
 $$
 
 Where:
@@ -469,8 +471,6 @@ AI-friendly syntax should not be studied independently of the tools used to gene
 
 Grammar-constrained decoding combines a language model with a parser or grammar engine. At each generation step, the system restricts which next tokens are allowed, aiming to ensure that the final output conforms to a specified grammar. Research has demonstrated this approach for structured outputs and has explored ways to improve how the constraints interact with the model's probability distribution.
 
-*Source: ACL Anthology (+1 more)*
-
 *Figure: grammar-constrained decoding loop*
 
 - **Task and program context** — Requirements, available APIs, existing declarations
@@ -493,8 +493,6 @@ A crucial design opportunity is to make the language's grammar easy for such sys
 The second level is especially important. A program can be syntactically valid while referring to a nonexistent function or passing the wrong type of argument.
 
 In a 2025 PLDI paper, Type-Constrained Code Generation with Language Models, researchers demonstrated a method that incorporates type-system constraints into generation. Their experiments reported that type-constrained generation reduced compilation errors by more than half across the evaluated synthesis, translation, and repair tasks. These are results for their method and experimental setting, not a guarantee for every language or model.
-
-*Source: DOI (+1 more)*
 
 This suggests an important research direction: design languages whose grammar, symbol resolution, and type system can all provide useful feedback during incremental generation.
 
@@ -594,8 +592,6 @@ Constraint overhead. Parsing, type-aware decoding, and maintaining symbol enviro
 
 Distribution distortion. Restricting the model's candidate tokens can change the relative probabilities of valid outputs, so guaranteeing syntactic validity does not guarantee the highest-quality result. This is a documented concern in research on grammar-constrained and grammar-aligned decoding.
 
-*Source: NeurIPS Papers (+1 more)*
-
 Human usability. A language that is easy for a model to generate may be unpleasant for people to maintain. Human readability, debugging, and code review should remain explicit evaluation criteria.
 
 ## 10. Open research questions
@@ -622,6 +618,7 @@ The following papers provide a useful foundation for research in this area.
 - **Grammar-Aligned Decoding (2024)** — *Park, Wang, Berg-Kirkpatrick, Polikarpova, and D'Antoni · NeurIPS.* Investigates the distributional effects of constrained generation and the challenge of producing high-quality outputs while guaranteeing validity. [Read the paper](https://papers.nips.cc/paper_files/paper/2024/hash/2bdc2267c3d7d01523e2e17ac0a754f3-Abstract-Conference.html)
 - **Type-Constrained Code Generation with Language Models (2025)** — *Mündler, He, Wang, Sen, Song, and Vechev · PLDI.* Particularly relevant to language design because it explores how type information can constrain code generation beyond syntax alone. [Read the paper](https://doi.org/10.1145/3729274)
 - **Flexible and Efficient Grammar-Constrained Decoding (2025)** — *Park, Zhou, and D'Antoni · ICML.* Examines the efficiency of grammar-constrained decoding, an important consideration when evaluating whether a language is practical for AI-driven development. [Read the paper](https://proceedings.mlr.press/v267/park25l.html)
+- **Large Language Models for Visual Programming Languages: A Systematic Analysis of Representation, Constraints, and Tasks (2026)** — *Zhang, Chen, Zhou, and Wen · Journal of Systems Architecture, online 22 August 2026.* A systematic review of LLM work on executable visual programming languages, reported to cover 41 studies from 2022–2025; directly relevant to this note's central question. *Verification note: this entry comes from the fact-check report; the publisher page could not be retrieved when these files were corrected, so confirm the details before citing.* [DOI 10.1016/j.sysarc.2026.103968](https://doi.org/10.1016/j.sysarc.2026.103968)
 
 ## Conclusion
 

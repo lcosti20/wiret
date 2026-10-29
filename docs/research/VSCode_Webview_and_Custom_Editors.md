@@ -95,8 +95,6 @@ Use this when the resource is binary or when the application genuinely needs to 
 
 The official guidance is straightforward: for a text-based format, prefer `CustomTextEditorProvider`; for a custom binary document, use `CustomEditorProvider`.
 
-*Source: Visual Studio Code Extension API (+1 more)*
-
 For a visual programming language whose canonical representation is text, the recommended starting point is a custom text editor rather than inventing a parallel document system.
 
 ### What a custom text editor provides
@@ -115,13 +113,9 @@ This method connects a text document to a webview. The extension initializes the
 
 VS Code also permits the same resource to have multiple editor instances. If a user splits the editor, each view has its own webview, but the views share the same underlying `TextDocument`. That distinction is fundamental to correct synchronization.
 
-*Source: Visual Studio Code Extension API (+1 more)*
-
 ## 4. Bundling React, Svelte, or vanilla JavaScript
 
 A webview is essentially a sandboxed browser surface embedded in VS Code. It can render sophisticated web applications, but it is not a normal webpage and cannot directly access the extension API. Communication takes place through message passing.
-
-*Source: GitHub (+1 more)*
 
 A typical extension project might look like this:
 
@@ -202,9 +196,6 @@ context.subscriptions.push(
 
  
 
-
-
-
 The exact activation configuration may depend on the VS Code version and manifest setup. The `viewType` must match between the contribution and registration. Supporting multiple editors is appropriate only if the document controller and synchronization logic can safely maintain several views.
 
 ### Generate secure webview HTML
@@ -267,8 +258,6 @@ Important implementation rules:
 - Treat every message received from the webview as untrusted input; validate its shape and permissions before applying edits.
 
 These restrictions are not merely deployment inconveniences. They encourage a clean separation between the UI and the privileged extension host. The [official Webview API guide](https://code.visualstudio.com/api/extension-guides/webview) explains the security model and resource-loading requirements.
-
-*Source: GitHub (+1 more)*
 
 ## 5. Bidirectional synchronization: the central engineering problem
 
@@ -408,8 +397,6 @@ The crucial detail is that a change caused by the visual editor also triggers th
 
 The official custom-editor documentation explicitly warns about this feedback loop and recommends handling invalid document states gracefully.
 
-*Source: Visual Studio Code Extension API (+1 more)*
-
 ### 5.4 Avoid synchronization loops
 
 A simple, reliable architecture assigns one authority for committed state: the text document.
@@ -434,8 +421,6 @@ For simple single-user editing, serializing edits through one extension-host con
 ## 6. Messaging between the webview and extension
 
 The webview bridge is asynchronous and message-based. The extension can call `webview.postMessage(...)`; inside the webview, the UI obtains the VS Code API using `acquireVsCodeApi()` and sends messages using `postMessage(...)`.
-
-*Source: GitHub (+1 more)*
 
 Initialize the API once:
 
@@ -567,8 +552,6 @@ A good implementation distinguishes three performance concerns.
 
 The official documentation cautions that webviews have meaningful resource costs and should be used where native VS Code APIs are insufficient.
 
-*Source: GitHub (+1 more)*
-
 ## 9. Undo, redo, and multiple views
 
 These are among the most important architectural decisions to make early.
@@ -587,8 +570,6 @@ There is an important distinction between transient canvas interactions and comm
 - Undoing a textual change should also update the graph.
 
 With `CustomEditorProvider`, the extension instead reports edits using `onDidChangeCustomDocument`. Implementing `CustomDocumentEditEvent` allows VS Code to invoke the extension's undo and redo callbacks. A content-change event alone marks the document dirty but does not provide undo/redo support.
-
-*Source: Visual Studio Code Extension API (+1 more)*
 
 ### Multiple views of one file
 

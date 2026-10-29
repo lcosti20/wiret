@@ -713,13 +713,18 @@ The following works and documentation are useful starting points. Publication de
 - **Jasper Rekers and Andy Schürr, “A Graph-Based Framework for the Implementation of Visual Environments” (1996).** Relevant to graph-based implementation frameworks and the distinction between logical structure and spatial relationships.
 - **Kang Zhang, Da-Qian Zhang, and Jiannong Cao, “Design, Construction, and Application of a Generic Visual Language Generation Environment” (2001).** Relevant to reusable visual-language environments, graph grammars, editors, and compilers.
 
+- **Large Language Models for Visual Programming Languages: A Systematic Analysis of Representation, Constraints, and Tasks** — Zhang, Chen, Zhou, and Wen · *Journal of Systems Architecture*, 2026. [DOI 10.1016/j.sysarc.2026.103968](https://doi.org/10.1016/j.sysarc.2026.103968). *Verification note: taken from the fact-check report; the publisher page could not be retrieved, so confirm details before citing.*
+
 ### Primary product documentation
 
-- **Pure Data manual:** patch syntax, canvases, objects, connections, and editing operations.
-- **Cycling '74 documentation:** Max patcher structure and `.maxpat` file types.
-- **Epic Developer Community documentation:** Blueprint assets, classes, nodes, pins, graphs, and compilation.
-- **National Instruments documentation:** LabVIEW VIs, block diagrams, dataflow behavior, and file-format distinctions.
-- **Node-RED documentation:** flow structure, nodes, wires, deployment, and runtime behavior.
+- **[Pure Data](https://puredata.info/):** patch syntax, canvases, objects, connections, and editing operations. (Project home; locate the current manual from there.)
+- **[Cycling '74 Max documentation](https://docs.cycling74.com/):** Max patcher structure and `.maxpat` file types.
+- **[Unreal Engine Blueprint Visual Scripting](https://dev.epicgames.com/documentation/unreal-engine/blueprints-visual-scripting-in-unreal-engine):** Blueprint assets, classes, nodes, pins, graphs, and compilation.
+- **[NI LabVIEW](https://www.ni.com/en/shop/labview.html):** LabVIEW VIs, block diagrams, dataflow behavior, and file-format distinctions. (Product page; use NI's current LabVIEW documentation for file-format claims.)
+- **[Node-RED documentation](https://nodered.org/docs/):** flow structure, nodes, wires, deployment, and runtime behavior.
+- **[Blender Geometry Nodes manual](https://docs.blender.org/manual/en/latest/modeling/geometry_nodes/index.html):** node-tree model for procedural geometry.
+
+Claims in this note about the saved formats of these tools (Pure Data records, `.maxpat`, Blueprint assets, `.vi` vs `.lvm`) are summaries and have not been tied to specific documentation pages; cite the exact page before relying on them.
 
 For a formal bibliography, prefer original papers and official documentation over search-result snippets or secondary summaries. For claims about file-format compatibility, cite the exact documentation or tool behavior that supports the claim.
 

@@ -86,8 +86,6 @@ JSON + JSON Schema
 
 JSON stores the document; JSON Schema describes and validates its structure. The format is widely supported and easy to inspect, generate, and process.
 
-*Source: json-schema.org (+1 more)*
-
 Best when interoperability, editor tooling, and straightforward implementation matter more than minimizing file size.
 
 Protocol Buffers (Protobuf)
@@ -95,8 +93,6 @@ Protocol Buffers (Protobuf)
 **Strong for compact data exchange**
 
 A typed schema defines messages, which can be encoded into a compact binary representation or mapped to JSON. Stable field numbers and compatibility rules support schema evolution.
-
-*Source: protobuf.com (+1 more)*
 
 Best when efficient network transfer, generated types, and strict message contracts are priorities. Binary output is less convenient for ordinary Git diffs.
 
@@ -311,8 +307,6 @@ JSON Schema can enforce rules such as:
 
 However, many graph invariants are cross-referential or semantic. For example, JSON Schema alone is not the right place to implement a complete graph type checker that resolves node references, checks every connection, and infers generic types. JSON Schema is primarily a declarative mechanism for validating document structure and constraints.
 
-*Source: json-schema.org (+1 more)*
-
 Use a layered validation pipeline:
 
 1. Parse the file and report syntax errors.
@@ -383,9 +377,7 @@ This is related to, but not identical to, byte-for-byte preservation of the orig
 5. Stable omission or inclusion rules for default values.
 6. No duplicate representations of the same fact.
 
-The JSON Canonicalization Scheme (JCS), specified by [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785.html), standardizes a deterministic JSON representation useful for hashing and signing. It does not, by itself, establish semantic equivalence between different graph documents or determine the correct ordering of graph nodes.
-
-*Source: RFC Editor (+1 more)*
+The JSON Canonicalization Scheme (JCS), specified by [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785.html) (an Informational RFC, not an Internet Standards Track document), standardizes a deterministic JSON representation useful for hashing and signing. It does not, by itself, establish semantic equivalence between different graph documents or determine the correct ordering of graph nodes.
 
 For Git, a pretty-printed canonical format is often more useful than compact canonical JSON. The system can apply deterministic ordering while retaining indentation and line breaks designed for human review.
 
@@ -514,8 +506,6 @@ Compatibility should be evaluated across at least three dimensions:
 - **Round-trip compatibility:** Can an implementation load and save a document without losing its meaning or unsupported data?
 
 Protobuf is instructive here: its evolution rules include stable field numbers and reserved deleted fields. Its unknown-field behavior also shows why merely accepting an unfamiliar field is not sufficient if a later transformation drops it.
-
-*Source: Protocol Buffers Documentation (+1 more)*
 
 For a visual language, unknown node types and extension fields deserve particular attention. An editor might be able to preserve an unfamiliar node as an opaque object even if it cannot execute or display that node correctly.
 
@@ -744,8 +734,6 @@ This schema checks that the document has the expected shape. It does not guarant
 A production schema would also need to specify unknown-field handling, extension points, node-specific variants, numeric constraints, and version-dependent rules.
 
 For current JSON Schema guidance, consult the [official specification](https://json-schema.org/specification).
-
-*Source: Specification (+1 more)*
 
 ## 14. A recommended architecture
 
