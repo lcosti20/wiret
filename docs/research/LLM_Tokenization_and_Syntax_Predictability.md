@@ -1,3 +1,9 @@
+---
+title: "LLM Tokenization and Syntax Predictability"
+document_type: "Research note"
+formatted: 2026-10-28
+---
+
 # LLM Tokenization and Syntax Predictability
 
 LLM Tokenization and Syntax Predictability is the study of how the way a programming language, markup language, or intermediate representation (IR) is written affects an AI model's ability to understand it, generate it accurately, edit it, and reason about its structure.
@@ -8,7 +14,22 @@ Can we design a syntax that makes correct output easier for an LLM to produce th
 
 This matters for AI-generated code, visual programming languages, workflow graphs, configuration files, structured data, and languages designed specifically for AI-assisted development. It is especially relevant when an LLM must generate a large structured artifact, modify one part without damaging another, or keep a textual representation synchronized with a graphical editor.
 
-the initial hypothesis is promising: a flat, explicit, line-oriented representation may be more reliable for some AI tasks than deeply nested JSON or XML. However, token count, syntactic complexity, and generation reliability are related but distinct properties. The best design optimizes all three without sacrificing semantic clarity or human usability.
+The initial hypothesis is promising: a flat, explicit, line-oriented representation may be more reliable for some AI tasks than deeply nested JSON or XML. However, token count, syntactic complexity, and generation reliability are related but distinct properties. The best design optimizes all three without sacrificing semantic clarity or human usability.
+
+## Contents
+
+- [1. What tokenization means for code](#1-what-tokenization-means-for-code)
+- [2. Why deeply nested syntax can be harder to generate](#2-why-deeply-nested-syntax-can-be-harder-to-generate)
+- [3. Syntax predictability: what makes a format AI-friendly?](#3-syntax-predictability-what-makes-a-format-ai-friendly)
+- [4. Token efficiency is not the same as syntactic simplicity](#4-token-efficiency-is-not-the-same-as-syntactic-simplicity)
+- [5. How the model predicts syntax](#5-how-the-model-predicts-syntax)
+- [6. Why grammar validity is not enough](#6-why-grammar-validity-is-not-enough)
+- [7. Designing a token-efficient graph IR](#7-designing-a-token-efficient-graph-ir)
+- [8. Bidirectional editing and partial generation](#8-bidirectional-editing-and-partial-generation)
+- [9. How to test the hypothesis scientifically](#9-how-to-test-the-hypothesis-scientifically)
+- [Experimental design](#experimental-design)
+- [10. Related research and further reading](#10-related-research-and-further-reading)
+- [11. Conclusions and open questions](#11-conclusions-and-open-questions)
 
 ## 1. What tokenization means for code
 
@@ -18,13 +39,13 @@ A tokenizer maps text into token IDs. Depending on the tokenizer, a token might 
 
 For example, the following code:
 
-```
+```text
 total = price + tax
 ```
 
 might be split into tokens resembling:
 
-```
+```json
 ["total", " =", " price", " +", " tax"]
 ```
 
@@ -32,27 +53,19 @@ This is illustrative, not the guaranteed output of any particular model's tokeni
 
 ### Three levels of representation
 
-Source text
-
-`node_17 [x, y] -> [result]`
-
-Token sequence
-
-A tokenizer-specific sequence of token IDs; identifiers and punctuation may occupy one or several tokens.
-
-Model prediction
-
-The model predicts successive tokens conditioned on the preceding context and its learned representations.
+1. **Source text** — `node_17 [x, y] -> [result]`
+2. **Token sequence** — A tokenizer-specific sequence of token IDs; identifiers and punctuation may occupy one or several tokens.
+3. **Model prediction** — The model predicts successive tokens conditioned on the preceding context and its learned representations.
 
 The important consequence is that two syntaxes expressing the same computation can have different token costs and different generation characteristics.
 
 ### Why tokenization matters
 
-- Context-window consumption: More tokens for the same program leave less context available for requirements, examples, documentation, and surrounding code.
-- Generation cost and latency: Longer outputs generally require more token-generation steps.
-- Identifier consistency: Unusual names or repeated fragments may tokenize inefficiently, although token count alone does not determine whether the model remembers them correctly.
-- Structural learning: Common, repeated syntax patterns may be easier for a model to continue because it has encountered similar patterns during training.
-- Error opportunities: Every generated token is another opportunity for a mistake, but the risk depends on the grammar and decoding process—not merely the number of tokens.
+- **Context-window consumption:** More tokens for the same program leave less context available for requirements, examples, documentation, and surrounding code.
+- **Generation cost and latency:** Longer outputs generally require more token-generation steps.
+- **Identifier consistency:** Unusual names or repeated fragments may tokenize inefficiently, although token count alone does not determine whether the model remembers them correctly.
+- **Structural learning:** Common, repeated syntax patterns may be easier for a model to continue because it has encountered similar patterns during training.
+- **Error opportunities:** Every generated token is another opportunity for a mistake, but the risk depends on the grammar and decoding process—not merely the number of tokens.
 
 Tokenization is therefore one component of a larger problem: designing representations that align well with how models predict structured sequences.
 
@@ -62,28 +75,34 @@ Consider a simple dataflow graph containing two nodes and one connection.
 
 ### Representation A: Nested JSON
 
-```
+```json
 {
- "nodes": [
- {
- "id": "add_1",
- "type": "Add",
- "inputs": {
- "a": {"value": 10},
- "b": {"value": 20}
- },
- "outputs": {
- "result": {"type": "Number"}
- }
- }
- ],
- "connections": []
+  "nodes": [
+    {
+      "id": "add_1",
+      "type": "Add",
+      "inputs": {
+        "a": {
+          "value": 10
+        },
+        "b": {
+          "value": 20
+        }
+      },
+      "outputs": {
+        "result": {
+          "type": "Number"
+        }
+      }
+    }
+  ],
+  "connections": []
 }
 ```
 
 ### Representation B: Flat, line-oriented IR
 
-```
+```text
 node add_1: Add
  input a = 10
  input b = 20
@@ -93,7 +112,7 @@ node add_1: Add
 The flat representation makes the main semantic unit—the node—explicit. Each line has a relatively predictable purpose, and a reader can inspect or modify one property without navigating several layers of nested objects.
 
 | Property | Nested JSON | Flat line-oriented IR |
-| --------------------- | ----------------------------------------------- | --------------------------------------------------- |
+| --- | --- | --- |
 | Structural delimiters | Many braces, brackets, and commas | Few delimiters |
 | Local edits | May require editing nested objects | Often limited to one line |
 | Visual scanning | Requires navigating object hierarchy | Easy to scan line by line |
@@ -109,7 +128,7 @@ The relevant comparison is not simply JSON versus flat text. It is how much stru
 
 For a visual programming language, a graph-oriented IR could be even more compact:
 
-```
+```text
 node input_1: Number = 10
 node input_2: Number = 20
 node add_1: Add
@@ -131,25 +150,11 @@ Syntax predictability describes how consistently a model can anticipate the vali
 
 A predictable syntax typically has the following properties.
 
-1. Repeated structural patterns
-
-Similar entities follow the same template. A node declaration always uses the same field order, connection syntax, and termination convention. The model can reuse a familiar pattern instead of inventing a new arrangement for every entity.
-
-2. Locality of meaning
-
-Most of a line's meaning can be understood without examining distant parts of the document. For example, `edge add_1.result -> output_1.value` communicates one connection in isolation.
-
-3. Minimal structural ambiguity
-
-Separators, quoting, escaping, comments, and multiline values have clear rules. A parser should not need to guess whether a character is syntax or data.
-
-4. Canonical representation
-
-The same semantic structure has one preferred textual form. Stable field order, normalized identifiers, and consistent quoting reduce unnecessary variation during generation and comparison.
-
-5. Explicit constraints
-
-Required fields, valid references, types, and permissible operations are defined formally. The model can be guided by these rules, and a validator can enforce them independently.
+1. **Repeated structural patterns** — Similar entities follow the same template. A node declaration always uses the same field order, connection syntax, and termination convention. The model can reuse a familiar pattern instead of inventing a new arrangement for every entity.
+2. **Locality of meaning** — Most of a line's meaning can be understood without examining distant parts of the document. For example, `edge add_1.result -> output_1.value` communicates one connection in isolation.
+3. **Minimal structural ambiguity** — Separators, quoting, escaping, comments, and multiline values have clear rules. A parser should not need to guess whether a character is syntax or data.
+4. **Canonical representation** — The same semantic structure has one preferred textual form. Stable field order, normalized identifiers, and consistent quoting reduce unnecessary variation during generation and comparison.
+5. **Explicit constraints** — Required fields, valid references, types, and permissible operations are defined formally. The model can be guided by these rules, and a validator can enforce them independently.
 
 An especially useful principle is regularity without unnecessary verbosity. A format should make common cases easy and uniform, while providing an explicit, predictable mechanism for exceptional cases.
 
@@ -159,11 +164,11 @@ A critical distinction for this research is that the number of characters, the n
 
 Consider these equivalent-looking declarations:
 
-```
+```text
 node calculate_total: Add
 ```
 
-```
+```json
 {"kind":"node","name":"calculate_total","operation":"Add"}
 ```
 
@@ -174,7 +179,7 @@ A tokenizer may encode frequently occurring JSON fragments efficiently. Converse
 ### Four quantities worth measuring
 
 | Quantity | What it measures | Why it matters |
-| --------------------------- | ------------------------------------------------------- | ----------------------------------------------------- |
+| --- | --- | --- |
 | Token count | Encoded length under a specific tokenizer | Context usage and generation cost |
 | Structural complexity | Nesting, grammar rules, and structural dependencies | How much syntax the model must manage |
 | Continuation predictability | How constrained the next valid part is, given a prefix | How readily the model can continue a partial artifact |
@@ -196,7 +201,7 @@ An autoregressive LLM generates a sequence incrementally. At each step, it estim
 
 For example, given:
 
-```
+```text
 node add_1: Add
 ```
 
@@ -208,12 +213,12 @@ However, the model does not automatically know which continuations are formally 
 
 Research on grammar-constrained generation demonstrates that a model can be paired with a parser or automaton that restricts the available continuations to those that preserve grammatical validity. The challenge includes aligning character-level grammar rules with tokenizers whose tokens may span multiple characters or structural boundaries.
 
-Google Research+1
+*Source: Google Research (+1 more)*
 
 This gives us two complementary strategies:
 
-- Design for predictability: Make the common valid continuation easy for the model to learn.
-- Enforce validity: Use a parser, grammar constraint, type checker, or semantic validator to reject invalid continuations or repair invalid output.
+- **Design for predictability:** Make the common valid continuation easy for the model to learn.
+- **Enforce validity:** Use a parser, grammar constraint, type checker, or semantic validator to reject invalid continuations or repair invalid output.
 
 A well-designed language should benefit from both.
 
@@ -231,23 +236,23 @@ A graph description can parse perfectly while still containing:
 
 This suggests a hierarchy of constraints.
 
-Layer 1 — Lexical validity
+**Layer 1 — Lexical validity**
 
 Are identifiers, strings, and tokens well-formed?
 
-Layer 2 — Syntactic validity
+**Layer 2 — Syntactic validity**
 
 Does the text conform to the language grammar?
 
-Layer 3 — Structural validity
+**Layer 3 — Structural validity**
 
 Do node IDs, ports, and references resolve correctly?
 
-Layer 4 — Type and semantic validity
+**Layer 4 — Type and semantic validity**
 
 Are connections type-safe and operations meaningful?
 
-Layer 5 — Behavioral correctness
+**Layer 5 — Behavioral correctness**
 
 Does the graph actually perform the intended computation?
 
@@ -255,7 +260,7 @@ These layers are not always strictly sequential—some checks can happen togethe
 
 A 2025 paper, Type-Constrained Code Generation with Language Models, demonstrates the potential of enforcing type constraints in addition to syntax. Its evaluation reports substantial reductions in compilation errors and improvements in functional correctness across several code-generation tasks.
 
-DOI+1
+*Source: DOI (+1 more)*
 
 The implication for an AI-friendly intermediate representation is important: the ideal format should not merely be easy to generate; it should also be easy to validate.
 
@@ -265,7 +270,7 @@ For a graph-based visual programming language, the recommended approach is to ex
 
 One possible design is outlined below.
 
-```
+```mermaid
 graph Calculator
 
 node n1: Constant
@@ -296,10 +301,10 @@ The representation is a proposal for investigation, not an empirically proven op
 ### Design decisions worth investigating
 
 | Design choice | Recommended starting point | Reason |
-| ----------------- | ----------------------------------------------- | ---------------------------------------------------- |
+| --- | --- | --- |
 | Record boundaries | One declaration per line | Simplifies parsing and local edits |
 | Node identity | Explicit, stable IDs | Reduces ambiguity during graph edits |
-| Connection syntax | `source.port -> target.port`  | Makes direction and endpoints visible |
+| Connection syntax | `source.port -> target.port` | Makes direction and endpoints visible |
 | Field ordering | Canonical ordering | Reduces representational variation |
 | Types | Named types or explicit annotations | Makes compatibility checks easier |
 | Optional fields | Omit defaults where unambiguous | Avoids redundant output |
@@ -314,7 +319,7 @@ A good compromise is stable IDs for identity and descriptive names for human-fac
 
 Consider:
 
-```
+```text
 N1 C 10
 N2 C 20
 N3 A
@@ -326,8 +331,7 @@ This is compact, but the meaning of `C`, `A`, `v`, and `E` must be learned or lo
 
 The design goal should be to minimize total cost, not just character count:
 
-\\[ \text{Total cost} = \text{generation cost} +\text{validation cost} +\text{repair cost} +\text{interpretation cost} \\]
-
+$$ \text{Total cost} = \text{generation cost} +\text{validation cost} +\text{repair cost} +\text{interpretation cost} $$
 This is a conceptual model rather than a standardized metric, but it helps explain why the shortest syntax is not necessarily the best.
 
 ## 8. Bidirectional editing and partial generation
@@ -338,7 +342,7 @@ In that setting, the representation needs to support more than initial generatio
 
 Suppose an LLM is asked to add a multiplication node between two existing nodes. With explicit edge declarations, the edit might be:
 
-```
+```text
 node n4: Multiply
 edge n3.result -> n4.a
 edge n2.value -> n4.b
@@ -350,9 +354,9 @@ This is useful because regeneration creates opportunities for accidental changes
 
 A robust design would distinguish three kinds of state:
 
-1. Semantic state: nodes, ports, values, and connections.
-2. Presentation state: positions, colors, grouping, and visual layout.
-3. Editing state: comments, formatting, partial declarations, and perhaps stable source locations.
+1. **Semantic state:** nodes, ports, values, and connections.
+2. **Presentation state:** positions, colors, grouping, and visual layout.
+3. **Editing state:** comments, formatting, partial declarations, and perhaps stable source locations.
 
 Separating these concerns lets the graph editor update presentation details without rewriting semantic declarations unnecessarily. It also lets an LLM modify the computation without having to reproduce every coordinate and styling attribute.
 
@@ -364,23 +368,23 @@ One caution: canonical formatting alone does not solve concurrent editing confli
 
 The strongest research contribution would be an empirical comparison of different syntaxes rather than an argument based solely on visual simplicity.
 
-the recommendation is to testing at least four representations of the same graph tasks.
+The recommendation is to test at least four representations of the same graph tasks.
 
 ## Experimental design
 
-A. Nested JSON
+**A. Nested JSON**
 
 A conventional structured-data baseline.
 
-B. Flat key-value records
+**B. Flat key-value records**
 
 Explicit fields with one record per line.
 
-C. Graph-oriented IR
+**C. Graph-oriented IR**
 
 Node declarations and explicit edge statements.
 
-D. Compact custom DSL
+**D. Compact custom DSL**
 
 A deliberately concise syntax designed for AI generation.
 
@@ -389,7 +393,7 @@ All four formats should encode the same underlying graph, types, constraints, an
 ### Metrics
 
 | Metric | Measurement |
-| -------------------- | --------------------------------------------------------------- |
+| --- | --- |
 | Token efficiency | Median input and output tokens per equivalent graph |
 | Parse success | Percentage of outputs accepted by the parser |
 | Structural validity | Percentage with valid IDs, ports, and references |
@@ -424,37 +428,10 @@ An important control is familiarity: a model may already have seen extensive JSO
 
 The following works provide a useful starting point for grounding the research in formal methods and empirical results.
 
-[Automata-based Constraints for Language Model Decoding](https://research.google/pubs/automata-based-constraints-for-language-model-decoding/?utm_source=chatgpt.com)
-
-Terry Koo, Frederick Liu, and Luheng He · 2024
-
-Explores automata-based methods for constraining LLM output to formal languages, including structured data and schema-guided generation. Particularly relevant to syntax enforcement and tokenizer/grammar alignment.
-
-Google Research
-
-[Grammar-Aligned Decoding](https://mlanthology.org/neurips/2024/park2024neurips-grammaraligned/?utm_source=chatgpt.com)
-
-NeurIPS 2024
-
-Studies how grammar-constrained decoding can distort the language model's original probability distribution. Important because enforcing validity can sometimes affect output quality.
-
-ML Anthology
-
-[Type-Constrained Code Generation with Language Models](https://doi.org/10.1145/3729274?utm_source=chatgpt.com)
-
-Niels Mündler and colleagues · PLDI 2025
-
-Extends constrained generation from syntax to type correctness. Relevant to the distinction between easy-to-parse syntax and semantically valid graph connections.
-
-DOI+1
-
-[CRANE: Reasoning with Constrained LLM Generation](https://proceedings.mlr.press/v267/banerjee25a.html?utm_source=chatgpt.com)
-
-ICML 2025
-
-Investigates the relationship between output constraints and reasoning capabilities. Useful for evaluating whether an overly restrictive grammar limits the model's ability to construct a correct solution.
-
-Proceedings of Machine Learning Research
+- [Automata-based Constraints for Language Model Decoding](https://research.google/pubs/automata-based-constraints-for-language-model-decoding/) — *Terry Koo, Frederick Liu, and Luheng He · 2024.* Explores automata-based methods for constraining LLM output to formal languages, including structured data and schema-guided generation. Particularly relevant to syntax enforcement and tokenizer/grammar alignment. *(Google Research).*
+- [Grammar-Aligned Decoding](https://mlanthology.org/neurips/2024/park2024neurips-grammaraligned/) — *NeurIPS 2024.* Studies how grammar-constrained decoding can distort the language model's original probability distribution. Important because enforcing validity can sometimes affect output quality. *(ML Anthology).*
+- [Type-Constrained Code Generation with Language Models](https://doi.org/10.1145/3729274) — *Niels Mündler and colleagues · PLDI 2025.* Extends constrained generation from syntax to type correctness. Relevant to the distinction between easy-to-parse syntax and semantically valid graph connections. *(DOI (+1 more)).*
+- [CRANE: Reasoning with Constrained LLM Generation](https://proceedings.mlr.press/v267/banerjee25a.html) — *ICML 2025.* Investigates the relationship between output constraints and reasoning capabilities. Useful for evaluating whether an overly restrictive grammar limits the model's ability to construct a correct solution. *(Proceedings of Machine Learning Research).*
 
 ## 11. Conclusions and open questions
 

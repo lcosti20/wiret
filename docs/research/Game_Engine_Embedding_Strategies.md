@@ -1,3 +1,9 @@
+---
+title: "Game Engine Embedding Strategies"
+document_type: "Research note"
+formatted: 2026-10-28
+---
+
 # Game Engine Embedding Strategies
 
 Game Engine Embedding Strategies concern how a text-based visual programming language (VPL) is executed inside a host game engine, such as Unreal Engine, Unity, or Godot. The central architectural question is whether the language should be interpreted, compiled, or translated into the host engine's native scripting environment.
@@ -6,46 +12,60 @@ For a language whose programs can be edited as text and manipulated as visual gr
 
 The ideal strategy may be a hybrid: a single language with multiple execution backends, each suited to a different stage of development or deployment.
 
+## Contents
+
+- [1. The fundamental execution models](#1-the-fundamental-execution-models)
+- [2. Comparison of the strategies](#2-comparison-of-the-strategies)
+- [3. The most relevant real-world precedents](#3-the-most-relevant-real-world-precedents)
+- [4. A key design distinction: compilation versus execution](#4-a-key-design-distinction-compilation-versus-execution)
+- [5. Engine embedding is also an API design problem](#5-engine-embedding-is-also-an-api-design-problem)
+- [6. Hot reload and state preservation](#6-hot-reload-and-state-preservation)
+- [7. Sandboxing and runtime safety](#7-sandboxing-and-runtime-safety)
+- [8. Performance: where the real costs come from](#8-performance-where-the-real-costs-come-from)
+- [9. A practical architecture for a text-based VPL](#9-a-practical-architecture-for-a-text-based-vpl)
+- [10. How to evaluate the alternatives experimentally](#10-how-to-evaluate-the-alternatives-experimentally)
+- [11. Recommended research conclusion](#11-recommended-research-conclusion)
+
 ## 1. The fundamental execution models
 
-A. Direct interpretation
+**A. Direct interpretation**
 
 The engine embeds a language runtime that parses or loads the program and executes its instructions directly. A Lua-like approach is the classic example.
 
-Text → Parser → Runtime execution
+**Text → Parser → Runtime execution**
 
-Advantages: fast startup, straightforward interactive editing, easy inspection of runtime state, and relatively simple hot reloading. Disadvantages: runtime overhead, the need to ship an interpreter, and potential difficulties optimizing large programs.
+**Advantages:** fast startup, straightforward interactive editing, easy inspection of runtime state, and relatively simple hot reloading. Disadvantages: runtime overhead, the need to ship an interpreter, and potential difficulties optimizing large programs.
 
-B. Compile to bytecode
+**B. Compile to bytecode**
 
 Source code is compiled into instructions for a virtual machine, which executes the resulting bytecode.
 
-Text → Compiler → Bytecode → VM
+**Text → Compiler → Bytecode → VM**
 
-Advantages: compact distributable programs, validation before execution, potentially better runtime performance, and a natural basis for portable serialized artifacts. Disadvantages: compiler and VM complexity, bytecode versioning, and the need for source-to-instruction debugging.
+**Advantages:** compact distributable programs, validation before execution, potentially better runtime performance, and a natural basis for portable serialized artifacts. Disadvantages: compiler and VM complexity, bytecode versioning, and the need for source-to-instruction debugging.
 
-C. Compile or transpile to a host language
+**C. Compile or transpile to a host language**
 
 The VPL is translated into C#, C++, or another supported language, then processed by the host toolchain.
 
-Text → Code generation → Host compiler → Executable code
+**Text → Code generation → Host compiler → Executable code**
 
-Advantages: access to mature compilers, potential for high performance, and easier integration with native tooling. Disadvantages: slower rebuild cycles, generated-code complexity, toolchain dependencies, and possible friction with live graph editing.
+**Advantages:** access to mature compilers, potential for high performance, and easier integration with native tooling. Disadvantages: slower rebuild cycles, generated-code complexity, toolchain dependencies, and possible friction with live graph editing.
 
-D. Hybrid execution
+**D. Hybrid execution**
 
 The language has a shared semantic model and can run interpreted, compile to bytecode, or generate native code depending on the use case.
 
-Text → Shared representation → Interpreter / VM / Native backend
+**Text → Shared representation → Interpreter / VM / Native backend**
 
-Advantages: flexible development and deployment, multiple optimization levels, and consistent language semantics if designed carefully. Disadvantages: greater implementation and testing complexity.
+**Advantages:** flexible development and deployment, multiple optimization levels, and consistent language semantics if designed carefully. Disadvantages: greater implementation and testing complexity.
 
 A crucial distinction: compiling to bytecode does not necessarily mean compiling to machine code. Bytecode still typically runs through a VM, while native compilation produces instructions for the target processor. Similarly, transpiling to C# is not the same as compiling directly to C++.
 
 ## 2. Comparison of the strategies
 
 | Criterion | Interpreter / VM | Native code generation |
-| -------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------- |
+| --- | --- | --- |
 | Edit-and-run latency | Usually excellent | Often slower, especially with full rebuilds |
 | Runtime performance | Good for many gameplay tasks; overhead varies | Potentially excellent |
 | Hot reload | Usually straightforward | Possible, but requires careful recompilation and state migration |
@@ -62,73 +82,58 @@ For example, one script call that asks the engine to move an actor is generally 
 
 ## 3. The most relevant real-world precedents
 
-Lua — embedded scripting
+**Lua — embedded scripting**
 
 Lua is a useful reference for a lightweight, embeddable language. It compiles source to bytecode and executes it using a register-based virtual machine. Its C API lets an application expose carefully selected host functionality.
 
-Lua+1
+*Source: Lua (+1 more)*
 
-Lesson: Keep the language runtime independent from the engine, and provide a deliberately designed host API rather than exposing the entire engine indiscriminately.
+**Lesson:** Keep the language runtime independent from the engine, and provide a deliberately designed host API rather than exposing the entire engine indiscriminately.
 
-Unreal Engine Blueprints — VM with native engine integration
+**Unreal Engine Blueprints — VM with native engine integration**
 
 Blueprint nodes execute through a virtual machine and can invoke native C++ functions. Unreal's historical Blueprint nativization feature demonstrated a route from visual scripts to generated C++ for selected performance-sensitive cases.
 
-Epic Developer Community
+*Source: Epic Developer Community*
 
-Lesson: A visual language can have a high-level authoring model while using different execution strategies under the hood. Generated native code is an optimization option, not necessarily the foundation of the editor.
+**Lesson:** A visual language can have a high-level authoring model while using different execution strategies under the hood. Generated native code is an optimization option, not necessarily the foundation of the editor.
 
-Unity scripting backends — managed code and AOT compilation
+**Unity scripting backends — managed code and AOT compilation**
 
 Unity documents the distinction between runtime JIT compilation and the IL2CPP pipeline, which converts C# intermediate language to C++ and then compiles it to native code. AOT is required on some target platforms where runtime code generation is unavailable.
 
-Unity Docs+1
+*Source: Unity Docs (+1 more)*
 
-Lesson: A language that relies on runtime code generation may encounter platform restrictions even when it works perfectly in the desktop editor.
+**Lesson:** A language that relies on runtime code generation may encounter platform restrictions even when it works perfectly in the desktop editor.
 
-Luau — a more modern scripting runtime
+**Luau — a more modern scripting runtime**
 
 Luau combines bytecode interpretation, gradual typing, an optimized garbage collector, and optional JIT compilation on supported architectures.
 
-Luau
+**Luau**
 
-Lesson: Interpretation does not preclude strong performance, static analysis, or sophisticated tooling. These features can be designed into the language rather than added only through native compilation.
+**Lesson:** Interpretation does not preclude strong performance, static analysis, or sophisticated tooling. These features can be designed into the language rather than added only through native compilation.
 
 ## 4. A key design distinction: compilation versus execution
 
 For a text-based VPL, it is helpful to separate three independent decisions:
 
-1. Authoring representation: Is the program stored as text, a graph, or both?
-2. Intermediate representation (IR): Does the compiler normalize the program into an abstract syntax tree, typed graph, bytecode, or another form?
-3. Execution backend: Does the final program run in an interpreter, a VM, a JIT compiler, or native code?
+1. **Authoring representation:** Is the program stored as text, a graph, or both?
+2. **Intermediate representation (IR):** Does the compiler normalize the program into an abstract syntax tree, typed graph, bytecode, or another form?
+3. **Execution backend:** Does the final program run in an interpreter, a VM, a JIT compiler, or native code?
 
 These decisions do not need to be coupled.
 
 For instance, the editor could store a canonical text file, derive a typed intermediate representation, and then either execute bytecode immediately or compile to native code during a release build.
 
-Canonical program source
+*Figure: canonical source, shared IR, and alternative execution back ends*
 
-Text file ↔ visual graph editor
-
-Parser + semantic analysis
-
-Types · symbols · validation · diagnostics
-
-Shared intermediate representation
-
-Normalized, typed program semantics
-
-Interpreter
-
-Immediate feedback
-
-Bytecode VM
-
-Portable runtime
-
-Native backend
-
-Optimized builds
+- **Canonical program source** — Text file ↔ visual graph editor
+- **Parser + semantic analysis** — Types · symbols · validation · diagnostics
+- **Shared intermediate representation** — Normalized, typed program semantics
+   - **Interpreter** — Immediate feedback
+   - **Bytecode VM** — Portable runtime
+   - **Native backend** — Optimized builds
 
 This architecture is particularly useful when the text and visual graph must remain synchronized. Both editing modes should modify the same logical program, and every execution backend should preserve the language's defined behavior.
 
@@ -140,7 +145,7 @@ The language runtime is only one part of the system. The interface between scrip
 
 Consider a simple behavior:
 
-```
+```text
 on_update(delta_time):
  if player.distance_to(self) < 5:
  self.open_door()
@@ -156,14 +161,14 @@ The runtime must answer several questions:
 
 A useful precedent is Open 3D Engine (O3DE), which exposes engine functionality to both Lua and Script Canvas through a shared reflection and binding mechanism. This illustrates how multiple authoring models can use a common engine-facing API.
 
-Open 3D Engine
+**Open 3D Engine**
 
 For a new language, the recommended approach is to explicitly separate the following layers:
 
-- Language runtime: Values, functions, control flow, memory management, exceptions, and scheduling.
-- Engine binding layer: Access to entities, components, resources, events, and engine services.
-- Execution host: Script lifecycle, update scheduling, permissions, cancellation, and error reporting.
-- Editor integration: Source locations, breakpoints, variable inspection, graph selection, and hot reload.
+- **Language runtime:** Values, functions, control flow, memory management, exceptions, and scheduling.
+- **Engine binding layer:** Access to entities, components, resources, events, and engine services.
+- **Execution host:** Script lifecycle, update scheduling, permissions, cancellation, and error reporting.
+- **Editor integration:** Source locations, breakpoints, variable inspection, graph selection, and hot reload.
 
 This separation makes the language easier to port between engines and allows the execution backend to change without redesigning every engine binding.
 
@@ -173,11 +178,11 @@ For a live-editing VPL, the ability to change code while a game is running may b
 
 Suppose a script has been running for ten minutes and contains:
 
-```
+```text
 state:
- health = 75
- current_target = enemy_42
- cooldown = 1.3
+  health = 75
+  current_target = enemy_42
+  cooldown = 1.3
 ```
 
 The user changes the source file while the game is paused. What happens when the updated program is loaded?
@@ -185,7 +190,7 @@ The user changes the source file while the game is paused. What happens when the
 There are several possible policies:
 
 | Policy | Behavior | Trade-off |
-| ------------------------- | ----------------------------------------------- | --------------------------------------------- |
+| --- | --- | --- |
 | Restart script | Reinitialize all script state | Simple, but loses progress |
 | Preserve compatible state | Keep fields that still match the new definition | Convenient, but needs migration rules |
 | Explicit migration | Run user-defined state conversion | Flexible, but more complex |
@@ -205,16 +210,16 @@ If users can write scripts—or if an AI system can generate them—the runtime 
 
 A sandbox should consider:
 
-- API permissions: Scripts should only access explicitly exposed engine capabilities.
-- Execution budgets: Limit instructions, elapsed execution time, recursion, or other expensive operations.
-- Memory budgets: Prevent runaway allocations from exhausting the game's memory.
-- Cancellation: Allow scripts to be interrupted when they exceed limits or their owning object is destroyed.
-- Isolation: Separate untrusted scripts from privileged engine code and from one another where necessary.
-- Validation: Reject invalid or unsupported program artifacts before execution.
+- **API permissions:** Scripts should only access explicitly exposed engine capabilities.
+- **Execution budgets:** Limit instructions, elapsed execution time, recursion, or other expensive operations.
+- **Memory budgets:** Prevent runaway allocations from exhausting the game's memory.
+- **Cancellation:** Allow scripts to be interrupted when they exceed limits or their owning object is destroyed.
+- **Isolation:** Separate untrusted scripts from privileged engine code and from one another where necessary.
+- **Validation:** Reject invalid or unsupported program artifacts before execution.
 
 Luau's embedding documentation is particularly relevant here: it describes restricting standard-library access, separating script environments, and interrupting runaway execution. It also warns that accepting untrusted bytecode is not equivalent to accepting validated source code.
 
-Luau
+**Luau**
 
 One important distinction is that bytecode compilation is not a security boundary. A bytecode VM still needs safe instruction validation, restricted host bindings, and resource limits. Likewise, generated native code should not be treated as safe simply because it passed a compiler.
 
@@ -222,25 +227,25 @@ One important distinction is that bytecode compilation is not a security boundar
 
 Comparing interpreters and native compilation using a single benchmark can be misleading. For game scripting, performance depends on the workload.
 
-Small event-driven behaviors
+**Small event-driven behaviors**
 
 Opening doors, responding to collisions, triggering dialogue, and changing UI state.
 
 An interpreter or bytecode VM is often sufficient. The cost of invoking the engine may dominate the cost of executing the script.
 
-Long-running gameplay logic
+**Long-running gameplay logic**
 
 AI decision-making, inventory logic, quests, state machines, and complex event processing.
 
 A bytecode VM with good profiling and optimization may provide a useful balance between speed and iteration time.
 
-Compute-heavy loops
+**Compute-heavy loops**
 
 Large simulations, pathfinding workloads, procedural generation, and intensive numerical processing.
 
 Native compilation or optimized engine-native routines may provide substantial benefits. The actual improvement should be measured on representative workloads.
 
-Large-scale entity processing
+**Large-scale entity processing**
 
 Updating thousands of entities or performing repeated operations across large collections.
 
@@ -252,25 +257,11 @@ A sensible optimization strategy is to profile the whole system first, optimize 
 
 For a language that supports both text editing and graph editing, research should investigate the following design.
 
-1. Canonical source
-
-Store the program in a deterministic, version-control-friendly text format. The graph editor is another view of the same program, not a separate authoritative representation.
-
-2. Incremental compiler and validator
-
-Parse changed regions, resolve symbols, perform type checking, and report diagnostics without rebuilding unrelated programs when possible.
-
-3. Stable intermediate representation
-
-Represent control flow, data flow, types, source spans, and stable node identities. Use the same representation for validation, debugging, and backend generation.
-
-4. Bytecode VM for development
-
-Execute changed programs quickly, support breakpoints, preserve runtime state where compatible, and make errors traceable to original source.
-
-5. Optional release backend
-
-Compile selected programs to native code, or to a host-supported compiled representation, when profiling or platform requirements justify it.
+1. **Canonical source** — Store the program in a deterministic, version-control-friendly text format. The graph editor is another view of the same program, not a separate authoritative representation.
+2. **Incremental compiler and validator** — Parse changed regions, resolve symbols, perform type checking, and report diagnostics without rebuilding unrelated programs when possible.
+3. **Stable intermediate representation** — Represent control flow, data flow, types, source spans, and stable node identities. Use the same representation for validation, debugging, and backend generation.
+4. **Bytecode VM for development** — Execute changed programs quickly, support breakpoints, preserve runtime state where compatible, and make errors traceable to original source.
+5. **Optional release backend** — Compile selected programs to native code, or to a host-supported compiled representation, when profiling or platform requirements justify it.
 
 The most important engineering constraint is semantic consistency. A program must not behave differently merely because it was run in the editor's VM rather than compiled for release. Differences in numeric behavior, scheduling, exception handling, object lifetime, and execution order can otherwise create bugs that appear only in production.
 
@@ -279,7 +270,7 @@ The most important engineering constraint is semantic consistency. A program mus
 Rather than choosing a backend based on reputation, build a small prototype and measure the following:
 
 | Measurement | Why it matters |
-| ---------------------------- | ----------------------------------------------------------------- |
+| --- | --- |
 | Source-to-executable latency | Measures interactive editing responsiveness |
 | Cold startup time | Measures loading and initialization overhead |
 | Steady-state execution time | Measures runtime efficiency |
@@ -307,7 +298,7 @@ This choice is attractive because it provides:
 
 The recommendation changes if the language is intended exclusively for performance-critical simulation, if the target platform forbids the chosen runtime mechanism, or if the host engine already supplies a compelling compilation and hot-reload pipeline.
 
-For further research, compare the [O3DE scripting architecture](https://www.docs.o3de.org/docs/user-guide/scripting/?utm_source=chatgpt.com), [Luau's embedding and sandboxing model](https://luau.org/sandbox/?utm_source=chatgpt.com), and [Unity's scripting backend documentation](https://docs.unity.com/en-us/engine/6000.0/manual/programming-environment/scripting-backends/intro?utm_source=chatgpt.com). Together, they illustrate the trade-offs between embedding, isolation, interactive iteration, and ahead-of-time compilation.
+For further research, compare the [O3DE scripting architecture](https://www.docs.o3de.org/docs/user-guide/scripting/), [Luau's embedding and sandboxing model](https://luau.org/sandbox/), and [Unity's scripting backend documentation](https://docs.unity.com/en-us/engine/6000.0/manual/programming-environment/scripting-backends/intro). Together, they illustrate the trade-offs between embedding, isolation, interactive iteration, and ahead-of-time compilation.
 
 The most useful next step is to define the intended language's priorities: is it primarily an AI-friendly, text-and-graph authoring language for rapid gameplay iteration, or is it intended to support high-performance production logic across multiple engines and platforms?
 

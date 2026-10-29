@@ -1,3 +1,9 @@
+---
+title: "CRDTs and Git Diffing for Text-Based Visual Programming"
+document_type: "Research note"
+formatted: 2026-10-28
+---
+
 # CRDTs and Git Diffing for Text-Based Visual Programming
 
 The central research question is:
@@ -8,31 +14,67 @@ This problem sits at the intersection of source-code design, graph serialization
 
 The key insight is that a graph's logical structure, its visual layout, and its collaborative editing history should not necessarily share the same representation. Once these concerns are separated, Git and CRDTs can each handle the problems they are best suited for.
 
+## Contents
+
+- [1. Why traditional visual formats create merge conflicts](#1-why-traditional-visual-formats-create-merge-conflicts)
+- [2. The three layers of the problem](#2-the-three-layers-of-the-problem)
+- [3. Design the file so that Git can understand it](#3-design-the-file-so-that-git-can-understand-it)
+- [4. Stable identity is more important than line-oriented syntax](#4-stable-identity-is-more-important-than-line-oriented-syntax)
+- [5. CRDTs: merging edits as operations on shared data](#5-crdts-merging-edits-as-operations-on-shared-data)
+- [6. Git and CRDTs should complement each other](#6-git-and-crdts-should-complement-each-other)
+- [7. What a graph CRDT actually needs to model](#7-what-a-graph-crdt-actually-needs-to-model)
+- [8. Git merge drivers can make the format graph-aware](#8-git-merge-drivers-can-make-the-format-graph-aware)
+- [9. A practical design recommendation](#9-a-practical-design-recommendation)
+- [10. Research questions worth investigating](#10-research-questions-worth-investigating)
+- [11. Suggested literature and implementation references](#11-suggested-literature-and-implementation-references)
+- [Conclusion](#conclusion)
+
 ## 1. Why traditional visual formats create merge conflicts
 
 Consider a visual program containing three nodes and two connections. A conventional visual editor might serialize it as JSON:
 
-```
+```json
 {
- "nodes": [
- {"id": "n1", "x": 100, "y": 200, "type": "Input"},
- {"id": "n2", "x": 300, "y": 200, "type": "Add"},
- {"id": "n3", "x": 500, "y": 200, "type": "Output"}
- ],
- "connections": [
- {"from": "n1.out", "to": "n2.a"},
- {"from": "n2.out", "to": "n3.in"}
- ]
+  "nodes": [
+    {
+      "id": "n1",
+      "x": 100,
+      "y": 200,
+      "type": "Input"
+    },
+    {
+      "id": "n2",
+      "x": 300,
+      "y": 200,
+      "type": "Add"
+    },
+    {
+      "id": "n3",
+      "x": 500,
+      "y": 200,
+      "type": "Output"
+    }
+  ],
+  "connections": [
+    {
+      "from": "n1.out",
+      "to": "n2.a"
+    },
+    {
+      "from": "n2.out",
+      "to": "n3.in"
+    }
+  ]
 }
 ```
 
 Suppose Alice moves `n1`, while Bob changes the position of `n3`.
 
-Alice's change
+**Alice's change**
 
 Move the input node from (100, 200) to (120, 240).
 
-Bob's change
+**Bob's change**
 
 Move the output node from (500, 200) to (520, 180).
 
@@ -40,25 +82,25 @@ Logically, these edits are independent. Yet a visual editor may reorder nodes, r
 
 This produces several related problems:
 
-- Diff noise: a one-node movement changes many unrelated lines.
-- False conflicts: two edits to different graph elements overlap in the serialized file.
-- Semantic conflicts: Git merges text successfully but produces an invalid graph.
-- Unstable diffs: the same graph can serialize differently across editor versions or sessions.
-- Poor code review: reviewers see coordinate churn instead of meaningful program changes.
+- **Diff noise:** a one-node movement changes many unrelated lines.
+- **False conflicts:** two edits to different graph elements overlap in the serialized file.
+- **Semantic conflicts:** Git merges text successfully but produces an invalid graph.
+- **Unstable diffs:** the same graph can serialize differently across editor versions or sessions.
+- **Poor code review:** reviewers see coordinate churn instead of meaningful program changes.
 
 The goal is not simply to make files smaller. It is to make changes local, stable, and semantically understandable.
 
 ## 2. The three layers of the problem
 
-Layer A — Version control
+**Layer A — Version control**
 
 Git stores snapshots and compares versions. It needs deterministic serialization, meaningful line boundaries, and merge rules.
 
-Layer B — Graph model
+**Layer B — Graph model**
 
 Nodes, ports, edges, properties, and references need stable identities and explicit structural constraints.
 
-Layer C — Collaboration
+**Layer C — Collaboration**
 
 Concurrent operations need deterministic conflict resolution, causal ordering where required, and convergence across replicas.
 
@@ -76,7 +118,7 @@ The first strategy is to make the canonical graph format a well-designed text la
 
 Consider this representation:
 
-```
+```mermaid
 graph Main
 
 node n1: Input
@@ -94,7 +136,7 @@ edge n2.out -> n3.in
 
 Each node has a stable identifier, and each independent property occupies its own line. A change to one coordinate can now produce a tiny diff.
 
-```
+```text
  node n1: Input
 - position (100, 200)
 + position (120, 240)
@@ -102,12 +144,12 @@ Each node has a stable identifier, and each independent property occupies its ow
 
 This is already a major improvement. Git's ordinary three-way merge can combine independent changes when their edited regions do not overlap. Git also supports custom merge drivers for formats that require more specialized logic.
 
-gitattributes Documentation+1
+*Source: gitattributes Documentation (+1 more)*
 
 ### Recommended syntax properties
 
 | Design choice | Why it matters |
-| ------------------------------------- | ---------------------------------------------------------------------------------- |
+| --- | --- |
 | Stable node IDs | Identifies the same node across revisions. |
 | One property per line | Localizes edits and reduces overlapping diff regions. |
 | One declaration per node or edge | Makes additions and deletions easy to review. |
@@ -135,13 +177,13 @@ Suppose two developers add nodes concurrently.
 
 Alice adds:
 
-```
+```text
 node n4: Multiply
 ```
 
 Bob adds:
 
-```
+```text
 node n4: Divide
 ```
 
@@ -151,10 +193,10 @@ A graph language therefore needs an identity policy.
 
 Possible approaches include:
 
-- Globally unique IDs: UUIDs or similarly collision-resistant identifiers.
-- Actor-derived IDs: identifiers incorporating a replica or actor ID and a local counter.
-- Content-derived IDs: hashes of canonical content, useful for immutable objects but often unsuitable for editable nodes whose contents change.
-- Human-assigned names: readable identifiers, with explicit handling for naming collisions and renames.
+- **Globally unique IDs:** UUIDs or similarly collision-resistant identifiers.
+- **Actor-derived IDs:** identifiers incorporating a replica or actor ID and a local counter.
+- **Content-derived IDs:** hashes of canonical content, useful for immutable objects but often unsuitable for editable nodes whose contents change.
+- **Human-assigned names:** readable identifiers, with explicit handling for naming collisions and renames.
 
 For a collaborative visual programming language, globally unique or actor-derived IDs are usually a better starting point than deriving identity from node type, position, or array index.
 
@@ -176,13 +218,13 @@ For a graph editor, the CRDT might represent:
 
 Structured CRDT libraries such as Automerge provide maps, lists, text, and conflict handling. Their behavior differs by data type: for example, independent map properties can merge while concurrent assignments to the same property may retain multiple conflicting values internally but expose a deterministic winner by default.
 
-automerge.org+2
+*Source: automerge.org (+2 more)*
 
 ### Example: two developers move different nodes
 
 Suppose the initial state is:
 
-```
+```text
 n1.position = (100, 200)
 n2.position = (300, 200)
 ```
@@ -191,7 +233,7 @@ Alice moves `n1` to `(120, 240)`. Bob moves `n2` to `(320, 180)`.
 
 The resulting updates are conceptually:
 
-```
+```text
 set n1.position = (120, 240)
 set n2.position = (320, 180)
 ```
@@ -206,10 +248,10 @@ Both edits target the same logical property. The system must decide what this me
 
 Possible policies include:
 
-1. Deterministic winner: select one position consistently across replicas.
-2. Multi-value conflict: retain both proposed positions and ask the user to resolve them.
-3. Intent-aware resolution: use application-specific rules to determine which movement should prevail.
-4. Operation-based transformation: reconcile the movements according to a model that defines how concurrent transformations compose.
+1. **Deterministic winner:** select one position consistently across replicas.
+2. **Multi-value conflict:** retain both proposed positions and ask the user to resolve them.
+3. **Intent-aware resolution:** use application-specific rules to determine which movement should prevail.
+4. **Operation-based transformation:** reconcile the movements according to a model that defines how concurrent transformations compose.
 
 A last-writer-wins policy can be deterministic without respecting what a human considers the latest action. In particular, wall-clock timestamps are not a reliable universal ordering for distributed operations.
 
@@ -222,7 +264,7 @@ Convergence is not the same as preserving intent. This is one of the most import
 A common misconception is that adopting a CRDT eliminates the need for Git. It does not. The two systems have different goals.
 
 | Capability | Git | CRDT |
-| -------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------- |
+| --- | --- | --- |
 | Primary purpose | Version history, branches, review | Concurrent updates and replica synchronization |
 | Typical unit of change | File snapshots and textual diffs | Operations on replicated data structures |
 | Offline editing | Supported through local commits and branches | Supported by local updates and later synchronization |
@@ -233,31 +275,19 @@ A common misconception is that adopting a CRDT eliminates the need for Git. It d
 
 Git's documented custom merge drivers provide an extension point for language-specific merging. Automerge, by contrast, provides structured replicated data and conflict handling.
 
-gitattributes Documentation+2
+*Source: gitattributes Documentation (+2 more)*
 
 ### A hybrid architecture
 
 For a text-based visual programming language, research should investigate this architecture:
 
-Visual editor and text editor
+*Figure: proposed architecture*
 
-One logical program, two editing interfaces
-
-Canonical graph model
-
-Stable IDs · typed nodes · explicit edges · properties
-
-Live synchronization
-
-CRDT or structured collaboration engine
-
-Persistent source
-
-Canonical text, Git commits and diffs
-
-Validation and conflict resolution
-
-Syntax · graph invariants · types · unresolved conflicts
+- **Visual editor and text editor** — One logical program, two editing interfaces
+- **Canonical graph model** — Stable IDs · typed nodes · explicit edges · properties
+- **Live synchronization** — CRDT or structured collaboration engine
+- **Persistent source** — Canonical text, Git commits and diffs
+- **Validation and conflict resolution** — Syntax · graph invariants · types · unresolved conflicts
 
 The canonical graph model is the key boundary. The editor need not manipulate source text and coordinates as independent truths; it can manipulate a shared model and project that model into either representation.
 
@@ -277,7 +307,7 @@ A generic CRDT is not automatically a graph CRDT. The choice of replicated data 
 
 A reasonable conceptual model is:
 
-```
+```text
 Graph
  nodes: Map<NodeId, Node>
  edges: Map<EdgeId, Edge>
@@ -298,23 +328,23 @@ The map structures provide stable addressing. The edge IDs allow connections to 
 
 ### Important conflict cases
 
-Independent property edits
+**Independent property edits**
 
 Alice changes a node's label while Bob moves another node. Merge both edits.
 
-Concurrent insertions
+**Concurrent insertions**
 
 Two users add distinct nodes. Preserve both, provided their identities are distinct and their declarations are valid.
 
-Delete versus edit
+**Delete versus edit**
 
 One user deletes a node while another modifies one of its properties. Define whether deletion wins, the edit resurrects the node, or the conflict requires intervention.
 
-Conflicting connections
+**Conflicting connections**
 
 Two users connect different sources to a single-input port. Both edges may survive the CRDT merge even though the resulting graph violates the language's rules.
 
-Concurrent movement
+**Concurrent movement**
 
 Multiple positions for the same node require a policy. Independent movements of different nodes should normally compose without conflict.
 
@@ -341,7 +371,7 @@ Even without a live CRDT, a graph language can substantially improve Git merging
 
 Git supports custom merge drivers configured through `.gitattributes` and the repository's Git configuration. A driver receives the common ancestor, the current version, and the other branch's version, and can produce a merged file or report a conflict.
 
-gitattributes Documentation+1
+*Source: gitattributes Documentation (+1 more)*
 
 The driver could:
 
@@ -356,8 +386,20 @@ The driver could:
 
 A simplified conceptual algorithm:
 
-```
-def merge_graphs(base_text, ours_text, theirs_text): base = parse_graph(base_text) ours = parse_graph(ours_text) theirs = parse_graph(theirs_text) ours_changes = diff_graphs(base, ours) theirs_changes = diff_graphs(base, theirs) merged = merge_independent_changes( base, ours_changes, theirs_changes ) validate_graph(merged) return serialize_canonically(merged)
+```python
+def merge_graphs(base_text, ours_text, theirs_text):
+    base = parse_graph(base_text)
+    ours = parse_graph(ours_text)
+    theirs = parse_graph(theirs_text)
+    ours_changes = diff_graphs(base, ours)
+    theirs_changes = diff_graphs(base, theirs)
+    merged = merge_independent_changes(
+        base,
+        ours_changes,
+        theirs_changes
+    )
+    validate_graph(merged)
+    return serialize_canonically(merged)
 ```
 
 This is pseudocode, not a complete implementation. In particular, the merge function needs explicit rules for overlapping changes, object identity, deletion, and invalid intermediate states.
@@ -396,7 +438,7 @@ This sequence establishes whether good syntax and semantic merging solve most of
 Several areas deserve focused investigation.
 
 | Research question | What to measure |
-| --------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| --- | --- |
 | How much does canonical line-oriented syntax reduce diff noise? | Changed lines, diff size, and unrelated lines rewritten per edit. |
 | When does semantic merging outperform ordinary Git merging? | Automatic merge rate and correctness of merged graphs. |
 | What is the right CRDT granularity? | Node-level, property-level, edge-level, or operation-level conflict rates. |
@@ -416,31 +458,19 @@ Then evaluate a CRDT-enabled implementation separately, using concurrent collabo
 
 ## 11. Suggested literature and implementation references
 
-Git attributes and custom merge drivers
+- **Git attributes and custom merge drivers** Official documentation describing merge drivers, conflict handling, and file-level merge behavior. [Read the Git documentation](https://git-scm.com/docs/gitattributes)
 
-Official documentation describing merge drivers, conflict handling, and file-level merge behavior.
-
-[Read the Git documentation](https://git-scm.com/docs/gitattributes?utm_source=chatgpt.com)
-
-Automerge — Document model and conflicts
+**Automerge — Document model and conflicts**
 
 A practical reference for structured collaborative state, conflict retention, map semantics, lists, and collaborative text.
 
-[Document model](https://automerge.org/docs/reference/documents/?utm_source=chatgpt.com) · [Conflict semantics](https://automerge.org/docs/reference/documents/conflicts/?utm_source=chatgpt.com)
+- **[Document model](https://automerge.org/docs/reference/documents/) · [Conflict semantics](https://automerge.org/docs/reference/documents/conflicts/)** — *Peritext: A CRDT for Collaborative Rich Text Editing (2022).* A peer-reviewed study of how to preserve editing intent when concurrent operations interact. Although it concerns rich text rather than graphs, its treatment of stable anchors and intent preservation is relevant to structured source formats. *Source: Martin Kleppmann’s publications (+1 more)* [Read the paper](https://doi.org/10.1145/3555644)
 
-Peritext: A CRDT for Collaborative Rich Text Editing (2022)
-
-A peer-reviewed study of how to preserve editing intent when concurrent operations interact. Although it concerns rich text rather than graphs, its treatment of stable anchors and intent preservation is relevant to structured source formats.
-
-Martin Kleppmann’s publications+1
-
-[Read the paper](https://doi.org/10.1145/3555644?utm_source=chatgpt.com)
-
-CRDT fundamentals
+**CRDT fundamentals**
 
 Study convergence, commutativity, causal dependencies, operation identity, and the difference between deterministic conflict resolution and semantic correctness.
 
-[Automerge concepts](https://automerge.org/docs/reference/concepts/?utm_source=chatgpt.com) · [CRDT terminology](https://automerge.org/docs/reference/glossary/?utm_source=chatgpt.com)
+[Automerge concepts](https://automerge.org/docs/reference/concepts/) · [CRDT terminology](https://automerge.org/docs/reference/glossary/)
 
 ## Conclusion
 

@@ -1,4 +1,13 @@
+---
+title: "Markup Languages"
+document_type: "Reference article with extended analysis"
+source: "https://en.wikipedia.org/wiki/Markup_language"
+formatted: 2026-10-28
+---
+
 # Markup Languages
+
+> **Structure of this document.** Part I follows the Wikipedia article ([Markup language](https://en.wikipedia.org/wiki/Markup_language)). The section titled *Extended Analysis* is supplementary explanation added for research purposes; it is not part of the Wikipedia text.
 
 ![Example of RecipeML, a simple markup language based on XML for creating recipes. The markup can be converted programmatically for display into, for example, HTML, PDF or Rich Text Format.](https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/RecipeML.svg/500px-RecipeML.svg.png)
 
@@ -13,6 +22,49 @@ Older markup languages, which typically focus on typesetting and presentation, i
 Some markup languages, such as the widely used HTML, have pre-defined presentation semantics, meaning that their specifications prescribe some aspects of how to present the structured data on particular media. HTML, like DocBook, Open eBook, JATS, and many others, are based on the markup metalanguages XML and SGML. That is, SGML and XML allow designers to specify particular schemas, which determine which elements, attributes, and other features are permitted, and where.
 
 A key characteristic of most markup languages is that they allow combining markup with content such as text and pictures. For example, if a few words in a sentence need to be emphasized, or identified as a proper name, defined term, or another special item, the markup may be inserted between the characters of the sentence.
+
+## Contents
+
+- [Etymology](#etymology)
+- [Types of markup language](#types-of-markup-language)
+- [History](#history)
+  - [GenCode](#gencode)
+  - [troff and nroff](#troff-and-nroff)
+  - [TeX](#tex)
+  - [Scribe, GML, and SGML](#scribe-gml-and-sgml)
+  - [HTML](#html)
+  - [XML](#xml)
+  - [XHTML](#xhtml)
+  - [Other XML-based applications](#other-xml-based-applications)
+- [Features](#features)
+- [Broader use](#broader-use)
+- [See also](#see-also)
+- [Notes](#notes)
+- [Extended Analysis: Structure, Processing, and Design](#extended-analysis-structure-processing-and-design)
+  - [1. What is a markup language, really?](#1-what-is-a-markup-language-really)
+  - [2. The three traditional categories of markup](#2-the-three-traditional-categories-of-markup)
+  - [3. A taxonomy of markup languages](#3-a-taxonomy-of-markup-languages)
+  - [4. Syntax: how markup is written](#4-syntax-how-markup-is-written)
+  - [5. The structure of a marked-up document](#5-the-structure-of-a-marked-up-document)
+  - [6. How markup is processed](#6-how-markup-is-processed)
+  - [7. Major markup languages in greater depth](#7-major-markup-languages-in-greater-depth)
+  - [HTML](#html-1)
+  - [XML](#xml-1)
+  - [Markdown](#markdown)
+  - [TeX and LaTeX](#tex-and-latex)
+  - [TEI](#tei)
+  - [8. Markup languages and programming languages](#8-markup-languages-and-programming-languages)
+  - [9. Design principles and trade-offs](#9-design-principles-and-trade-offs)
+  - [10. Markup languages beyond publishing](#10-markup-languages-beyond-publishing)
+  - [11. Limitations, security, and accessibility](#11-limitations-security-and-accessibility)
+  - [12. A deeper historical interpretation](#12-a-deeper-historical-interpretation)
+  - [1960s–70s](#1960s70s)
+  - [1970s–80s](#1970s80s)
+  - [1990s](#1990s)
+  - [2000s onward](#2000s-onward)
+  - [13. Research directions worth exploring next](#13-research-directions-worth-exploring-next)
+  - [14. Recommended primary references](#14-recommended-primary-references)
+  - [Conclusion](#conclusion)
 
 ## Etymology
 
@@ -147,17 +199,11 @@ The use of XML has also led to the possibility of combining multiple markup lang
 
 1. HTML is a particular instance of SGML, whereas LaTeX is designed with the separation-between-content-and-design philosophy of Scribe in mind.
 
----
-
-**Source:** https://en.wikipedia.org/wiki/Markup_language
-
-## Markup Languages: Structure, Processing, and Design
+## Extended Analysis: Structure, Processing, and Design
 
 The foundational material introduces the history and major families of markup languages, including the distinction between describing document structure and controlling presentation. The following sections examine how markup represents information, how documents are processed, and how design philosophies affect practical use.
 
-The additional discussion builds on those foundations with technical explanations, comparisons, and broader context.&#x20;
-
-Markup_language.md
+The additional discussion builds on those foundations with technical explanations, comparisons, and broader context.
 
 ### 1. What is a markup language, really?
 
@@ -165,25 +211,27 @@ A markup language is a formal notation for adding information to content. That a
 
 Consider the same sentence represented in four ways.
 
-Plain text
+**Plain text**
 
+```text
 The History of Computing
-
-HTML — document structure
-
 ```
+
+**HTML — document structure**
+
+```html
 <h1>The History of Computing</h1>
 ```
 
-Markdown — lightweight authoring
+**Markdown — lightweight authoring**
 
-```
+```text
 ## The History of Computing
 ```
 
-LaTeX — document typesetting
+**LaTeX — document typesetting**
 
-```
+```text
 \section{The History of Computing}
 ```
 
@@ -197,11 +245,11 @@ A heading might appear in large, bold text, but its semantic role as a heading i
 
 A useful way to understand markup is to separate five concepts:
 
-- Content: the underlying information, such as words, numbers, images, or mathematical expressions.
-- Markup syntax: the notation used to express additional information, such as tags, delimiters, attributes, or indentation.
-- Structure: the organization of content into elements, sections, lists, tables, and other components.
-- Semantics: the intended meaning or role of those components.
-- Processing: the interpretation, validation, transformation, storage, or rendering of the marked-up information.
+- **Content:** the underlying information, such as words, numbers, images, or mathematical expressions.
+- **Markup syntax:** the notation used to express additional information, such as tags, delimiters, attributes, or indentation.
+- **Structure:** the organization of content into elements, sections, lists, tables, and other components.
+- **Semantics:** the intended meaning or role of those components.
+- **Processing:** the interpretation, validation, transformation, storage, or rendering of the marked-up information.
 
 These concepts are related, but they are not interchangeable. A syntax defines how markup is written; a vocabulary defines which elements and attributes exist; a schema may constrain how those elements can be combined; and a processor determines what to do with the resulting document.
 
@@ -209,11 +257,7 @@ For example, XML defines much of the syntax used to write tags, but it does not 
 
 ### 2. The three traditional categories of markup
 
-The Wikipedia article identifies three categories: presentational, procedural, and descriptive markup. These categories are best understood as different answers to the question, What information should the markup express?&#x20;
-
-Markup_language.md
-
-[Bauer Bodoni 活字見本帳を見てみる : デザインの現場 小林章の「タイプディレクターの眼」](https://images.openai.com/static-rsc-4/qD4m5xP8nawOPaJucBQ9e-AtjpRqJfsr7Ey5B6v86Q-z2sa--uOCwrV6mC_t5ksSBwAV6zEUdyzXu7zZXWmajlaEb84ims_WjsSGmXOCtRUGZf07URzqjttjlliQQIg0qbPLKgs9SodFn3D7AL1-du9AivdL8o92awhioSbVjZ8?purpose=inline)
+The Wikipedia article identifies three categories: presentational, procedural, and descriptive markup. These categories are best understood as different answers to the question, What information should the markup express?
 
 #### 2.1 Presentational markup
 
@@ -221,11 +265,9 @@ Presentational markup specifies how content should look.
 
 For example, a word might be marked as bold, italic, red, or 18 points in size. The markup directly encodes a visual property rather than necessarily explaining why that property is appropriate.
 
-Advantages: direct control over appearance.
+**Advantages:** direct control over appearance.
 
-Disadvantages: appearance becomes intertwined with content, making redesign, reuse, and consistent formatting harder.
-
-[How to Use Troff to Format PDF Documents in Linux - Make Tech Easier](https://images.openai.com/static-rsc-4/rcAwBwaXXIkm_6tllIn6Bp3HFjrkzbl4gkx7INwhb-pZTPmQxvHCoWZTFj18uQ7nRUXxzhfq7jOOW1bYlXwFy8LoxZi82QuSG7oKBfjoFQR9rCFK5ywJFJUg2aZgNp9DbUrCC3PpqxUjukZ8HCgvBDHXSfVVqnqzE5v8_8Pzlis?purpose=inline)
+**Disadvantages:** appearance becomes intertwined with content, making redesign, reuse, and consistent formatting harder.
 
 #### 2.2 Procedural markup
 
@@ -233,11 +275,9 @@ Procedural markup tells a processing system what actions or operations to perfor
 
 A typesetting document might instruct a processor to change fonts, insert vertical space, or begin a new page. The markup expresses operations in a sequence rather than simply identifying the meaning of each passage.
 
-Advantages: fine-grained control over production.
+**Advantages:** fine-grained control over production.
 
-Disadvantages: documents can become dependent on a particular processor, sequence of operations, or output medium.
-
-[Microsoft Word Outlines and Heading Styles.](https://images.openai.com/static-rsc-4/zbkn9Eh4VBZyIPNlJZzmtCzIm1xfkh6cqW4J6H6_vwpJFZ5F5eKUtILCsUh1UudFO7-xKYjFYiGOVscxKluad7IUh2qPnHCNCcHlERy1nMjc-7yY-Dt2PABeW1CAPCspopq74A1Re36R5iQC0XaecSU78eU1rlw0jmmNe-HHsKo?purpose=inline)
+**Disadvantages:** documents can become dependent on a particular processor, sequence of operations, or output medium.
 
 #### 2.3 Descriptive markup
 
@@ -245,9 +285,9 @@ Descriptive markup identifies the role or meaning of a piece of content.
 
 For example, a passage might be identified as a heading, quotation, mathematical expression, person, or bibliographic reference. A separate processing system can decide how to display or use that information.
 
-Advantages: reuse, consistency, transformation, accessibility, and machine processing.
+**Advantages:** reuse, consistency, transformation, accessibility, and machine processing.
 
-Disadvantages: meaningful markup requires a vocabulary and conventions that processors must understand.
+**Disadvantages:** meaningful markup requires a vocabulary and conventions that processors must understand.
 
 These categories are not mutually exclusive. LaTeX, for example, provides commands for identifying document structure while also offering precise typesetting control. HTML has semantic elements, but its rendering is also influenced by presentation rules and CSS.
 
@@ -273,24 +313,22 @@ However, descriptive markup does not eliminate presentation concerns. It makes t
 
 The three traditional categories describe markup's purpose. Another useful classification groups languages according to their syntax, domain, and intended use.
 
-| Family                        | Primary purpose                                        | Examples                               |
-| ----------------------------- | ------------------------------------------------------ | -------------------------------------- |
-| General-purpose metalanguages | Define other markup vocabularies                       | SGML, XML                              |
-| Web document markup           | Structure and describe web content                     | HTML, XHTML                            |
-| Lightweight markup            | Author readable source with minimal notation           | Markdown, reStructuredText, AsciiDoc   |
-| Typesetting markup            | Control document composition and typography            | TeX, LaTeX                             |
-| Technical publishing          | Represent structured technical documentation           | DocBook                                |
-| Scholarly text encoding       | Represent texts and editorial scholarship              | TEI                                    |
-| Vector graphics               | Describe scalable two-dimensional graphics             | SVG                                    |
-| Mathematical markup           | Represent mathematical notation and structure          | MathML                                 |
-| Data-oriented markup          | Represent structured records and exchanged information | XML-based vocabularies, including Atom |
-| Interface-oriented markup     | Describe interface structure or layout                 | XAML and XUL                           |
+| Family | Primary purpose | Examples |
+| --- | --- | --- |
+| General-purpose metalanguages | Define other markup vocabularies | SGML, XML |
+| Web document markup | Structure and describe web content | HTML, XHTML |
+| Lightweight markup | Author readable source with minimal notation | Markdown, reStructuredText, AsciiDoc |
+| Typesetting markup | Control document composition and typography | TeX, LaTeX |
+| Technical publishing | Represent structured technical documentation | DocBook |
+| Scholarly text encoding | Represent texts and editorial scholarship | TEI |
+| Vector graphics | Describe scalable two-dimensional graphics | SVG |
+| Mathematical markup | Represent mathematical notation and structure | MathML |
+| Data-oriented markup | Represent structured records and exchanged information | XML-based vocabularies, including Atom |
+| Interface-oriented markup | Describe interface structure or layout | XAML and XUL |
 
-The boundaries overlap. SVG, for example, describes graphics using XML syntax; MathML represents mathematical content; and HTML can combine text, images, audio, video, and interactive controls. The HTML standard defines both document semantics and extensive browser behavior.&#x20;
+The boundaries overlap. SVG, for example, describes graphics using XML syntax; MathML represents mathematical content; and HTML can combine text, images, audio, video, and interactive controls. The HTML standard defines both document semantics and extensive browser behavior.
 
-[image](https://www.google.com/s2/favicons?domain=https://www.w3.org\&sz=32)
-
-W3C+2
+*Source: W3C (+2 more)*
 
 A language's classification therefore depends on what aspect we are examining. XML is a syntax and metalanguage, while SVG is a domain-specific vocabulary built on that syntax. Markdown is a lightweight authoring language, while HTML is the web document language it commonly generates.
 
@@ -302,7 +340,7 @@ A markup language provides a notation for describing documents. A metalanguage p
 
 XML illustrates the distinction. Its syntax permits authors to create named elements:
 
-```
+```xml
 <book>
   <title>Introduction to Computing</title>
   <author>A. Example</author>
@@ -313,19 +351,17 @@ XML itself does not define what a `book` or `author` is. An application-specific
 
 This creates several distinct layers:
 
-- Syntax: how a document is written.
-- Vocabulary: which names and constructs are available.
-- Schema: which combinations of constructs are permitted.
-- Semantics: what the constructs mean.
-- Processing model: what a consuming application does with them.
+- **Syntax:** how a document is written.
+- **Vocabulary:** which names and constructs are available.
+- **Schema:** which combinations of constructs are permitted.
+- **Semantics:** what the constructs mean.
+- **Processing model:** what a consuming application does with them.
 
 These layers are related but independent. Two documents may both be valid XML while expressing completely different kinds of information.
 
-XML's specification distinguishes a well-formed document from a valid document. Well-formedness concerns XML's basic syntactic rules, such as properly nested and matched tags. Validity adds conformance to applicable declarations or constraints.&#x20;
+XML's specification distinguishes a well-formed document from a valid document. Well-formedness concerns XML's basic syntactic rules, such as properly nested and matched tags. Validity adds conformance to applicable declarations or constraints.
 
-[image](https://www.google.com/s2/favicons?domain=https://www.w3.org\&sz=32)
-
-W3C
+*Source: W3C*
 
 This layered architecture is a major reason XML became useful for document interchange, publishing, and application-to-application communication.
 
@@ -337,7 +373,7 @@ Markup languages differ not only in what they represent, but also in how authors
 
 HTML and XML commonly use angle-bracket tags.
 
-```
+```html
 <article>
   <h1>Markup Languages</h1>
   <p>Markup adds structure to content.</p>
@@ -348,7 +384,7 @@ The tags identify elements, and their nesting expresses a hierarchical structure
 
 For example:
 
-```
+```xml
 <a href="https://example.com/">Visit the website</a>
 ```
 
@@ -360,7 +396,7 @@ This syntax is explicit and extensible, although its opening and closing tags ca
 
 Lightweight markup often uses punctuation as a shorthand for structural or presentational concepts.
 
-```
+```text
 ## Markup Languages
 
 Markup adds **structure** to content.
@@ -372,17 +408,15 @@ Markup adds **structure** to content.
 
 The source is readable without being rendered. Its brevity makes it attractive for notes, documentation, source-code repositories, and collaborative writing.
 
-However, the original Markdown ecosystem developed multiple implementations with differing interpretations of ambiguous syntax. CommonMark addresses this problem by defining a more precise specification and a conformance test suite.&#x20;
+However, the original Markdown ecosystem developed multiple implementations with differing interpretations of ambiguous syntax. CommonMark addresses this problem by defining a more precise specification and a conformance test suite.
 
-[image](https://www.google.com/s2/favicons?domain=https://spec.commonmark.org\&sz=32)
-
-spec.commonmark.org+1
+*Source: spec.commonmark.org (+1 more)*
 
 #### 4.3 Command-based syntax
 
 TeX and LaTeX use commands introduced by a backslash.
 
-```
+```text
 \section{Markup Languages}
 
 Markup adds \textbf{structure} to content.
@@ -398,7 +432,7 @@ Some structured text formats use indentation to express hierarchy rather than ex
 
 YAML is an important example:
 
-```
+```yaml
 book:
   title: Introduction to Computing
   author: A. Example
@@ -414,7 +448,7 @@ A marked-up document can be understood as a structured object rather than merely
 
 Consider this XML document:
 
-```
+```xml
 <article>
   <title>Markup Languages</title>
   <paragraph>
@@ -428,23 +462,14 @@ Consider this XML document:
 
 The document contains an article element, a title element, and two paragraph elements. Each element has a position in the hierarchy.
 
-article
+```text
+article (root element)
+├── title (text content)
+├── paragraph (text content)
+└── paragraph (text content)
+```
 
-Root element
-
-title
-
-Text content
-
-paragraph
-
-Text content
-
-paragraph
-
-Text content
-
-Simplified structural representation
+*Simplified structural representation.*
 
 This hierarchical organization is often represented internally as a tree. Each element becomes a node, nested elements become children, and the overall document has a root.
 
@@ -460,7 +485,7 @@ Three basic components of tag-based markup are worth distinguishing.
 
 For example:
 
-```
+```xml
 <person id="p17" role="editor">
   Ada Example
 </person>
@@ -472,13 +497,11 @@ Attributes and child elements can sometimes represent similar information. Choos
 
 #### 5.2 Inline markup and standoff markup
 
-The Wikipedia article also discusses two different ways to associate markup with content.&#x20;
-
-Markup_language.md
+The Wikipedia article also discusses two different ways to associate markup with content.
 
 Inline markup places the markup directly in the document:
 
-```
+```html
 <p>The <em>important</em> result was published.</p>
 ```
 
@@ -486,7 +509,7 @@ Standoff markup stores annotations separately and associates them with the origi
 
 A simplified example might look like this:
 
-```
+```json
 {
   "text": "The important result was published.",
   "annotations": [
@@ -513,25 +536,11 @@ Markup does not normally produce a visible result by itself. Software interprets
 
 A typical workflow looks like this:
 
-1\. Source document
-
-Text plus markup
-
-2\. Parsing
-
-Recognize syntax and structure
-
-3\. Interpretation and validation
-
-Apply language rules and optional constraints
-
-4\. Processing
-
-Build a document tree, transform data, or apply styles
-
-5\. Output
-
-A web page, PDF, structured data, or another representation
+1. **Source document** — Text plus markup
+2. **Parsing** — Recognize syntax and structure
+3. **Interpretation and validation** — Apply language rules and optional constraints
+4. **Processing** — Build a document tree, transform data, or apply styles
+5. **Output** — A web page, PDF, structured data, or another representation
 
 This is a conceptual pipeline, not a requirement that every markup language follow exactly these steps.
 
@@ -564,11 +573,9 @@ After parsing, a processor may transform the document into another format or ren
 
 A recipe document encoded in XML could be transformed into HTML for a website, PDF for printing, or plain text for a compact recipe card.
 
-Likewise, a Markdown document can be converted to HTML. A stylesheet can determine how structured elements are displayed in a browser. CSS is specifically designed to control aspects of web-document presentation such as typography, colors, and spacing.&#x20;
+Likewise, a Markdown document can be converted to HTML. A stylesheet can determine how structured elements are displayed in a browser. CSS is specifically designed to control aspects of web-document presentation such as typography, colors, and spacing.
 
-[image](https://www.google.com/s2/favicons?domain=https://www.w3.org\&sz=32)
-
-W3C+1
+*Source: W3C (+1 more)*
 
 This ability to separate a source document from its output is one of the most important practical benefits of markup.
 
@@ -576,77 +583,61 @@ This ability to separate a source document from its output is one of the most im
 
 The original article concentrates on the historical development of SGML, HTML, XML, and TeX-related systems. For a more complete study, it helps to compare these with lightweight markup and domain-specific vocabularies.
 
-[HTML Overview | Clear Programming](https://images.openai.com/static-rsc-4/i1Zj6rmVonUfdt_roAKuPzkajTtWRGYrLgEPJiINUkg1YBnf5O55ubqzplsLxQrpPvi-xftHk56Ede7sgQ-QKstbKUJnIPOzjDug6wQOV6_J9gp_s2Kj6Yg8Fe0HtyZg5PEerk2S2o8CkCzeGbGxJbifpdufAVWMjNSzdAnWfM4?purpose=inline)
-
 ### HTML
 
-HyperText Markup Language
+**HyperText Markup Language**
 
 HTML is the core markup language of the Web. It defines elements for headings, paragraphs, links, images, forms, tables, and many other document and interface components.
 
-Unlike a completely user-defined XML vocabulary, HTML has a standardized set of element names and defined browser-processing behavior. Modern HTML is maintained as a living standard.&#x20;
+Unlike a completely user-defined XML vocabulary, HTML has a standardized set of element names and defined browser-processing behavior. Modern HTML is maintained as a living standard.
 
-[image](https://www.google.com/s2/favicons?domain=https://html.spec.whatwg.org\&sz=32)
+*Source: HTML Living Standard (+1 more)*
 
-HTML Living Standard+1
-
-Best suited for: web pages, browser-based documents, and web application structure.
-
-[XML source code close-up concept](https://images.openai.com/static-rsc-4/zOgROJuotmhoUjLJNd7KpLUm9NRx0O1nae6RxOu6re80gCXMCUyW-8FhoWixwBCDnUtLSR_z4oHF4acFqp8ucLf-YjG8tU73-gh1a5nQdjze9tg8BGvSPr-egUKBVbbgxr-OPhvvJi1kAkkU70dNlneqq28p-xEcrVG1PhHafic6HgHwd0dnnbJ0eh0ml7EO?purpose=inline)
+**Best suited for:** web pages, browser-based documents, and web application structure.
 
 ### XML
 
-Extensible Markup Language
+**Extensible Markup Language**
 
 XML provides rules for creating structured documents with named elements and attributes.
 
 It is useful when applications need explicit document structure, predictable syntax, extensible vocabularies, and validation. Its flexibility comes with a cost: verbose notation and the need to define conventions for each application.
 
-Best suited for: structured documents, configuration, document exchange, and specialized data vocabularies.&#x20;
+**Best suited for:** structured documents, configuration, document exchange, and specialized data vocabularies.
 
-[image](https://www.google.com/s2/favicons?domain=https://www.w3.org\&sz=32)
-
-W3C
-
-[5  Reproducible notebooks – BES Guide to Reproducible Code](https://images.openai.com/static-rsc-4/QbTUCghC7w74MAmqw5bDYZcwAvtzaBMvz-IESY6HvaFy12vXdzpSGln3v5JSJN8RtERXHZxbtiCIPh8op5ukxPrXJaYYLK6x9Gp03gtsKs7uf3Gkg1y_KZNlr6KE3DAHtKcR-pqTmCA6LCzhVJkXewSXO8gjkD4SHzoEm26IIvc?purpose=inline)
+*Source: W3C*
 
 ### Markdown
 
-Lightweight markup
+**Lightweight markup**
 
 Markdown prioritizes human-readable source. Authors can create headings, lists, links, code blocks, and emphasis without writing a tag for every element.
 
 Its simplicity makes it popular for software documentation, notes, readme files, and collaborative writing. Different implementations may support different extensions, so compatibility requires attention to the dialect or specification being used.
 
-Best suited for: documentation, technical notes, and relatively simple structured writing.&#x20;
+**Best suited for:** documentation, technical notes, and relatively simple structured writing.
 
-[image](https://www.google.com/s2/favicons?domain=https://spec.commonmark.org\&sz=32)
-
-spec.commonmark.org+1
-
-[LaTeX Templates       - Classicthesis Typographic Thesis](https://images.openai.com/static-rsc-4/IkaHY11uS7if12_ET7az86wzKV50xErbHp7P8SHsgNIdJf5GbmhWcepu152MHj8I-3sJ-_sYUxxP8nNBhmqTjnnM4u2q1ikIFz5eRaNMLm5XWkMpDKojDXJqMCJloNzSuAjFyVjEFZD5MBHnrSKla7QflKyiSOwdXT8YHf3W_-A?purpose=inline)
+*Source: spec.commonmark.org (+1 more)*
 
 ### TeX and LaTeX
 
-Typesetting and document preparation
+**Typesetting and document preparation**
 
 TeX is a typesetting system, while LaTeX is a document preparation system built on TeX. LaTeX provides higher-level commands for sections, references, mathematical notation, bibliographies, and document structure.
 
 It combines descriptive commands with detailed control over composition, making it especially useful for academic and mathematical publishing.
 
-Best suited for: scientific papers, technical books, mathematical writing, and publication workflows.
-
-[Archives en ligne](https://images.openai.com/static-rsc-4/6XPDrxTCKEIuoN2HSzNajOe_1E0Qt7Ov0kLzhjTbt5e1L36rptnXD_DmeQFcRd0iKSoZTvrPPNNhLNmQuAYnpeFI97KG4zyXQff-XMeDI2_HmBMf8B2Gox-YUHV8WAukiB-mQ4K9ElSn5fgmI1NUXHsZXC1FwPL-qGtqxXO6iHg?purpose=inline)
+**Best suited for:** scientific papers, technical books, mathematical writing, and publication workflows.
 
 ### TEI
 
-Text Encoding Initiative
+**Text Encoding Initiative**
 
 TEI provides extensive guidelines for encoding texts for scholarly research, particularly in the humanities and social sciences.
 
 A TEI document can represent structural divisions, speakers, dates, names, textual variants, editorial interventions, and other features relevant to scholarly interpretation.
 
-Best suited for: digital editions, historical documents, literary studies, and linguistic research.
+**Best suited for:** digital editions, historical documents, literary studies, and linguistic research.
 
 #### 7.1 Why there are so many markup languages
 
@@ -675,7 +666,7 @@ A traditional markup language describes the organization, properties, or interpr
 
 Consider:
 
-```
+```xml
 <button>Save</button>
 ```
 
@@ -683,7 +674,7 @@ This HTML describes a button in a document. By itself, it does not implement an 
 
 Now consider JavaScript:
 
-```
+```javascript
 button.addEventListener("click", () => {
   saveDocument();
 });
@@ -707,16 +698,16 @@ The important distinction is whether a format is principally concerned with anno
 
 When evaluating or designing a markup language, several questions become particularly important.
 
-| Design dimension | Key question                                              | Common trade-off                              |
-| ---------------- | --------------------------------------------------------- | --------------------------------------------- |
-| Readability      | Can humans understand the source easily?                  | Conciseness versus explicitness               |
-| Expressiveness   | Can the language represent the required concepts?         | Simplicity versus flexibility                 |
-| Extensibility    | Can new concepts be introduced safely?                    | Freedom versus interoperability               |
-| Validation       | Can invalid structures be detected?                       | Strictness versus authoring convenience       |
-| Semantics        | Are the meanings of constructs clear?                     | Generality versus domain specificity          |
-| Presentation     | Can content be rendered in different ways?                | Reuse versus fine-grained visual control      |
+| Design dimension | Key question | Common trade-off |
+| --- | --- | --- |
+| Readability | Can humans understand the source easily? | Conciseness versus explicitness |
+| Expressiveness | Can the language represent the required concepts? | Simplicity versus flexibility |
+| Extensibility | Can new concepts be introduced safely? | Freedom versus interoperability |
+| Validation | Can invalid structures be detected? | Strictness versus authoring convenience |
+| Semantics | Are the meanings of constructs clear? | Generality versus domain specificity |
+| Presentation | Can content be rendered in different ways? | Reuse versus fine-grained visual control |
 | Interoperability | Do different processors interpret documents consistently? | Implementation freedom versus standardization |
-| Complexity       | How difficult is parsing and implementation?              | Power versus ease of implementation           |
+| Complexity | How difficult is parsing and implementation? | Power versus ease of implementation |
 
 These are not merely theoretical concerns. They explain why two languages with superficially similar syntax can behave very differently in practice.
 
@@ -748,33 +739,23 @@ These benefits depend on the vocabulary actually expressing meaningful distincti
 
 ### 10. Markup languages beyond publishing
 
-The article observes that markup has expanded into graphics, mathematical notation, playlists, web services, and user interfaces.&#x20;
+The article observes that markup has expanded into graphics, mathematical notation, playlists, web services, and user interfaces.
 
-Markup_language.md
+These applications demonstrate that markup is a general technique for representing structured information.
 
-&#x20;These applications demonstrate that markup is a general technique for representing structured information.
-
-[Abstract shapes illustration](https://images.openai.com/static-rsc-4/6KVsutGRR-bFp8dz5QOR7H8jfuPP6r4J-WZx1xd-Wwx-JCQSXwizKCGWOiOuIzXDiQBkuGSaw_fnYSHrodzztQNDhmf3l2tsARf958W8J-G85cghNgVr41ric0Ff1eI3paYZMUG1EllwiN-RrjQJFRiwLc-XOyvHhe-IFxNYNHPsIoIKUvyKaA8tDn4xwr4L?purpose=inline)
-
-Graphics — SVG
+**Graphics — SVG**
 
 SVG represents two-dimensional graphics through elements such as paths, shapes, text, and groups. Because it describes geometry rather than only a fixed-resolution bitmap, it can be scaled and manipulated by compatible software.
 
-[Pencil and math book](https://images.openai.com/static-rsc-4/mergyG5z2WseM7tI-sJFnXOT6l4r0z3Mi_UuXs_PKTXS4EWfqZzMmdlRHWUwogCckWTuwj4NXL42SDj2xMt0K1MPCtsYu4tv9-p1armrzUR5G83y_JU2NNkxO1wkTqv-49hLbGY1jDZGtp8o7pFrrH9Q1PjnV0kTlKExdcdpXsJvqyd_hxUGqnQvEmUP0RYX?purpose=inline)
-
-Mathematics — MathML
+**Mathematics — MathML**
 
 MathML represents mathematical expressions and their structure, supporting uses in which mathematics must be interpreted or processed rather than stored only as an image.
 
-[New styles for code examples in the OCaml reference manual - Ecosystem - OCaml](https://images.openai.com/static-rsc-4/T7JhcYx8APAkZlpH-fEYWNtw451uDIE48REJgZyNL8GM4JVxtaQsD5vkVYAFBNJkP3kAHXW7oIdwvcyP3ooyne3pTbadJlEBcsVOMpUn7LQADwZo6oAF2v167D_7mZGZtxCLPG7qrf3nEgWEC2rAcG1afBB1nau5uDSPYWCnLJY?purpose=inline)
-
-Technical documentation — DocBook
+**Technical documentation — DocBook**
 
 DocBook provides a vocabulary for structured technical books and articles. A document can identify chapters, sections, procedures, examples, and other components for downstream publishing.
 
-[PL03-Topic02, PyQt, Qt Designer](https://images.openai.com/static-rsc-4/Lby5IvC-GQxwQdIVJwC6tvsyRqCmWZ4f1vbCKzx_-E0MMIQmYieRrElaSwleVE5nqRcM4Rzrf09tCOEUk2Psfa4bqAbNlgf2oJBd827sJa85LLtaG2kb7kHsVFAlICFFg1kikh5xoKPoDX_cstlEe1-EP0NDVeyjMtn60pLjdD8?purpose=inline)
-
-User interfaces — XAML and similar systems
+**User interfaces — XAML and similar systems**
 
 Interface-oriented markup can describe windows, controls, layouts, and relationships between visual components. Application frameworks then interpret that structure and connect it to application behavior.
 
@@ -808,31 +789,29 @@ A successful markup design balances expressiveness with clarity, predictable pro
 
 ### 12. A deeper historical interpretation
 
-The history described in the Wikipedia article can be understood as a progression through several different problems.&#x20;
-
-Markup_language.md
+The history described in the Wikipedia article can be understood as a progression through several different problems.
 
 ### 1960s–70s
 
-Standardizing publishing instructions
+**Standardizing publishing instructions**
 
 Early systems such as RUNOFF, troff, and nroff used embedded commands to direct text processing. GenCode and IBM's GML helped advance the idea that documents could use generalized descriptions instead of device-specific instructions.
 
 ### 1970s–80s
 
-Separating structure from presentation
+**Separating structure from presentation**
 
 Scribe and the development of SGML advanced descriptive markup and the idea that document structure should be distinct from its eventual visual form. TeX simultaneously demonstrated the importance of sophisticated control over typography and mathematical composition.
 
 ### 1990s
 
-The Web and extensible document formats
+**The Web and extensible document formats**
 
 HTML made structured hypertext central to the Web. XML simplified aspects of SGML for broader use, including data exchange and specialized vocabularies.
 
 ### 2000s onward
 
-Lightweight authoring and specialized applications
+**Lightweight authoring and specialized applications**
 
 Markdown became popular for readable source documents, while markup-based technologies continued to support graphics, mathematical expressions, scholarly editions, configuration, and interface descriptions.
 
@@ -844,71 +823,28 @@ The enduring development is the increasing ability to describe content independe
 
 ### 13. Research directions worth exploring next
 
-If your goal is to research markup languages in depth, I would expand the investigation into six areas.
+To research markup languages in depth, the investigation could expand into six areas.
 
-1\. Comparative language design
-
-Compare XML, HTML, Markdown, LaTeX, and SGML in terms of syntax, semantics, extensibility, validation, and processing. This is the best starting point for understanding the field's major design trade-offs.
-
-2\. Formal grammars and parsing
-
-Investigate grammars, tokenization, parsing algorithms, error recovery, tree construction, and how language specifications define what counts as a valid document.
-
-3\. Semantics and knowledge representation
-
-Explore how vocabularies encode meaning, how metadata is represented, and why syntactic validity is different from semantic correctness.
-
-4\. Document transformation and publishing
-
-Study stylesheets, XSLT, Markdown conversion pipelines, typesetting engines, and multi-format publishing systems.
-
-5\. Interoperability and security
-
-Examine schema design, versioning, namespaces, compatibility, safe parsing, and the challenges of exchanging structured documents between independent systems.
-
-6\. Scholarly and historical encoding
-
-Investigate TEI, digital editions, archival documents, overlapping annotations, and the role of markup in preserving the interpretation and provenance of texts.
+1. **Comparative language design** — Compare XML, HTML, Markdown, LaTeX, and SGML in terms of syntax, semantics, extensibility, validation, and processing. This is the best starting point for understanding the field's major design trade-offs.
+2. **Formal grammars and parsing** — Investigate grammars, tokenization, parsing algorithms, error recovery, tree construction, and how language specifications define what counts as a valid document.
+3. **Semantics and knowledge representation** — Explore how vocabularies encode meaning, how metadata is represented, and why syntactic validity is different from semantic correctness.
+4. **Document transformation and publishing** — Study stylesheets, XSLT, Markdown conversion pipelines, typesetting engines, and multi-format publishing systems.
+5. **Interoperability and security** — Examine schema design, versioning, namespaces, compatibility, safe parsing, and the challenges of exchanging structured documents between independent systems.
+6. **Scholarly and historical encoding** — Investigate TEI, digital editions, archival documents, overlapping annotations, and the role of markup in preserving the interpretation and provenance of texts.
 
 ### 14. Recommended primary references
 
 For research beyond the Wikipedia article, these specifications and documentation sources are particularly valuable.
 
-[image](https://www.google.com/s2/favicons?domain=https://www.w3.org\&sz=32)
+- [XML 1.0 — W3C](https://www.w3.org/TR/xml/) — The formal specification for XML syntax, well-formedness, and validity terminology.
+- [HTML Living Standard — WHATWG](https://html.spec.whatwg.org/multipage/) — The authoritative technical reference for HTML's elements, document structure, parsing, and browser behavior.
 
-[XML 1.0 — W3C](https://www.w3.org/TR/xml/?utm_source=chatgpt.com)
-
-The formal specification for XML syntax, well-formedness, and validity terminology.
-
-[image](https://www.google.com/s2/favicons?domain=https://html.spec.whatwg.org\&sz=32)
-
-[HTML Living Standard — WHATWG](https://html.spec.whatwg.org/multipage/?utm_source=chatgpt.com)
-
-The authoritative technical reference for HTML's elements, document structure, parsing, and browser behavior.
-
-[image](https://www.google.com/s2/favicons?domain=https://spec.commonmark.org\&sz=32)
-
-[CommonMark specification](https://spec.commonmark.org/?utm_source=chatgpt.com)
+[CommonMark specification](https://spec.commonmark.org/)
 
 A precise specification for Markdown syntax, useful for studying ambiguity, parsing, and interoperability.
 
-[image](https://www.google.com/s2/favicons?domain=https://www.w3.org\&sz=32)
-
-[CSS — W3C](https://www.w3.org/Style/CSS/?utm_source=chatgpt.com)
-
-Documentation on the language used to control the presentation of web documents.
-
-[image](https://www.google.com/s2/favicons?domain=https://www.tei-c.org\&sz=32)
-
-[TEI Guidelines](https://www.tei-c.org/guidelines/?utm_source=chatgpt.com)
-
-A substantial reference for scholarly text encoding and the modeling of complex textual features.
-
-These sources complement the historical overview with primary technical material.&#x20;
-
-[image](https://www.google.com/s2/favicons?domain=https://www.w3.org\&sz=32)
-
-W3C+3
+- [CSS — W3C](https://www.w3.org/Style/CSS/) — Documentation on the language used to control the presentation of web documents.
+- [TEI Guidelines](https://www.tei-c.org/guidelines/) — A substantial reference for scholarly text encoding and the modeling of complex textual features. These sources complement the historical overview with primary technical material. *(W3C (+3 more)).*
 
 ### Conclusion
 
@@ -920,4 +856,4 @@ The most important conceptual distinction is that a document's structure, its me
 
 Understanding that distinction makes it easier to compare existing languages, understand their histories, select the appropriate format for a task, and evaluate the design of new markup systems.
 
-Research note: The supplied Wikipedia snapshot is the basis for the historical framework and original categories. The technical examples, comparisons, and research directions above are additional explanatory material; they are not all claims made by the original article.
+> **Research note.** The Wikipedia text in Part I is the basis for the historical framework and original categories. The technical examples, comparisons, and research directions above are additional explanatory material; they are not all claims made by the original article.

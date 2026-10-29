@@ -1,4 +1,12 @@
+---
+title: "C Foreign Function Interface (FFI)"
+document_type: "Research note"
+formatted: 2026-10-28
+---
+
 # C Foreign Function Interface (FFI)
+
+> **Structure of this document.** Part I is exploratory research on foreign function interfaces. Part II (*Technical Proposal*) develops it into a design specification.
 
 A Foreign Function Interface (FFI) is a mechanism that allows code written in one programming language to call functions, exchange data, and sometimes manipulate objects implemented in another language. It is a foundational technology for embedding scripting languages in game engines, extending applications with plugins, and connecting high-level languages to native libraries.
 
@@ -8,33 +16,43 @@ How should a programming language represent calls to external engine APIs so tha
 
 This is more than a syntax problem. A robust FFI needs to define how functions are discovered, how values cross language boundaries, how engine objects are represented, and how foreign calls behave at runtime.
 
+## Contents
+
+- [1. The basic concept](#1-the-basic-concept)
+- [2. Why FFI matters for a visual programming language](#2-why-ffi-matters-for-a-visual-programming-language)
+- [3. Three distinct approaches to binding foreign code](#3-three-distinct-approaches-to-binding-foreign-code)
+- [4. Lua: the practical model for a game engine](#4-lua-the-practical-model-for-a-game-engine)
+- [5. C versus C++ versus C# interop](#5-c-versus-c-versus-c-interop)
+- [6. The most important technical design problems](#6-the-most-important-technical-design-problems)
+- [7. How this connects to visual programming and text-based graph formats](#7-how-this-connects-to-visual-programming-and-text-based-graph-formats)
+- [8. API metadata: the bridge between native code and graph nodes](#8-api-metadata-the-bridge-between-native-code-and-graph-nodes)
+- [9. Design questions for an AI-friendly FFI](#9-design-questions-for-an-ai-friendly-ffi)
+- [10. Recommended architecture](#10-recommended-architecture)
+- [11. Further reading](#11-further-reading)
+- [12. Open research directions](#12-open-research-directions)
+- [Part II — Technical Proposal: A Unified FFI for Visual Programming Languages](#part-ii--technical-proposal-a-unified-ffi-for-visual-programming-languages)
+
 ## 1. The basic concept
 
 Suppose a game engine implements a native C++ function:
 
-```
+```c
 void SetPlayerHealth(Entity* player, float health);
 ```
 
 A scripting language such as Lua might want to invoke it like this:
 
-```
+```text
 SetPlayerHealth(player, 75.0)
 ```
 
 The Lua runtime cannot simply execute the C++ function by interpreting that expression. Some integration layer must connect the Lua call to the native function, convert or validate its arguments, invoke the implementation using the correct calling convention, and translate the result back into a Lua value if necessary.
 
-Scripting or visual program
+*Figure: call path from visual program to native API*
 
-`SetPlayerHealth(player, 75.0)`
-
-FFI binding / adapter
-
-Resolve function · Validate types · Convert arguments · Check permissions
-
-Native engine API
-
-C / C++ / C# / engine runtime
+1. **Scripting or visual program** — `SetPlayerHealth(player, 75.0)`
+2. **FFI binding / adapter** — Resolve function · Validate types · Convert arguments · Check permissions
+3. **Native engine API** — C / C++ / C# / engine runtime
 
 The diagram represents the logical flow. The implementation can vary considerably: a Lua C API wrapper might use explicit adapters, a dynamic FFI might call native functions through generated call stubs, and a managed runtime might use marshaling and runtime interop.
 
@@ -44,7 +62,7 @@ An FFI is not necessarily a single standardized technology. It is a broad catego
 
 Imagine a visual programming language in which nodes represent functions, data, and control flow. Its textual representation might contain:
 
-```
+```text
 node SetPlayerHealth {
  target: Entity
  health: Float
@@ -55,13 +73,13 @@ That declares a node's shape, but not necessarily what executes when the node ru
 
 A complete system must answer several questions:
 
-- Binding: Which native function implements the node?
-- Typing: Which foreign types correspond to the language's types?
-- Calling: How are arguments, return values, errors, and callbacks handled?
-- Lifetime: Who owns the objects and memory passed across the boundary?
-- Availability: Which engine version or platform provides the function?
-- Security: Which native operations is a script allowed to invoke?
-- Serialization: How does a graph retain a stable reference to the binding when saved to a text file?
+- **Binding:** Which native function implements the node?
+- **Typing:** Which foreign types correspond to the language's types?
+- **Calling:** How are arguments, return values, errors, and callbacks handled?
+- **Lifetime:** Who owns the objects and memory passed across the boundary?
+- **Availability:** Which engine version or platform provides the function?
+- **Security:** Which native operations is a script allowed to invoke?
+- **Serialization:** How does a graph retain a stable reference to the binding when saved to a text file?
 
 These requirements suggest treating FFI as a first-class part of the language's execution model, rather than merely allowing arbitrary native function calls inside expressions.
 
@@ -69,33 +87,33 @@ These requirements suggest treating FFI as a first-class part of the language's 
 
 The term FFI is often used broadly, but it helps to distinguish three architectures.
 
-A. Explicit native bindings
+**A. Explicit native bindings**
 
 The engine or library author writes a C-compatible adapter that registers functions with the scripting runtime. This is the traditional Lua C API approach.
 
-Best for: embedding, controlled APIs, portability, and carefully designed wrappers.
+**Best for:** embedding, controlled APIs, portability, and carefully designed wrappers.
 
 Lua's official manual documents the C API used by the host program to interact with the interpreter.
 
-Lua+1
+*Source: Lua (+1 more)*
 
-B. Dynamic native FFI
+**B. Dynamic native FFI**
 
 The scripting environment dynamically loads native libraries, resolves symbols, and uses type declarations to call functions directly. A separate wrapper for every function may not be necessary.
 
-Best for: C libraries, rapid prototyping, and low-level native integration.
+**Best for:** C libraries, rapid prototyping, and low-level native integration.
 
 This approach places more responsibility on correct type declarations, ABI compatibility, memory handling, and pointer safety.
 
-C. Reflected or generated bindings
+**C. Reflected or generated bindings**
 
 The engine exposes a selected API through metadata, reflection, or generated wrapper code. A visual editor can inspect this information to construct typed nodes.
 
-Best for: visual programming, engine APIs, editor tooling, and version-aware node generation.
+**Best for:** visual programming, engine APIs, editor tooling, and version-aware node generation.
 
 Unreal Engine's `UFUNCTION` and `BlueprintCallable` mechanism is a practical example of exposing selected C++ functions to Blueprint graphs.
 
-Epic Developer Community+1
+*Source: Epic Developer Community (+1 more)*
 
 These approaches are not mutually exclusive. A game engine could expose most gameplay functions through reflection, provide generated wrappers for frequently used APIs, and reserve dynamic FFI for advanced native integrations.
 
@@ -103,38 +121,38 @@ These approaches are not mutually exclusive. A game engine could expose most gam
 
 Lua is especially relevant because it is designed to be embedded in applications. The host application controls the interpreter and chooses which C functions to make available.
 
-Lua+1
+*Source: Lua (+1 more)*
 
 ### 4.1 Registering a native function
 
 A simplified C binding might look like this:
 
-```
+```c
 #include <lua.h>
 #include <lauxlib.h>
 
 static int l_add(lua_State *L) {
- lua_Integer a = luaL_checkinteger(L, 1);
- lua_Integer b = luaL_checkinteger(L, 2);
+    lua_Integer a = luaL_checkinteger(L, 1);
+    lua_Integer b = luaL_checkinteger(L, 2);
 
- lua_pushinteger(L, a + b);
- return 1;
+    lua_pushinteger(L, a + b);
+    return 1;
 }
 
 void register_math_api(lua_State *L) {
- lua_register(L, "add", l_add);
+    lua_register(L, "add", l_add);
 }
 ```
 
 Lua code can then call:
 
-```
+```lua
 local result = add(20, 22)
 ```
 
 The adapter `l_add` does not have the same signature as an ordinary C function like `int add(int, int)`. Instead, it follows Lua's C-function protocol: it receives a `lua_State`, reads arguments from the Lua stack, pushes results onto that stack, and returns the number of results.
 
-Lua+1
+*Source: Lua (+1 more)*
 
 This distinction is important: the binding adapter is itself a function in the runtime's calling convention. It mediates between two different execution models.
 
@@ -142,7 +160,7 @@ This distinction is important: the binding adapter is itself a function in the r
 
 A game engine needs to expose more than simple numbers and strings. Consider an entity with a native representation:
 
-```
+```text
 struct Entity {
  float health;
 };
@@ -150,14 +168,14 @@ struct Entity {
 
 A script might write:
 
-```
+```text
 player:set_health(75.0)
 print(player:get_health())
 ```
 
 The Lua value `player` generally should not be a copy of the native object. Instead, it can be userdata that represents or references the engine-owned entity. Metatables can define operations and behavior for that userdata.
 
-Lua+1
+*Source: Lua (+1 more)*
 
 A robust engine binding needs to determine:
 
@@ -180,18 +198,18 @@ The trade-off is maintenance: large engines may have thousands of functions, mak
 These three targets have different constraints, even when the source language is the same.
 
 | Target | Typical integration mechanism | Main challenge |
-| ------ | --------------------------------------------------- | ----------------------------------------------------------------------- |
+| --- | --- | --- |
 | C | C ABI, exported functions, function pointers | Correct types, ownership, and calling convention |
 | C++ | C wrappers, reflection, generated adapters | Complex types, templates, exceptions, and compiler-specific ABI details |
 | C# | Managed interop, P/Invoke, runtime or engine bridge | Marshaling, managed object lifetime, and runtime boundaries |
 
 The C ABI is a common interoperability target because C has a relatively stable binary interface across supported platforms. C++ does not have one universally consistent ABI across popular compiler implementations, so exporting a narrow C-compatible interface is often preferable.
 
-Microsoft Learn+1
+*Source: Microsoft Learn (+1 more)*
 
 For C#,.NET supports Platform Invocation Services (P/Invoke) for native calls. Modern.NET also supports source-generated interop through `LibraryImport`, reducing some runtime stub-generation overhead and making interop code more explicit.
 
-Microsoft Learn+1
+*Source: Microsoft Learn (+1 more)*
 
 One important distinction: calling a C function from a C# application and exposing C# engine objects to Lua are different problems. The latter requires a managed-runtime bridge, which may use reflection, generated wrappers, or an engine-specific embedding layer.
 
@@ -204,17 +222,17 @@ An FFI is easy to demonstrate with a function that adds two integers. It becomes
 The foreign function and the scripting runtime may represent the same logical value differently. Marshaling converts values between these representations.
 
 | Native type | Possible language-level type |
-| ------------- | ---------------------------- |
-| `int32_t`  | `Int32`  |
-| `float`  | `Float32`  |
-| `const char*` | `String`  |
-| `Vector3`  | `Vector3` value |
-| `Entity*`  | `Entity` reference |
+| --- | --- |
+| `int32_t` | `Int32` |
+| `float` | `Float32` |
+| `const char*` | `String` |
+| `Vector3` | `Vector3` value |
+| `Entity*` | `Entity` reference |
 | `void` return | No return value |
 
 The mapping is not always one-to-one. A C string is not the same as an arbitrary Unicode string, and a native pointer is not automatically a safe object reference. Struct layout, alignment, encoding, nullability, and ownership all matter..NET's native interop guidance emphasizes matching native signatures and choosing appropriate representations.
 
-Microsoft Learn+1
+*Source: Microsoft Learn (+1 more)*
 
 ### 6.2 Memory ownership and lifetimes
 
@@ -222,10 +240,10 @@ Every pointer or resource crossing the boundary needs an ownership contract.
 
 Common policies include:
 
-- Borrowed: the caller may use the value temporarily but must not free it.
-- Owned: the receiver is responsible for releasing the resource.
-- Shared: multiple parties may retain references under defined rules.
-- Handle-based: the language receives an opaque identifier instead of a raw pointer.
+- **Borrowed:** the caller may use the value temporarily but must not free it.
+- **Owned:** the receiver is responsible for releasing the resource.
+- **Shared:** multiple parties may retain references under defined rules.
+- **Handle-based:** the language receives an opaque identifier instead of a raw pointer.
 
 For game engines, borrowed references and engine-managed handles are often preferable to transferring ownership of engine objects to a garbage-collected script.
 
@@ -235,7 +253,7 @@ Native code may report errors through return codes, error objects, exceptions, o
 
 For example, a binding could return a result:
 
-```
+```text
 result: Result<Float32, EngineError>
 ```
 
@@ -265,7 +283,7 @@ Instead, the text format should reference a logical API declaration, and the eng
 
 For example, a hypothetical format might support:
 
-```
+```text
 module engine.gameplay
 
 external function set_player_health(
@@ -290,15 +308,15 @@ The compiler or graph editor could use this declaration to construct a typed nod
 
 ### A recommended separation of concerns
 
-Layer 1 — API schema
+**Layer 1 — API schema**
 
 Names, types, defaults, nullability, ownership, effects, permissions, and documentation.
 
-Layer 2 — Binding implementation
+**Layer 2 — Binding implementation**
 
 Native symbol, reflection lookup, generated wrapper, marshaling, and runtime dispatch.
 
-Layer 3 — Program representation
+**Layer 3 — Program representation**
 
 Stable node IDs, typed connections, control flow, serialized graph structure, and source locations.
 
@@ -312,42 +330,42 @@ A visual programming editor needs much more information than a function's C sign
 
 Consider this native declaration:
 
-```
+```c
 void SpawnProjectile(
- Entity* owner,
- Vector3 position,
- Vector3 direction,
- float speed
+    Entity* owner,
+    Vector3 position,
+    Vector3 direction,
+    float speed
 );
 ```
 
 A graph-oriented schema might describe it as:
 
-```
+```yaml
 id: engine.combat.spawn_projectile
 version: 1
 
 parameters:
- - name: owner
- type: Entity
- ownership: borrowed
- nullable: false
+  - name: owner
+    type: Entity
+    ownership: borrowed
+    nullable: false
 
- - name: position
- type: Vector3
+  - name: position
+    type: Vector3
 
- - name: direction
- type: Vector3
+  - name: direction
+    type: Vector3
 
- - name: speed
- type: Float32
- constraints:
- minimum: 0
+  - name: speed
+    type: Float32
+    constraints:
+      minimum: 0
 
 returns: Unit
 
 effects:
- - world.spawn
+  - world.spawn
 thread: game
 ```
 
@@ -357,14 +375,14 @@ The metadata allows the editor to create a node with four inputs and an executio
 
 This approach has a close real-world analogue in Unreal Engine's reflection system: C++ declarations annotated with `UFUNCTION` metadata can be exposed to Blueprint graphs, while specifiers control how those functions are presented and used.
 
-Epic Developer Community+1
+*Source: Epic Developer Community (+1 more)*
 
 ## 9. Design questions for an AI-friendly FFI
 
 If an LLM is generating the text representation of a graph, an FFI schema should minimize the amount of information the model must infer.
 
 | Design choice | Recommended direction | Why it helps |
-| ----------------------- | ---------------------------------------- | --------------------------------------------------- |
+| --- | --- | --- |
 | Function identification | Stable, fully qualified IDs | Avoids ambiguous names and accidental substitutions |
 | Types | Explicit, canonical types | Reduces invented conversions |
 | Overloads | Explicit signatures or distinct IDs | Prevents choosing the wrong overload |
@@ -384,7 +402,7 @@ That is safer than asking the model to reproduce a C++ declaration accurately or
 
 Consider two functions:
 
-```
+```text
 math.normalize(vector: Vector3) -> Vector3
 world.destroy(entity: Entity) -> Unit
 ```
@@ -409,23 +427,12 @@ This is a useful extension of conventional FFI design because it makes behaviora
 
 For a new visual programming language targeting a game engine, the preferred approach is a schema-first, generated-binding architecture with an explicit C ABI fallback.
 
-1. Define the API schema
+1. **Define the API schema** — Use a canonical declaration format for function identity, types, defaults, ownership, effects, threading, and errors.
+2. **Generate bindings and graph metadata** — Produce wrappers, validation code, editor node definitions, documentation, and type information from the same source.
+3. **Validate before execution** — Check signatures, capabilities, API versions, type conversions, and threading restrictions before dispatching a call.
+4. **Keep implementation replaceable** — Permit the same logical function to use a hand-written Lua adapter, generated C wrapper, reflection-based dispatcher, or managed C# bridge without changing the serialized graph.
 
-Use a canonical declaration format for function identity, types, defaults, ownership, effects, threading, and errors.
-
-2. Generate bindings and graph metadata
-
-Produce wrappers, validation code, editor node definitions, documentation, and type information from the same source.
-
-3. Validate before execution
-
-Check signatures, capabilities, API versions, type conversions, and threading restrictions before dispatching a call.
-
-4. Keep implementation replaceable
-
-Permit the same logical function to use a hand-written Lua adapter, generated C wrapper, reflection-based dispatcher, or managed C# bridge without changing the serialized graph.
-
-the recommended approach is to also make the following choices:
+The recommended approach is to also make the following choices:
 
 - Use stable logical IDs rather than raw native symbol names as serialized references.
 - Prefer engine-managed handles over arbitrary pointers in the language's public type system.
@@ -440,81 +447,53 @@ This approach is more work to design initially than exposing raw function pointe
 
 These are useful primary sources for deepening the research.
 
-Lua — Reference manual and C API
+**Lua — Reference manual and C API**
 
 The canonical starting point for embedding Lua, registering native functions, managing the Lua stack, and exposing userdata.
 
-[Lua 5.5 Reference Manual](https://www.lua.org/manual/5.5/manual.html?utm_source=chatgpt.com)
+- [Lua 5.5 Reference Manual](https://www.lua.org/manual/5.5/manual.html) — *Unreal Engine — Reflection and Blueprint exposure.* A real example of native engine functions being exposed as typed visual-programming nodes.
 
-Unreal Engine — Reflection and Blueprint exposure
+[UFunctions](https://dev.epicgames.com/documentation/unreal-engine/ufunctions-in-unreal-engine)
 
-A real example of native engine functions being exposed as typed visual-programming nodes.
+- [Reflection System](https://dev.epicgames.com/documentation/unreal-engine/reflection-system-in-unreal-engine) — *.NET — Native interoperability.* Useful for understanding managed-to-native marshaling, ABI constraints, source-generated bindings, and lifetime safety.
 
-[UFunctions](https://dev.epicgames.com/documentation/unreal-engine/ufunctions-in-unreal-engine?utm_source=chatgpt.com)
+[Native interoperability ABI support](https://learn.microsoft.com/dotnet/standard/native-interop/abi-support)
 
-[Reflection System](https://dev.epicgames.com/documentation/unreal-engine/reflection-system-in-unreal-engine?utm_source=chatgpt.com)
+- [Native interoperability best practices](https://learn.microsoft.com/dotnet/standard/native-interop/best-practices) — *Foreign function interface — General overview.* A broader taxonomy of mechanisms for invoking functions across programming language boundaries.
 
-.NET — Native interoperability
-
-Useful for understanding managed-to-native marshaling, ABI constraints, source-generated bindings, and lifetime safety.
-
-[Native interoperability ABI support](https://learn.microsoft.com/dotnet/standard/native-interop/abi-support?utm_source=chatgpt.com)
-
-[Native interoperability best practices](https://learn.microsoft.com/dotnet/standard/native-interop/best-practices?utm_source=chatgpt.com)
-
-Foreign function interface — General overview
-
-A broader taxonomy of mechanisms for invoking functions across programming language boundaries.
-
-[Wikipedia overview](https://en.wikipedia.org/wiki/Foreign_function_interface?utm_source=chatgpt.com)
+[Wikipedia overview](https://en.wikipedia.org/wiki/Foreign_function_interface)
 
 ## 12. Open research directions
 
 The remaining question is how general-purpose the FFI should be versus how much it should specialize for the graph language and engine.
 
-These are useful directions to explore next.
+These are useful directions to explore next:
 
-Which part should the research develop next?
+- A concrete FFI declaration syntax and type system
+- Lua/C/C++ binding implementation details
+- Mapping external functions into serialized visual graph nodes
+- Ownership, capabilities, effects, and safety
+- Comparison of Lua, Unreal Blueprints, and C# interop
 
-A concrete FFI declaration syntax and type system
+The technical proposal in Part II develops these directions for both native (C/C++) and managed (C#) engines.
 
-Lua/C/C++ binding implementation details
-
-Mapping external functions into serialized visual graph nodes
-
-Ownership, capabilities, effects, and safety
-
-Comparison of Lua, Unreal Blueprints, and C# interop
-
-What runtime should the design target?
-
-Native C/C++ engine
-
-Managed C# engine
-
-Both native and managed engines
-
-Develop this direction
-
-> Expand the C Foreign Function Interface research into a detailed technical proposal. Focus: comparison of Lua, Unreal Blueprints, and C# interop. Target runtime: both native and managed engines. Include examples, design trade-offs, and a recommended architecture.
-
-# Technical Proposal: A Unified FFI for Visual Programming Languages
+## Part II — Technical Proposal: A Unified FFI for Visual Programming Languages
 
 Research specification · Version 0.1 · October 2026
 
-## Executive summary
+### Executive summary
 
 The proposed system is a schema-first Foreign Function Interface (FFI) that lets a visual programming language call functions implemented in C, C++, C#, and embedded scripting runtimes, without tying its serialized program format to any one engine or runtime.
 
 The design takes inspiration from three established approaches:
 
-- Lua: embedding a lightweight scripting language in a host application and explicitly registering native functions.
-- Unreal Blueprints: exposing reflected engine functions as typed visual nodes.
-- C# interop: using declared signatures, generated marshaling code, and a defined native ABI.
+- **Lua:** embedding a lightweight scripting language in a host application and explicitly registering native functions.
+- **Unreal Blueprints:** exposing reflected engine functions as typed visual nodes.
+- **C# interop:** using declared signatures, generated marshaling code, and a defined native ABI.
 
 Lua's C API provides a well-established model for exchanging values between a host and an embedded interpreter. Unreal's reflection system shows how function metadata can drive a visual programming environment..NET's native interoperability guidance recommends a C ABI for many native interop scenarios, particularly because C++ does not have a universally consistent ABI across compilers.
 
-Lua+2
+*Source: Lua (+2 more)*
 
 The proposal combines these ideas into a system with five central properties:
 
@@ -530,9 +509,9 @@ A graph should refer to a logical operation such as `engine.entity.set_health`, 
 
 That separation is the foundation for portability, versioning, static validation, and reliable AI-generated programs.
 
-## 1. Goals and non-goals
+### 1. Goals and non-goals
 
-### 1.1 Goals
+#### 1.1 Goals
 
 The FFI should support:
 
@@ -547,7 +526,7 @@ The FFI should support:
 - Handling object handles, memory ownership, and engine thread affinity.
 - Producing useful diagnostics for humans and LLM-based program generators.
 
-### 1.2 Non-goals
+#### 1.2 Non-goals
 
 The initial design should not attempt to:
 
@@ -560,81 +539,81 @@ The initial design should not attempt to:
 
 Instead, it should define a small, predictable interoperability contract that engines can implement in different ways.
 
-## 2. Comparison of the three reference architectures
+### 2. Comparison of the three reference architectures
 
-## Lua: embedded runtime and explicit adapters
+### Lua: embedded runtime and explicit adapters
 
-Primary model: host-controlled registration
+**Primary model: host-controlled registration**
 
 Lua gives the host application control over the interpreter and its exposed APIs. C functions are registered as Lua-callable functions; native values are converted through the Lua C API.
 
-Strengths
+**Strengths**
 
 - Small embedding surface.
 - Straightforward host-controlled API exposure.
 - Flexible dynamic values and callbacks.
 - Useful for gameplay scripting and runtime extensibility.
 
-Limitations
+**Limitations**
 
 - Bindings and type information may need to be authored separately.
 - Dynamic typing shifts many errors to runtime.
 - Native object lifetime and engine-thread rules require deliberate design.
 
-[Lua 5.5 Reference Manual](https://www.lua.org/manual/5.5/manual.html?utm_source=chatgpt.com)
+[Lua 5.5 Reference Manual](https://www.lua.org/manual/5.5/manual.html)
 
-## Unreal Blueprints: reflection-driven visual API
+### Unreal Blueprints: reflection-driven visual API
 
-Primary model: metadata-driven nodes
+**Primary model: metadata-driven nodes**
 
 Unreal's `UFUNCTION` declarations and specifiers expose selected functions to reflection and, where appropriate, Blueprint graphs. The engine can use metadata to create callable nodes, display parameter pins, and enforce engine-specific conventions.
 
-Epic Developer Community+1
+*Source: Epic Developer Community (+1 more)*
 
-Strengths
+**Strengths**
 
 - Native declarations can drive visual-node generation.
 - Types and engine objects are integrated into the editor.
 - The engine can enforce domain-specific rules and conventions.
 - Networking and event-related features can be reflected in API metadata.
 
-Limitations
+**Limitations**
 
 - The reflection model is tied to Unreal's object system and build tooling.
 - Ordinary C++ functions are not automatically Blueprint-callable.
 - Metadata conventions are not directly portable to another engine.
 
-[Unreal Engine UFunctions](https://dev.epicgames.com/documentation/unreal-engine/ufunctions-in-unreal-engine?utm_source=chatgpt.com)
+[Unreal Engine UFunctions](https://dev.epicgames.com/documentation/unreal-engine/ufunctions-in-unreal-engine)
 
-## C# interop: declared signatures and generated marshaling
+### C# interop: declared signatures and generated marshaling
 
-Primary model: ABI declarations and runtime bridges
+**Primary model: ABI declarations and runtime bridges**
 
 .NET P/Invoke describes how managed code invokes native functions. On.NET 7 and later, `LibraryImport` can use source generation to produce interop stubs. Microsoft's guidance recommends matching native signatures and using appropriate lifetime-management types such as `SafeHandle` for owned unmanaged resources.
 
-Microsoft Learn+1
+*Source: Microsoft Learn (+1 more)*
 
-Strengths
+**Strengths**
 
 - Explicit signatures and compile-time tooling.
 - Strong integration with managed types and runtime services.
 - Generated marshaling can reduce boilerplate.
 - Suitable for engines with managed gameplay APIs.
 
-Limitations
+**Limitations**
 
 - Native and managed representations still need careful conversion.
 - P/Invoke primarily solves managed-to-native calls, not arbitrary dynamic invocation of C# methods from an external graph runtime.
 - Reflection, generated delegates, or an engine bridge are needed to expose managed functions as graph nodes.
 
-[.NET Native Interoperability](https://learn.microsoft.com/dotnet/standard/native-interop?utm_source=chatgpt.com)
+[.NET Native Interoperability](https://learn.microsoft.com/dotnet/standard/native-interop)
 
-### 2.1 What the comparison tells us
+#### 2.1 What the comparison tells us
 
 These are not three interchangeable FFIs.
 
 | Dimension | Lua | Unreal Blueprints | C# interop |
-| ---------------------------------- | ----------------------------------- | ------------------------------------------ | ------------------------------------------- |
+| --- | --- | --- | --- |
 | Primary abstraction | Script-callable function | Reflected engine function | Declared managed/native signature |
 | Typical discovery | Registration | Reflection metadata | Declarations, reflection, generators |
 | Type discipline | Usually dynamic at script boundary | Engine-reflected types | Strong static types at C# boundary |
@@ -645,75 +624,55 @@ These are not three interchangeable FFIs.
 
 The recommended design should borrow the embedding model from Lua, the metadata model from Blueprints, and the signature and marshaling discipline from C# interop.
 
-## 3. Proposed architecture
+### 3. Proposed architecture
 
 The proposed system has six layers. The first three define the contract; the remaining layers implement, validate, and execute it.
 
-### Layer 1 — Serialized program
+- **Layer 1 — Serialized program** — Textual graph · Stable node IDs · Typed edges
+- **Layer 2 — Canonical API schema** — Signatures · Types · Effects · Ownership · Versioning
+- **Layer 3 — Resolver and validator** — Type checking · Capability checks · API compatibility
+- **Layer 4 — Binding adapters** — Generated wrappers · Reflection · Manual adapters
+   - *Native:* C / C++ ABI
+   - *Embedded:* Lua / Luau
+   - *Managed:* C# / CLR
 
-Textual graph · Stable node IDs · Typed edges
-
-### Layer 2 — Canonical API schema
-
-Signatures · Types · Effects · Ownership · Versioning
-
-### Layer 3 — Resolver and validator
-
-Type checking · Capability checks · API compatibility
-
-### Layer 4 — Binding adapters
-
-Generated wrappers · Reflection · Manual adapters
-
-Native
-
-C / C++ ABI
-
-Embedded
-
-Lua / Luau
-
-Managed
-
-C# / CLR
-
-### Layer 1 — Serialized program
+#### Layer 1 — Serialized program
 
 This is the persistent representation of the visual program. It should contain logical API references, arguments, connections, and graph-specific metadata.
 
 It should not contain runtime pointers, native addresses, generated thunk addresses, or unstable reflection tokens.
 
-### Layer 2 — Canonical API schema
+#### Layer 2 — Canonical API schema
 
 This describes the callable operation independently of its implementation. The same schema can generate a Lua adapter, a C ABI wrapper, a C# bridge, and an editor node.
 
-### Layer 3 — Resolver and validator
+#### Layer 3 — Resolver and validator
 
 The resolver connects a logical function ID to an installed implementation. The validator checks signatures, engine versions, platform availability, permissions, and graph-level constraints before execution.
 
-### Layer 4 — Binding adapters
+#### Layer 4 — Binding adapters
 
 An adapter converts from the language's canonical value representation into the representation expected by the implementation. It also converts results and failures back into canonical values.
 
-### Layer 5 — Runtime dispatch
+#### Layer 5 — Runtime dispatch
 
 This layer invokes the adapter and enforces execution policies such as thread affinity, reentrancy, cancellation, and asynchronous scheduling.
 
-### Layer 6 — Engine implementation
+#### Layer 6 — Engine implementation
 
 The final operation may be implemented in C, C++, C#, Lua, or another supported language. The engine owns its actual runtime objects and internal invariants.
 
 Important architectural choice: the canonical schema is the authority for graph semantics, but it need not be the only source of truth for the native implementation. An existing engine can retain its C++ declarations or C# API and generate schema metadata from them.
 
-## 4. The canonical API declaration format
+### 4. The canonical API declaration format
 
 The proposal uses a small, declarative syntax called `extern` below as an illustrative notation. It is not an existing standard.
 
 The design goal is to express the complete callable contract with minimal ambiguity.
 
-### 4.1 Example: a gameplay function
+#### 4.1 Example: a gameplay function
 
-```
+```text
 module engine.gameplay
 
 extern function engine.entity.set_health@1(
@@ -730,8 +689,8 @@ extern function engine.entity.set_health@1(
 
 This declaration specifies:
 
-- A stable function ID: `engine.entity.set_health`.
-- An explicit signature version: `@1`.
+- **A stable function ID:** `engine.entity.set_health`.
+- **An explicit signature version:** `@1`.
 - A typed entity handle and a 32-bit floating-point input.
 - An explicit result type that can represent failure.
 - A mutation effect.
@@ -742,7 +701,7 @@ The keyword `auto` means the resolver may select an implementation registered by
 
 A stable ID should identify the logical operation, not its implementation language. For example, both a C++ method and a C# method may implement the same logical operation when their observable contracts match.
 
-### 4.2 Why explicit types matter
+#### 4.2 Why explicit types matter
 
 A language should not treat all numeric values as interchangeable.
 
@@ -756,11 +715,11 @@ For example:
 
 Implicit conversions should be limited to conversions with defined semantics. Lossy conversions, ownership transfers, and pointer reinterpretations should require explicit operations or be rejected.
 
-### 4.3 Overloads and defaults
+#### 4.3 Overloads and defaults
 
 Suppose a native library contains:
 
-```
+```c
 void SetScale(float uniform_scale);
 void SetScale(float x, float y, float z);
 ```
@@ -769,7 +728,7 @@ The serialized graph should not refer only to `SetScale`, because that name does
 
 Instead, it should refer to a stable ID such as:
 
-```
+```text
 engine.transform.set_uniform_scale
 engine.transform.set_scale_xyz
 ```
@@ -778,51 +737,51 @@ The engine may still map these IDs to overloaded native functions. The distincti
 
 Defaults should also be declared in the schema rather than inferred from native code at runtime. That makes generated graphs deterministic even when the engine language has different default-argument semantics.
 
-### 4.4 Metadata is part of the contract
+#### 4.4 Metadata is part of the contract
 
 The schema should distinguish three classes of metadata:
 
 | Class | Examples | Purpose |
-| ------------ | ------------------------------------- | --------------------------- |
+| --- | --- | --- |
 | Semantic | Types, errors, mutation, ownership | Defines program meaning |
 | Execution | Thread, async behavior, cancellation | Defines runtime behavior |
 | Presentation | Category, tooltip, icon, display name | Defines editor presentation |
 
 This separation allows the editor to change its appearance without changing program semantics. Conversely, a change to the return type or ownership contract can be detected as an API compatibility change.
 
-## 5. A portable type system for foreign APIs
+### 5. A portable type system for foreign APIs
 
 The most difficult part of cross-language interoperability is not calling the function. It is defining which values can cross the boundary and what those values mean.
 
-the recommendation is to defining a canonical type system with three levels.
+The recommendation is to define a canonical type system with three levels.
 
-### 5.1 Level A — Portable value types
+#### 5.1 Level A — Portable value types
 
 These are the easiest types to support across all three approaches.
 
 | Canonical type | Intended meaning |
-| ------------------------------- | --------------------------------- |
-| `Bool`  | Boolean value |
-| `Int32`, `Int64`  | Signed fixed-width integer |
-| `UInt32`, `UInt64`  | Unsigned fixed-width integer |
-| `Float32`, `Float64`  | IEEE-style floating-point value |
-| `String`  | Validated Unicode text |
-| `Bytes`  | Arbitrary byte sequence |
+| --- | --- |
+| `Bool` | Boolean value |
+| `Int32`, `Int64` | Signed fixed-width integer |
+| `UInt32`, `UInt64` | Unsigned fixed-width integer |
+| `Float32`, `Float64` | IEEE-style floating-point value |
+| `String` | Validated Unicode text |
+| `Bytes` | Arbitrary byte sequence |
 | `Vector2`, `Vector3`, `Vector4` | Defined numeric vector types |
-| `Quaternion`  | Defined quaternion representation |
-| `Result<T,E>`  | Value or defined failure |
-| `Array<T>`  | Typed sequence |
-| `Option<T>`  | Explicit presence or absence |
+| `Quaternion` | Defined quaternion representation |
+| `Result<T,E>` | Value or defined failure |
+| `Array<T>` | Typed sequence |
+| `Option<T>` | Explicit presence or absence |
 
 These types can be copied by value, with specified conversions and serialization rules.
 
 A canonical `Vector3`, for example, should define its component precision and layout semantics. The system must not assume that every engine uses the same struct packing or coordinate conventions.
 
-### 5.2 Level B — Engine object references
+#### 5.2 Level B — Engine object references
 
 Engine objects should normally be represented by typed handles.
 
-```
+```text
 Handle<engine.Entity>
 Handle<engine.Transform>
 Handle<engine.AudioSource>
@@ -834,20 +793,20 @@ The serialized program should not contain the actual handle value. It should con
 
 For example:
 
-```
+```text
 SpawnEntity(...) -> Handle<engine.Entity>
 SetHealth(entity: Handle<engine.Entity>, health: Float32)
 ```
 
 The resolver must verify that a supplied handle is valid and belongs to the expected type. A generation counter or equivalent mechanism can help detect stale references after an object is destroyed.
 
-### 5.3 Level C — Explicitly unsafe foreign values
+#### 5.3 Level C — Explicitly unsafe foreign values
 
 Some APIs genuinely require pointers, raw buffers, function pointers, native struct layouts, or other low-level representations.
 
 These should be represented by explicit unsafe types or an escape-hatch API, not silently folded into ordinary types.
 
-```
+```text
 UnsafePointer<T>
 NativeBuffer
 FunctionPointer<Signature>
@@ -855,30 +814,30 @@ FunctionPointer<Signature>
 
 Their use should require an explicit capability or unsafe declaration. They may also be restricted to particular backends because they cannot be meaningfully serialized or interpreted portably.
 
-Recommendation: make Level A the default, Level B the standard way to interact with engine objects, and Level C an advanced opt-in facility.
+**Recommendation:** make Level A the default, Level B the standard way to interact with engine objects, and Level C an advanced opt-in facility.
 
-## 6. Backend design: native C and C++
+### 6. Backend design: native C and C++
 
 The native backend should provide a stable C ABI around the selected C++ implementation.
 
 Microsoft's.NET ABI documentation explicitly recommends C-compatible exports for many C++ interoperability scenarios because C++ does not define one universal ABI across the major supported compiler implementations.
 
-Microsoft Learn+1
+*Source: Microsoft Learn (+1 more)*
 
-### 6.1 Example native implementation
+#### 6.1 Example native implementation
 
 The internal engine implementation can remain idiomatic C++:
 
-```
+```cpp
 class Entity {
 public:
- void SetHealth(float health);
+    void SetHealth(float health);
 };
 ```
 
 The generated C ABI should expose an explicit interface:
 
-```
+```text
 typedef uint64_t EngineEntityHandle;
 
 typedef enum EngineStatus {
@@ -905,7 +864,7 @@ The wrapper would:
 
 This is illustrative C API design, not a complete implementation.
 
-### 6.2 Why opaque handles are preferable
+#### 6.2 Why opaque handles are preferable
 
 A raw `Entity*` is convenient inside C++, but exposing it directly creates problems:
 
@@ -919,18 +878,18 @@ A handle registry creates an indirection layer. That adds a lookup cost, but it 
 
 For frequently used internal operations, a generated backend may optimize dispatch while preserving the same external contract.
 
-### 6.3 When to use Lua's C API directly
+#### 6.3 When to use Lua's C API directly
 
 If the engine embeds Lua, it can expose the native wrapper through Lua's C API:
 
-```
+```csharp
 static int l_set_health(lua_State *L)
 {
- /* Read and validate the entity userdata. */
- /* Read and validate the numeric health argument. */
- /* Call engine_entity_set_health(...). */
- /* Return results or raise a Lua error. */
- return 0;
+    /* Read and validate the entity userdata. */
+    /* Read and validate the numeric health argument. */
+    /* Call engine_entity_set_health(...). */
+    /* Return results or raise a Lua error. */
+    return 0;
 }
 ```
 
@@ -938,23 +897,23 @@ The body is intentionally schematic: the implementation must define the exact us
 
 Lua's official manual specifies that a C function called by Lua receives arguments on the Lua stack and returns its results by pushing values and returning a result count.
 
-Lua+1
+*Source: Lua (+1 more)*
 
 The important distinction is that the Lua adapter is not the engine API itself. It is one implementation of the binding contract.
 
-### 6.4 Advantages and trade-offs
+#### 6.4 Advantages and trade-offs
 
 | Decision | Benefit | Cost |
-| -------------------------- | ------------------------------------- | --------------------------------- |
+| --- | --- | --- |
 | Stable C ABI | Cross-compiler interoperability | Extra wrapper layer |
 | Opaque handles | Lifetime checks and portability | Lookup overhead |
 | Generated wrappers | Reduced repetitive code | More tooling and build complexity |
 | Manual wrappers | Maximum control | Maintenance burden |
 | Reflection-based discovery | Fast integration with engine metadata | Depends on the reflection system |
 
-For a new engine, generated wrappers are the default the recommended approach is to choose, with hand-written adapters available for special cases.
+For a new engine, generated wrappers are the recommended default, with hand-written adapters available for special cases.
 
-## 7. Backend design: managed C# engines
+### 7. Backend design: managed C# engines
 
 The managed backend needs a different strategy because C# methods live inside a managed runtime, not necessarily in a native library with exported C symbols.
 
@@ -965,31 +924,31 @@ There are two distinct cases:
 
 These cases should not be forced through the same mechanism.
 
-### 7.1 Case A: graph runtime hosted in C\#
+#### 7.1 Case A: graph runtime hosted in C\#
 
 If the graph runtime itself runs in.NET, the engine can expose a generated registry of typed delegates.
 
 For example, a managed implementation might be:
 
-```
+```csharp
 public static class EntityApi
 {
- public static EngineResult SetHealth(
- EntityHandle entity,
- float health)
- {
- if (!EntityRegistry.TryResolve(entity, out var target))
- return EngineResult.InvalidHandle;
+    public static EngineResult SetHealth(
+        EntityHandle entity,
+        float health)
+    {
+        if (!EntityRegistry.TryResolve(entity, out var target))
+        return EngineResult.InvalidHandle;
 
- target.Health = health;
- return EngineResult.Success;
- }
+        target.Health = health;
+        return EngineResult.Success;
+    }
 }
 ```
 
 A generated registry could associate the logical ID with the method:
 
-```
+```text
 registry.Register(
  "engine.entity.set_health",
  EntityApi.SetHealth);
@@ -1001,7 +960,7 @@ The graph interpreter can resolve the ID to a typed delegate and invoke it using
 
 The main benefit is that ordinary gameplay calls do not have to cross a native ABI boundary. The cost is that the graph runtime must be integrated with the managed runtime and its type system.
 
-### 7.2 Case B: native code needs to call C\#
+#### 7.2 Case B: native code needs to call C\#
 
 If a C or C++ runtime must call into a managed engine, there are several possible mechanisms:
 
@@ -1014,26 +973,26 @@ The appropriate choice depends on whether the managed runtime is already hosted,
 
 A conceptual managed-to-native declaration using.NET 7+ might look like this:
 
-```
+```csharp
 using System.Runtime.InteropServices;
 
 internal static partial class NativeEngine
 {
- [LibraryImport("engine_native",
- EntryPoint = "engine_entity_set_health")]
- internal static partial int SetHealth(
- ulong entity,
- float health);
+    [LibraryImport("engine_native",
+        EntryPoint = "engine_entity_set_health")]
+    internal static partial int SetHealth(
+        ulong entity,
+        float health);
 }
 ```
 
 This example shows the opposite direction: managed C# calling a native C ABI function. It illustrates the value of generated interop declarations, but it is not itself a native-to-managed bridge.
 
-Microsoft Learn+1
+*Source: Microsoft Learn (+1 more)*
 
 To expose managed functions to a native caller, the engine must supply the appropriate hosting or unmanaged-callable mechanism.
 
-### 7.3 Do not equate C# reflection with native interop
+#### 7.3 Do not equate C# reflection with native interop
 
 C# reflection can discover managed methods, but discovery does not automatically solve:
 
@@ -1045,67 +1004,67 @@ C# reflection can discover managed methods, but discovery does not automatically
 
 For a managed-only engine, reflection plus generated delegates may be enough. For a mixed native/managed engine, a narrow C ABI is a useful interchange boundary, while managed-only calls can remain within.NET.
 
-### 7.4 Managed backend recommendation
+#### 7.4 Managed backend recommendation
 
 Use a two-path architecture:
 
-- Managed fast path: direct typed delegate or generated managed call.
-- Native interop path: generated binding through the engine's stable C ABI.
+- **Managed fast path:** direct typed delegate or generated managed call.
+- **Native interop path:** generated binding through the engine's stable C ABI.
 
 Both paths resolve from the same logical API schema. That avoids imposing native marshaling overhead on every managed gameplay call.
 
-## 8. Backend design: Lua and Lua-like scripting
+### 8. Backend design: Lua and Lua-like scripting
 
 Lua is best treated as a host-controlled scripting backend, rather than as the universal type system for all external calls.
 
 The host should expose a curated set of functions and types. Each registered function maps to a schema ID and a binding adapter.
 
-### 8.1 Two possible exposure strategies
+#### 8.1 Two possible exposure strategies
 
-Strategy A — Named wrappers
+**Strategy A — Named wrappers**
 
 Expose functions directly:
 
-```
+```lua
 local ok = engine.entity.set_health(player, 75.0)
 ```
 
 This is intuitive and aligns with Lua's normal function-call model. It is also easy to debug.
 
-Strategy B — Generic dispatch
+**Strategy B — Generic dispatch**
 
 Use a central invocation interface:
 
-```
+```lua
 local result = engine.call(
- "engine.entity.set_health",
- player,
- 75.0
+    "engine.entity.set_health",
+    player,
+    75.0
 )
 ```
 
 This makes it easy to invoke dynamically discovered APIs and build generic tooling, but it loses some IDE assistance and can make errors harder to locate.
 
-the recommendation is to using named wrappers for normal scripts and reserving generic dispatch for reflection tools, testing, debugging, and dynamic extensions.
+The recommendation is to use named wrappers for normal scripts and reserving generic dispatch for reflection tools, testing, debugging, and dynamic extensions.
 
-### 8.2 The scripting representation of engine objects
+#### 8.2 The scripting representation of engine objects
 
 Lua's full userdata is useful for representing engine-managed objects because the host controls the underlying memory and can define behavior through metatables. Light userdata, by contrast, is a raw pointer value and does not provide the same owned-memory or finalization behavior.
 
-Lua+1
+*Source: Lua (+1 more)*
 
 The engine should therefore expose an `Entity` userdata that wraps an opaque handle or managed reference rather than treating an arbitrary native pointer as a normal script value.
 
 For example:
 
-```
+```lua
 local player = world.get_player()
 player:set_health(75.0)
 ```
 
 The adapter validates the userdata, resolves the current engine entity, and dispatches the operation.
 
-### 8.3 Sandboxing and script permissions
+#### 8.3 Sandboxing and script permissions
 
 Embedding Lua does not automatically make an application secure. The host controls which libraries and engine operations are exposed.
 
@@ -1120,15 +1079,15 @@ If scripts are generated by an LLM, downloaded, or authored by less-trusted user
 
 The Luau runtime, for example, explicitly documents sandboxing mechanisms intended for embedded environments.
 
-Luau
+**Luau**
 
 The broader design principle is that permissions belong to the runtime and binding registry, not merely to the text syntax.
 
-## 9. Runtime dispatch and execution semantics
+### 9. Runtime dispatch and execution semantics
 
 The system should not resolve a function ID to an arbitrary address and call it immediately. Resolution and execution should be separate stages.
 
-### 9.1 Resolution
+#### 9.1 Resolution
 
 At load or compilation time, the resolver verifies that:
 
@@ -1140,43 +1099,26 @@ At load or compilation time, the resolver verifies that:
 
 The resolver can then cache a binding descriptor or a typed callable.
 
-### 9.2 Invocation
+#### 9.2 Invocation
 
 At runtime, the invocation pipeline should be:
 
-1. Validate arguments
-
-Check value types, nullability, ranges, and handle validity.
-
-2. Enforce policy
-
-Check permissions, thread affinity, and call budgets.
-
-3. Marshal values
-
-Convert canonical values into backend-specific representations.
-
-4. Invoke adapter
-
-Call the generated, reflected, or hand-written binding.
-
-5. Convert outcome
-
-Map return values and failures into canonical result types.
-
-6. Record diagnostics
-
-Attach function ID, source node, and error context.
+1. **Validate arguments** — Check value types, nullability, ranges, and handle validity.
+2. **Enforce policy** — Check permissions, thread affinity, and call budgets.
+3. **Marshal values** — Convert canonical values into backend-specific representations.
+4. **Invoke adapter** — Call the generated, reflected, or hand-written binding.
+5. **Convert outcome** — Map return values and failures into canonical result types.
+6. **Record diagnostics** — Attach function ID, source node, and error context.
 
 For performance-sensitive builds, some of these checks may be proven statically and omitted from the hot path. Dynamic handles, untrusted inputs, and security-sensitive operations should still receive the necessary runtime checks.
 
-### 9.3 Synchronous versus asynchronous functions
+#### 9.3 Synchronous versus asynchronous functions
 
 The schema should explicitly distinguish synchronous and asynchronous operations.
 
 For example:
 
-```
+```text
 extern function engine.asset.load(
  path: String
 ) -> Task<Result<AssetHandle, EngineError>> {
@@ -1191,7 +1133,7 @@ The graph runtime can represent this using a suspension point, an event continua
 
 An API should not silently turn a synchronous node into an asynchronous one because that changes execution order and graph semantics.
 
-### 9.4 Callbacks and events
+#### 9.4 Callbacks and events
 
 Callbacks introduce a lifetime problem because native code may retain a callback after the original graph execution has finished.
 
@@ -1206,31 +1148,31 @@ The schema should describe:
 
 For game engines, it is usually preferable to turn engine events into registered subscriptions or event nodes rather than passing arbitrary function pointers through the graph format.
 
-## 10. Memory ownership, lifetime, and failure handling
+### 10. Memory ownership, lifetime, and failure handling
 
 This area deserves stricter rules than most conventional FFI designs because graph programs are frequently edited, reloaded, hot-reloaded, and generated automatically.
 
-### 10.1 Ownership rules
+#### 10.1 Ownership rules
 
 Every reference-bearing API parameter should specify one of the following policies:
 
 | Policy | Meaning |
-| ---------- | --------------------------------------------------------------------------- |
+| --- | --- |
 | `borrowed` | The callee may use the value temporarily but does not acquire ownership. |
-| `owned`  | Ownership is transferred under a defined release contract. |
-| `shared`  | Multiple parties may retain a reference under a defined lifetime mechanism. |
-| `weak`  | The reference does not keep the target alive; resolution may fail. |
-| `handle`  | The value is an opaque engine identifier resolved by the runtime. |
+| `owned` | Ownership is transferred under a defined release contract. |
+| `shared` | Multiple parties may retain a reference under a defined lifetime mechanism. |
+| `weak` | The reference does not keep the target alive; resolution may fail. |
+| `handle` | The value is an opaque engine identifier resolved by the runtime. |
 
 These are proposed schema terms, not universal C ABI annotations.
 
 A graph language should not infer ownership from a raw pointer type or assume that garbage collection on the scripting side controls the lifetime of native engine objects.
 
-### 10.2 Failure model
+#### 10.2 Failure model
 
-the recommendation is to standardizing a small set of error categories:
+The recommendation is to standardize a small set of error categories:
 
-```
+```text
 BindingNotFound
 SignatureMismatch
 InvalidArgument
@@ -1246,17 +1188,17 @@ Backends may supply more detailed diagnostic information, but the language shoul
 
 The error should also identify the logical function and source node. For example:
 
-```
+```yaml
 InvalidHandle:
- function: engine.entity.set_health
- node: node_0182
- parameter: entity
- detail: The entity was destroyed before invocation.
+  function: engine.entity.set_health
+  node: node_0182
+  parameter: entity
+  detail: The entity was destroyed before invocation.
 ```
 
 This makes the failure useful to a developer and to an AI agent attempting to repair a graph.
 
-### 10.3 Exceptions must stop at the appropriate boundary
+#### 10.3 Exceptions must stop at the appropriate boundary
 
 A C++ exception should not escape a C ABI function. A managed exception should not escape an unmanaged-callable boundary without a defined translation. A Lua error should be caught or propagated according to the host's protected-call policy.
 
@@ -1264,7 +1206,7 @@ Each backend adapter must translate implementation-specific failures into the co
 
 Not every error should be treated as recoverable. A missing handle may produce an error output; a violated internal invariant may require terminating the current script or reporting a fatal engine error.
 
-### 10.4 Hot reload
+#### 10.4 Hot reload
 
 When an API module changes, the runtime must decide what happens to active calls and retained references.
 
@@ -1278,15 +1220,15 @@ Recommended policy:
 
 The system should never assume that a pointer or function address remains valid across hot reload.
 
-## 11. Versioning and compatibility
+### 11. Versioning and compatibility
 
 A stable FFI needs to survive engine updates without silently changing the meaning of existing graphs.
 
-### 11.1 Separate logical identity from implementation version
+#### 11.1 Separate logical identity from implementation version
 
 Consider this declaration:
 
-```
+```text
 engine.entity.set_health@1
 ```
 
@@ -1296,15 +1238,15 @@ The implementation may change internally from C++ to C#, or from a manual wrappe
 
 A contract version should change when the meaning of the interface changes in a way that matters to callers.
 
-### 11.2 Compatibility rules
+#### 11.2 Compatibility rules
 
 | Change | Default policy |
-| ---------------------------------------------------------- | --------------------------------------------------------- |
+| --- | --- |
 | Change internal native implementation | Compatible |
 | Optimize generated wrapper | Compatible |
 | Improve error diagnostics without changing error semantics | Compatible |
 | Add an optional parameter with a defined default | Potentially compatible; validate graph and overload rules |
-| Change `Float32` to `Float64`  | Requires explicit compatibility analysis |
+| Change `Float32` to `Float64` | Requires explicit compatibility analysis |
 | Change ownership from borrowed to owned | Breaking |
 | Change synchronous to asynchronous | Breaking |
 | Change required capability | Security-relevant compatibility change |
@@ -1313,7 +1255,7 @@ A contract version should change when the meaning of the interface changes in a 
 
 A major design principle is that compatibility is semantic, not merely syntactic. Two declarations with identical parameter types can still be incompatible if one changes ownership, side effects, threading, or failure behavior.
 
-### 11.3 Missing APIs
+#### 11.3 Missing APIs
 
 If an engine update removes a function, the graph editor should not replace it automatically with a similarly named function.
 
@@ -1321,15 +1263,15 @@ Instead, it should report an unresolved binding, provide the expected signature,
 
 This is especially important for AI-generated graphs: a plausible name match is not evidence that two engine functions are equivalent.
 
-## 12. Security and capability design
+### 12. Security and capability design
 
 The FFI is a natural security boundary because it mediates access to the engine and, potentially, the operating system.
 
-the recommendation is to a capability-based model. A capability is an explicit permission to invoke a category of operations.
+The recommendation is a capability-based model. A capability is an explicit permission to invoke a category of operations.
 
 For example:
 
-```
+```text
 capability gameplay.read
 capability gameplay.write
 capability asset.read
@@ -1339,7 +1281,7 @@ capability filesystem.write
 
 A function can declare its required capability:
 
-```
+```text
 extern function engine.asset.load(path: String)
  -> Task<Result<AssetHandle, EngineError>> {
  capability: asset.read
@@ -1348,7 +1290,7 @@ extern function engine.asset.load(path: String)
 
 This is only a sketch of the declaration syntax. A real implementation would also specify whether capabilities are inherited, scoped to a graph, or granted to a particular runtime environment.
 
-### 12.1 Why an allowlist is better than unrestricted FFI
+#### 12.1 Why an allowlist is better than unrestricted FFI
 
 Unrestricted dynamic FFI may permit arbitrary native library loading, pointer manipulation, and invocation of functions with incorrectly declared signatures.
 
@@ -1364,7 +1306,7 @@ For untrusted or AI-generated programs, the default should be:
 
 The compiler can validate declared capabilities, but the runtime must enforce them. Static validation alone is insufficient when permissions can change or values can originate from untrusted sources.
 
-## 13. Graph serialization and bidirectional text synchronization
+### 13. Graph serialization and bidirectional text synchronization
 
 Because the FFI is intended for a visual programming language with a text representation, the graph serializer needs its own contract.
 
@@ -1372,7 +1314,7 @@ The file should identify nodes by stable IDs and identify foreign operations by 
 
 For example:
 
-```
+```mermaid
 graph PlayerController {
  node node_01: event.begin_play
 
@@ -1387,7 +1329,7 @@ graph PlayerController {
 
 This is an illustrative syntax. Its purpose is to show that the graph refers to the logical function and expresses typed arguments separately from the implementation.
 
-### 13.1 What belongs in the graph file?
+#### 13.1 What belongs in the graph file?
 
 The file should contain:
 
@@ -1407,7 +1349,7 @@ It should not contain:
 - Cached function pointers.
 - Implementation-specific marshaling objects.
 
-### 13.2 What belongs in the schema registry?
+#### 13.2 What belongs in the schema registry?
 
 The registry should contain:
 
@@ -1422,7 +1364,7 @@ The registry should contain:
 
 The registry may be generated from C++ reflection, C# source declarations, Lua registration tables, or hand-authored metadata. Regardless of its origin, the output should conform to one canonical schema.
 
-### 13.3 Bidirectional synchronization rules
+#### 13.3 Bidirectional synchronization rules
 
 When a user edits the graph visually, the serializer should update the textual representation without changing logical function IDs.
 
@@ -1432,43 +1374,43 @@ If a function's signature changes, the editor should display the incompatibility
 
 This provides an important guarantee: the graph and text are two representations of the same program, not two separate sources of truth for API semantics.
 
-## 14. Recommended implementation strategy
+### 14. Recommended implementation strategy
 
-the architecture should be implemented this architecture incrementally, beginning with the smallest subset that can prove the cross-backend contract.
+The architecture should be implemented incrementally, beginning with the smallest subset that can prove the cross-backend contract.
 
-### Phase 1 — Canonical schema and validator
+#### Phase 1 — Canonical schema and validator
 
-Foundation
+**Foundation**
 
 Implement stable IDs, fixed-width primitive types, typed handles, function signatures, return types, and basic errors.
 
-Acceptance criteria: a graph with an unknown function, incorrect type, or incompatible signature fails validation before execution.
+**Acceptance criteria:** a graph with an unknown function, incorrect type, or incompatible signature fails validation before execution.
 
-### Phase 2 — C ABI backend
+#### Phase 2 — C ABI backend
 
 Generate wrappers for a small set of native functions and implement opaque handles and error conversion.
 
-Acceptance criteria: the same graph can call a C function and a C++ implementation behind the C ABI without changing its serialized node ID.
+**Acceptance criteria:** the same graph can call a C function and a C++ implementation behind the C ABI without changing its serialized node ID.
 
-### Phase 3 — Managed C# backend
+#### Phase 3 — Managed C# backend
 
 Implement a typed registry and generated managed delegates. Add a C ABI bridge for functions that must cross into native code.
 
-Acceptance criteria: the same schema contract works with a managed-only function and a native-backed function.
+**Acceptance criteria:** the same schema contract works with a managed-only function and a native-backed function.
 
-### Phase 4 — Lua integration
+#### Phase 4 — Lua integration
 
 Generate named Lua wrappers from the canonical schema, and represent engine objects through validated userdata or handle wrappers.
 
-Acceptance criteria: Lua and the visual graph invoke the same logical operations and produce equivalent results for the supported type subset.
+**Acceptance criteria:** Lua and the visual graph invoke the same logical operations and produce equivalent results for the supported type subset.
 
-### Phase 5 — Production hardening
+#### Phase 5 — Production hardening
 
 Add capability enforcement, async operations, callbacks, hot reload, API migrations, fuzz testing, and performance benchmarks.
 
-Acceptance criteria: invalid handles, revoked permissions, wrong-thread calls, stale bindings, and incompatible API versions fail deterministically.
+**Acceptance criteria:** invalid handles, revoked permissions, wrong-thread calls, stale bindings, and incompatible API versions fail deterministically.
 
-### 14.1 Testing requirements
+#### 14.1 Testing requirements
 
 The same behavioral test suite should run against each backend.
 
@@ -1485,14 +1427,14 @@ For a logical function such as `engine.entity.set_health`, tests should verify:
 
 Performance tests should separately measure resolution, argument marshaling, invocation, and result conversion. A single end-to-end timing is not enough to identify which layer dominates the cost.
 
-## 15. Final design recommendation
+### 15. Final design recommendation
 
 The strongest design is a language-neutral API schema with backend-specific execution adapters.
 
-the design should make the following architectural choices normative for the first version.
+The design should make the following architectural choices normative for the first version.
 
 | Concern | Recommended decision |
-| ------------------- | ------------------------------------------------------ |
+| --- | --- |
 | Public API identity | Stable, fully qualified logical IDs |
 | API metadata | Canonical, machine-readable schema |
 | Native interop | Stable C ABI around C++ implementations |
@@ -1508,7 +1450,7 @@ the design should make the following architectural choices normative for the fir
 | Performance | Generated adapters and optional direct-call fast paths |
 | AI generation | Stable IDs, explicit types, deterministic validation |
 
-### The most important trade-off
+#### The most important trade-off
 
 There are two extremes to avoid.
 
@@ -1526,35 +1468,25 @@ The recommended compromise is a schema-first, generated-by-default, reflection-a
 
 This is a practical synthesis of Lua's embedding model, Unreal's reflection-driven node exposure, and.NET's explicit interop contracts.
 
-## 16. Further research
+### 16. Further research
 
 The following primary references are the best starting points for validating and extending this proposal.
 
-Lua and embedded scripting
+**Lua and embedded scripting**
 
-[Lua 5.5 Reference Manual](https://www.lua.org/manual/5.5/manual.html?utm_source=chatgpt.com)
+- [Lua 5.5 Reference Manual](https://www.lua.org/manual/5.5/manual.html) — C API, value stack, userdata, error handling, garbage collection, and coroutines. *(Unreal reflection and visual nodes).*
 
-C API, value stack, userdata, error handling, garbage collection, and coroutines.
+[UFunctions in Unreal Engine](https://dev.epicgames.com/documentation/unreal-engine/ufunctions-in-unreal-engine)
 
-Unreal reflection and visual nodes
+- [Reflection System in Unreal Engine](https://dev.epicgames.com/documentation/unreal-engine/reflection-system-in-unreal-engine) — Native function metadata, Blueprint exposure, and engine-managed reflection. *(C# and native ABI interoperability).*
 
-[UFunctions in Unreal Engine](https://dev.epicgames.com/documentation/unreal-engine/ufunctions-in-unreal-engine?utm_source=chatgpt.com)
+[Native interoperability ABI support](https://learn.microsoft.com/dotnet/standard/native-interop/abi-support)
 
-[Reflection System in Unreal Engine](https://dev.epicgames.com/documentation/unreal-engine/reflection-system-in-unreal-engine?utm_source=chatgpt.com)
+[Native interoperability best practices](https://learn.microsoft.com/dotnet/standard/native-interop/best-practices)
 
-Native function metadata, Blueprint exposure, and engine-managed reflection.
+- [P/Invoke source generation](https://learn.microsoft.com/dotnet/standard/native-interop/pinvoke-source-generation) — ABI compatibility, signature declarations, marshaling, generated stubs, and resource lifetime.
 
-C# and native ABI interoperability
-
-[Native interoperability ABI support](https://learn.microsoft.com/dotnet/standard/native-interop/abi-support?utm_source=chatgpt.com)
-
-[Native interoperability best practices](https://learn.microsoft.com/dotnet/standard/native-interop/best-practices?utm_source=chatgpt.com)
-
-[P/Invoke source generation](https://learn.microsoft.com/dotnet/standard/native-interop/pinvoke-source-generation?utm_source=chatgpt.com)
-
-ABI compatibility, signature declarations, marshaling, generated stubs, and resource lifetime.
-
-## 17. Open design decisions
+### 17. Open design decisions
 
 Before treating this as a formal specification, the recommended approach is to resolve three remaining questions:
 

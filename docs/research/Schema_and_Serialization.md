@@ -1,3 +1,9 @@
+---
+title: "Schema and Serialization for Text-Based Visual Programming Languages"
+document_type: "Research note"
+formatted: 2026-10-28
+---
+
 # Schema and Serialization for Text-Based Visual Programming Languages
 
 Schema and serialization define how a visual programming language represents its programs as persistent data. They determine how a graph of nodes, pins, connections, types, and properties is validated, saved to disk, reconstructed in memory, compared in version control, and exchanged with other tools.
@@ -8,29 +14,48 @@ The central design question is:
 
 > How should a visual program be represented so that it is unambiguous, easy to validate, efficient to process, robust across versions, and understandable in a text diff?
 
+## Contents
+
+- [1. The problem domain](#1-the-problem-domain)
+- [2. Schema versus serialization](#2-schema-versus-serialization)
+- [3. The major serialization approaches](#3-the-major-serialization-approaches)
+- [4. Representing a graph in a schema](#4-representing-a-graph-in-a-schema)
+- [5. What the schema should define](#5-what-the-schema-should-define)
+- [6. Stable identifiers and referential integrity](#6-stable-identifiers-and-referential-integrity)
+- [7. Deterministic serialization and version-control diffs](#7-deterministic-serialization-and-version-control-diffs)
+- [8. Preserving visual layout without polluting program semantics](#8-preserving-visual-layout-without-polluting-program-semantics)
+- [9. Schema evolution and migration](#9-schema-evolution-and-migration)
+- [10. Unknown fields, extensions, and forward compatibility](#10-unknown-fields-extensions-and-forward-compatibility)
+- [11. Default values, optional fields, and information loss](#11-default-values-optional-fields-and-information-loss)
+- [12. Serialization and AI-generated edits](#12-serialization-and-ai-generated-edits)
+- [13. An illustrative schema design](#13-an-illustrative-schema-design)
+- [14. A recommended architecture](#14-a-recommended-architecture)
+- [15. Testing and measuring the design](#15-testing-and-measuring-the-design)
+- [16. Final recommendation](#16-final-recommendation)
+
 ## 1. The problem domain
 
 A conventional visual programming environment might store a program as a proprietary binary document or a large JSON object. This can work well for an editor, but becomes cumbersome when the program needs to be reviewed, generated, transformed, or maintained as source code.
 
 A text-based visual programming language introduces several requirements at once.
 
-Persistence and reconstruction
+**Persistence and reconstruction**
 
 The saved representation must contain enough information to rebuild the intended program, including connections, types, defaults, metadata, and any editor state that needs to survive reopening.
 
-Structural and semantic validation
+**Structural and semantic validation**
 
 The system must distinguish malformed files from structurally valid files that describe an invalid program, such as an incompatible connection or a reference to a nonexistent node.
 
-Readable and stable diffs
+**Readable and stable diffs**
 
 A small logical edit should ideally produce a small textual change. Reordering unrelated nodes, changing whitespace, or opening and saving a file should not create hundreds of irrelevant lines of diff.
 
-Evolution and interoperability
+**Evolution and interoperability**
 
 Programs should remain usable when the language gains new node types, properties, or features. Other tools should be able to inspect or transform supported parts of a program without needing the entire editor.
 
-Machine and AI friendliness
+**Machine and AI friendliness**
 
 The representation should be easy for parsers, formatters, code generators, and language models to produce correctly. Its grammar should discourage ambiguous references and redundant information.
 
@@ -40,12 +65,12 @@ These requirements overlap, but they are not identical. A compact binary format 
 
 These concepts are related but should not be conflated.
 
-- Schema: Defines what data is valid, including fields, types, required properties, constraints, identifiers, and relationships.
-- Serialization: Converts an in-memory program into a persistent representation.
-- Deserialization: Parses that representation and reconstructs the corresponding data structures.
-- Validation: Determines whether the reconstructed data satisfies structural and semantic rules.
-- Canonicalization: Converts equivalent representations into one standardized form.
-- Migration: Converts a document written under an older schema into a newer representation.
+- **Schema:** Defines what data is valid, including fields, types, required properties, constraints, identifiers, and relationships.
+- **Serialization:** Converts an in-memory program into a persistent representation.
+- **Deserialization:** Parses that representation and reconstructs the corresponding data structures.
+- **Validation:** Determines whether the reconstructed data satisfies structural and semantic rules.
+- **Canonicalization:** Converts equivalent representations into one standardized form.
+- **Migration:** Converts a document written under an older schema into a newer representation.
 
 For example, a schema might specify that a `Multiply` node has two numeric input pins and one numeric output pin. Serialization determines how the node and its connections are written to a file. Validation checks that the pins and connections are legal. Migration handles changes if a later version renames a pin or changes the node's representation.
 
@@ -57,47 +82,47 @@ There are several ways to encode the same visual program. It is important to dis
 
 JSON + JSON Schema
 
-Strong default for structured storage
+**Strong default for structured storage**
 
 JSON stores the document; JSON Schema describes and validates its structure. The format is widely supported and easy to inspect, generate, and process.
 
-json-schema.org+1
+*Source: json-schema.org (+1 more)*
 
 Best when interoperability, editor tooling, and straightforward implementation matter more than minimizing file size.
 
 Protocol Buffers (Protobuf)
 
-Strong for compact data exchange
+**Strong for compact data exchange**
 
 A typed schema defines messages, which can be encoded into a compact binary representation or mapped to JSON. Stable field numbers and compatibility rules support schema evolution.
 
-protobuf.com+1
+*Source: protobuf.com (+1 more)*
 
 Best when efficient network transfer, generated types, and strict message contracts are priorities. Binary output is less convenient for ordinary Git diffs.
 
 YAML
 
-Human-oriented configuration
+**Human-oriented configuration**
 
 YAML provides indentation-based structured data and supports features such as aliases. It can reduce punctuation and visual noise, but its parsing rules and presentation flexibility require careful constraints when deterministic output is important.
 
-IETF
+*Source: IETF*
 
 Best when people manually author configuration or relatively small graph documents. Restricting the accepted YAML subset can make tooling more predictable.
 
-TOML
+**TOML**
 
 TOML is designed for readable configuration, with explicit key-value pairs and tables. It is less natural for deeply nested graphs and arbitrary collections of interconnected objects.
 
 Best for project settings, compiler options, and editor preferences rather than a complete visual program.
 
-Custom textual syntax
+**Custom textual syntax**
 
 A purpose-built language can represent nodes, connections, and values using domain-specific constructs instead of generic data structures.
 
 Best when the textual representation is itself a first-class programming language, particularly when developers and AI systems are expected to edit it directly. It requires more investment in grammar design, diagnostics, tooling, and migration.
 
-CBOR and other compact encodings
+**CBOR and other compact encodings**
 
 CBOR provides a compact binary representation of structured data. Similar binary formats can be useful for transport, caches, snapshots, and embedded environments.
 
@@ -106,7 +131,7 @@ Best when size or parsing performance is more important than native text diffs. 
 ### Comparative evaluation
 
 | Criterion | JSON + schema | Protobuf binary | YAML | Custom text |
-| --------------------- | --------------------------------- | -------------------------------- | --------------------------------- | ---------------------------- |
+| --- | --- | --- | --- | --- |
 | Human readability | Good | Poor | Very good | Potentially excellent |
 | Git diffs | Good with canonicalization | Poor without decoding | Good with normalization | Excellent if designed for it |
 | Structural validation | Strong with JSON Schema | Strong, typed messages | Requires schema/tooling | Depends on implementation |
@@ -124,29 +149,11 @@ A visual program is not simply a nested tree. It is a graph containing objects w
 
 Consider a simple multiplication graph:
 
-Input
-
-A
-
-## 6
-
-Input
-
-B
-
-## 7
-
-Node: multiply
-
-## Multiply
-
-A × B
-
-Output
-
-Result
-
-# 42
+```text
+Input "A" = 6 ──┐
+                ├──► multiply (A × B) ──► Output "Result" = 42
+Input "B" = 7 ──┘
+```
 
 The serialization must describe at least:
 
@@ -162,30 +169,48 @@ There are two principal representation strategies.
 
 ### Strategy A: Nodes with explicit edges
 
-```
+```json
 {
- "format": "example-graph",
- "version": 1,
- "nodes": [
- {
- "id": "a",
- "type": "constant",
- "value": 6
- },
- {
- "id": "b",
- "type": "constant",
- "value": 7
- },
- {
- "id": "mul",
- "type": "multiply"
- }
- ],
- "edges": [
- {"from": ["a", "value"], "to": ["mul", "a"]},
- {"from": ["b", "value"], "to": ["mul", "b"]}
- ]
+  "format": "example-graph",
+  "version": 1,
+  "nodes": [
+    {
+      "id": "a",
+      "type": "constant",
+      "value": 6
+    },
+    {
+      "id": "b",
+      "type": "constant",
+      "value": 7
+    },
+    {
+      "id": "mul",
+      "type": "multiply"
+    }
+  ],
+  "edges": [
+    {
+      "from": [
+        "a",
+        "value"
+      ],
+      "to": [
+        "mul",
+        "a"
+      ]
+    },
+    {
+      "from": [
+        "b",
+        "value"
+      ],
+      "to": [
+        "mul",
+        "b"
+      ]
+    }
+  ]
 }
 ```
 
@@ -204,18 +229,28 @@ Disadvantages:
 
 ### Strategy B: Connections embedded in input pins
 
-```
+```json
 {
- "nodes": [
- {
- "id": "mul",
- "type": "multiply",
- "inputs": {
- "a": {"from": ["a", "value"]},
- "b": {"from": ["b", "value"]}
- }
- }
- ]
+  "nodes": [
+    {
+      "id": "mul",
+      "type": "multiply",
+      "inputs": {
+        "a": {
+          "from": [
+            "a",
+            "value"
+          ]
+        },
+        "b": {
+          "from": [
+            "b",
+            "value"
+          ]
+        }
+      }
+    }
+  ]
 }
 ```
 
@@ -231,7 +266,7 @@ Disadvantages:
 - Bidirectional graph operations may be less convenient.
 - Repeated references and cyclic graphs still need explicit identity rules.
 
-Recommendation: For a general-purpose visual programming language, start with explicit node identities and explicit connections, even if the surface syntax later presents connections in a more compact form.
+**Recommendation:** For a general-purpose visual programming language, start with explicit node identities and explicit connections, even if the surface syntax later presents connections in a more compact form.
 
 A further distinction is essential: execution order should normally be derived from graph semantics, not from the order in which nodes happen to appear in a serialized list.
 
@@ -241,23 +276,23 @@ A good schema defines the contract of the document without duplicating every rul
 
 ### Recommended schema layers
 
-Layer 1 — Document envelope
+**Layer 1 — Document envelope**
 
 Format identifier, schema version, language version, feature declarations, and document metadata.
 
-Layer 2 — Graph structure
+**Layer 2 — Graph structure**
 
 Nodes, node IDs, pins, edges, endpoint references, subgraphs, and graph-level properties.
 
-Layer 3 — Node definitions
+**Layer 3 — Node definitions**
 
 Allowed node types, pin signatures, required fields, default values, and node-specific data.
 
-Layer 4 — Semantic rules
+**Layer 4 — Semantic rules**
 
 Type compatibility, execution constraints, cardinality, cycle restrictions, variable resolution, and language-specific invariants.
 
-Layer 5 — Presentation metadata
+**Layer 5 — Presentation metadata**
 
 Node positions, canvas zoom, comments, collapsed groups, and optional editor-specific state.
 
@@ -276,7 +311,7 @@ JSON Schema can enforce rules such as:
 
 However, many graph invariants are cross-referential or semantic. For example, JSON Schema alone is not the right place to implement a complete graph type checker that resolves node references, checks every connection, and infers generic types. JSON Schema is primarily a declarative mechanism for validating document structure and constraints.
 
-json-schema.org+1
+*Source: json-schema.org (+1 more)*
 
 Use a layered validation pipeline:
 
@@ -296,9 +331,9 @@ Identifiers are among the most consequential decisions in a graph format because
 Consider three common approaches:
 
 | Identifier strategy | Example | Main trade-off |
-| --------------------- | --------------------- | ---------------------------------------------------------------------------- |
-| Sequential IDs | `node-1`, `node-2`  | Readable, but insertion and regeneration policies can cause churn |
-| Random persistent IDs | `n-7f2c...`  | Stable across edits, but verbose and less readable |
+| --- | --- | --- |
+| Sequential IDs | `node-1`, `node-2` | Readable, but insertion and regeneration policies can cause churn |
+| Random persistent IDs | `n-7f2c...` | Stable across edits, but verbose and less readable |
 | Content-derived IDs | Hash of node contents | Useful for immutable data, but difficult when nodes are edited or duplicated |
 
 For editable graph nodes, persistent identity is usually preferable to identity derived from content. If a node changes from multiplying two values to adding them, it is still the same logical node. Its identity should not need to change.
@@ -348,9 +383,9 @@ This is related to, but not identical to, byte-for-byte preservation of the orig
 5. Stable omission or inclusion rules for default values.
 6. No duplicate representations of the same fact.
 
-The JSON Canonicalization Scheme (JCS), specified by [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785.html?utm_source=chatgpt.com), standardizes a deterministic JSON representation useful for hashing and signing. It does not, by itself, establish semantic equivalence between different graph documents or determine the correct ordering of graph nodes.
+The JSON Canonicalization Scheme (JCS), specified by [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785.html), standardizes a deterministic JSON representation useful for hashing and signing. It does not, by itself, establish semantic equivalence between different graph documents or determine the correct ordering of graph nodes.
 
-RFC Editor+1
+*Source: RFC Editor (+1 more)*
 
 For Git, a pretty-printed canonical format is often more useful than compact canonical JSON. The system can apply deterministic ordering while retaining indentation and line breaks designed for human review.
 
@@ -362,7 +397,7 @@ A poor serializer might regenerate every node ID, reorder the entire node array,
 
 A well-designed serializer would ideally show only:
 
-```
+```text
 - "value": 6
 + "value": 8
 ```
@@ -375,9 +410,9 @@ Sorting every node by ID may make output deterministic, but it can make related 
 
 A good format distinguishes:
 
-- Semantic ordering: ordering that affects program meaning.
-- Canonical ordering: ordering selected for reproducible output.
-- Presentation ordering: ordering chosen to help humans understand the program.
+- **Semantic ordering:** ordering that affects program meaning.
+- **Canonical ordering:** ordering selected for reproducible output.
+- **Presentation ordering:** ordering chosen to help humans understand the program.
 
 These policies should be documented separately.
 
@@ -387,13 +422,13 @@ Visual programming has an additional complication that ordinary source languages
 
 A useful model separates semantic data from presentation data.
 
-Semantic graph
+**Semantic graph**
 
 Node types, IDs, connections, literal values, types, control flow, and program properties.
 
 Changing this data can change program behavior.
 
-Presentation graph
+**Presentation graph**
 
 Positions, sizes, colors, comments, collapsed state, and editor-specific annotations.
 
@@ -401,9 +436,9 @@ Changing this data should not change program behavior.
 
 There are three common approaches:
 
-- Single document: Store both semantic and presentation data in one file. This simplifies sharing and backup, but layout-only changes appear in the same diffs as logic changes.
-- Separate files: Store the semantic graph and layout independently. This produces cleaner semantic history but requires a stable mapping between them.
-- Embedded optional metadata: Keep layout in the graph document under a dedicated metadata field or namespace. This is a useful compromise, provided tools know which fields are semantic.
+- **Single document:** Store both semantic and presentation data in one file. This simplifies sharing and backup, but layout-only changes appear in the same diffs as logic changes.
+- **Separate files:** Store the semantic graph and layout independently. This produces cleaner semantic history but requires a stable mapping between them.
+- **Embedded optional metadata:** Keep layout in the graph document under a dedicated metadata field or namespace. This is a useful compromise, provided tools know which fields are semantic.
 
 For a VS Code-based graph editor, a practical default is to keep the graph in one canonical, human-readable source file and include layout metadata in a clearly separated section. Split the files only if layout churn becomes a demonstrated problem.
 
@@ -425,12 +460,12 @@ Use a document-level schema version distinct from the language's semantic versio
 
 For example:
 
-```
+```json
 {
- "format": "example-graph",
- "schemaVersion": 2,
- "languageVersion": "1.4",
- "nodes": []
+  "format": "example-graph",
+  "schemaVersion": 2,
+  "languageVersion": "1.4",
+  "nodes": []
 }
 ```
 
@@ -456,7 +491,7 @@ A robust migration system should:
 
 For example:
 
-```
+```text
 v1 document
  ↓
 v1 → v2 migration
@@ -474,13 +509,13 @@ The reverse direction is a separate capability. Reading an older format does not
 
 Compatibility should be evaluated across at least three dimensions:
 
-- Read compatibility: Can a new implementation load an old document?
-- Write compatibility: Can an implementation emit documents an older implementation understands?
-- Round-trip compatibility: Can an implementation load and save a document without losing its meaning or unsupported data?
+- **Read compatibility:** Can a new implementation load an old document?
+- **Write compatibility:** Can an implementation emit documents an older implementation understands?
+- **Round-trip compatibility:** Can an implementation load and save a document without losing its meaning or unsupported data?
 
 Protobuf is instructive here: its evolution rules include stable field numbers and reserved deleted fields. Its unknown-field behavior also shows why merely accepting an unfamiliar field is not sufficient if a later transformation drops it.
 
-Protocol Buffers Documentation+1
+*Source: Protocol Buffers Documentation (+1 more)*
 
 For a visual language, unknown node types and extension fields deserve particular attention. An editor might be able to preserve an unfamiliar node as an opaque object even if it cannot execute or display that node correctly.
 
@@ -500,7 +535,7 @@ The format must define what happens in these cases.
 There are three broad strategies.
 
 | Strategy | Behavior | Risk |
-| --------------------- | ------------------------------------------- | -------------------------------------------------------------- |
+| --- | --- | --- |
 | Reject unknown data | Refuse to load the document | Prevents accidental corruption, but limits interoperability |
 | Ignore unknown data | Load recognized fields and discard the rest | Opening and saving can destroy information |
 | Preserve unknown data | Retain unrecognized fields or opaque nodes | More implementation complexity, but better round-trip behavior |
@@ -533,11 +568,11 @@ Suppose a node has a `visible` property with a default of `true`.
 
 These documents may appear equivalent:
 
-```
+```json
 {"id": "n1", "visible": true}
 ```
 
-```
+```json
 {"id": "n1"}
 ```
 
@@ -565,24 +600,24 @@ A model might need to add a node, connect two pins, change a constant, or rename
 
 Consider two approaches.
 
-Whole-document generation
+**Whole-document generation**
 
 The model produces a complete graph document. This is straightforward, but large graphs consume more tokens, and a small mistake can damage unrelated sections.
 
-Structured graph operations
+**Structured graph operations**
 
 The model produces a set of operations against an existing graph:
 
-```
+```json
 {
- "operations": [
- {
- "op": "set_property",
- "node": "n42",
- "property": "value",
- "value": 8
- }
- ]
+  "operations": [
+    {
+      "op": "set_property",
+      "node": "n42",
+      "property": "value",
+      "value": 8
+    }
+  ]
 }
 ```
 
@@ -609,65 +644,98 @@ These principles complement the design of an AI-friendly grammar: the schema con
 
 The following is a conceptual JSON Schema fragment for a graph document. It demonstrates document-level validation, not a complete production schema.
 
-```
+```json
 {
- "$schema": "https://json-schema.org/draft/2020-12/schema",
- "type": "object",
- "required": ["format", "schemaVersion", "nodes", "edges"],
- "properties": {
- "format": {
- "const": "example-graph"
- },
- "schemaVersion": {
- "type": "integer",
- "minimum": 1
- },
- "nodes": {
- "type": "array",
- "items": {
- "type": "object",
- "required": ["id", "type"],
- "properties": {
- "id": {"type": "string", "minLength": 1},
- "type": {"type": "string", "minLength": 1},
- "properties": {"type": "object"},
- "position": {
- "type": "object",
- "properties": {
- "x": {"type": "number"},
- "y": {"type": "number"}
- },
- "required": ["x", "y"]
- }
- }
- }
- },
- "edges": {
- "type": "array",
- "items": {
- "type": "object",
- "required": ["from", "to"],
- "properties": {
- "from": {
- "$ref": "#/$defs/endpoint"
- },
- "to": {
- "$ref": "#/$defs/endpoint"
- }
- }
- }
- }
- },
- "$defs": {
- "endpoint": {
- "type": "object",
- "required": ["node", "pin"],
- "properties": {
- "node": {"type": "string"},
- "pin": {"type": "string"}
- }
- }
- }
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "format",
+    "schemaVersion",
+    "nodes",
+    "edges"
+  ],
+  "properties": {
+    "format": {
+      "const": "example-graph"
+    },
+    "schemaVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "type"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "properties": {
+            "type": "object"
+          },
+          "position": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "x",
+              "y"
+            ]
+          }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "$ref": "#/$defs/endpoint"
+          },
+          "to": {
+            "$ref": "#/$defs/endpoint"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "endpoint": {
+      "type": "object",
+      "required": [
+        "node",
+        "pin"
+      ],
+      "properties": {
+        "node": {
+          "type": "string"
+        },
+        "pin": {
+          "type": "string"
+        }
+      }
+    }
+  }
 }
 ```
 
@@ -675,37 +743,22 @@ This schema checks that the document has the expected shape. It does not guarant
 
 A production schema would also need to specify unknown-field handling, extension points, node-specific variants, numeric constraints, and version-dependent rules.
 
-For current JSON Schema guidance, consult the [official specification](https://json-schema.org/specification?utm_source=chatgpt.com).
+For current JSON Schema guidance, consult the [official specification](https://json-schema.org/specification).
 
-Specification [#section]+1
+*Source: Specification (+1 more)*
 
 ## 14. A recommended architecture
 
 For a text-based visual programming language intended for Git, IDE integration, and AI-assisted editing, a suitable starting point is this architecture:
 
-### Canonical text document
+*Figure: recommended architecture*
 
-Versioned source, stable IDs, explicit connections
-
-### Parser and serializer
-
-Deterministic formatting, precise source locations, lossless handling where required
-
-### Versioned graph model
-
-Nodes, pins, edges, properties, extensions, layout metadata
-
-### Validation and migration
-
-Schema checks, ID resolution, type checking, migration, diagnostics
-
-Graph editor
-
-Layout, interaction, visual rendering
-
-Compiler and tools
-
-Code generation, analysis, AI edits
+- **Canonical text document** — Versioned source, stable IDs, explicit connections
+- **Parser and serializer** — Deterministic formatting, precise source locations, lossless handling where required
+- **Versioned graph model** — Nodes, pins, edges, properties, extensions, layout metadata
+- **Validation and migration** — Schema checks, ID resolution, type checking, migration, diagnostics
+- **Graph editor** — Layout, interaction, visual rendering
+- **Compiler and tools** — Code generation, analysis, AI edits
 
 The central principle is that the editor and compiler should share a well-defined graph model rather than inventing separate interpretations of the file.
 
@@ -718,7 +771,7 @@ For incremental editing, the parser may additionally maintain source spans or a 
 A schema and serializer should be tested as rigorously as a compiler.
 
 | Test | Required property |
-| -------------------------- | ----------------------------------------------------------------------------- |
+| --- | --- |
 | Round-trip test | Serialize → deserialize → serialize produces stable output |
 | Semantic preservation | Saving and reopening preserves graph meaning |
 | Canonicalization | Equivalent graphs produce identical canonical output |
@@ -758,11 +811,11 @@ The most important design decisions are not whether JSON is more elegant than YA
 
 ### Further research directions
 
-1. Schema evolution: How should graph formats migrate when node types, pins, type systems, or language semantics change?
-2. Semantic diff and merge: How can version-control tools compare and merge graph changes by node identity rather than by text lines?
-3. Lossless round-tripping: How can editors preserve comments, formatting, unknown nodes, and extension metadata?
-4. AI-oriented serialization: Does a custom grammar reduce token consumption and generation errors compared with canonical JSON?
-5. Incremental parsing: Can a graph editor update only the affected portion of the in-memory model after a small text edit?
-6. Content addressing: Can stable graph fragments be hashed for caching, reproducible builds, and deduplicated storage without making editable identities unstable?
+1. **Schema evolution:** How should graph formats migrate when node types, pins, type systems, or language semantics change?
+2. **Semantic diff and merge:** How can version-control tools compare and merge graph changes by node identity rather than by text lines?
+3. **Lossless round-tripping:** How can editors preserve comments, formatting, unknown nodes, and extension metadata?
+4. **AI-oriented serialization:** Does a custom grammar reduce token consumption and generation errors compared with canonical JSON?
+5. **Incremental parsing:** Can a graph editor update only the affected portion of the in-memory model after a small text edit?
+6. **Content addressing:** Can stable graph fragments be hashed for caching, reproducible builds, and deduplicated storage without making editable identities unstable?
 
 These questions connect schema and serialization to the broader problems of bidirectional text/graph synchronization, language design, and collaborative programming.

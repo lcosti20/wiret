@@ -1,3 +1,9 @@
+---
+title: "Source-to-Source Compilation with ASTs"
+document_type: "Research note"
+formatted: 2026-10-28
+---
+
 # Source-to-Source Compilation with ASTs
 
 Source-to-source compilation (also called transpilation) is the process of translating one programming language into another while preserving the original program's intended behavior. An Abstract Syntax Tree (AST) is a structured representation of a program that allows a compiler to analyze, transform, optimize, and generate code without relying on fragile text substitutions.
@@ -6,45 +12,47 @@ For the text-based visual programming language, this is especially important: if
 
 The key architectural idea is:
 
-the language's intermediate representation (IR) should define program meaning; the JavaScript AST should define how that meaning is expressed in JavaScript.
+The language's intermediate representation (IR) should define program meaning; the JavaScript AST should define how that meaning is expressed in JavaScript.
 
 This separation lets you change the syntax of the language, the visual editor, or the JavaScript output strategy without rebuilding the entire compiler.
 
+## Contents
+
+- [1. The compilation pipeline](#1-the-compilation-pipeline)
+- [2. What an AST contributes](#2-what-an-ast-contributes)
+- [3. Mapping the IR to JavaScript](#3-mapping-the-ir-to-javascript)
+- [4. AST transformation techniques](#4-ast-transformation-techniques)
+- [5. JavaScript AST libraries and tooling](#5-javascript-ast-libraries-and-tooling)
+- [6. A practical implementation with Babel](#6-a-practical-implementation-with-babel)
+- [7. The difficult part: preserving semantics](#7-the-difficult-part-preserving-semantics)
+- [8. Optimization: where it belongs](#8-optimization-where-it-belongs)
+- [9. Source maps and visual debugging](#9-source-maps-and-visual-debugging)
+- [10. Live compilation and incremental updates](#10-live-compilation-and-incremental-updates)
+- [11. Testing the compiler](#11-testing-the-compiler)
+- [12. Recommended architecture for the project](#12-recommended-architecture-for-the-project)
+- [13. Further research](#13-further-research)
+- [Suggested expansion of the research note](#suggested-expansion-of-the-research-note)
+
 ## 1. The compilation pipeline
 
-### 1. Source language
+*Figure: compilation pipeline*
 
-Text files, visual nodes, connections, properties
-
-### 2. Parse and normalize
-
-Syntax tree → canonical language IR
-
-### 3. Semantic analysis and IR passes
-
-Name resolution, types, control flow, validation, optimization
-
-### 4. JavaScript AST generation
-
-Map IR constructs to valid ECMAScript nodes
-
-### 5. Generate and validate
-
-Format, emit source maps, parse-check, test
-
-### 6. JavaScript output
-
-Portable code for the browser and supported runtimes
+1. **Source language** — Text files, visual nodes, connections, properties
+2. **Parse and normalize** — Syntax tree → canonical language IR
+3. **Semantic analysis and IR passes** — Name resolution, types, control flow, validation, optimization
+4. **JavaScript AST generation** — Map IR constructs to valid ECMAScript nodes
+5. **Generate and validate** — Format, emit source maps, parse-check, test
+6. **JavaScript output** — Portable code for the browser and supported runtimes
 
 Each stage has a distinct responsibility:
 
-- Parsing: determines what the source says syntactically.
-- Normalization: converts different source representations into one canonical IR.
-- Semantic analysis: resolves variables, checks types and verifies that operations make sense.
-- IR transformations: perform language-level rewrites and optimizations.
-- AST generation: maps each IR construct to one or more JavaScript AST nodes.
-- Code generation: serializes the AST into readable JavaScript.
-- Validation: checks generated syntax, behavior and compatibility with the chosen runtime targets.
+- **Parsing:** determines what the source says syntactically.
+- **Normalization:** converts different source representations into one canonical IR.
+- **Semantic analysis:** resolves variables, checks types and verifies that operations make sense.
+- **IR transformations:** perform language-level rewrites and optimizations.
+- **AST generation:** maps each IR construct to one or more JavaScript AST nodes.
+- **Code generation:** serializes the AST into readable JavaScript.
+- **Validation:** checks generated syntax, behavior and compatibility with the chosen runtime targets.
 
 A visual graph should not need to generate JavaScript independently from the text compiler. Both should converge on the same semantic IR, so the generated output is consistent regardless of how the program was authored.
 
@@ -54,13 +62,13 @@ An AST represents the structure of a program rather than its textual appearance.
 
 Consider this source program:
 
-```
+```text
 total = price * quantity + tax
 ```
 
 A simplified expression AST is:
 
-```
+```text
 Assignment
 ├── Identifier("total")
 └── Add
@@ -86,7 +94,7 @@ Text replacement cannot reliably perform these tasks because identical text can 
 ### The three representations to distinguish
 
 | Representation | Main purpose |
-| -------------- | -------------------------------------------------- |
+| --- | --- |
 | Source AST | Captures the source language's syntax |
 | Semantic IR | Captures the meaning and operations of the program |
 | JavaScript AST | Captures a legal target-language program |
@@ -99,29 +107,29 @@ The most important design question is how much of the language should map direct
 
 Suppose the visual language has a node called `SetText`, which sets the text content of an HTML element. Its IR might be:
 
-```
+```json
 {
- "op": "SetText",
- "target": {
- "op": "Variable",
- "name": "element"
- },
- "value": {
- "op": "StringLiteral",
- "value": "Hello, world!"
- }
+  "op": "SetText",
+  "target": {
+    "op": "Variable",
+    "name": "element"
+  },
+  "value": {
+    "op": "StringLiteral",
+    "value": "Hello, world!"
+  }
 }
 ```
 
 A JavaScript backend could translate this into:
 
-```
+```text
 element.textContent = "Hello, world!";
 ```
 
 But a more abstract UI operation might need to become:
 
-```
+```text
 runtime.setText(element, "Hello, world!");
 ```
 
@@ -130,7 +138,7 @@ Both are valid compilation strategies. The first generates idiomatic JavaScript 
 For a visual programming language, the design should divide operations into three categories:
 
 | IR operation | Compilation strategy |
-| ------------------------------------------------------ | ------------------------------------------- |
+| --- | --- |
 | Arithmetic, comparisons, basic variables | Direct JavaScript expressions |
 | Control flow, functions, local scopes | JavaScript statements and declarations |
 | UI nodes, signals, graph execution, special data types | Runtime helpers or explicit lowering passes |
@@ -141,21 +149,14 @@ This division avoids turning the backend into a large collection of special case
 
 Imagine a visual graph that checks a score and displays a message.
 
-Input: `score`
-
-Condition: `score >= 10`
-
-True
-
-Show `"Passed"`
-
-False
-
-Show `"Try again"`
+- **Input:** `score`
+- **Condition:** `score >= 10`
+   - **True:** show `"Passed"`
+   - **False:** show `"Try again"`
 
 A normalized IR could represent the same program as:
 
-```
+```text
 If(
  GreaterThanOrEqual(Variable("score"), Number(10)),
  Call("showMessage", ["Passed"]),
@@ -165,7 +166,7 @@ If(
 
 The JavaScript backend emits:
 
-```
+```text
 if (score >= 10) {
  showMessage("Passed");
 } else {
@@ -187,13 +188,13 @@ Evaluate expressions whose results are already known.
 
 Before:
 
-```
+```javascript
 const width = 100 * 2;
 ```
 
 After:
 
-```
+```javascript
 const width = 200;
 ```
 
@@ -203,14 +204,14 @@ Remove statements that cannot affect the program's observable behavior.
 
 Before:
 
-```
+```javascript
 const unused = 42;
 showMessage("Ready");
 ```
 
 Potentially after:
 
-```
+```text
 showMessage("Ready");
 ```
 
@@ -222,7 +223,7 @@ Translate a high-level language construct into simpler operations.
 
 Suppose the language supports a node like:
 
-```
+```text
 Repeat(5) {
  showMessage("Hello")
 }
@@ -230,9 +231,9 @@ Repeat(5) {
 
 A direct JavaScript representation could be:
 
-```
+```javascript
 for (let i = 0; i < 5; i++) {
- showMessage("Hello");
+  showMessage("Hello");
 }
 ```
 
@@ -258,41 +259,26 @@ These transformations should happen before or during JavaScript AST generation, 
 
 ## 5. JavaScript AST libraries and tooling
 
-You generally do not need to invent the own JavaScript AST format or code printer. Established compiler libraries already provide AST construction, traversal, transformation, and code generation.
+You generally do not need to invent your own JavaScript AST format or code printer. Established compiler libraries already provide AST construction, traversal, transformation, and code generation.
 
-Babel
+*Source: Babel*
 
-Strong default
+**Strong default**
 
 Babel offers JavaScript AST types, traversal utilities, transformations, and code generation. Its generator can emit JavaScript and source maps, making it a natural backend for a custom language compiler.
 
-Babel
+*Source: Babel*
 
-Documentation: [Babel documentation](https://babel.dev/docs/?utm_source=chatgpt.com) · [Generator API](https://babel.dev/docs/babel-generator?utm_source=chatgpt.com)
+- **Documentation: [Babel documentation](https://babel.dev/docs/) · [Generator API](https://babel.dev/docs/babel-generator)** — *TypeScript Compiler API.* Useful when you want compiler infrastructure, typed AST construction, diagnostics, and control over emitted JavaScript. Its factory and printer APIs can build output without assembling code strings manually. *(GitHub).* [Compiler API guide](https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API)
+- **SWC** A performance-oriented compiler toolkit with parsing, transformation, code generation, and source-map support. Worth evaluating if large projects or rapid recompilation become important. *(SWC).* [SWC core API](https://swc.rs/docs/usage/core)
 
-TypeScript Compiler API
+### Recommended choice
 
-Useful when you want compiler infrastructure, typed AST construction, diagnostics, and control over emitted JavaScript. Its factory and printer APIs can build output without assembling code strings manually.
-
-GitHub
-
-Documentation: [Compiler API guide](https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API?utm_source=chatgpt.com)
-
-SWC
-
-A performance-oriented compiler toolkit with parsing, transformation, code generation, and source-map support. Worth evaluating if large projects or rapid recompilation become important.
-
-SWC
-
-Documentation: [SWC core API](https://swc.rs/docs/usage/core?utm_source=chatgpt.com)
-
-### Which would the author choose?
-
-for this use case, a suitable starting point is Babel's AST construction and generator APIs, alongside a custom IR and compiler pipeline.
+For this use case, a suitable starting point is Babel's AST construction and generator APIs, alongside a custom IR and compiler pipeline.
 
 Reasons:
 
-- The system can generate JavaScript directly from the own IR without first expressing the source language as TypeScript.
+- The system can generate JavaScript directly from the language's own IR without first expressing the source language as TypeScript.
 - Babel provides established AST node definitions and traversal tools.
 - It supports source-map generation, useful for mapping runtime errors back to visual nodes and original source lines.
 - The system can keep the source language independent of the specific JavaScript backend.
@@ -307,58 +293,64 @@ Here is a small example of generating JavaScript from a custom IR using Babel's 
 
 Install the relevant packages:
 
-```
+```bash
 npm install @babel/types @babel/generator
 ```
 
 Suppose the source language has an IR operation `Add`:
 
-```
+```json
 {
- "op": "Add",
- "left": { "op": "Variable", "name": "price" },
- "right": { "op": "Variable", "name": "tax" }
+  "op": "Add",
+  "left": {
+    "op": "Variable",
+    "name": "price"
+  },
+  "right": {
+    "op": "Variable",
+    "name": "tax"
+  }
 }
 ```
 
 The system can recursively translate that IR into a JavaScript expression AST:
 
-```
+```javascript
 import * as t from "@babel/types";
 import generate from "@babel/generator";
 
 function emitExpression(ir) {
- switch (ir.op) {
- case "Number":
- return t.numericLiteral(ir.value);
+  switch (ir.op) {
+    case "Number":
+      return t.numericLiteral(ir.value);
 
- case "String":
- return t.stringLiteral(ir.value);
+    case "String":
+      return t.stringLiteral(ir.value);
 
- case "Variable":
- return t.identifier(ir.name);
+    case "Variable":
+      return t.identifier(ir.name);
 
- case "Add":
- return t.binaryExpression(
- "+",
- emitExpression(ir.left),
- emitExpression(ir.right)
- );
+    case "Add":
+      return t.binaryExpression(
+        "+",
+        emitExpression(ir.left),
+        emitExpression(ir.right)
+      );
 
- default:
- throw new Error(`Unsupported IR operation: ${ir.op}`);
- }
+    default:
+      throw new Error(`Unsupported IR operation: ${ir.op}`);
+  }
 }
 
 const expression = emitExpression({
- op: "Add",
- left: { op: "Variable", name: "price" },
- right: { op: "Variable", name: "tax" }
+  op: "Add",
+  left: { op: "Variable", name: "price" },
+  right: { op: "Variable", name: "tax" }
 });
 
 const output = generate(expression, {
- comments: true,
- compact: false
+  comments: true,
+  compact: false
 }).code;
 
 console.log(output);
@@ -366,19 +358,19 @@ console.log(output);
 
 Output:
 
-```
+```text
 price + tax
 ```
 
-The important design decision is that `emitExpression` produces structured AST nodes, not strings. Babel handles the serialization and required formatting. Its generator API is documented at [Babel generator documentation](https://babel.dev/docs/babel-generator?utm_source=chatgpt.com).
+The important design decision is that `emitExpression` produces structured AST nodes, not strings. Babel handles the serialization and required formatting. Its generator API is documented at [Babel generator documentation](https://babel.dev/docs/babel-generator).
 
-Babel
+*Source: Babel*
 
 ### Extend the backend by node category
 
 A maintainable compiler should have separate emission functions for expressions and statements:
 
-```
+```text
 emitExpression(IRExpression) -> JSExpression
 emitStatement(IRStatement) -> JSStatement
 emitFunction(IRFunction) -> JSFunction
@@ -387,9 +379,9 @@ emitProgram(IRProgram) -> JSProgram
 
 This separation is important because JavaScript distinguishes expressions from statements. An addition is an expression; an `if` branch is a statement. Some IR operations may need to expand into multiple JavaScript statements, so a single universal function returning one AST node is not sufficient.
 
-For more sophisticated transformations, Babel's traversal API lets you visit and modify particular AST node types. [Read the traversal documentation](https://babeljs.io/docs/babel-traverse.html?utm_source=chatgpt.com).
+For more sophisticated transformations, Babel's traversal API lets you visit and modify particular AST node types. [Read the traversal documentation](https://babeljs.io/docs/babel-traverse.html).
 
-Babel
+*Source: Babel*
 
 ## 7. The difficult part: preserving semantics
 
@@ -398,7 +390,7 @@ Generating syntactically valid JavaScript is relatively straightforward. Generat
 Consider these language features:
 
 | Source-language feature | Potential JavaScript mismatch |
-| ----------------------- | --------------------------------------------------------------------------------------------- |
+| --- | --- |
 | Integer arithmetic | JavaScript's ordinary `number` type uses IEEE 754 floating-point arithmetic |
 | Boolean conditions | Truthiness may differ from the source language's rules |
 | Equality | `==`, `===`, and source-language equality may have different behavior |
@@ -416,27 +408,27 @@ For example, if the language promises integer arithmetic with overflow checking,
 
 A small runtime library can isolate source-language semantics:
 
-```
+```javascript
 const runtime = {
- checkedAdd(a, b) {
- const result = a + b;
+  checkedAdd(a, b) {
+    const result = a + b;
 
- if (!Number.isSafeInteger(result)) {
- throw new RangeError("Integer overflow");
- }
+    if (!Number.isSafeInteger(result)) {
+      throw new RangeError("Integer overflow");
+    }
 
- return result;
- },
+    return result;
+  },
 
- setText(element, value) {
- element.textContent = String(value);
- }
+  setText(element, value) {
+    element.textContent = String(value);
+  }
 };
 ```
 
 The generated program can call these helpers when necessary:
 
-```
+```javascript
 const total = runtime.checkedAdd(price, tax);
 runtime.setText(outputElement, total);
 ```
@@ -449,11 +441,11 @@ For browser-based visual programming, the recommended approach is to use a hybri
 
 There are two useful levels of optimization.
 
-IR-level optimization
+**IR-level optimization**
 
 Understands the language's concepts directly. It can simplify graph structures, remove unreachable nodes, fold constants, eliminate unused values, and lower abstract control flow.
 
-JavaScript-level optimization
+**JavaScript-level optimization**
 
 Understands ECMAScript syntax and runtime constraints. It can simplify generated expressions, remove redundant code, and apply target-specific transformations.
 
@@ -467,31 +459,31 @@ This is particularly important for a text-based visual programming language.
 
 When the browser reports an error in generated JavaScript, you want to identify the original source expression or visual node—not a line inside a generated helper function.
 
-Standard JavaScript source maps map generated code positions back to original source positions. The format is specified by [ECMA-426](https://tc39.es/ecma426/?utm_source=chatgpt.com).
+Standard JavaScript source maps map generated code positions back to original source positions. The format is specified by [ECMA-426](https://tc39.es/ecma426/).
 
-Ecma International+1
+*Source: Ecma International (+1 more)*
 
 However, the compiler has a further challenge: a visual graph may not have ordinary source-file locations for every node.
 
-the recommendation is to assigning stable identifiers to source-level constructs:
+The recommendation is to assign stable identifiers to source-level constructs:
 
-```
+```json
 {
- "op": "SetText",
- "nodeId": "node-42",
- "sourceSpan": {
- "file": "program",
- "start": 120,
- "end": 158
- },
- "target": {
- "op": "Variable",
- "name": "output"
- },
- "value": {
- "op": "String",
- "value": "Hello"
- }
+  "op": "SetText",
+  "nodeId": "node-42",
+  "sourceSpan": {
+    "file": "program",
+    "start": 120,
+    "end": 158
+  },
+  "target": {
+    "op": "Variable",
+    "name": "output"
+  },
+  "value": {
+    "op": "String",
+    "value": "Hello"
+  }
 }
 ```
 
@@ -499,8 +491,8 @@ The compiler should propagate this origin information through IR transformations
 
 Maintain two mappings:
 
-- Source map: generated JavaScript positions to source text positions.
-- Node-origin map: generated JavaScript positions or AST nodes to visual node IDs.
+- **Source map:** generated JavaScript positions to source text positions.
+- **Node-origin map:** generated JavaScript positions or AST nodes to visual node IDs.
 
 The second mapping can support selecting a graph node when an error occurs, highlighting the node currently being executed, and displaying generated code for a selected node.
 
@@ -508,11 +500,11 @@ Because one source node can produce multiple JavaScript statements—and multipl
 
 Babel's generator supports source-map output, including scenarios involving multiple source files.
 
-Babel
+*Source: Babel*
 
 ## 10. Live compilation and incremental updates
 
-the WYSIWYG editor may need to regenerate code whenever the user edits text, moves a node, changes a connection, or modifies a property.
+The WYSIWYG editor may need to regenerate code whenever the user edits text, moves a node, changes a connection, or modifies a property.
 
 Recompiling the entire program on every keystroke is a reasonable starting point for small projects. As programs grow, incremental compilation can reduce latency.
 
@@ -536,7 +528,7 @@ A compiler needs more than tests that assert a particular output string. Formatt
 Use several layers of testing:
 
 | Test type | What it verifies |
-| ------------------------- | ----------------------------------------------------------------------------- |
+| --- | --- |
 | Golden tests | Representative IR produces expected JavaScript |
 | AST validity tests | Generated ASTs serialize and parse successfully |
 | Semantic tests | Executing generated code matches the language specification |
@@ -551,31 +543,16 @@ For a visual language, also test that equivalent text-authored and graph-authore
 
 ## 12. Recommended architecture for the project
 
-Text frontend
+*Figure: recommended compiler architecture*
 
-Parser, syntax diagnostics
+- **Text frontend** — Parser, syntax diagnostics
+- **Graph frontend** — Nodes, wires, properties
+- **Canonical semantic IR** — Stable node IDs, symbols, types, source origins, control flow
+- **IR transformation passes** — Validation → lowering → optimization
+- **JavaScript backend** — AST generation and source maps
+- **IR interpreter** — Reference execution and debugging
 
-Graph frontend
-
-Nodes, wires, properties
-
-### Canonical semantic IR
-
-Stable node IDs, symbols, types, source origins, control flow
-
-IR transformation passes
-
-Validation → lowering → optimization
-
-JavaScript backend
-
-AST generation and source maps
-
-IR interpreter
-
-Reference execution and debugging
-
-the design should make the compiler deterministic: the same normalized IR and compiler configuration should produce the same output. This improves caching, reproducible builds, debugging, testing, and version-control diffs.
+The design should make the compiler deterministic: the same normalized IR and compiler configuration should produce the same output. This improves caching, reproducible builds, debugging, testing, and version-control diffs.
 
 For the initial milestone, implement a small subset—literals, variables, arithmetic, function calls, conditionals, and simple loops. Generate JavaScript ASTs, emit readable code, validate the output, and compare its behavior against an IR interpreter. Add graph-specific lowering and DOM operations after the core pipeline is dependable.
 
@@ -583,12 +560,12 @@ For the initial milestone, implement a small subset—literals, variables, arith
 
 These resources provide the most useful starting points:
 
-- [Babel Generator](https://babel.dev/docs/babel-generator?utm_source=chatgpt.com) — AST-to-code generation, formatting options and source maps.
-- [Babel Traverse](https://babeljs.io/docs/babel-traverse.html?utm_source=chatgpt.com) — visiting and modifying AST nodes.
-- [Babel Core](https://babel.dev/docs/babel-core?utm_source=chatgpt.com) — transforming existing ASTs and composing compiler passes.
-- [TypeScript Compiler API](https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API?utm_source=chatgpt.com) — AST construction, diagnostics, symbol resolution and emission.
-- [SWC Core API](https://swc.rs/docs/usage/core?utm_source=chatgpt.com) — parsing, transforming, and generating JavaScript with source-map support.
-- [ECMA-426 Source Map Specification](https://tc39.es/ecma426/?utm_source=chatgpt.com) — the standard for mapping generated code to its original source.
+- [Babel Generator](https://babel.dev/docs/babel-generator) — AST-to-code generation, formatting options and source maps.
+- [Babel Traverse](https://babeljs.io/docs/babel-traverse.html) — visiting and modifying AST nodes.
+- [Babel Core](https://babel.dev/docs/babel-core) — transforming existing ASTs and composing compiler passes.
+- [TypeScript Compiler API](https://github.com/microsoft/TypeScript/wiki/Using-the-Compiler-API) — AST construction, diagnostics, symbol resolution and emission.
+- [SWC Core API](https://swc.rs/docs/usage/core) — parsing, transforming, and generating JavaScript with source-map support.
+- [ECMA-426 Source Map Specification](https://tc39.es/ecma426/) — the standard for mapping generated code to its original source.
 
 ## Suggested expansion of the research note
 

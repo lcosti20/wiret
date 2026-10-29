@@ -1,10 +1,40 @@
+---
+title: "Intermediate Representations"
+document_type: "Reference article with extended analysis"
+source: "https://en.wikipedia.org/wiki/Intermediate_representation"
+formatted: 2026-10-28
+---
+
 # Intermediate Representations
+
+> **Structure of this document.** Part I follows the Wikipedia article ([Intermediate representation](https://en.wikipedia.org/wiki/Intermediate_representation)). The section titled *Extended Analysis* is supplementary explanation added for research purposes; it is not part of the Wikipedia text.
 
 > **"Intermediate form" redirects here.** For the use of the term in biology, see [Transitional fossil](https://en.wikipedia.org/wiki/Transitional_fossil).
 
 An **intermediate representation** (IR) is the data structure or code used internally by a compiler or virtual machine to represent source code. An IR is designed to be conducive to further processing, such as optimization and translation. A "good" IR must be accurate – capable of representing the source code without loss of information – and independent of any particular source or target language. An IR may take one of several forms: an in-memory data structure, or a special tuple- or stack-based code readable by the program. In the latter case it is also called an intermediate language.
 
 A canonical example is found in most modern compilers. For example, the CPython interpreter transforms the linear human-readable text representing a program into an intermediate graph structure that allows flow analysis and re-arrangement before execution. Use of an intermediate representation such as this allows compiler systems like the GNU Compiler Collection and LLVM to be used by many different source languages to generate code for many different target architectures.
+
+## Contents
+
+- [Intermediate language](#intermediate-language)
+- [Languages](#languages)
+- [Other](#other)
+- [See also](#see-also)
+- [References](#references)
+- [External links](#external-links)
+- [Extended Analysis: Design Principles and Implementation](#extended-analysis-design-principles-and-implementation)
+  - [1. Why intermediate representations exist](#1-why-intermediate-representations-exist)
+  - [2. What makes a good IR?](#2-what-makes-a-good-ir)
+  - [3. The major families of intermediate representation](#3-the-major-families-of-intermediate-representation)
+  - [4. Lowering: moving between levels of abstraction](#4-lowering-moving-between-levels-of-abstraction)
+  - [5. Case studies: how real compiler systems use IRs](#5-case-studies-how-real-compiler-systems-use-irs)
+  - [6. The central problem: preserving semantics](#6-the-central-problem-preserving-semantics)
+  - [7. IRs beyond conventional compilation](#7-irs-beyond-conventional-compilation)
+  - [8. IR design trade-offs worth studying](#8-ir-design-trade-offs-worth-studying)
+  - [9. A practical framework for evaluating an IR](#9-a-practical-framework-for-evaluating-an-ir)
+  - [10. Recommended research path](#10-recommended-research-path)
+  - [Conclusion](#conclusion)
 
 ## Intermediate language
 
@@ -69,7 +99,7 @@ Static analysis tools often use an intermediate representation. For instance, Ra
 
 ## References
 
-1. Walker, David. "CS320: Compilers: Intermediate Representation" (Lecture slides). Retrieved 12 February 2016.
+1. **Walker, David. "CS320:** Compilers: Intermediate Representation" (Lecture slides). Retrieved 12 February 2016.
 2. Chow, Fred (22 November 2013). "The Challenge of Cross-language Interoperability". *ACM Queue*. 11 (10). Retrieved 12 February 2016.
 3. Toal, Ray. "Intermediate Representations". Retrieved 12 February 2016.
 4. "Bitcode (iOS, watchOS)". Hacker News. 10 June 2015. Retrieved 17 June 2015.
@@ -84,19 +114,13 @@ Static analysis tools often use an intermediate representation. For instance, Ra
 
 - [The Stanford SUIF Group](https://suif.stanford.edu/)
 
----
-
-**Source:** https://en.wikipedia.org/wiki/Intermediate_representation
-
-## Intermediate Representations: Design Principles and Implementation
+## Extended Analysis: Design Principles and Implementation
 
 An intermediate representation (IR) is one of the central abstractions in compiler design. It is the form in which a compiler, interpreter, optimizer, or analysis tool expresses a program so that it can reason about the program independently of the exact syntax in which a human wrote it or the exact machine on which it will run.
 
 The foundational material introduces intermediate languages, three-address code, virtual-machine bytecode, GCC, LLVM IR, MLIR, and IRs for static analysis and reverse engineering. The following sections examine design principles, representation families, compiler pipelines, optimization techniques, and trade-offs.
 
-One important distinction: the article gives examples of IRs, but IR is a broader concept than a single intermediate language. It can be a syntax tree, a graph of operations, a control-flow graph, a typed dataflow representation, bytecode, or a collection of related representations used at different stages of a toolchain.&#x20;
-
-Intermediate_representation.md
+One important distinction: the article gives examples of IRs, but IR is a broader concept than a single intermediate language. It can be a syntax tree, a graph of operations, a control-flow graph, a typed dataflow representation, bytecode, or a collection of related representations used at different stages of a toolchain.
 
 ### 1. Why intermediate representations exist
 
@@ -106,47 +130,33 @@ Without a shared intermediate representation, each source language may need its 
 
 With a shared IR, each source language can translate into the IR, and each target can have a backend that translates the IR into its target instructions.
 
-Source languages
+*Figure: compiler pipeline with a shared IR*
 
-Rust · Swift · Nova
-
-Frontends
-
-Parsing · type checking · lowering
-
-Shared intermediate representation
-
-Common semantics · analysis · optimization
-
-Backends
-
-Instruction selection · register allocation · code generation
-
-Targets
-
-x86-64 · ARM64 · WebAssembly
+1. **Source languages** — Rust · Swift · Nova
+2. **Frontends** — Parsing · type checking · lowering
+3. **Shared intermediate representation** — Common semantics · analysis · optimization
+4. **Backends** — Instruction selection · register allocation · code generation
+5. **Targets** — x86-64 · ARM64 · WebAssembly
 
 Conceptual architecture. Real compilers may use several IRs, and not every frontend can target every IR or backend.
 
-If there are \\(m\\) source languages and \\(n\\) targets, a direct implementation may require roughly \\(m \times n\\) translation paths. A shared IR can reduce this toward \\(m+n\\) components: one frontend per language and one backend per target.
+If there are $m$ source languages and $n$ targets, a direct implementation may require roughly $m \times n$ translation paths. A shared IR can reduce this toward $m+n$ components: one frontend per language and one backend per target.
 
 This is an architectural simplification, not a guarantee of lower total engineering effort. The IR must express enough of each source language's semantics and enough of each target's capabilities to make the shared system useful.
 
 #### The five principal benefits
 
-- Separation of concerns: language-specific syntax and type rules can be handled separately from processor-specific code generation.
-- Optimization: the compiler can apply transformations to a representation designed for analysis rather than human readability.
-- Portability: a common IR can support multiple processors, operating systems, or execution environments.
-- Analysis: explicit data dependencies and control flow make it easier to prove properties, detect errors, or understand behavior.
-- Reuse: multiple frontends, optimizers, analyzers, and backends can share infrastructure.
+- **Separation of concerns:** language-specific syntax and type rules can be handled separately from processor-specific code generation.
+- **Optimization:** the compiler can apply transformations to a representation designed for analysis rather than human readability.
+- **Portability:** a common IR can support multiple processors, operating systems, or execution environments.
+- **Analysis:** explicit data dependencies and control flow make it easier to prove properties, detect errors, or understand behavior.
+- **Reuse:** multiple frontends, optimizers, analyzers, and backends can share infrastructure.
 
 IR is therefore not merely a temporary format. It is an architectural boundary between different kinds of reasoning about a program.
 
 ### 2. What makes a good IR?
 
-The Wikipedia article emphasizes accuracy, further processing, and independence from particular source and target languages. These are useful starting criteria, but they interact in subtle ways.&#x20;
-
-Intermediate_representation.md
+The Wikipedia article emphasizes accuracy, further processing, and independence from particular source and target languages. These are useful starting criteria, but they interact in subtle ways.
 
 #### Semantic fidelity
 
@@ -154,7 +164,7 @@ An IR must preserve the meaning of the program, including details that affect ob
 
 For example:
 
-```
+```text
 int x = a + b;
 ```
 
@@ -180,7 +190,7 @@ An IR that is too high-level may hide the details needed for low-level optimizat
 
 Consider the expression:
 
-```
+```text
 matrix_multiply(A, B)
 ```
 
@@ -206,31 +216,27 @@ An abstract syntax tree (AST) represents the grammatical structure of a program 
 
 For example:
 
-```
+```text
 result = a + b * c;
 ```
 
 can be represented as:
 
+```text
 Assignment
-
-result
-
-Add
-
-a
-
-Multiply
-
-b
-
-c
+├── result
+└── Add
+    ├── a
+    └── Multiply
+        ├── b
+        └── c
+```
 
 The tree captures operator precedence: multiplication occurs inside the addition.
 
-Strengths: ASTs preserve source-level structure and are useful for type checking, diagnostics, refactoring, and transformations that depend on language constructs.
+**Strengths:** ASTs preserve source-level structure and are useful for type checking, diagnostics, refactoring, and transformations that depend on language constructs.
 
-Limitations: Complex expressions and nested control structures can make dataflow analysis difficult. An AST alone does not necessarily make execution order, control-flow edges, or variable definitions explicit.
+**Limitations:** Complex expressions and nested control structures can make dataflow analysis difficult. An AST alone does not necessarily make execution order, control-flow edges, or variable definitions explicit.
 
 ASTs are often the first representation in a compiler, but they can also serve as an IR for tools such as linters, formatters, and source-to-source translators.
 
@@ -240,13 +246,13 @@ Three-address code (TAC) decomposes expressions into simple operations, usually 
 
 Consider:
 
-```
+```text
 x = (a + b) * (c - d)
 ```
 
 Its TAC representation could be:
 
-```
+```text
 t1 = a + b
 t2 = c - d
 t3 = t1 * t2
@@ -267,7 +273,7 @@ A basic block is a sequence of instructions with a single entry point and no int
 
 For example:
 
-```
+```text
 if (x > 0)
     y = x + 1;
 else
@@ -278,28 +284,19 @@ return y;
 
 can be organized into four blocks:
 
-Entry
-
-`x > 0?`
-
-True
-
-`y = x + 1`
-
-False
-
-`y = x - 1`
-
-Merge
-
-`return y`
+| Block | Contents |
+| --- | --- |
+| Entry | `x > 0?` |
+| True branch | `y = x + 1` |
+| False branch | `y = x - 1` |
+| Merge | `return y` |
 
 Schematic CFG; the merge block receives control from either branch.
 
 A CFG supports analyses such as:
 
 - Reachability and unreachable-code detection.
-- Dominance: whether every path to a block passes through another block.
+- **Dominance:** whether every path to a block passes through another block.
 - Loop identification and loop-invariant code motion.
 - Liveness analysis and register allocation.
 - Dataflow propagation across branches.
@@ -312,7 +309,7 @@ Static single assignment (SSA) is one of the most influential IR design techniqu
 
 Ordinary code may assign to the same variable multiple times:
 
-```
+```text
 x = 10
 x = x + 5
 x = x * 2
@@ -320,7 +317,7 @@ x = x * 2
 
 In SSA form, these become distinct definitions:
 
-```
+```text
 x1 = 10
 x2 = x1 + 5
 x3 = x2 * 2
@@ -332,7 +329,7 @@ The benefit is that each use refers to a specific definition. This simplifies re
 
 Consider:
 
-```
+```text
 if (condition)
     x = 10;
 else
@@ -341,9 +338,9 @@ else
 use(x);
 ```
 
-The compiler needs to represent which version of `x` reaches `use`. In a classic SSA representation with explicit merge functions, it can use a \\(\phi\\) (phi) function:
+The compiler needs to represent which version of `x` reaches `use`. In a classic SSA representation with explicit merge functions, it can use a $\phi$ (phi) function:
 
-```
+```text
 then:
     x1 = 10
     goto merge
@@ -357,15 +354,13 @@ merge:
     use(x3)
 ```
 
-The \\(\phi\\) function selects the value associated with the predecessor block from which control arrived. It is a representation of a control-flow-dependent choice, not necessarily a machine instruction.
+The $\phi$ function selects the value associated with the predecessor block from which control arrived. It is a representation of a control-flow-dependent choice, not necessarily a machine instruction.
 
 SSA is particularly useful for sparse conditional constant propagation, dead-code elimination, and many forms of dataflow analysis.
 
-LLVM IR is SSA-based, and GCC uses an SSA form of GIMPLE for important optimization passes.&#x20;
+LLVM IR is SSA-based, and GCC uses an SSA form of GIMPLE for important optimization passes.
 
-[image](https://www.google.com/s2/favicons?domain=https://llvm.org\&sz=32)
-
-LLVM+1
+*Source: LLVM (+1 more)*
 
 One subtlety: SSA makes ordinary value dependencies explicit, but it does not automatically eliminate all complications caused by memory. If two pointers may refer to the same location, stores and loads still require alias analysis and memory-dependence reasoning.
 
@@ -375,7 +370,7 @@ A virtual-machine instruction set is often an IR intended for execution by an in
 
 A stack-based instruction sequence might calculate `a + b` as:
 
-```
+```text
 LOAD a
 LOAD b
 ADD
@@ -386,7 +381,7 @@ The `ADD` instruction consumes values from an evaluation stack.
 
 A register-based sequence might instead look like:
 
-```
+```text
 LOAD r1, a
 LOAD r2, b
 ADD  r3, r1, r2
@@ -395,19 +390,17 @@ STORE result, r3
 
 Here, the operands and destination are named explicitly.
 
-| Property            | Stack-based                                        | Register-based                                  |
-| ------------------- | -------------------------------------------------- | ----------------------------------------------- |
-| Operand naming      | Often implicit in stack position                   | Explicit registers or virtual registers         |
-| Instruction size    | Often compact                                      | May require more operand fields                 |
-| Dataflow visibility | Must often be reconstructed from stack effects     | Usually more explicit                           |
-| Execution           | Natural for a simple interpreter                   | Natural for many JIT optimizers                 |
-| Optimization        | Possible, but stack effects complicate some passes | Often convenient for dependency-oriented passes |
+| Property | Stack-based | Register-based |
+| --- | --- | --- |
+| Operand naming | Often implicit in stack position | Explicit registers or virtual registers |
+| Instruction size | Often compact | May require more operand fields |
+| Dataflow visibility | Must often be reconstructed from stack effects | Usually more explicit |
+| Execution | Natural for a simple interpreter | Natural for many JIT optimizers |
+| Optimization | Possible, but stack effects complicate some passes | Often convenient for dependency-oriented passes |
 
 These are tendencies, not universal performance laws. Bytecode format, interpreter implementation, JIT strategy, and workload all matter.
 
-Examples include Java bytecode, .NET's Common Intermediate Language (CIL), and Pascal p-code. As your source notes, these can be considered intermediate languages because they sit between a high-level language and native execution.&#x20;
-
-Intermediate_representation.md
+Examples include Java bytecode, .NET's Common Intermediate Language (CIL), and Pascal p-code. As the source article notes, these can be considered intermediate languages because they sit between a high-level language and native execution.
 
 #### 3.6 Dataflow graphs and graph IRs
 
@@ -415,7 +408,7 @@ In a dataflow representation, operations are connected according to their inputs
 
 For example:
 
-```
+```text
        a ──┐
            ├─ Add ──┐
        b ──┘        │
@@ -436,11 +429,9 @@ Dataflow graphs are especially useful for:
 
 A graph does not necessarily mean the program is free of control flow. Real dataflow systems may have conditional execution, loops, mutable state, and memory effects. Some use acyclic graphs for individual computations and separate mechanisms for loops and control.
 
-MLIR, discussed below, supports dataflow-oriented representations alongside conventional control flow.&#x20;
+MLIR, discussed below, supports dataflow-oriented representations alongside conventional control flow.
 
-[image](https://www.google.com/s2/favicons?domain=https://mlir.llvm.org\&sz=32)
-
-MLIR+1
+*Source: MLIR (+1 more)*
 
 #### 3.7 Structured, domain-specific, and polyhedral IRs
 
@@ -448,7 +439,7 @@ Some operations are easier to optimize when the IR preserves more structure than
 
 For example, a tensor-level operation:
 
-```
+```text
 C = matmul(A, B)
 ```
 
@@ -468,25 +459,13 @@ A modern compiler often uses several IRs rather than trying to make one represen
 
 Lowering is the transformation of a program into a representation that exposes lower-level implementation details.
 
-Level 1 — Source-oriented IR
+*Figure: levels of lowering*
 
-Functions, classes, pattern matching, high-level types
-
-Level 2 — Structured or domain-specific IR
-
-Loops, tensors, vector operations, domain semantics
-
-Level 3 — Low-level, target-independent IR
-
-Explicit control flow, arithmetic, loads, stores, calls
-
-Level 4 — Target-oriented IR
-
-Machine-specific operations, calling conventions, register constraints
-
-Machine code
-
-Encoded instructions for the processor
+- **Level 1 — Source-oriented IR** — Functions, classes, pattern matching, high-level types
+- **Level 2 — Structured or domain-specific IR** — Loops, tensors, vector operations, domain semantics
+- **Level 3 — Low-level, target-independent IR** — Explicit control flow, arithmetic, loads, stores, calls
+- **Level 4 — Target-oriented IR** — Machine-specific operations, calling conventions, register constraints
+- **Machine code** — Encoded instructions for the processor
 
 This diagram is a conceptual hierarchy, not a mandatory sequence. A compiler can skip levels, move between related representations, or repeatedly alternate between optimization and lowering.
 
@@ -494,7 +473,7 @@ This diagram is a conceptual hierarchy, not a mandatory sequence. A compiler can
 
 A source-level loop:
 
-```
+```text
 for (int i = 0; i < n; i++) {
     sum += a[i];
 }
@@ -502,7 +481,7 @@ for (int i = 0; i < n; i++) {
 
 might first be represented as a structured loop operation. At a lower level, it could become explicit basic blocks:
 
-```
+```text
 entry:
     i = 0
     sum = 0
@@ -547,29 +526,27 @@ In practice, one pass can do both.
 
 ### 5. Case studies: how real compiler systems use IRs
 
-Your source article mentions GCC, LLVM, MLIR, and bytecode systems. Comparing them reveals that IR design is largely about deciding which information belongs at which stage.
+The source article mentions GCC, LLVM, MLIR, and bytecode systems. Comparing them reveals that IR design is largely about deciding which information belongs at which stage.
 
 #### 5.1 GCC: multiple representations for different jobs
 
-The GNU Compiler Collection (GCC) uses three major intermediate representations: GENERIC, GIMPLE, and RTL.&#x20;
+The GNU Compiler Collection (GCC) uses three major intermediate representations: GENERIC, GIMPLE, and RTL.
 
-[image](https://www.google.com/s2/favicons?domain=https://gcc.gnu.org\&sz=32)
+*Source: GCC (+1 more)*
 
-GCC+1
-
-GENERIC
+**GENERIC**
 
 A language-independent representation that serves as an interface between language frontends and subsequent compiler stages.
 
-GIMPLE
+**GIMPLE**
 
 A restricted, three-address-style representation used for many language- and target-independent optimizations. SSA form supports important dataflow analyses.
 
-RTL — Register Transfer Language
+**RTL — Register Transfer Language**
 
 A lower-level representation used for machine-oriented optimization and instruction generation.
 
-Machine code
+**Machine code**
 
 The important design decision is that GCC does not force all optimizations into one universal instruction set.
 
@@ -577,31 +554,27 @@ GIMPLE restricts the complexity of expressions and makes control flow and interm
 
 This is a practical example of specialization: different representations make different operations convenient.
 
-Official references: [GIMPLE documentation](https://gcc.gnu.org/onlinedocs/gccint/GIMPLE.html?utm_source=chatgpt.com) and [GCC tree SSA documentation](https://gcc.gnu.org/onlinedocs/gccint/Tree-SSA.html?utm_source=chatgpt.com).
+Official references: [GIMPLE documentation](https://gcc.gnu.org/onlinedocs/gccint/GIMPLE.html) and [GCC tree SSA documentation](https://gcc.gnu.org/onlinedocs/gccint/Tree-SSA.html).
 
 #### 5.2 LLVM: a common low-level representation
 
-LLVM centers on LLVM IR, an SSA-based, typed, low-level representation designed to support optimization and code generation across multiple source languages and targets.&#x20;
+LLVM centers on LLVM IR, an SSA-based, typed, low-level representation designed to support optimization and code generation across multiple source languages and targets.
 
-[image](https://www.google.com/s2/favicons?domain=https://llvm.org\&sz=32)
-
-LLVM+1
+*Source: LLVM (+1 more)*
 
 LLVM IR exists in three equivalent forms:
 
-- In-memory representation: compiler data structures used by passes.
-- Textual representation: a human-readable assembly-like language.
-- Bitcode: a serialized binary form.
+- **In-memory representation:** compiler data structures used by passes.
+- **Textual representation:** a human-readable assembly-like language.
+- **Bitcode:** a serialized binary form.
 
-These are different encodings of the IR, not three different abstraction levels.&#x20;
+These are different encodings of the IR, not three different abstraction levels.
 
-[image](https://www.google.com/s2/favicons?domain=https://llvm.org\&sz=32)
-
-LLVM
+*Source: LLVM*
 
 For example, LLVM IR can explicitly express integer arithmetic:
 
-```
+```text
 define i32 @add(i32 %a, i32 %b) {
 entry:
   %sum = add i32 %a, %b
@@ -613,21 +586,17 @@ The function accepts two 32-bit integers, adds them, and returns the result.
 
 The IR is more explicit than C about types, values, and operations, but it does not commit to a particular physical register or machine instruction. Those decisions are made later.
 
-LLVM also illustrates why a low-level IR still needs rich semantics. Integer arithmetic, pointer operations, memory accesses, atomic operations, and undefined behavior all affect which transformations are valid. The IR is not simply a list of arithmetic instructions.&#x20;
+LLVM also illustrates why a low-level IR still needs rich semantics. Integer arithmetic, pointer operations, memory accesses, atomic operations, and undefined behavior all affect which transformations are valid. The IR is not simply a list of arithmetic instructions.
 
-[image](https://www.google.com/s2/favicons?domain=https://llvm.org\&sz=32)
+*Source: LLVM (+1 more)*
 
-LLVM+1
-
-Official reference: [LLVM Language Reference Manual](https://llvm.org/docs/LangRef.html?utm_source=chatgpt.com).
+Official reference: [LLVM Language Reference Manual](https://llvm.org/docs/LangRef.html).
 
 #### 5.3 MLIR: multiple abstraction levels in one framework
 
-MLIR takes a different approach. Instead of requiring every operation to be translated into one common, low-level instruction vocabulary as early as possible, it supports multiple abstraction levels within a shared IR framework.&#x20;
+MLIR takes a different approach. Instead of requiring every operation to be translated into one common, low-level instruction vocabulary as early as possible, it supports multiple abstraction levels within a shared IR framework.
 
-[image](https://www.google.com/s2/favicons?domain=https://mlir.llvm.org\&sz=32)
-
-MLIR+1
+*Source: MLIR (+1 more)*
 
 MLIR organizes extensible operations, types, and attributes into dialects. A dialect defines the vocabulary and semantics for a particular domain or compiler level.
 
@@ -640,11 +609,9 @@ Examples include:
 - `gpu` for GPU-related operations.
 - `llvm` for LLVM-oriented constructs.
 
-These dialects are documented in the [official MLIR dialect reference](https://mlir.llvm.org/docs/Dialects/?utm_source=chatgpt.com).&#x20;
+These dialects are documented in the [official MLIR dialect reference](https://mlir.llvm.org/docs/Dialects/).
 
-[image](https://www.google.com/s2/favicons?domain=https://mlir.llvm.org\&sz=32)
-
-MLIR
+*Source: MLIR*
 
 Why is this valuable?
 
@@ -654,16 +621,16 @@ If the compiler lowered everything immediately into scalar loads, stores, and ar
 
 MLIR therefore treats the transition between abstraction levels as an important part of the compiler's architecture rather than an incidental conversion step.
 
-Official references: [MLIR design rationale](https://mlir.llvm.org/docs/Rationale/Rationale/?utm_source=chatgpt.com) and [MLIR language reference](https://mlir.llvm.org/docs/LangRef/?utm_source=chatgpt.com).
+Official references: [MLIR design rationale](https://mlir.llvm.org/docs/Rationale/Rationale/) and [MLIR language reference](https://mlir.llvm.org/docs/LangRef/).
 
 #### Comparison
 
-| Design dimension    | GCC                                                        | LLVM                                                         | MLIR                                                                       |
-| ------------------- | ---------------------------------------------------------- | ------------------------------------------------------------ | -------------------------------------------------------------------------- |
-| Core approach       | Multiple specialized IRs                                   | Shared low-level SSA IR                                      | Extensible framework for multiple abstraction levels                       |
-| Main strength       | Separating general optimization from machine-oriented work | Broad optimization and target-code-generation infrastructure | Preserving and transforming domain-specific structure                      |
-| Extensibility model | Compiler passes and representation-specific extensions     | Instructions, types, attributes, intrinsics, and metadata    | Dialects, operations, types, attributes, and interfaces                    |
-| Typical role        | General-purpose native compilation                         | General-purpose native compilation and JIT infrastructure    | Domain-specific compilation, heterogeneous targets, and lowering pipelines |
+| Design dimension | GCC | LLVM | MLIR |
+| --- | --- | --- | --- |
+| Core approach | Multiple specialized IRs | Shared low-level SSA IR | Extensible framework for multiple abstraction levels |
+| Main strength | Separating general optimization from machine-oriented work | Broad optimization and target-code-generation infrastructure | Preserving and transforming domain-specific structure |
+| Extensibility model | Compiler passes and representation-specific extensions | Instructions, types, attributes, intrinsics, and metadata | Dialects, operations, types, attributes, and interfaces |
+| Typical role | General-purpose native compilation | General-purpose native compilation and JIT infrastructure | Domain-specific compilation, heterogeneous targets, and lowering pipelines |
 
 These are architectural distinctions, not mutually exclusive capabilities. LLVM supports extensions, GCC supports multiple optimization levels, and MLIR can lower into LLVM IR. The systems overlap considerably in practice.
 
@@ -673,7 +640,7 @@ A compiler is not free to transform a program merely because the resulting instr
 
 Consider:
 
-```
+```text
 int x = a * 2;
 ```
 
@@ -681,7 +648,7 @@ A compiler might replace multiplication with a left shift. Whether that is valid
 
 Similarly, these two floating-point expressions are not always interchangeable:
 
-```
+```text
 (a + b) + c
 a + (b + c)
 ```
@@ -716,32 +683,26 @@ Some source languages allow particular operations to have undefined behavior. An
 
 That means an IR may encode semantic facts that are not obvious from the source text alone. A seemingly harmless change in the definition of an IR instruction can therefore change the correctness of many optimizations.
 
-LLVM's language reference explicitly distinguishes well-formed IR from text that is merely syntactically accepted, illustrating that parsing is not the same as establishing validity.&#x20;
+LLVM's language reference explicitly distinguishes well-formed IR from text that is merely syntactically accepted, illustrating that parsing is not the same as establishing validity.
 
-[image](https://www.google.com/s2/favicons?domain=https://llvm.org\&sz=32)
-
-LLVM
+*Source: LLVM*
 
 #### How researchers check correctness
 
 Two broad approaches are especially relevant:
 
-- Compiler verification: prove that a compiler, or its important components, preserve semantics under stated assumptions.
-- Translation validation: check whether a particular translation or optimization preserves the required semantics.
+- **Compiler verification:** prove that a compiler, or its important components, preserve semantics under stated assumptions.
+- **Translation validation:** check whether a particular translation or optimization preserves the required semantics.
 
-For example, Alive2 uses bounded translation validation for LLVM transformations. Its research demonstrates how automated checking can uncover incorrect optimizations and ambiguities in IR semantics.&#x20;
+For example, Alive2 uses bounded translation validation for LLVM transformations. Its research demonstrates how automated checking can uncover incorrect optimizations and ambiguities in IR semantics.
 
-[image](https://www.google.com/s2/favicons?domain=https://pldi21.sigplan.org\&sz=32)
-
-PLDI 2021
+*Source: PLDI 2021*
 
 The broader lesson is that an IR's design cannot be separated from its semantic specification. If the meaning of an operation is ambiguous, every optimizer that uses it inherits that ambiguity.
 
 ### 7. IRs beyond conventional compilation
 
-Your Wikipedia article briefly mentions static analysis and reverse engineering. These applications broaden the concept considerably.&#x20;
-
-Intermediate_representation.md
+The Wikipedia article briefly mentions static analysis and reverse engineering. These applications broaden the concept considerably.
 
 #### Static analysis
 
@@ -766,9 +727,7 @@ When the input is already machine code, the task is almost the reverse of conven
 
 A tool may decode instructions into a normalized representation, construct a control-flow graph, and use an IR to compare or analyze instructions across architectures.
 
-The REIL and ESIL representations mentioned in your source are examples associated with binary analysis.&#x20;
-
-Intermediate_representation.md
+The REIL and ESIL representations mentioned in the source article are examples associated with binary analysis.
 
 An IR can make different processor instruction sets easier to compare, but it cannot magically recover information that compilation erased. Original variable names, source-level types, and high-level constructs may be unavailable or only partially recoverable.
 
@@ -792,11 +751,9 @@ IRs are increasingly important in systems that compile computations to GPUs, spe
 
 A domain-specific IR may represent tensor shapes, parallel iteration spaces, data layouts, synchronization, and memory movement. Those concepts can be essential for selecting an efficient hardware implementation.
 
-MLIR's design explicitly targets this kind of multilevel compilation, including high-level dataflow graphs and lower-level target-specific operations.&#x20;
+MLIR's design explicitly targets this kind of multilevel compilation, including high-level dataflow graphs and lower-level target-specific operations.
 
-[image](https://www.google.com/s2/favicons?domain=https://mlir.llvm.org\&sz=32)
-
-MLIR+1
+*Source: MLIR (+1 more)*
 
 ### 8. IR design trade-offs worth studying
 
@@ -806,52 +763,52 @@ The most interesting design questions arise when one desirable property conflict
 
 High-level operations preserve intent and enable domain-specific optimization. Low-level operations expose implementation details and enable machine-oriented optimization.
 
-Research question: Which information should be retained, and when should it be lowered?
+**Research question:** Which information should be retained, and when should it be lowered?
 
 #### Universality versus specialization
 
 A universal IR reduces the number of separate translation systems. Specialized IRs can encode domain semantics and target capabilities more naturally.
 
-Research question: How can one infrastructure support multiple domains without forcing them into an awkward common model?
+**Research question:** How can one infrastructure support multiple domains without forcing them into an awkward common model?
 
 #### Optimization freedom versus predictability
 
 Strong semantic guarantees can make program behavior easier to reason about but constrain optimization. Permissive semantics may enable aggressive transformations while making correctness harder to understand.
 
-Research question: How should an IR express undefined behavior, assumptions, effects, and numerical guarantees?
+**Research question:** How should an IR express undefined behavior, assumptions, effects, and numerical guarantees?
 
 #### Extensibility versus interoperability
 
 A framework that allows arbitrary new operations can support new languages and hardware. But independent tools need to agree on operation semantics before they can safely exchange or transform them.
 
-Research question: How can extensible IRs establish trustworthy contracts between dialects, passes, and toolchains?
+**Research question:** How can extensible IRs establish trustworthy contracts between dialects, passes, and toolchains?
 
 #### Information preservation versus compilation cost
 
 Retaining debug information, high-level types, aliasing facts, and source mappings can improve optimization and diagnostics. Maintaining that information may increase memory usage and implementation complexity.
 
-Research question: Which information has enough downstream value to justify its cost?
+**Research question:** Which information has enough downstream value to justify its cost?
 
 These tensions are more useful for research than treating ASTs, TAC, SSA, and bytecode as competing formats. They are often solutions to different problems, and many can coexist in a single compiler.
 
 ### 9. A practical framework for evaluating an IR
 
-If you are designing an IR or comparing existing ones, I recommend evaluating them against the following criteria.
+When designing an IR or comparing existing ones, evaluate them against the following criteria.
 
-| Criterion        | Questions to ask                                                                                                         |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Semantics        | Are integer arithmetic, floating-point behavior, memory effects, exceptions, and undefined behavior precisely specified? |
-| Structure        | Does it represent values, operations, control flow, regions, and dependencies explicitly?                                |
-| Types            | Are types static, dynamic, extensible, or partially inferred? Can the IR represent source-language distinctions?         |
-| Memory           | How are aliasing, pointers, ownership, mutation, and synchronization modeled?                                            |
-| Optimization     | Which transformations are easy to implement? Which invariants must every pass maintain?                                  |
-| Lowering         | Can high-level constructs be progressively reduced to target operations without losing essential meaning?                |
-| Target support   | Does it model target-independent computation, target-specific operations, or both?                                       |
-| Interoperability | Can separate compilers exchange the representation reliably? Are versions and extensions specified?                      |
-| Verification     | Can a verifier detect malformed programs and invalid transformations?                                                    |
-| Debuggability    | Can developers inspect, print, compare, and trace the IR back to source code?                                            |
-| Performance      | What are the memory, compile-time, and optimization costs?                                                               |
-| Extensibility    | Can new operations, types, and analysis passes be added without destabilizing the ecosystem?                             |
+| Criterion | Questions to ask |
+| --- | --- |
+| Semantics | Are integer arithmetic, floating-point behavior, memory effects, exceptions, and undefined behavior precisely specified? |
+| Structure | Does it represent values, operations, control flow, regions, and dependencies explicitly? |
+| Types | Are types static, dynamic, extensible, or partially inferred? Can the IR represent source-language distinctions? |
+| Memory | How are aliasing, pointers, ownership, mutation, and synchronization modeled? |
+| Optimization | Which transformations are easy to implement? Which invariants must every pass maintain? |
+| Lowering | Can high-level constructs be progressively reduced to target operations without losing essential meaning? |
+| Target support | Does it model target-independent computation, target-specific operations, or both? |
+| Interoperability | Can separate compilers exchange the representation reliably? Are versions and extensions specified? |
+| Verification | Can a verifier detect malformed programs and invalid transformations? |
+| Debuggability | Can developers inspect, print, compare, and trace the IR back to source code? |
+| Performance | What are the memory, compile-time, and optimization costs? |
+| Extensibility | Can new operations, types, and analysis passes be added without destabilizing the ecosystem? |
 
 For an existing compiler, inspect both its IR language reference and the invariants expected by its optimization passes. For a proposed IR, write down the semantic contract before designing the textual syntax. The syntax is usually the easier part.
 
@@ -859,35 +816,27 @@ For an existing compiler, inspect both its IR language reference and the invaria
 
 The following progression moves from foundational concepts to modern IR architecture.
 
-[Implementation of Programming Languages - Akash Cherukuri](https://images.openai.com/static-rsc-4/NZuzhqOLBoMOSeoOd4XzPGl4D5b4wvXVfwIYptidWNzG9l3X_BusJV6paaqwu8nZM-U_BGsBXv5NAaLw20ckqYGBJh1FAZ-OatZ7VLTzIIgX6aTGwV6vlwhmPlWWSeZwhRmrOSm_TAQszd3sPP0GPhVjgAFGtKT6pPzcMaZs5HY?purpose=inline)
-
-Stage 1 — Foundational representations
+**Stage 1 — Foundational representations**
 
 Study ASTs, three-address code, basic blocks, CFGs, dataflow analysis, and SSA. Learn how definitions and uses, dominance, and phi nodes support optimization.
 
-[PPT - LLVM IR PowerPoint Presentation, free download - ID:2196423](https://images.openai.com/static-rsc-4/UyH-5OFvjv_hhOWnPj5IwVXZDJL3b3uh8haiY93T0kBWjhUvfpIkkpkvz1bEU_fuW-GXchHPwRb3rv5M3o4-zllOWcpLlPVavdbmU5yYgz3wb40mfBwbHEJQLlNadRq_Et1ZHTApfAx8XHwCKPhRwiJYMiHqvdy_wGoYpqq2Ggg?purpose=inline)
-
-Stage 2 — LLVM IR and GCC GIMPLE
+**Stage 2 — LLVM IR and GCC GIMPLE**
 
 Read the official specifications, compile small programs, and inspect IR before and after optimization. Compare how each compiler represents control flow, memory, and intermediate values.
 
-Resources: [LLVM LangRef](https://llvm.org/docs/LangRef.html?utm_source=chatgpt.com) · [GIMPLE](https://gcc.gnu.org/onlinedocs/gccint/GIMPLE.html?utm_source=chatgpt.com).
+Resources: [LLVM LangRef](https://llvm.org/docs/LangRef.html) · [GIMPLE](https://gcc.gnu.org/onlinedocs/gccint/GIMPLE.html).
 
-[Lowering Affine Loops to LLVM - MLIR - LLVM Discussion Forums](https://images.openai.com/static-rsc-4/0TWzydipBZdlCI-KEv-SMZ0l2VV62pK-BYPkLd15brPOMM7E6V4O5J348Ojw2dRD4fBuW19lyveYkqvt3rBlS_3hJPuiCX1ItvUsewl8KIC4XuZcDEiXHefmpqeFK1ZdwJ1kQmn1bIBT56_Dzm7V4buYl-tDkzvi7YKxPWvnA5U?purpose=inline)
-
-Stage 3 — MLIR and multilevel compilation
+**Stage 3 — MLIR and multilevel compilation**
 
 Study dialects, operations, regions, block arguments, rewrite patterns, and progressive lowering. Follow a tensor operation through structured loops and into lower-level operations.
 
-Resources: [MLIR rationale](https://mlir.llvm.org/docs/Rationale/Rationale/?utm_source=chatgpt.com) · [MLIR reference](https://mlir.llvm.org/docs/LangRef/?utm_source=chatgpt.com).
+Resources: [MLIR rationale](https://mlir.llvm.org/docs/Rationale/Rationale/) · [MLIR reference](https://mlir.llvm.org/docs/LangRef/).
 
-[CS 6120: Provably Correct Peephole Optimizations with Alive](https://images.openai.com/static-rsc-4/z3Lt0BH3ULzgYkabDJ0PnHg_n9Tyyfd-PkqYeckXz_eTokk5PA6PUEg4euXhZd2dAFrGCOU3x8yP-xRiBMAbxh3BN7YLt_OXfV7XraKkYC2WqN28T25B30q7jvMYmH3gJSxdEoyU6dTmyeL3Tm_3Gl8Gsu8DdWmjzyA_2Q9dBBA?purpose=inline)
-
-Stage 4 — Semantics and correctness
+**Stage 4 — Semantics and correctness**
 
 Explore formal semantics, equivalence of programs, compiler verification, and translation validation. Investigate how an incorrect optimization can arise from an underspecified operation or an invalid assumption.
 
-Starting point: [Alive2 research paper](https://pldi21.sigplan.org/details/pldi-2021-papers/5/Alive2-Bounded-Translation-Validation-for-LLVM?utm_source=chatgpt.com).
+**Starting point:** [Alive2 research paper](https://pldi21.sigplan.org/details/pldi-2021-papers/5/Alive2-Bounded-Translation-Validation-for-LLVM).
 
 A useful exercise is to compile the same small program at different optimization levels, inspect the generated IR, and record which transformations occur. That makes the connection between representation design and compiler behavior concrete.
 
@@ -907,4 +856,4 @@ GCC demonstrates the value of multiple specialized representations; LLVM demonst
 
 For deeper research, I would focus on three connected questions: how an IR represents semantics, how its structure enables optimization, and how a compiler can establish that transformations preserve behavior. Those questions provide a much stronger basis for evaluating or designing an IR than its syntax alone.
 
-Source note: The original Wikipedia snapshot supplied the initial terminology, examples, and list of compiler systems. Additional details and current design context above are drawn from official LLVM, GCC, and MLIR documentation and the cited compiler-correctness research. Where the expansion goes beyond the supplied article, it is presented as supplementary explanation rather than as a claim made by Wikipedia.
+> **Source note.** The original Wikipedia snapshot supplied the initial terminology, examples, and list of compiler systems. Additional details and current design context above are drawn from official LLVM, GCC, and MLIR documentation and the cited compiler-correctness research. Where the expansion goes beyond the supplied article, it is presented as supplementary explanation rather than as a claim made by Wikipedia.

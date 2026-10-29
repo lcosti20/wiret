@@ -1,4 +1,28 @@
+---
+title: "Visual Language Environments"
+document_type: "Research note"
+formatted: 2026-10-28
+---
+
 # Visual Language Environments
+
+## Contents
+
+- [1. Overview](#1-overview)
+- [2. A taxonomy of visual language environments](#2-a-taxonomy-of-visual-language-environments)
+- [3. How visual environments store programs](#3-how-visual-environments-store-programs)
+- [4. The deeper architectural question: what is the program?](#4-the-deeper-architectural-question-what-is-the-program)
+- [5. Separating semantics from presentation](#5-separating-semantics-from-presentation)
+- [6. Serialization design and trade-offs](#6-serialization-design-and-trade-offs)
+- [7. Editing, validation, and execution](#7-editing-validation-and-execution)
+- [8. Round-trip engineering and bidirectional synchronization](#8-round-trip-engineering-and-bidirectional-synchronization)
+- [9. Version control, diffs, and collaboration](#9-version-control-diffs-and-collaboration)
+- [10. Interoperability and AI-assisted authoring](#10-interoperability-and-ai-assisted-authoring)
+- [11. A comparative research methodology](#11-a-comparative-research-methodology)
+- [12. Common failure modes and open questions](#12-common-failure-modes-and-open-questions)
+- [13. Recommended literature and documentation](#13-recommended-literature-and-documentation)
+- [14. Suggested outline for a larger research project](#14-suggested-outline-for-a-larger-research-project)
+- [15. Conclusion](#15-conclusion)
 
 ## 1. Overview
 
@@ -22,14 +46,12 @@ This question connects visual programming to:
 
 A key distinction is that **similar-looking visual editors may use very different internal architectures**. A node-and-wire canvas might be backed by a plain text file, a JSON document, a graph database-like model, or a complex project asset format. Conversely, two tools that use different visual metaphors may share similar graph representations underneath.
 
----
-
 ## 2. A taxonomy of visual language environments
 
 Visual language environments are not one uniform category. They differ in the kind of program they express, how execution is organized, how much of the program is visible at once, and how the project is stored.
 
 | Environment | Main visual model | Typical use | Research value |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | **Pure Data (Pd)** | Objects connected by patch cords | Audio, signal processing, interactive systems | A relatively inspectable text-based patch format |
 | **Max/MSP** | Boxes, messages, patch cords, nested patchers | Audio, media, performance, interactive installations | Structured JSON patcher documents and object identity |
 | **Unreal Engine Blueprints** | Typed nodes, data pins, execution pins, graphs | Gameplay logic and engine scripting | Graphs embedded in a larger typed asset and compilation system |
@@ -56,8 +78,6 @@ A useful comparison should distinguish at least these dimensions:
 
 These dimensions are often more informative than simply labeling an environment “visual programming.”
 
----
-
 ## 3. How visual environments store programs
 
 The most important storage distinction is between three representations that are often mistakenly treated as equivalent:
@@ -69,7 +89,7 @@ The most important storage distinction is between three representations that are
 A single environment may use all three. Loading a project may deserialize a file into objects, resolve references, build a graph, validate it, and then compile or schedule it. Saving may perform the reverse process, but it need not reproduce the original file byte-for-byte.
 
 | Environment | Typical saved representation | What the format implies |
-|---|---|---|
+| --- | --- | --- |
 | Pure Data | Text-based `.pd` patch files | Objects, arguments, coordinates, and connections can be represented as textual records |
 | Max/MSP | JSON-based `.maxpat` patcher files; other file types also exist | Objects and patch lines are represented in structured documents |
 | Unreal Engine Blueprints | Unreal asset packages, commonly `.uasset` | Graphs are part of a broader object, class, reference, and compilation system |
@@ -109,19 +129,24 @@ A deliberately simplified illustration of the document's shape is:
 
 ```json
 {
- "patcher": {
- "boxes": [
- {
- "box": {
- "id": "obj-1",
- "maxclass": "newobj",
- "text": "cycle~ 440",
- "patching_rect": [75, 107, 80, 22]
- }
- }
- ],
- "lines": []
- }
+  "patcher": {
+    "boxes": [
+      {
+        "box": {
+          "id": "obj-1",
+          "maxclass": "newobj",
+          "text": "cycle~ 440",
+          "patching_rect": [
+            75,
+            107,
+            80,
+            22
+          ]
+        }
+      }
+    ],
+    "lines": []
+  }
 }
 ```
 
@@ -175,8 +200,6 @@ Research questions include how a saved VI represents:
 - SubVIs, external dependencies, and execution configuration.
 
 LabVIEW should be investigated as a complete authoring environment. In particular, the `.lvm` text format is used for measurement data; it should not be confused with the native `.vi` program format. Exact on-disk structures and compatibility guarantees should be verified against NI documentation or format-specific tooling.
-
----
 
 ## 4. The deeper architectural question: what *is* the program?
 
@@ -252,14 +275,12 @@ A graphical editor, textual editor, generated-code view, or other interface can 
 
 These architectures are not mutually exclusive. A practical system may use a typed graph as its semantic model, a separate layout model, a textual interchange format, and a compiled intermediate representation.
 
----
-
 ## 5. Separating semantics from presentation
 
 A visual program usually contains at least two categories of information.
 
 | Semantic information | Presentation information |
-|---|---|
+| --- | --- |
 | Node types and operations | Node positions |
 | Inputs, outputs, and types | Node sizes and shapes |
 | Connections and control flow | Wire routing |
@@ -273,21 +294,24 @@ A conceptual representation might look like this:
 
 ```json
 {
- "program": {
- "nodes": [
- {
- "id": "n1",
- "operation": "add",
- "inputs": ["n2", "n3"]
- }
- ]
- },
- "layout": {
- "n1": {
- "x": 320,
- "y": 160
- }
- }
+  "program": {
+    "nodes": [
+      {
+        "id": "n1",
+        "operation": "add",
+        "inputs": [
+          "n2",
+          "n3"
+        ]
+      }
+    ]
+  },
+  "layout": {
+    "n1": {
+      "x": 320,
+      "y": 160
+    }
+  }
 }
 ```
 
@@ -304,14 +328,12 @@ Separating semantics from presentation can enable:
 
 The separation should not be absolute if visual properties carry meaning. For example, execution order might be encoded by wire direction, spatial containment might define scope, or a specific arrangement might itself be part of the language. The design should document which properties are semantic and which are presentational.
 
----
-
 ## 6. Serialization design and trade-offs
 
 Choosing how to save a visual program involves more than deciding between JSON and binary.
 
 | Design choice | Benefits | Risks and questions |
-|---|---|---|
+| --- | --- | --- |
 | Text vs. binary | Text is inspectable and easy to generate; binary can be compact and support complex data | Text may be verbose; binary may require specialized tools |
 | Positional references vs. stable IDs | Positional references are simple; IDs survive reordering | Index changes can break links; IDs need lifecycle rules |
 | One file vs. multiple files | One file simplifies transfer | Large files complicate merging; multiple files require dependency management |
@@ -366,8 +388,6 @@ A robust persistence format should define:
 
 For long-lived engineering projects, migration and compatibility can be as important as the initial file format.
 
----
-
 ## 7. Editing, validation, and execution
 
 The internal representation determines how the environment reacts to edits. A typical editing pipeline is:
@@ -421,8 +441,6 @@ This is particularly natural in dataflow and reactive systems, but it requires a
 
 A useful experiment is to compare the work performed after a local parameter edit with the work performed after a structural edit, such as deleting a node with many downstream dependents.
 
----
-
 ## 8. Round-trip engineering and bidirectional synchronization
 
 Round-trip engineering concerns transformations between representations—for example, loading a serialized document into an editor, changing the graph, saving it, and then loading the saved document again.
@@ -473,8 +491,6 @@ A reliable bidirectional environment therefore needs:
 
 This topic links visual language environments to bidirectional transformations, concrete and abstract syntax, and live synchronization between editors.
 
----
-
 ## 9. Version control, diffs, and collaboration
 
 Visual programs can be difficult to review in conventional version control when a small edit rewrites a large serialized document. The challenge is not only file size; it is distinguishing semantic changes from layout churn and generated metadata.
@@ -509,8 +525,6 @@ Text-based merge tools work best when independent edits affect separate lines. T
 Graph-aware merging can instead compare nodes and edges by stable identity. Even then, semantic conflicts remain possible: two edits may change the same parameter, delete and modify the same node, or introduce incompatible connections.
 
 Research should separate **syntactic merge success** from **semantic merge correctness**. A merged file that parses is not necessarily a valid or behaviorally sensible program.
-
----
 
 ## 10. Interoperability and AI-assisted authoring
 
@@ -557,15 +571,15 @@ For example:
 
 ```json
 {
- "operation": "connect",
- "source": {
- "node": "n17",
- "port": "result"
- },
- "target": {
- "node": "n24",
- "port": "input"
- }
+  "operation": "connect",
+  "source": {
+    "node": "n17",
+    "port": "result"
+  },
+  "target": {
+    "node": "n24",
+    "port": "input"
+  }
 }
 ```
 
@@ -603,8 +617,6 @@ A visual language environment intended for reliable automation should consider:
 
 These principles apply beyond language models. They also improve IDE integrations, automated refactoring, testing, migration, and collaborative tooling.
 
----
-
 ## 11. A comparative research methodology
 
 A strong comparative study should apply the same experiments to every environment instead of inspecting only one example file.
@@ -630,7 +642,7 @@ A strong comparative study should apply the same experiments to every environmen
 ### 11.2 Metrics to record
 
 | Metric | What it measures |
-|---|---|
+| --- | --- |
 | File size | Storage overhead and the effect of metadata |
 | Parse/load time | Cost of reconstructing the in-memory model |
 | Save time | Serialization and normalization cost |
@@ -658,8 +670,6 @@ For each experiment, record:
 - Whether observed changes are semantic, structural, or presentational.
 
 Distinguish measured results from hypotheses. A JSON file may look easy to generate, but compatibility should be tested by opening it in the target application and exercising its behavior.
-
----
 
 ## 12. Common failure modes and open questions
 
@@ -693,8 +703,6 @@ A useful research program should actively look for failures rather than judging 
 11. How can schema migrations preserve both program meaning and user-authored layout?
 12. What is the right balance between human readability, compactness, canonicalization, and forward compatibility?
 
----
-
 ## 13. Recommended literature and documentation
 
 The following works and documentation are useful starting points. Publication details and current documentation URLs should be checked before formal citation.
@@ -714,8 +722,6 @@ The following works and documentation are useful starting points. Publication de
 - **Node-RED documentation:** flow structure, nodes, wires, deployment, and runtime behavior.
 
 For a formal bibliography, prefer original papers and official documentation over search-result snippets or secondary summaries. For claims about file-format compatibility, cite the exact documentation or tool behavior that supports the claim.
-
----
 
 ## 14. Suggested outline for a larger research project
 

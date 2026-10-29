@@ -1,3 +1,9 @@
+---
+title: "Text-to-Diagram Tools: A Deep Dive"
+document_type: "Research note"
+formatted: 2026-10-28
+---
+
 # Text-to-Diagram Tools: A Deep Dive
 
 Text-to-diagram tools translate a textual description of a graph, process, architecture, or relationship into a visual representation. They occupy an interesting intersection of programming languages, graph theory, compilers, document generation, and visual programming.
@@ -6,31 +12,45 @@ Tools such as Mermaid, PlantUML, and D2 let developers treat diagrams as source 
 
 The deeper research question is not merely how these tools draw diagrams. It is how a textual language represents visual structure, how much of the diagram's meaning it captures, and how well the language supports reliable programmatic transformation.
 
+## Contents
+
+- [1. The major tools](#1-the-major-tools)
+- [2. How text becomes a diagram](#2-how-text-becomes-a-diagram)
+- [3. Comparing the language designs](#3-comparing-the-language-designs)
+- [4. Where these tools fall short as programming languages](#4-where-these-tools-fall-short-as-programming-languages)
+- [5. The deeper language-design trade-offs](#5-the-deeper-language-design-trade-offs)
+- [6. The connection to compilers and intermediate representations](#6-the-connection-to-compilers-and-intermediate-representations)
+- [7. Bidirectional text–diagram synchronization](#7-bidirectional-textdiagram-synchronization)
+- [8. Text-to-diagram tools and AI-friendly syntax](#8-text-to-diagram-tools-and-ai-friendly-syntax)
+- [9. Evaluation criteria for research](#9-evaluation-criteria-for-research)
+- [10. Further reading and related projects](#10-further-reading-and-related-projects)
+- [11. A possible research direction](#11-a-possible-research-direction)
+
 ## 1. The major tools
 
-Mermaid
+**Mermaid**
 
-Website: [mermaid.js.org](https://mermaid.js.org/?utm_source=chatgpt.com)
+**Website:** [mermaid.js.org](https://mermaid.js.org/)
 
 A JavaScript-based diagramming system with concise syntax for flowcharts, sequence diagrams, class diagrams, state diagrams, entity-relationship diagrams, timelines, and more. It is especially well suited to Markdown documentation, wikis, and developer platforms.
 
-Design emphasis: easy authoring and convenient embedding in prose.
+**Design emphasis:** easy authoring and convenient embedding in prose.
 
-PlantUML
+**PlantUML**
 
-Website: [plantuml.com](https://plantuml.com/?utm_source=chatgpt.com)
+**Website:** [plantuml.com](https://plantuml.com/)
 
 A mature text-driven diagram generator with extensive UML support, including sequence, class, component, deployment, activity, and state diagrams. It also supports non-UML diagrams and integrates with documentation and development workflows.
 
-Design emphasis: expressive modeling conventions and established software-engineering diagrams.
+**Design emphasis:** expressive modeling conventions and established software-engineering diagrams.
 
-D2
+**D2**
 
-Website: [d2lang.com](https://d2lang.com/?utm_source=chatgpt.com)
+**Website:** [d2lang.com](https://d2lang.com/)
 
 A declarative diagramming language that emphasizes readable source, styling, nested structures, explicit relationships, and layout control. Its source resembles a small configuration language for describing visual systems.
 
-Design emphasis: structured declarations, visual customization, and architecture diagrams.
+**Design emphasis:** structured declarations, visual customization, and architecture diagrams.
 
 These tools share a general idea but differ in their language designs. Mermaid provides many specialized diagram grammars; PlantUML often uses diagram-specific directives and modeling conventions; D2 leans toward a more uniform declaration-and-relationship syntax.
 
@@ -40,25 +60,11 @@ Other useful comparison points include Graphviz's DOT language, Structurizr DSL 
 
 The basic architecture resembles a compiler pipeline. A textual source language is parsed into a structured representation, transformed into a graph or diagram model, laid out geometrically, and finally rendered.
 
-1. Source text
-
-Identifiers, edges, labels, styles, declarations
-
-2. Lexing and parsing
-
-Tokens, grammar rules, syntax validation
-
-3. Intermediate representation (IR)
-
-Nodes, edges, attributes, groups, semantic types
-
-4. Layout engine
-
-Positions, routing, spacing, hierarchy
-
-5. Renderer
-
-SVG, HTML, PNG, or another output format
+1. **Source text** — Identifiers, edges, labels, styles, declarations
+2. **Lexing and parsing** — Tokens, grammar rules, syntax validation
+3. **Intermediate representation (IR)** — Nodes, edges, attributes, groups, semantic types
+4. **Layout engine** — Positions, routing, spacing, hierarchy
+5. **Renderer** — SVG, HTML, PNG, or another output format
 
 This is a conceptual architecture rather than an assertion that every tool uses exactly these stages or the same intermediate representation.
 
@@ -66,7 +72,13 @@ This is a conceptual architecture rather than an assertion that every tool uses 
 
 Consider this Mermaid flowchart:
 
-\#chatgpt-mermaid-\_r_8g3\_{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;font-size:16px;fill:rgb(13, 13, 13);}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#chatgpt-mermaid-\_r_8g3\_.edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#chatgpt-mermaid-\_r_8g3\_.edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#chatgpt-mermaid-\_r_8g3\_.error-icon{fill:rgb(243, 243, 243);}#chatgpt-mermaid-\_r_8g3\_.error-text{fill:rgb(13, 13, 13);stroke:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_.edge-thickness-normal{stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_.edge-thickness-thick{stroke-width:3.5px;}#chatgpt-mermaid-\_r_8g3\_.edge-pattern-solid{stroke-dasharray:0;}#chatgpt-mermaid-\_r_8g3\_.edge-thickness-invisible{stroke-width:0;fill:none;}#chatgpt-mermaid-\_r_8g3\_.edge-pattern-dashed{stroke-dasharray:3;}#chatgpt-mermaid-\_r_8g3\_.edge-pattern-dotted{stroke-dasharray:2;}#chatgpt-mermaid-\_r_8g3\_.marker{fill:rgb(143, 143, 143);stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8g3\_.marker.cross{stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8g3\_ svg{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;font-size:16px;}#chatgpt-mermaid-\_r_8g3\_ p{margin:0;}#chatgpt-mermaid-\_r_8g3\_.label{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_.cluster-label text{fill:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_.cluster-label span{color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_.cluster-label span p{background-color:transparent;}#chatgpt-mermaid-\_r_8g3\_.label text,#chatgpt-mermaid-\_r_8g3\_ span{fill:rgb(13, 13, 13);color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_.node rect,#chatgpt-mermaid-\_r_8g3\_.node circle,#chatgpt-mermaid-\_r_8g3\_.node ellipse,#chatgpt-mermaid-\_r_8g3\_.node polygon,#chatgpt-mermaid-\_r_8g3\_.node path{fill:rgb(222, 234, 251);stroke:rgb(83, 154, 248);stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_.rough-node.label text,#chatgpt-mermaid-\_r_8g3\_.node.label text,#chatgpt-mermaid-\_r_8g3\_.image-shape.label,#chatgpt-mermaid-\_r_8g3\_.icon-shape.label{text-anchor:middle;}#chatgpt-mermaid-\_r_8g3\_.node.katex path{fill:#000;stroke:#000;stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_.rough-node.label,#chatgpt-mermaid-\_r_8g3\_.node.label,#chatgpt-mermaid-\_r_8g3\_.image-shape.label,#chatgpt-mermaid-\_r_8g3\_.icon-shape.label{text-align:center;}#chatgpt-mermaid-\_r_8g3\_.node.clickable{cursor:pointer;}#chatgpt-mermaid-\_r_8g3\_.root.anchor path{fill:rgb(143, 143, 143)!important;stroke-width:0;stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8g3\_.arrowheadPath{fill:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8g3\_.edgePath.path{stroke:rgb(143, 143, 143);stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_.flowchart-link{stroke:rgb(143, 143, 143);fill:none;}#chatgpt-mermaid-\_r_8g3\_.edgeLabel{background-color:rgb(252, 252, 252);text-align:center;}#chatgpt-mermaid-\_r_8g3\_.edgeLabel p{background-color:rgb(252, 252, 252);}#chatgpt-mermaid-\_r_8g3\_.edgeLabel rect{opacity:0.5;background-color:rgb(252, 252, 252);fill:rgb(252, 252, 252);}#chatgpt-mermaid-\_r_8g3\_.labelBkg{background-color:rgba(252, 252, 252, 0.5);}#chatgpt-mermaid-\_r_8g3\_.cluster rect{fill:rgb(243, 243, 243);stroke:rgba(0, 0, 0, 0.1);stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_.cluster text{fill:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_.cluster span{color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_ div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;font-size:12px;background:rgb(243, 243, 243);border:1px solid rgba(0, 0, 0, 0.1);border-radius:2px;pointer-events:none;z-index:100;}#chatgpt-mermaid-\_r_8g3\_.flowchartTitleText{text-anchor:middle;font-size:18px;fill:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8g3\_ rect.text{fill:none;stroke-width:0;}#chatgpt-mermaid-\_r_8g3\_.icon-shape,#chatgpt-mermaid-\_r_8g3\_.image-shape{background-color:rgb(252, 252, 252);text-align:center;}#chatgpt-mermaid-\_r_8g3\_.icon-shape p,#chatgpt-mermaid-\_r_8g3\_.image-shape p{background-color:rgb(252, 252, 252);padding:2px;}#chatgpt-mermaid-\_r_8g3\_.icon-shape.label rect,#chatgpt-mermaid-\_r_8g3\_.image-shape.label rect{opacity:0.5;background-color:rgb(252, 252, 252);fill:rgb(252, 252, 252);}#chatgpt-mermaid-\_r_8g3\_.label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#chatgpt-mermaid-\_r_8g3\_.node.label-icon path{fill:currentColor;stroke:revert;stroke-width:revert;}#chatgpt-mermaid-\_r_8g3\_.node.neo-node{stroke:rgb(83, 154, 248);}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].node rect,#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].cluster rect,#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].node polygon{stroke:url(#chatgpt-mermaid-\_r_8g3\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].swimlane.cluster rect{filter:none;}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].node path{stroke:url(#chatgpt-mermaid-\_r_8g3\_-gradient);stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].node.outer-path{filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].node.neo-line path{stroke:rgb(83, 154, 248);filter:none;}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].node circle{stroke:url(#chatgpt-mermaid-\_r_8g3\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].node circle.state-start{fill:#000000;}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].icon-shape.icon{fill:url(#chatgpt-mermaid-\_r_8g3\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8g3\_ [data-look="neo"].icon-shape.icon-neo path{stroke:url(#chatgpt-mermaid-\_r_8g3\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8g3\_.node text{font-size:14px;font-weight:600;letter-spacing:normal;fill:rgb(0, 79, 153);}#chatgpt-mermaid-\_r_8g3\_.edgeLabels text{font-size:13px;font-weight:600;letter-spacing:-0.08px;fill:rgb(0, 79, 153);}#chatgpt-mermaid-\_r_8g3\_.node tspan[font-weight="normal"],#chatgpt-mermaid-\_r_8g3\_.edgeLabels tspan[font-weight="normal"]{font-weight:600;}#chatgpt-mermaid-\_r_8g3\_.edgeLabel.label rect{opacity:1;rx:13px;ry:13px;fill:rgb(245, 250, 255);stroke:rgb(206, 219, 229);stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_.node rect,#chatgpt-mermaid-\_r_8g3\_.node circle,#chatgpt-mermaid-\_r_8g3\_.node ellipse,#chatgpt-mermaid-\_r_8g3\_.node polygon,#chatgpt-mermaid-\_r_8g3\_.node path{fill:rgb(229, 243, 255);stroke:rgba(0, 0, 0, 0.1);stroke-width:1px;}#chatgpt-mermaid-\_r_8g3\_.node rect{rx:16px;ry:16px;}#chatgpt-mermaid-\_r_8g3\_.mermaid-decision.label-container{fill:rgb(245, 250, 255);stroke:rgb(206, 219, 229);stroke-dasharray:2px,2px;}#chatgpt-mermaid-\_r_8g3\_.edgePaths.flowchart-link{stroke:rgb(143, 143, 143);stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;}#chatgpt-mermaid-\_r_8g3\_.marker{fill:rgb(143, 143, 143);stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8g3\_:root{--mermaid-font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;}ClientAPIDatabase
+```mermaid
+flowchart LR
+    A[Client] --> B(API)
+    B --> C[(Database)]
+```
+
+*Diagram source reconstructed from the surrounding description (the original export contained only rendered output).*
 
 The parser needs to recognize several different concepts:
 
@@ -78,25 +90,45 @@ The parser needs to recognize several different concepts:
 
 The syntax therefore carries both structural information and presentation hints. Mermaid's official documentation describes the separation between node identifiers, labels, links, shapes, and grouping constructs.
 
-Mermaid+1
+*Source: Mermaid (+1 more)*
 
 ### Stage 2: Constructing a graph
 
 A simplified intermediate representation might be:
 
-```
+```json
 {
- "kind": "flowchart",
- "direction": "LR",
- "nodes": [
- {"id": "A", "label": "Client", "shape": "rect"},
- {"id": "B", "label": "API", "shape": "rect"},
- {"id": "C", "label": "Database", "shape": "cylinder"}
- ],
- "edges": [
- {"from": "A", "to": "B", "directed": true},
- {"from": "B", "to": "C", "directed": true}
- ]
+  "kind": "flowchart",
+  "direction": "LR",
+  "nodes": [
+    {
+      "id": "A",
+      "label": "Client",
+      "shape": "rect"
+    },
+    {
+      "id": "B",
+      "label": "API",
+      "shape": "rect"
+    },
+    {
+      "id": "C",
+      "label": "Database",
+      "shape": "cylinder"
+    }
+  ],
+  "edges": [
+    {
+      "from": "A",
+      "to": "B",
+      "directed": true
+    },
+    {
+      "from": "B",
+      "to": "C",
+      "directed": true
+    }
+  ]
 }
 ```
 
@@ -119,7 +151,7 @@ The layout engine must decide:
 
 Mermaid's flowchart documentation, for example, describes layout-engine choices and configuration options.
 
-Mermaid+1
+*Source: Mermaid (+1 more)*
 
 This division is fundamental: the graph defines what is connected; the layout determines how those connections look.
 
@@ -128,7 +160,7 @@ It also explains why the same source can render differently across versions, con
 ## 3. Comparing the language designs
 
 | Dimension | Mermaid | PlantUML | D2 |
-| -------------------------- | -------------------------------- | ------------------------------------------------- | -------------------------------------------- |
+| --- | --- | --- | --- |
 | Core style | Diagram-specific textual syntax | Diagram-specific directives and modeling notation | Declarative diagram DSL |
 | Common use | Documentation and quick diagrams | UML and software modeling | Architecture and system diagrams |
 | Diagram types | Broad collection | Broad collection, especially UML | General diagrams and structured systems |
@@ -138,7 +170,7 @@ It also explains why the same source can render differently across versions, con
 
 This comparison is qualitative, not a benchmark. Each tool has exceptions and capabilities that extend beyond the generalizations in the table. PlantUML's language reference documents its range of UML and non-UML diagrams, while D2's documentation describes it as a text-based diagram DSL.
 
-pdf.plantuml.net+1
+*Source: pdf.plantuml.net (+1 more)*
 
 ### Example: one graph, three notations
 
@@ -146,13 +178,18 @@ Suppose the intended diagram is a client calling an API, which reads from a data
 
 ### Mermaid
 
-\#chatgpt-mermaid-\_r_8gu\_{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;font-size:16px;fill:rgb(13, 13, 13);}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#chatgpt-mermaid-\_r_8gu\_.edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#chatgpt-mermaid-\_r_8gu\_.edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#chatgpt-mermaid-\_r_8gu\_.error-icon{fill:rgb(243, 243, 243);}#chatgpt-mermaid-\_r_8gu\_.error-text{fill:rgb(13, 13, 13);stroke:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_.edge-thickness-normal{stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_.edge-thickness-thick{stroke-width:3.5px;}#chatgpt-mermaid-\_r_8gu\_.edge-pattern-solid{stroke-dasharray:0;}#chatgpt-mermaid-\_r_8gu\_.edge-thickness-invisible{stroke-width:0;fill:none;}#chatgpt-mermaid-\_r_8gu\_.edge-pattern-dashed{stroke-dasharray:3;}#chatgpt-mermaid-\_r_8gu\_.edge-pattern-dotted{stroke-dasharray:2;}#chatgpt-mermaid-\_r_8gu\_.marker{fill:rgb(143, 143, 143);stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8gu\_.marker.cross{stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8gu\_ svg{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;font-size:16px;}#chatgpt-mermaid-\_r_8gu\_ p{margin:0;}#chatgpt-mermaid-\_r_8gu\_.label{font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_.cluster-label text{fill:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_.cluster-label span{color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_.cluster-label span p{background-color:transparent;}#chatgpt-mermaid-\_r_8gu\_.label text,#chatgpt-mermaid-\_r_8gu\_ span{fill:rgb(13, 13, 13);color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_.node rect,#chatgpt-mermaid-\_r_8gu\_.node circle,#chatgpt-mermaid-\_r_8gu\_.node ellipse,#chatgpt-mermaid-\_r_8gu\_.node polygon,#chatgpt-mermaid-\_r_8gu\_.node path{fill:rgb(222, 234, 251);stroke:rgb(83, 154, 248);stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_.rough-node.label text,#chatgpt-mermaid-\_r_8gu\_.node.label text,#chatgpt-mermaid-\_r_8gu\_.image-shape.label,#chatgpt-mermaid-\_r_8gu\_.icon-shape.label{text-anchor:middle;}#chatgpt-mermaid-\_r_8gu\_.node.katex path{fill:#000;stroke:#000;stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_.rough-node.label,#chatgpt-mermaid-\_r_8gu\_.node.label,#chatgpt-mermaid-\_r_8gu\_.image-shape.label,#chatgpt-mermaid-\_r_8gu\_.icon-shape.label{text-align:center;}#chatgpt-mermaid-\_r_8gu\_.node.clickable{cursor:pointer;}#chatgpt-mermaid-\_r_8gu\_.root.anchor path{fill:rgb(143, 143, 143)!important;stroke-width:0;stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8gu\_.arrowheadPath{fill:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8gu\_.edgePath.path{stroke:rgb(143, 143, 143);stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_.flowchart-link{stroke:rgb(143, 143, 143);fill:none;}#chatgpt-mermaid-\_r_8gu\_.edgeLabel{background-color:rgb(252, 252, 252);text-align:center;}#chatgpt-mermaid-\_r_8gu\_.edgeLabel p{background-color:rgb(252, 252, 252);}#chatgpt-mermaid-\_r_8gu\_.edgeLabel rect{opacity:0.5;background-color:rgb(252, 252, 252);fill:rgb(252, 252, 252);}#chatgpt-mermaid-\_r_8gu\_.labelBkg{background-color:rgba(252, 252, 252, 0.5);}#chatgpt-mermaid-\_r_8gu\_.cluster rect{fill:rgb(243, 243, 243);stroke:rgba(0, 0, 0, 0.1);stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_.cluster text{fill:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_.cluster span{color:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_ div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;font-size:12px;background:rgb(243, 243, 243);border:1px solid rgba(0, 0, 0, 0.1);border-radius:2px;pointer-events:none;z-index:100;}#chatgpt-mermaid-\_r_8gu\_.flowchartTitleText{text-anchor:middle;font-size:18px;fill:rgb(13, 13, 13);}#chatgpt-mermaid-\_r_8gu\_ rect.text{fill:none;stroke-width:0;}#chatgpt-mermaid-\_r_8gu\_.icon-shape,#chatgpt-mermaid-\_r_8gu\_.image-shape{background-color:rgb(252, 252, 252);text-align:center;}#chatgpt-mermaid-\_r_8gu\_.icon-shape p,#chatgpt-mermaid-\_r_8gu\_.image-shape p{background-color:rgb(252, 252, 252);padding:2px;}#chatgpt-mermaid-\_r_8gu\_.icon-shape.label rect,#chatgpt-mermaid-\_r_8gu\_.image-shape.label rect{opacity:0.5;background-color:rgb(252, 252, 252);fill:rgb(252, 252, 252);}#chatgpt-mermaid-\_r_8gu\_.label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#chatgpt-mermaid-\_r_8gu\_.node.label-icon path{fill:currentColor;stroke:revert;stroke-width:revert;}#chatgpt-mermaid-\_r_8gu\_.node.neo-node{stroke:rgb(83, 154, 248);}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].node rect,#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].cluster rect,#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].node polygon{stroke:url(#chatgpt-mermaid-\_r_8gu\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].swimlane.cluster rect{filter:none;}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].node path{stroke:url(#chatgpt-mermaid-\_r_8gu\_-gradient);stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].node.outer-path{filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].node.neo-line path{stroke:rgb(83, 154, 248);filter:none;}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].node circle{stroke:url(#chatgpt-mermaid-\_r_8gu\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].node circle.state-start{fill:#000000;}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].icon-shape.icon{fill:url(#chatgpt-mermaid-\_r_8gu\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8gu\_ [data-look="neo"].icon-shape.icon-neo path{stroke:url(#chatgpt-mermaid-\_r_8gu\_-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#chatgpt-mermaid-\_r_8gu\_.node text{font-size:14px;font-weight:600;letter-spacing:normal;fill:rgb(0, 79, 153);}#chatgpt-mermaid-\_r_8gu\_.edgeLabels text{font-size:13px;font-weight:600;letter-spacing:-0.08px;fill:rgb(0, 79, 153);}#chatgpt-mermaid-\_r_8gu\_.node tspan[font-weight="normal"],#chatgpt-mermaid-\_r_8gu\_.edgeLabels tspan[font-weight="normal"]{font-weight:600;}#chatgpt-mermaid-\_r_8gu\_.edgeLabel.label rect{opacity:1;rx:13px;ry:13px;fill:rgb(245, 250, 255);stroke:rgb(206, 219, 229);stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_.node rect,#chatgpt-mermaid-\_r_8gu\_.node circle,#chatgpt-mermaid-\_r_8gu\_.node ellipse,#chatgpt-mermaid-\_r_8gu\_.node polygon,#chatgpt-mermaid-\_r_8gu\_.node path{fill:rgb(229, 243, 255);stroke:rgba(0, 0, 0, 0.1);stroke-width:1px;}#chatgpt-mermaid-\_r_8gu\_.node rect{rx:16px;ry:16px;}#chatgpt-mermaid-\_r_8gu\_.mermaid-decision.label-container{fill:rgb(245, 250, 255);stroke:rgb(206, 219, 229);stroke-dasharray:2px,2px;}#chatgpt-mermaid-\_r_8gu\_.edgePaths.flowchart-link{stroke:rgb(143, 143, 143);stroke-width:1px;stroke-linecap:round;stroke-linejoin:round;}#chatgpt-mermaid-\_r_8gu\_.marker{fill:rgb(143, 143, 143);stroke:rgb(143, 143, 143);}#chatgpt-mermaid-\_r_8gu\_:root{--mermaid-font-family:-apple-system-body,ui-sans-serif,-apple-system,system-ui,Segoe UI,Helvetica,Apple Color Emoji,Arial,sans-serif,Segoe UI Emoji,Segoe UI Symbol;}ClientAPIDatabase
+```mermaid
+flowchart LR
+    Client --> API --> Database
+```
+
+*Diagram source reconstructed from the surrounding description (the original export contained only rendered output).*
 
 Compact, graph-oriented, and easy to embed in Markdown.
 
 ### PlantUML
 
-```
+```plantuml
 @startuml
 [Client] --> [API]
 [API] --> database "Database"
@@ -163,7 +200,7 @@ A component-style representation; exact notation and semantics depend on the sel
 
 ### D2
 
-```
+```text
 Client -> API
 API -> Database
 ```
@@ -184,7 +221,7 @@ This distinction is especially important If the project is researching AI-friend
 
 Consider:
 
-```
+```text
 Client -> API
 API -> Database
 ```
@@ -200,29 +237,29 @@ The diagram may be visually correct while remaining semantically incomplete.
 
 A more expressive language might separate these concerns:
 
-```
+```yaml
 nodes:
- - id: client
- type: application
- - id: api
- type: service
- - id: database
- type: database
+  - id: client
+    type: application
+  - id: api
+    type: service
+  - id: database
+    type: database
 
 edges:
- - from: client
- to: api
- relation: invokes
- protocol: HTTPS
- - from: api
- to: database
- relation: queries
- protocol: SQL
+  - from: client
+    to: api
+    relation: invokes
+    protocol: HTTPS
+  - from: api
+    to: database
+    relation: queries
+    protocol: SQL
 ```
 
 This is illustrative YAML, not a standard diagram format. Its advantage is that relationships become machine-readable facts rather than visual conventions alone.
 
-Research question: Should a diagram language define a domain model first and treat appearance as a projection of that model?
+**Research question:** Should a diagram language define a domain model first and treat appearance as a projection of that model?
 
 ### 4.2 Syntax can be ambiguous or fragile
 
@@ -230,7 +267,7 @@ Compact syntax is convenient for humans, but punctuation can have several compet
 
 Mermaid's flowchart documentation warns about certain uses of `end` and about identifiers beginning with `o` or `x` adjacent to particular edge operators.
 
-Mermaid+1
+*Source: Mermaid (+1 more)*
 
 These are small examples of a general issue: a language designed around convenient punctuation may become harder to parse, generate, and transform reliably.
 
@@ -252,9 +289,9 @@ But what if the user's placement was intentional?
 
 There are at least three distinct kinds of layout intent:
 
-1. Semantic intent: A is upstream of B.
-2. Relative visual intent: A should appear above B.
-3. Geometric intent: A should be placed at a specific coordinate.
+1. **Semantic intent:** A is upstream of B.
+2. **Relative visual intent:** A should appear above B.
+3. **Geometric intent:** A should be placed at a specific coordinate.
 
 Many text-to-diagram languages primarily capture the first, offer varying support for the second, and may offer limited or specialized support for the third.
 
@@ -285,47 +322,47 @@ A diagram renderer needs to produce a picture. A programming-language toolchain 
 
 For example, a language could distinguish between:
 
-- A syntax error: an edge is malformed.
-- A reference error: an edge refers to a nonexistent node.
-- A semantic error: a sequence diagram violates a domain constraint.
-- A layout warning: two labels overlap.
-- A style warning: a node violates a design convention.
+- **A syntax error:** an edge is malformed.
+- **A reference error:** an edge refers to a nonexistent node.
+- **A semantic error:** a sequence diagram violates a domain constraint.
+- **A layout warning:** two labels overlap.
+- **A style warning:** a node violates a design convention.
 
 These are different failure classes and should be reported separately.
 
 Graphviz's DOT documentation provides a useful point of comparison because it defines a formal grammar for graph, node, edge, attribute, and subgraph constructs.
 
-Graphviz+1
+*Source: Graphviz (+1 more)*
 
 ## 5. The deeper language-design trade-offs
 
 The interesting design space can be summarized along five axes.
 
-Declarative vs. imperative
+**Declarative vs. imperative**
 
 Declarative source says what the diagram contains. Imperative instructions say how to construct or modify it.
 
-Example: `A -> B` versus `createNode("A"); createNode("B"); connect("A", "B")`.
+**Example:** `A -> B` versus `createNode("A"); createNode("B"); connect("A", "B")`.
 
-Semantic vs. geometric
+**Semantic vs. geometric**
 
 Semantic source describes relationships and domain entities. Geometric source explicitly describes positions, dimensions, and routing.
 
 A useful language needs to decide which layer is authoritative when they conflict.
 
-Concise vs. explicit
+**Concise vs. explicit**
 
 Short syntax reduces typing and token consumption. Explicit syntax reduces hidden assumptions and can improve diagnostics.
 
 This is especially important when language models generate source automatically.
 
-Free-form vs. constrained
+**Free-form vs. constrained**
 
 Free-form diagrams support expressive layouts. Constrained diagrams can enforce rules, schemas, and organizational conventions.
 
 Constraints can prevent structurally invalid diagrams before rendering.
 
-Source-authoritative vs. model-authoritative
+**Source-authoritative vs. model-authoritative**
 
 A source-authoritative system treats text as the canonical artifact. A model-authoritative system stores a structured graph and generates text as one representation.
 
@@ -337,17 +374,9 @@ No single choice is universally best. A documentation-oriented tool and a visual
 
 One promising architecture is to treat the text format as a front end to a canonical graph model.
 
-Text DSL
-
-Visual editor
-
-Canonical graph IR
-
-Stable IDs · typed nodes · typed edges · metadata · constraints
-
-Layout engine
-
-Other exporters
+- **Front ends:** Text DSL · Visual editor
+- **Canonical graph IR** — Stable IDs · typed nodes · typed edges · metadata · constraints
+- **Consumers:** Layout engine · Other exporters
 
 The central model would define the diagram independently of any particular syntax or rendering engine.
 
@@ -366,7 +395,7 @@ The main difficulty is deciding what belongs in the canonical model. If the mode
 A well-designed IR may therefore separate at least three layers:
 
 | Layer | Responsibility |
-| ------------------ | -------------------------------------------------------- |
+| --- | --- |
 | Semantic model | Entities, relationships, types, constraints |
 | Presentation model | Layout preferences, styles, grouping, visual annotations |
 | Source mapping | Original syntax, comments, formatting, source locations |
@@ -379,15 +408,13 @@ This is where text-to-diagram tools become especially interesting.
 
 A normal renderer implements a function:
 
-\\[ R: S \rightarrow V \\]
-
-where \\(S\\) is source text and \\(V\\) is a visual diagram.
+$$ R: S \rightarrow V $$
+where $S$ is source text and $V$ is a visual diagram.
 
 A bidirectional editor needs an additional transformation:
 
-\\[ U: (S,V') \rightarrow S' \\]
-
-Here, \\(V'\\) is the diagram after a user edits it visually, and \\(S'\\) is the updated source.
+$$ U: (S,V') \rightarrow S' $$
+Here, $V'$ is the diagram after a user edits it visually, and $S'$ is the updated source.
 
 A naïve approach would regenerate all source from the edited graph. But this can destroy comments, whitespace, declaration order, stylistic choices, or syntax that has no direct equivalent in the graph model.
 
@@ -414,7 +441,7 @@ LLMs introduce a different set of design requirements. They are good at generati
 A diagram DSL designed for reliable AI generation could prioritize the following.
 
 | Design feature | Why it helps |
-| --------------------------- | ----------------------------------------------------------------------------- |
+| --- | --- |
 | Explicit declarations | Makes entities and their types easier to identify |
 | Stable IDs | Prevents accidental renaming and duplicate nodes |
 | Uniform syntax | Reduces the number of special cases a model must learn |
@@ -437,85 +464,23 @@ The latter approach also makes it easier to validate proposed changes before app
 
 To compare text-to-diagram languages rigorously, it helps to define measurable criteria rather than relying exclusively on syntax aesthetics.
 
-### 1
-
-Expressiveness
-
-Can the language represent the intended graph, relationships, grouping, layout, and domain semantics?
-
-### 2
-
-Syntactic reliability
-
-How often do humans or LLMs produce valid source, and how easy are errors to diagnose?
-
-### 3
-
-Round-trip fidelity
-
-Can source be parsed and re-emitted without losing semantics, formatting, comments, or visual intent?
-
-### 4
-
-Edit locality
-
-Does changing one node or edge require rewriting unrelated source?
-
-### 5
-
-Determinism
-
-Does the same source and configuration yield stable output across repeated renders?
-
-### 6
-
-Incremental performance
-
-Can large diagrams be reparsed, validated, and rendered efficiently after small changes?
-
-### 7
-
-Interoperability
-
-Can the graph be converted to other diagram languages or a canonical graph representation?
-
-### 8
-
-AI generation quality
-
-How many attempts are needed to produce a valid, semantically correct diagram under a fixed task set?
+1. **Expressiveness** — Can the language represent the intended graph, relationships, grouping, layout, and domain semantics?
+2. **Syntactic reliability** — How often do humans or LLMs produce valid source, and how easy are errors to diagnose?
+3. **Round-trip fidelity** — Can source be parsed and re-emitted without losing semantics, formatting, comments, or visual intent?
+4. **Edit locality** — Does changing one node or edge require rewriting unrelated source?
+5. **Determinism** — Does the same source and configuration yield stable output across repeated renders?
+6. **Incremental performance** — Can large diagrams be reparsed, validated, and rendered efficiently after small changes?
+7. **Interoperability** — Can the graph be converted to other diagram languages or a canonical graph representation?
+8. **AI generation quality** — How many attempts are needed to produce a valid, semantically correct diagram under a fixed task set?
 
 For a serious experiment, use the same collection of diagram tasks across languages. Measure parse success, semantic correctness, source size, editing effort, render stability, and repair cost. Test both human-written and LLM-generated source, since a language that is elegant for experts may not be the easiest for a model to generate reliably.
 
 ## 10. Further reading and related projects
 
-Graphviz DOT
-
-A useful baseline for studying explicit graph declarations, attributes, subgraphs, and formal grammar.
-
-[DOT language reference](https://graphviz.org/doc/info/lang.html?utm_source=chatgpt.com)
-
-Graphviz
-
-Structurizr DSL
-
-Worth investigating when diagrams should be views of a shared architecture model instead of independent drawings.
-
-[DSL documentation](https://docs.structurizr.com/dsl?utm_source=chatgpt.com)
-
-PlantUML sequence diagrams
-
-Particularly useful for examining how a domain-specific grammar represents interactions, ordering, conditional branches, and parallel behavior.
-
-[Sequence diagram reference](https://plantuml.com/sequence-diagram?utm_source=chatgpt.com)
-
-PlantUML.com
-
-D2 connections and object declarations
-
-Useful for studying how identifiers, labels, nested objects, and edges can be expressed in a declarative DSL.
-
-[Connections reference](https://d2lang.com/tour/connections?utm_source=chatgpt.com)
+- **Graphviz DOT** A useful baseline for studying explicit graph declarations, attributes, subgraphs, and formal grammar. [DOT language reference](https://graphviz.org/doc/info/lang.html)
+- **Graphviz** — *Structurizr DSL.* Worth investigating when diagrams should be views of a shared architecture model instead of independent drawings. [DSL documentation](https://docs.structurizr.com/dsl)
+- **PlantUML sequence diagrams** Particularly useful for examining how a domain-specific grammar represents interactions, ordering, conditional branches, and parallel behavior. [Sequence diagram reference](https://plantuml.com/sequence-diagram)
+- **PlantUML.com** — *D2 connections and object declarations.* Useful for studying how identifiers, labels, nested objects, and edges can be expressed in a declarative DSL. [Connections reference](https://d2lang.com/tour/connections)
 
 D2 Documentation
 

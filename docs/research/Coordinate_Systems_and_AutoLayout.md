@@ -1,3 +1,9 @@
+---
+title: "Coordinate Systems and AutoLayout for Text-Based Visual Programming Languages"
+document_type: "Research note"
+formatted: 2026-10-28
+---
+
 # Coordinate Systems and AutoLayout for Text-Based Visual Programming Languages
 
 The central design question is:
@@ -8,29 +14,46 @@ This decision affects source readability, version control, deterministic renderi
 
 For a text-based visual programming language, the challenge is especially interesting because the same program has two representations:
 
-- Textual representation: a source file that can be edited, generated, diffed, merged, and processed by tools or AI models.
-- Visual representation: a graph of nodes, ports, connections, groups, and annotations arranged on a canvas.
+- **Textual representation:** a source file that can be edited, generated, diffed, merged, and processed by tools or AI models.
+- **Visual representation:** a graph of nodes, ports, connections, groups, and annotations arranged on a canvas.
 
 The source needs to describe the program's meaning, while the visual editor needs to make that meaning understandable to humans. Those goals overlap, but they are not identical.
 
+## Contents
+
+- [1. The three fundamental layout models](#1-the-three-fundamental-layout-models)
+- [2. Separate program semantics from visual presentation](#2-separate-program-semantics-from-visual-presentation)
+- [3. Coordinate systems: more than just X and Y](#3-coordinate-systems-more-than-just-x-and-y)
+- [4. AutoLayout: how node positions are calculated](#4-autolayout-how-node-positions-are-calculated)
+- [5. Where should layout information be stored?](#5-where-should-layout-information-be-stored)
+- [6. A better alternative to saving every coordinate: layout intent](#6-a-better-alternative-to-saving-every-coordinate-layout-intent)
+- [7. Deterministic layout and reproducibility](#7-deterministic-layout-and-reproducibility)
+- [8. Incremental layout: preserving the user's mental map](#8-incremental-layout-preserving-the-users-mental-map)
+- [9. Difficult cases the specification should address](#9-difficult-cases-the-specification-should-address)
+- [10. Proposed architecture for a text-based graph language](#10-proposed-architecture-for-a-text-based-graph-language)
+- [Proposed layout contract](#proposed-layout-contract)
+- [11. How to evaluate the design](#11-how-to-evaluate-the-design)
+- [12. Further research directions](#12-further-research-directions)
+- [Conclusion](#conclusion)
+
 ## 1. The three fundamental layout models
 
-A. Explicit coordinates
+**A. Explicit coordinates**
 
 Every node stores its position in the source file or in associated persistent layout data.
 
-```
+```text
 node Add at (320, 160)
 node Multiply at (560, 160)
 ```
 
 Best when spatial arrangement is part of the user's authored work.
 
-B. Fully automatic layout
+**B. Fully automatic layout**
 
 Node positions are derived from graph structure, node dimensions, and a layout algorithm.
 
-```
+```text
 result = multiply(add(a, b), c)
 ```
 
@@ -38,7 +61,7 @@ The editor calculates positions without requiring persistent coordinates.
 
 Best for generated graphs, canonical diagrams, and source-first workflows.
 
-C. Hybrid layout
+**C. Hybrid layout**
 
 The program's structure is authoritative, while layout is partially or wholly persistent. Nodes may be auto-arranged initially and manually adjusted afterward.
 
@@ -50,23 +73,11 @@ The hybrid model is often the strongest starting point. However, it is important
 
 The most important architectural principle is to distinguish three layers of information.
 
-### 1. Semantic graph
+*Figure: three layers of information*
 
-Nodes, ports, edges, types, execution order, expressions
-
-Defines what the program means
-
-### 2. Layout model
-
-Positions, ordering constraints, groups, pins, layout hints
-
-Defines how the graph should be organized
-
-### 3. Rendered canvas
-
-Pixel coordinates, zoom, pan, selection, wire routing
-
-Defines what the user sees now
+1. **Semantic graph** — Nodes, ports, edges, types, execution order, expressions. *Defines what the program means.*
+2. **Layout model** — Positions, ordering constraints, groups, pins, layout hints. *Defines how the graph should be organized.*
+3. **Rendered canvas** — Pixel coordinates, zoom, pan, selection, wire routing. *Defines what the user sees now.*
 
 These layers should communicate through well-defined interfaces, not be collapsed into a single data structure.
 
@@ -77,7 +88,7 @@ This distinction is valuable even if everything is stored in one file. It preven
 ### What belongs in each layer?
 
 | Property | Recommended layer |
-| ---------------------------------------- | -------------------------------------- |
+| --- | --- |
 | Node ID and operation type | Semantic |
 | Input/output ports and connections | Semantic |
 | Node label that changes program behavior | Semantic |
@@ -94,15 +105,15 @@ There are exceptions. A group might represent a semantic module rather than a vi
 
 A visual editor generally needs several coordinate spaces. Treating all coordinates as interchangeable is a common source of bugs.
 
-World coordinates
+**World coordinates**
 
 The persistent or logical position of an object in the graph. These should not change when the user zooms or pans the canvas.
 
-Viewport coordinates
+**Viewport coordinates**
 
 Positions relative to the visible canvas region. Scrolling, panning, and zooming affect the relationship between world and viewport coordinates.
 
-Screen coordinates
+**Screen coordinates**
 
 Physical or logical display coordinates used for rendering, pointer input, and hit testing. Device pixel ratio can introduce another conversion.
 
@@ -110,24 +121,21 @@ Physical or logical display coordinates used for rendering, pointer input, and h
 
 For a simple 2D canvas, let:
 
-- \\(w=(x_w,y_w)\\) be a world position.
-- \\(s\\) be the zoom scale.
-- \\(t=(t_x,t_y)\\) be the viewport translation.
-- \\(v=(x_v,y_v)\\) be the viewport position.
+- $w=(x_w,y_w)$ be a world position.
+- $s$ be the zoom scale.
+- $t=(t_x,t_y)$ be the viewport translation.
+- $v=(x_v,y_v)$ be the viewport position.
 
 Then:
 
-\\[ v = sw+t \\]
-
+$$ v = sw+t $$
 In expanded form:
 
-\\[ x_v=sx_w+t_x,\qquad y_v=sy_w+t_y \\]
-
+$$ x_v=sx_w+t_x,\qquad y_v=sy_w+t_y $$
 The inverse transformation is:
 
-\\[ x_w=\frac{x_v-t_x}{s},\qquad y_w=\frac{y_v-t_y}{s} \\]
-
-Suppose a node is at world position \\((200,100)\\), the zoom is \\(1.5\\), and the viewport translation is \\((40,20)\\). Its viewport position is \\((340,170)\\).
+$$ x_w=\frac{x_v-t_x}{s},\qquad y_w=\frac{y_v-t_y}{s} $$
+Suppose a node is at world position $(200,100)$, the zoom is $1.5$, and the viewport translation is $(40,20)$. Its viewport position is $(340,170)$.
 
 If the user drags the node, the editor should convert the pointer position back to world coordinates before saving the new location. Otherwise, zooming in would cause a drag to produce a different logical displacement than intended.
 
@@ -135,12 +143,12 @@ For more sophisticated editors, use affine transformation matrices. These suppor
 
 ### Coordinate-system design choices
 
-- Origin: Use a stable world origin, typically at \\((0,0)\\), without requiring the graph to remain in positive coordinates.
-- Axis direction: Document whether Y increases downward, as in most GUI canvases, or upward, as in conventional mathematical coordinates.
-- Units: Use abstract graph units rather than physical screen pixels. Specify whether positions refer to a node's top-left corner, center, or anchor.
-- Precision: Choose a numeric representation and rounding policy. Fractional positions can be useful during interactive movement, even if final placement snaps to a grid.
-- Grid: Make grid snapping an interaction policy, not an assumption built into every coordinate calculation.
-- Zoom and pan: Treat them as viewport state rather than node properties.
+- **Origin:** Use a stable world origin, typically at $(0,0)$, without requiring the graph to remain in positive coordinates.
+- **Axis direction:** Document whether Y increases downward, as in most GUI canvases, or upward, as in conventional mathematical coordinates.
+- **Units:** Use abstract graph units rather than physical screen pixels. Specify whether positions refer to a node's top-left corner, center, or anchor.
+- **Precision:** Choose a numeric representation and rounding policy. Fractional positions can be useful during interactive movement, even if final placement snaps to a grid.
+- **Grid:** Make grid snapping an interaction policy, not an assumption built into every coordinate calculation.
+- **Zoom and pan:** Treat them as viewport state rather than node properties.
 
 The most useful invariant is that zooming, panning, resizing the editor window, or changing display density must not silently modify saved graph positions.
 
@@ -150,27 +158,27 @@ AutoLayout is not one algorithm. It is a collection of algorithms that optimize 
 
 The right choice depends on the kind of visual programming language being designed.
 
-Layered layout
+**Layered layout**
 
 Nodes are arranged in ranks, often from left to right or top to bottom. The algorithm attempts to reduce edge crossings and produce a clear directional flow.
 
-Good for dataflow graphs, execution pipelines, and dependency graphs. See Graphviz [dot layout](https://graphviz.org/docs/layouts/dot/?utm_source=chatgpt.com) and [ELK Layered](https://eclipse.dev/elk/reference/algorithms/org-eclipse-elk-layered.html?utm_source=chatgpt.com).
+Good for dataflow graphs, execution pipelines, and dependency graphs. See Graphviz [dot layout](https://graphviz.org/docs/layouts/dot/) and [ELK Layered](https://eclipse.dev/elk/reference/algorithms/org-eclipse-elk-layered.html).
 
-Graphviz+1
+*Source: Graphviz (+1 more)*
 
-Force-directed layout
+**Force-directed layout**
 
 Nodes behave as if connected by springs and repelling one another. The algorithm seeks a visually balanced arrangement rather than a strict execution direction.
 
 Good for exploratory networks and relationship graphs; less suitable when a specific left-to-right flow is essential.
 
-Tree layout
+**Tree layout**
 
 Parent nodes are arranged above or beside their children.
 
 Good for expression trees, syntax trees, and nested control structures.
 
-Constraint-based and interactive layout
+**Constraint-based and interactive layout**
 
 Layout is calculated subject to existing positions, relative-order constraints, pinned nodes, grouping, and spacing requirements.
 
@@ -180,15 +188,15 @@ Good for hybrid editors that preserve the user's work while accommodating struct
 
 A layered algorithm often follows these stages:
 
-1. Cycle handling: Identify cycles and choose a representation that allows the graph to be laid out in layers.
-2. Layer assignment: Determine which nodes belong in which ranks.
-3. Crossing minimization: Reorder nodes within ranks to reduce intersecting edges.
-4. Node placement: Calculate actual coordinates and spacing.
-5. Edge routing: Calculate paths between ports, including bends and orthogonal segments.
+1. **Cycle handling:** Identify cycles and choose a representation that allows the graph to be laid out in layers.
+2. **Layer assignment:** Determine which nodes belong in which ranks.
+3. **Crossing minimization:** Reorder nodes within ranks to reduce intersecting edges.
+4. **Node placement:** Calculate actual coordinates and spacing.
+5. **Edge routing:** Calculate paths between ports, including bends and orthogonal segments.
 
-The Eclipse Layout Kernel documents these stages in its [Layered algorithm overview](https://eclipse.dev/elk/blog/posts/2025/25-08-21-layered.html?utm_source=chatgpt.com).
+The Eclipse Layout Kernel documents these stages in its [Layered algorithm overview](https://eclipse.dev/elk/blog/posts/2025/25-08-21-layered.html).
 
-Eclipse Foundation+1
+*Source: Eclipse Foundation (+1 more)*
 
 This pipeline has an important design implication: node positions are the output of a process with multiple competing objectives. A layout algorithm may reduce crossings but produce an unnecessarily wide graph. It may compact the graph but disrupt familiar node positions.
 
@@ -213,7 +221,7 @@ For an interactive editor, objective 6 deserves special attention. A mathematica
 There are more than two choices. A language can store layout in its main source file, a sidecar file, an embedded metadata section, or an external project database.
 
 | Storage model | Advantages | Disadvantages |
-| ------------------------- | ------------------------------------------------------------ | ---------------------------------------------------- |
+| --- | --- | --- |
 | Inline source | Self-contained; easy to share | Layout changes clutter code diffs |
 | Separate sidecar file | Clean semantic source; layout can be versioned independently | Files can become mismatched |
 | Embedded metadata | Single artifact with explicit separation | More complicated syntax and tooling |
@@ -224,7 +232,7 @@ There are more than two choices. A language can store layout in its main source 
 
 For example, a hypothetical graph language could use:
 
-```
+```mermaid
 graph Main {
  node a = Input("x") at (80, 120)
  node b = Add(a, 10) at (320, 120)
@@ -247,7 +255,7 @@ Inline coordinates are reasonable when spatial layout is an intentional, reviewa
 
 The semantic source might look like this:
 
-```
+```mermaid
 graph Main {
  node a = Input("x")
  node b = Add(a, 10)
@@ -257,15 +265,24 @@ graph Main {
 
 A corresponding `Main.layout.json` could contain:
 
-```
+```json
 {
- "schemaVersion": 1,
- "graph": "Main",
- "nodes": {
- "a": { "x": 80, "y": 120 },
- "b": { "x": 320, "y": 120 },
- "c": { "x": 560, "y": 120 }
- }
+  "schemaVersion": 1,
+  "graph": "Main",
+  "nodes": {
+    "a": {
+      "x": 80,
+      "y": 120
+    },
+    "b": {
+      "x": 320,
+      "y": 120
+    },
+    "c": {
+      "x": 560,
+      "y": 120
+    }
+  }
 }
 ```
 
@@ -279,7 +296,7 @@ Use stable node identifiers, not source line numbers or display names, as the pr
 
 A third option is to store relative constraints rather than exact coordinates:
 
-```
+```text
 layout Main {
  direction left_to_right
  place a before b
@@ -310,25 +327,25 @@ The important distinction is not simply coordinates versus no coordinates. It is
 
 Consider four levels of layout information:
 
-Level 1 — Exact position
+**Level 1 — Exact position**
 
 Keep this node at a specific world coordinate.
 
 Useful for manually arranged diagrams and precise compositions.
 
-Level 2 — Relative position
+**Level 2 — Relative position**
 
 Keep this node to the left, right, above, or below another.
 
 Useful when layout should adapt to node dimensions.
 
-Level 3 — Structural grouping
+**Level 3 — Structural grouping**
 
 Keep related nodes together or inside a group.
 
 Useful for subgraphs, functions, and conceptual regions.
 
-Level 4 — Pure derivation
+**Level 4 — Pure derivation**
 
 Calculate layout entirely from graph structure and layout rules.
 
@@ -360,7 +377,7 @@ For a text-based language, this matters because generated layouts may appear in 
 ### Three useful reproducibility guarantees
 
 | Guarantee | Meaning |
-| ------------------------- | -------------------------------------------------- |
+| --- | --- |
 | Semantic reproducibility | The program behaves identically |
 | Geometric reproducibility | The calculated node and edge geometry is identical |
 | Pixel reproducibility | The rendered image is identical |
@@ -369,9 +386,9 @@ The first is essential. The second is valuable for canonical layouts and stable 
 
 If deterministic geometry matters, the specification should define stable node ordering, tie-breaking rules, algorithm configuration, numeric precision, and versioning. A random seed alone is not sufficient.
 
-Graphviz's documentation, for example, distinguishes graph semantics from layout engines and supports explicit position attributes for relevant engines. See its [position attribute documentation](https://graphviz.org/docs/attrs/pos/?utm_source=chatgpt.com) and [dot layout documentation](https://graphviz.org/docs/layouts/dot/?utm_source=chatgpt.com).
+Graphviz's documentation, for example, distinguishes graph semantics from layout engines and supports explicit position attributes for relevant engines. See its [position attribute documentation](https://graphviz.org/docs/attrs/pos/) and [dot layout documentation](https://graphviz.org/docs/layouts/dot/).
 
-Graphviz+2
+*Source: Graphviz (+2 more)*
 
 A practical design is to make the layout engine and its configuration identifiable in the saved metadata, while allowing the editor to migrate old layout files when the engine changes.
 
@@ -383,9 +400,9 @@ If connecting one node causes 200 other nodes to move, the resulting graph may b
 
 A useful system distinguishes between three operations:
 
-- Initial layout: Arrange a graph that has no saved positions.
-- Incremental layout: Accommodate newly added, deleted, or connected nodes while preserving as much of the existing arrangement as possible.
-- Full relayout: Recalculate the entire graph when the user explicitly requests it.
+- **Initial layout:** Arrange a graph that has no saved positions.
+- **Incremental layout:** Accommodate newly added, deleted, or connected nodes while preserving as much of the existing arrangement as possible.
+- **Full relayout:** Recalculate the entire graph when the user explicitly requests it.
 
 A fourth operation, local relayout, can rearrange a selected region without disturbing unrelated regions.
 
@@ -393,13 +410,13 @@ A fourth operation, local relayout, can rearrange a selected region without dist
 
 Suppose the existing graph contains:
 
-```
+```text
 Input → Filter → Transform → Output
 ```
 
 The user adds a validation node:
 
-```
+```text
 Input → Filter → Validate → Transform → Output
 ```
 
@@ -409,15 +426,14 @@ For a robust editor, layout should have a notion of movement cost: moving an exi
 
 One conceptual objective function is:
 
-\\[ L = \alpha C + \beta O + \gamma D + \delta M \\]
-
+$$ L = \alpha C + \beta O + \gamma D + \delta M $$
 where:
 
-- \\(C\\) is the number or cost of edge crossings.
-- \\(O\\) is the cost of node overlaps.
-- \\(D\\) is a measure of excessive edge length or poor spacing.
-- \\(M\\) is the amount of movement from the previous layout.
-- \\(\alpha,\beta,\gamma,\delta\\) are weights.
+- $C$ is the number or cost of edge crossings.
+- $O$ is the cost of node overlaps.
+- $D$ is a measure of excessive edge length or poor spacing.
+- $M$ is the amount of movement from the previous layout.
+- $\alpha,\beta,\gamma,\delta$ are weights.
 
 In practice, some requirements should be hard constraints rather than weighted penalties. For example, overlapping nodes may be forbidden outright, while minimal movement is a preference.
 
@@ -467,68 +483,57 @@ The following is a concrete starting specification that could be adapted to a la
 
 Illustrative design proposal, not an existing language standard.
 
-1. Semantic source
-
-Defines nodes, ports, edges, node identities, and all execution-relevant properties. Visual position does not change program semantics.
-
-2. Layout sidecar
-
-Stores positions, pinned nodes, relative ordering constraints, grouping, optional edge waypoints, and schema version.
-
-3. Coordinate contract
-
-Persistent positions use world coordinates, with a documented origin, axis direction, units, and anchor convention. Viewport state is separate.
-
-4. Layout modes
-
-Support `automatic`, `incremental`, `manual`, and `hybrid` behavior. These are illustrative mode names.
-
-5. Identity and recovery
-
-Layout entries are keyed by stable graph and node IDs. Unknown IDs are ignored or reported, and stale records can be pruned safely.
-
-6. Determinism
-
-Define deterministic ordering and tie-breaking where reproducible geometry is required. Record layout-engine version and relevant options.
-
-7. Editing guarantees
-
-Ordinary text edits must not overwrite unrelated saved positions. Ordinary layout changes must not alter semantic source unless explicitly requested.
+1. **Semantic source** — Defines nodes, ports, edges, node identities, and all execution-relevant properties. Visual position does not change program semantics.
+2. **Layout sidecar** — Stores positions, pinned nodes, relative ordering constraints, grouping, optional edge waypoints, and schema version.
+3. **Coordinate contract** — Persistent positions use world coordinates, with a documented origin, axis direction, units, and anchor convention. Viewport state is separate.
+4. **Layout modes** — Support `automatic`, `incremental`, `manual`, and `hybrid` behavior. These are illustrative mode names.
+5. **Identity and recovery** — Layout entries are keyed by stable graph and node IDs. Unknown IDs are ignored or reported, and stale records can be pruned safely.
+6. **Determinism** — Define deterministic ordering and tie-breaking where reproducible geometry is required. Record layout-engine version and relevant options.
+7. **Editing guarantees** — Ordinary text edits must not overwrite unrelated saved positions. Ordinary layout changes must not alter semantic source unless explicitly requested.
 
 ### Example sidecar schema
 
 An extended illustrative representation might look like this:
 
-```
+```json
 {
- "schemaVersion": 1,
- "graphId": "main",
- "layout": {
- "mode": "hybrid",
- "direction": "right",
- "gridSize": 16,
- "engine": "layered",
- "engineVersion": "1"
- },
- "nodes": {
- "input-1": {
- "position": [80, 120],
- "pinned": true
- },
- "filter-1": {
- "position": [256, 120]
- },
- "output-1": {
- "position": [480, 120]
- }
- },
- "constraints": [
- {
- "type": "leftOf",
- "first": "input-1",
- "second": "filter-1"
- }
- ]
+  "schemaVersion": 1,
+  "graphId": "main",
+  "layout": {
+    "mode": "hybrid",
+    "direction": "right",
+    "gridSize": 16,
+    "engine": "layered",
+    "engineVersion": "1"
+  },
+  "nodes": {
+    "input-1": {
+      "position": [
+        80,
+        120
+      ],
+      "pinned": true
+    },
+    "filter-1": {
+      "position": [
+        256,
+        120
+      ]
+    },
+    "output-1": {
+      "position": [
+        480,
+        120
+      ]
+    }
+  },
+  "constraints": [
+    {
+      "type": "leftOf",
+      "first": "input-1",
+      "second": "filter-1"
+    }
+  ]
 }
 ```
 
@@ -541,7 +546,7 @@ Notice that the file can preserve both an exact position and a relational constr
 Before finalizing the language specification, test representative graphs under several workflows.
 
 | Test case | What it reveals |
-| ---------------------------------- | ------------------------------------------- |
+| --- | --- |
 | Open source with no layout file | Initial layout quality |
 | Reopen a manually arranged graph | Position persistence |
 | Rename and reorder declarations | Stability of node identity |
@@ -561,14 +566,14 @@ You should also evaluate readability: edge crossings, graph area, average edge l
 
 These questions are closely related to the design problem and deserve their own research notes:
 
-- Incremental Graph Layout: How can a graph be updated without disrupting a user's mental map?
-- Stable Node Identity: How can semantic node IDs survive text rewrites, refactoring, and LLM-generated code?
-- Canonical Graph Rendering: Can a language define a canonical geometric representation for reproducible documentation and testing?
-- Layout Constraints as Source: Should relative positioning and grouping be expressed in the language, metadata, or editor UI?
-- Semantic Diff vs. Visual Diff: How can tooling distinguish a behavior change from a layout-only change?
-- Collaborative Layout Editing: How should concurrent changes to node positions and graph structure be reconciled?
-- LLM-Friendly Graph Serialization: Can source omit coordinates while still giving an AI model enough structural hints to produce understandable visual graphs?
-- Layout Migration: How should layout files evolve when node shapes, ports, coordinate conventions, or layout algorithms change?
+- **Incremental Graph Layout:** How can a graph be updated without disrupting a user's mental map?
+- **Stable Node Identity:** How can semantic node IDs survive text rewrites, refactoring, and LLM-generated code?
+- **Canonical Graph Rendering:** Can a language define a canonical geometric representation for reproducible documentation and testing?
+- **Layout Constraints as Source:** Should relative positioning and grouping be expressed in the language, metadata, or editor UI?
+- **Semantic Diff vs. Visual Diff:** How can tooling distinguish a behavior change from a layout-only change?
+- **Collaborative Layout Editing:** How should concurrent changes to node positions and graph structure be reconciled?
+- **LLM-Friendly Graph Serialization:** Can source omit coordinates while still giving an AI model enough structural hints to produce understandable visual graphs?
+- **Layout Migration:** How should layout files evolve when node shapes, ports, coordinate conventions, or layout algorithms change?
 
 ## Conclusion
 
