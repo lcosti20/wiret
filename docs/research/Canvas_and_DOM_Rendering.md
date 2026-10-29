@@ -91,7 +91,7 @@ With Canvas, the application manages its own graphical scene and draws pixels di
 
 These are qualitative tendencies, not hard performance guarantees. Actual performance depends on the graph's structure, number of visible objects, node complexity, update frequency, browser, hardware, and implementation.
 
-A study comparing SVG, Canvas, and WebGL for large visualizations found that SVG and Canvas performed similarly in its tested configurations, with performance degradation beginning around 10,000 graphical elements. WebGL was less affected by increasing node counts when text was absent. This is a useful illustration of the tradeoffs, not a universal threshold for modern applications.
+A 2018 IEEE VIS poster comparing SVG, Canvas, and WebGL in large visualizations reported that SVG and Canvas performed similarly in the tested configurations, with degradation beginning around 10,000 graphical elements. WebGL was less affected by increasing node counts when text was absent. These results illustrate trade-offs in that poster’s benchmark; they are not a universal threshold for modern applications. [Horak, Kister, and Dachselt (2018), *Comparing Rendering Performance of Common Web Technologies for Large Graphs* (poster)](https://imld.de/cnt/uploads/Horak-2018-Graph-Performance-Poster.pdf).
 
 *Source: imld.de*
 
@@ -378,7 +378,7 @@ For reproducibility, benchmark the same graph with the same visual detail, run r
 - [MDN: Optimizing Canvas](https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Optimizing_canvas) — Practical techniques for caching, layering, batching, high-resolution rendering, and redraw optimization.
 - [MDN: Canvas element](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/canvas) — Canvas capabilities, OffscreenCanvas, sizing considerations, and accessibility limitations.
 - [MDN: WebGL best practices](https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/WebGL_best_practices) — GPU resource management, draw-call batching, buffer sizing, and rendering efficiency.
-- [Comparing Rendering Performance of Common Web Technologies for Large Graphs](https://imld.de/cnt/uploads/Horak-2018-Graph-Performance.pdf) — An empirical comparison of SVG, Canvas, and WebGL for large graph visualizations, including how text changes the performance picture.
+- [Comparing Rendering Performance of Common Web Technologies for Large Graphs](https://imld.de/cnt/uploads/Horak-2018-Graph-Performance-Poster.pdf) — An empirical comparison of SVG, Canvas, and WebGL for large graph visualizations, including how text changes the performance picture.
 
 ## 12. Research outline
 

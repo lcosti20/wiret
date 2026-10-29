@@ -17,7 +17,7 @@ formatted: 2026-10-28
 
 *A block of code written in the Snap! visual programming language, which is based on Scratch, calculating the sum of all numbers with values between a and b*
 
-In computer programming education, a **visual programming language**, **block coding system** or **diagrammatic programming language**, is a programming language that lets users create programs by manipulating program elements *graphically* rather than by specifying them *textually*. A VPL allows programming with visual expressions, spatial arrangements of text and graphic symbols, used either as elements of syntax or secondary notation. For example, many VPLs are based on the idea of "boxes and arrows", where boxes or other screen objects are treated as entities, connected by arrows, lines or arcs which represent relations. VPLs are generally the basis of low-code development platforms. Scratch is an example of a VPL.
+In computer programming education, a **visual programming language**, **block coding system** or **diagrammatic programming language**, is a programming language that lets users create programs by manipulating program elements *graphically* rather than by specifying them *textually*. A VPL allows programming with visual expressions, spatial arrangements of text and graphic symbols, used either as elements of syntax or secondary notation. For example, many VPLs are based on the idea of "boxes and arrows", where boxes or other screen objects are treated as entities, connected by arrows, lines or arcs which represent relations. Many low-code development platforms use visual programming techniques, though low-code platforms and VPLs are overlapping rather than identical categories. Scratch is an example of a VPL.
 
 ## Contents
 
@@ -504,7 +504,7 @@ A library for building block-based programming editors. Unlike a complete progra
 
 A key research question is whether the skills learned through blocks transfer to other programming paradigms. Block-based systems can provide a gentler introduction to concepts, but the transition to text also involves learning different workflows, syntax, debugging practices, and ways of navigating code.
 
-A 2021 meta-analysis examined 29 empirical studies of block-based programming and found a statistically significant positive overall effect on student learning achievement, with reported effect sizes varying across educational contexts and interventions. This supports the value of block-based instruction, but does not demonstrate that visual programming is universally superior to textual programming.
+A 2021 meta-analysis examined 29 empirical studies of block-based programming and found a statistically significant positive overall effect on student learning achievement, with reported effect sizes varying across educational contexts and interventions. This supports the value of block-based instruction, but does not demonstrate that visual programming is universally superior to textual programming. [Hu et al. (2021), *Exploring the Effectiveness and Moderators of Block-Based Visual Programming on Student Learning: A Meta-Analysis*](https://eric.ed.gov/?id=EJ1275976).
 
 *Source: DOI*
 
