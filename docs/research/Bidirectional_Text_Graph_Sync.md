@@ -311,21 +311,30 @@ An ideal system satisfies several useful properties.
 
 If the graph is derived from valid text, converting back should preserve the program's meaning:
 
-$$ \operatorname{sem}(P(T')) = \operatorname{sem}(P(T)) $$
+$$
+\operatorname{sem}(P(T')) = \operatorname{sem}(P(T))
+$$
+
 when $T'$ differs from $T$ only in presentation metadata, such as node coordinates.
 
 ### Graph-edit preservation
 
 If a user performs a semantic edit on the graph, the generated text should represent that edit:
 
-$$ \operatorname{sem}(P(E_T(T))) = \operatorname{sem}(E_G(P(T))) $$
+$$
+\operatorname{sem}(P(E_T(T))) = \operatorname{sem}(E_G(P(T)))
+$$
+
 This assumes the operation is supported by the language and the resulting program is valid.
 
 ### Idempotence
 
 Applying the same synchronization update repeatedly should not cause further changes after the first successful application:
 
-$$ S(S(x)) = S(x) $$
+$$
+S(S(x)) = S(x)
+$$
+
 Here, $S$ represents reconciliation of a representation with the current document state.
 
 ### Stability

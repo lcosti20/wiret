@@ -128,13 +128,22 @@ For a simple 2D canvas, let:
 
 Then:
 
-$$ v = sw+t $$
+$$
+v = sw+t
+$$
+
 In expanded form:
 
-$$ x_v=sx_w+t_x,\qquad y_v=sy_w+t_y $$
+$$
+x_v=sx_w+t_x,\qquad y_v=sy_w+t_y
+$$
+
 The inverse transformation is:
 
-$$ x_w=\frac{x_v-t_x}{s},\qquad y_w=\frac{y_v-t_y}{s} $$
+$$
+x_w=\frac{x_v-t_x}{s},\qquad y_w=\frac{y_v-t_y}{s}
+$$
+
 Suppose a node is at world position $(200,100)$, the zoom is $1.5$, and the viewport translation is $(40,20)$. Its viewport position is $(340,170)$.
 
 If the user drags the node, the editor should convert the pointer position back to world coordinates before saving the new location. Otherwise, zooming in would cause a drag to produce a different logical displacement than intended.
@@ -426,7 +435,10 @@ For a robust editor, layout should have a notion of movement cost: moving an exi
 
 One conceptual objective function is:
 
-$$ L = \alpha C + \beta O + \gamma D + \delta M $$
+$$
+L = \alpha C + \beta O + \gamma D + \delta M
+$$
+
 where:
 
 - $C$ is the number or cost of edge crossings.

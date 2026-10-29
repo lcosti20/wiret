@@ -285,7 +285,10 @@ The second representation is shorter in characters, but it introduces abbreviati
 
 A useful proposed metric is effective token cost:
 
-$$ C_{\mathrm{effective}} = C_{\mathrm{source}} + C_{\mathrm{context}} + C_{\mathrm{repair}} + C_{\mathrm{verification}} $$
+$$
+C_{\mathrm{effective}} = C_{\mathrm{source}} + C_{\mathrm{context}} + C_{\mathrm{repair}} + C_{\mathrm{verification}}
+$$
+
 Where:
 
 - $C_{\mathrm{source}}$ is the token cost of the generated code.

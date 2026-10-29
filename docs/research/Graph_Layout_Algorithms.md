@@ -111,7 +111,10 @@ The important distinction is that the algorithm changes its internal representat
 
 Each node receives a layer or rank. For a simple directed acyclic graph, a useful baseline is:
 
-$$ r(v)= \begin{cases} 0 & \text{if }v\text{ has no predecessors}\\\ 1+\max\limits_{u\to v}r(u) & \text{otherwise} \end{cases} $$
+$$
+r(v)= \begin{cases} 0 & \text{if }v\text{ has no predecessors}\\\ 1+\max\limits_{u\to v}r(u) & \text{otherwise} \end{cases}
+$$
+
 This assigns each node to a layer one greater than its deepest predecessor.
 
 For example:
@@ -219,7 +222,10 @@ ELK exposes interactive layout configuration, including a reference-point option
 
 A useful layout objective is to minimize not just crossings and edge lengths, but also displacement from the previous layout:
 
-$$ E = \alpha C+\beta L+\gamma B+\delta D $$
+$$
+E = \alpha C+\beta L+\gamma B+\delta D
+$$
+
 where:
 
 - $C$ = edge-crossing penalty

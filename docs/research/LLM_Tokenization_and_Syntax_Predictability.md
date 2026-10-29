@@ -331,7 +331,10 @@ This is compact, but the meaning of `C`, `A`, `v`, and `E` must be learned or lo
 
 The design goal should be to minimize total cost, not just character count:
 
-$$ \text{Total cost} = \text{generation cost} +\text{validation cost} +\text{repair cost} +\text{interpretation cost} $$
+$$
+\text{Total cost} = \text{generation cost} +\text{validation cost} +\text{repair cost} +\text{interpretation cost}
+$$
+
 This is a conceptual model rather than a standardized metric, but it helps explain why the shortest syntax is not necessarily the best.
 
 ## 8. Bidirectional editing and partial generation

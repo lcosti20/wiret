@@ -121,17 +121,26 @@ Because an AST abstracts away incidental syntactic details, it is a powerful rep
 
 Let $S$ be a set of *sorts* (syntactic categories). An *arity* is a tuple
 
-$$ (s_1,\dots,s_n,s) \qquad (s_1,\dots,s_n,s\in S) $$
+$$
+(s_1,\dots,s_n,s) \qquad (s_1,\dots,s_n,s\in S)
+$$
+
 also written $(s_1,\dots,s_n)_s$. More precisely the set of all arities is
 
-$$ \mathrm{Arity}(S) := \coprod_{n\in\mathbb{N}} S^{n+1}. $$
+$$
+\mathrm{Arity}(S) := \coprod_{n\in\mathbb{N}} S^{n+1}.
+$$
+
 Let $O = \{O_\alpha\}_{\alpha\in\mathrm{Arity}(S)}$ be an \(\mathrm{Arity}(S)\)-indexed family of disjoint sets of *operators*. If an operator $o$ has arity $(s_1,\dots,s_n)_s$ we say that $o$ has sort $s$ and takes $n$ arguments of sorts $s_1,\dots,s_n$.
 
 ### Abstract Syntax Trees
 
 Fix a finite set of sorts $S$ and an \(\mathrm{Arity}(S)\)-indexed family of operators $O$. Let $X = \{X_s\}_{s\in S}$ be an $S$-indexed family of disjoint sets of *variables*. The family of abstract syntax trees
 
-$$ A[X] = \{A[X]_s\}_{s\in S} $$
+$$
+A[X] = \{A[X]_s\}_{s\in S}
+$$
+
 is the smallest $S$-indexed family of disjoint sets closed under the following two rules:
 
 1. **Variables are ASTs**
@@ -140,7 +149,10 @@ is the smallest $S$-indexed family of disjoint sets closed under the following t
 2. **Operators combine ASTs**
    If $o$ is an operator of arity $(s_1,\dots,s_n)_s$ and $a_i\in A[X]_{s_i}$ for every $1\le i\le n$, then
 
-   $$ o(a_1;\dots;a_n)\in A[X]_s. $$
+   $$
+   o(a_1;\dots;a_n)\in A[X]_s.
+   $$
+
 In other words, an AST is either a variable of a given sort or the application of an operator to a correctly sorted tuple of subtrees.
 
 ## See Also
@@ -412,20 +424,26 @@ This provides a foundation for designing reliable syntax representations.
 
 Suppose the sorts are:
 
-$$ S = \{\text{Expr},\text{Stmt}\} $$
+$$
+S = \{\text{Expr},\text{Stmt}\}
+$$
+
 We can define operators such as:
 
-- **`Number :** () → Expr`
-- **`Add :** (Expr, Expr) → Expr`
-- **`Multiply :** (Expr, Expr) → Expr`
-- **`Return :** Expr → Stmt`
-- **`Block :** Stmt* → Stmt`
+- **`Number :** () → Expr`**
+- **`Add :** (Expr, Expr) → Expr`**
+- **`Multiply :** (Expr, Expr) → Expr`**
+- **`Return :** Expr → Stmt`**
+- **`Block :** Stmt* → Stmt`**
 
 Here, `Stmt*` denotes zero or more statements. The notation is schematic; actual formal definitions may encode literals and variables differently.
 
 An expression such as $2 + 3 \times 4$ becomes:
 
-$$ \operatorname{Add}\bigl(   \operatorname{Number}(2),   \operatorname{Multiply}(     \operatorname{Number}(3),     \operatorname{Number}(4)   ) \bigr) $$
+$$
+\operatorname{Add}\bigl(   \operatorname{Number}(2),   \operatorname{Multiply}(     \operatorname{Number}(3),     \operatorname{Number}(4)   ) \bigr)
+$$
+
 The important point is that the tree's shape encodes the grouping. The multiplication node is nested inside the addition node's right operand.
 
 #### Why sorts matter

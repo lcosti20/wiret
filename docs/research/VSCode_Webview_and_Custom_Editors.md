@@ -338,14 +338,14 @@ The webview sends a semantic operation rather than a complete serialized documen
 
 ```json
 {
-  type: "graph/patch",
-  revision: 12,
-  operations: [
+  "type": "graph/patch",
+  "revision": 12,
+  "operations": [
     {
-      op: "setNodePosition",
-      id: "input",
-      x: 80,
-      y: 180
+      "op": "setNodePosition",
+      "id": "input",
+      "x": 80,
+      "y": 180
     }
   ]
 }

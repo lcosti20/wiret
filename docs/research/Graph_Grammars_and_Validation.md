@@ -89,7 +89,10 @@ A graph grammar generalizes a conventional grammar from strings and syntax trees
 
 **A common rule-based formulation has the form**
 
-$$ L \leftarrow K \rightarrow R $$
+$$
+L \leftarrow K \rightarrow R
+$$
+
 where:
 
 - $L$ is the graph pattern that must exist.
@@ -150,7 +153,10 @@ Each port has a type, and each edge must respect the language's compatibility ru
 
 A simple formulation is:
 
-$$ \forall (u,v)\in E,\quad \operatorname{type}(u)\preceq \operatorname{type}(v) $$
+$$
+\forall (u,v)\in E,\quad \operatorname{type}(u)\preceq \operatorname{type}(v)
+$$
+
 Here, $u$ is an output port, $v$ is an input port, and $\preceq$ denotes the language's permitted assignment or connection relation. It need not mean literal equality.
 
 ### A richer type model
@@ -185,7 +191,10 @@ The table describes possible policies, not universal rules.
 
 **Consider a generic `Map` node with a type signature resembling**
 
-$$ \operatorname{map}: (A\rightarrow B)\times \operatorname{List}(A) \rightarrow \operatorname{List}(B) $$
+$$
+\operatorname{map}: (A\rightarrow B)\times \operatorname{List}(A) \rightarrow \operatorname{List}(B)
+$$
+
 If a list of integers is connected to its input, the checker may infer $A=\texttt{Int}$. If the supplied function accepts an integer and returns a string, it can infer $B=\texttt{String}$.
 
 The output then becomes `List<String>`.
@@ -196,10 +205,16 @@ This requires more than comparing port labels. The checker must collect constrai
 
 For a small, monomorphic language, direct type comparisons may be sufficient. For generic or polymorphic languages, type inference typically generates constraints such as
 
-$$ T_{\text{output}}=T_{\text{input}} $$
+$$
+T_{\text{output}}=T_{\text{input}}
+$$
+
 or subtype constraints such as
 
-$$ T_{\text{output}}\;<:\;T_{\text{input}}. $$
+$$
+T_{\text{output}}\;<:\;T_{\text{input}}.
+$$
+
 A unification algorithm can solve equality constraints, while subtype constraints, overload resolution, and complex effects may require additional machinery.
 
 **Research question:** How can type inference be made incremental so that changing one connection updates only the affected portion of a large visual program?
@@ -227,7 +242,10 @@ The language must therefore identify which graph relation is being checked and w
 
 For a directed graph $G=(V,E)$, a simple policy might require acyclicity:
 
-$$ G \text{ is a DAG} $$
+$$
+G \text{ is a DAG}
+$$
+
 This can be checked with a topological sort or a depth-first search in $O(|V|+|E|)$ time.
 
 ### Interactive cycle prevention

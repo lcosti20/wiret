@@ -121,7 +121,10 @@ However, a Canvas implementation does not automatically become cheap: it still h
 
 A useful conceptual model is:
 
-$$ T_{\text{frame}} = T_{\text{state}}+ T_{\text{geometry}}+ T_{\text{draw}}+ T_{\text{composite}} $$
+$$
+T_{\text{frame}} = T_{\text{state}}+ T_{\text{geometry}}+ T_{\text{draw}}+ T_{\text{composite}}
+$$
+
 Where:
 
 - $T_{\text{state}}$ is the cost of determining what changed.
@@ -183,7 +186,10 @@ Maintain a spatial index, such as a quadtree, R-tree, or grid-based index. Query
 
 The approximate goal is to make rendering work proportional to visible objects rather than total graph size:
 
-$$ T_{\text{render}} \approx O(V_{\text{visible}}+E_{\text{visible}}) $$
+$$
+T_{\text{render}} \approx O(V_{\text{visible}}+E_{\text{visible}})
+$$
+
 This is a target, not a guaranteed complexity bound: edge routing, overlapping objects, index maintenance, and label placement may add costs.
 
 ### B. Level of detail
@@ -254,12 +260,18 @@ Canvas does not automatically know which graph node the user clicked. The applic
 
 For a pan-and-zoom viewport, a simple transform is:
 
-$$ x_s = s x_w + t_x,\qquad y_s = s y_w + t_y $$
+$$
+x_s = s x_w + t_x,\qquad y_s = s y_w + t_y
+$$
+
 Here, $x_w,y_w$ are world coordinates, $x_s,y_s$ are screen coordinates, $s$ is the zoom scale, and $t_x,t_y$ represent translation.
 
 Pointer hit-testing applies the inverse transform:
 
-$$ x_w = \frac{x_s-t_x}{s},\qquad y_w = \frac{y_s-t_y}{s} $$
+$$
+x_w = \frac{x_s-t_x}{s},\qquad y_w = \frac{y_s-t_y}{s}
+$$
+
 The application can then query its spatial index for nearby candidates and perform precise geometric tests on those candidates.
 
 A robust interaction pipeline looks like this:

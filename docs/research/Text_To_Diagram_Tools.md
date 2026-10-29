@@ -408,12 +408,18 @@ This is where text-to-diagram tools become especially interesting.
 
 A normal renderer implements a function:
 
-$$ R: S \rightarrow V $$
+$$
+R: S \rightarrow V
+$$
+
 where $S$ is source text and $V$ is a visual diagram.
 
 A bidirectional editor needs an additional transformation:
 
-$$ U: (S,V') \rightarrow S' $$
+$$
+U: (S,V') \rightarrow S'
+$$
+
 Here, $V'$ is the diagram after a user edits it visually, and $S'$ is the updated source.
 
 A naïve approach would regenerate all source from the edited graph. But this can destroy comments, whitespace, declaration order, stylistic choices, or syntax that has no direct equivalent in the graph model.
