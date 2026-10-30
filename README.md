@@ -6,7 +6,7 @@ Instead of treating a visual editor as the source of truth, Wiret stores graphs 
 
 Example:
 
-![Screenshot 2026-10-29 at 9 14 47 PM](https://github.com/user-attachments/assets/14bebc8d-d113-47aa-847a-6ae164ac1443)
+![Tkinter UI/graph editor](https://github.com/user-attachments/assets/14bebc8d-d113-47aa-847a-6ae164ac1443)
 
 ```wiret
 wiret 1
