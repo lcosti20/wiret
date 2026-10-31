@@ -4,7 +4,7 @@
 | --- | --- |
 | `wiretc check file.wiret` | Parse, resolve, type-check and validate; print diagnostics (section 4.7). |
 | `wiretc fmt file.wiret` | Rewrite in canonical form. `--check` fails if the file is not canonical (for CI). |
-| `wiretc build file.wiret -o out.wbc` | Compile and verify. `-O0` / `-O1`, `--embed-source`, `--no-debug`. |
+| `wiretc build file.wiret -o out.wbc` | Compile and verify. `-O0` / `-O1`, `--embed-source`, `--no-debug`, `--export-all` (export every function, section 5.2; without it only `@export` items are exported). |
 | `wiretc dis out.wbc` | Disassemble, with node ids from `wr.debug`. |
 | `wiretc view --flow file.wiret` | Print a reading view in flow order (not canonical). Flow order is deterministic: from each `Entry`, depth-first along exec outputs in pin order; a node reached twice is printed at its first visit; each pure node is printed immediately before its first consumer; nodes unreachable from any entry come last, sorted by id. `--dot` exports Graphviz DOT, using `node:pin` ports and one cluster per layout box. |
 | `wiretc hash file.wiret` | Print the semantic and layout hashes. |
@@ -13,7 +13,7 @@
 | `wiretc merge base ours theirs` | Git merge driver. Line-merges, then re-validates (duplicate bindings, dangling ids). |
 | `wiretc verify out.wbc` | Run only the verifier. |
 | wiretc check --json file.wiret | Structured diagnostics, one JSON record per line (section 4.7). |
-| wiretc run file.wiret Func args... | Compile and run an export on the reference VM with the standard natives, for tests and quick experiments. |
+| wiretc run file.wiret Func args... | Compile with `--export-all` and run any function, event or method on the reference VM with the standard natives, for tests and quick experiments. |
 | wiretc svg file.wiret Func | Render a graph to SVG from the layout block, so a pull request can show the diagram next to the text diff. |
 
 Suggested Git setup:
@@ -80,7 +80,7 @@ allow = ["console.write"]
 ```
 
 - A module name maps to a path under a root: `game.player` is `src/game/player.wiret`. `use game.player` makes its exports visible, and `Call game.player.Heal` calls one.
-- A call to another Wiret module compiles to an import whose `module` field is the callee's module name. The loader resolves an import against the exports of loaded Wiret modules first (checking the signature), then against registered natives.
+- A call to another Wiret module compiles to an import whose `module` field is the callee's module name. The loader resolves an import against the declared exports (flag bit 3, section 5.2) of loaded Wiret modules first (checking the signature), then against registered natives.
 - Import cycles between modules are rejected at build time.
 - `wiret.lock` records the semantic hash of every dependency and the registry version. `wiretc build` fails if a dependency's hash no longer matches, so a build is reproducible.
 - `wiret.ids` is the project's **id registry**, committed next to the manifest: one line per retired id (module, graph, kind of element, id). It is append-only and merges by set union, so two branches that retire different ids never conflict. Editors and `wiretc edit` append to it when they delete an element, and `wiretc ids --check` verifies it in CI (section 2.4). It is what turns "ids are never reused" from a convention into something checkable; a single `.wiret` file cannot offer that on its own.
@@ -114,6 +114,7 @@ An editor that reads and writes `.wiret` files must:
 7. **Show diagnostics on the graph**, using the `node` and `pin` of each record from `wiretc check --json`.
 8. **Keep personal view state out of the file.** Zoom, scroll, selection, open tabs and panel layout go in a separate workspace file (for example `.wiret-workspace`) that is excluded from Git.
 9. **Use the debug data** when attached to a runtime: node-level breakpoints from `wr.debug`, and wire values from `wr_getpin`.
+10. **Run with `--export-all`.** To run or debug a function, build the module with `--export-all` (section 5.2) so any function can be called by name, and never ship that build.
 
 ### 7.6 Reference implementation
 

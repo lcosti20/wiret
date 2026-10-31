@@ -7,7 +7,26 @@ WBC is a **typed stack machine** with per-function typed locals, in the spirit o
 - **Flat code with labels, not structured blocks.** Exec wiring can form loops with several entry points and merges (irreducible control flow). WebAssembly's `block`/`loop` nesting would force a restructuring pass, which would make bytecode unrelated to the graph. WBC uses plain branches to labels, as the JVM does.
 - **The operand stack is empty at every label.** Each impure node is one block that starts and ends with an empty operand stack, and only locals carry values between blocks. Locals have fixed declared types and are zero-initialised, so the verifier needs no stack maps, no merge of type states and no definite-assignment analysis. Verification is a single linear pass, and *any* label is a type-safe jump target, which is what makes the dynamic continuation stack (section 4.2) safe.
 
-All multi-byte fixed-width values are little-endian. Integer immediates are LEB128 (`u32`/`s32`/`s64`).
+All multi-byte fixed-width values are little-endian. Section 5.1.1 fixes how each kind of number is encoded; in short, container fields are fixed-width, instruction immediates are LEB128, and branch offsets are fixed-width.
+
+#### 5.1.1 Primitive encodings
+
+| Name | Encoding | Used for |
+| --- | --- | --- |
+| `u8` | One byte. | Flags, kinds, type codes, opcodes, and the `kind` and `flags` immediates of `suspend` and `delegate.new`. |
+| `u32` | Exactly 4 bytes, little-endian. | Every `u32` in sections 5.2 and 5.3: header fields, section sizes, `vec` counts, type, function, global and data indices, local counts, `max_stack`, `max_cont`. Fixed width lets a writer patch sizes and counts without moving bytes. |
+| `uleb` | Unsigned LEB128, at most 5 bytes. | Instruction immediates that are indices or counts: local, global, function, type, field, slot and data indices, the count `n` of `br_table`, and the sub-opcode after the `FB` prefix. |
+| `sleb32` / `sleb64` | Signed LEB128, at most 5 / 10 bytes. | The immediates of `i32.const` and `i64.const`. |
+| `f32` / `f64` | The IEEE 754 binary32 / binary64 bit pattern, 4 / 8 bytes, little-endian. | The immediates of `f32.const` and `f64.const`. |
+| `L` (branch offset) | Exactly 4 bytes, little-endian, two's complement `s32`. **Not** LEB128. | Every branch target, in section 5.6. |
+
+**LEB128.** A writer emits the shortest form. A reader accepts a longer form with redundant bytes, up to the maximum length, and rejects a form that is longer than the maximum or whose final byte has unused bits that are not zero (unsigned) or not equal to the sign bit (signed). The verifier counts a rejected number as a decoding failure (section 5.5, rule 2).
+
+**Floating-point constants.** The bit pattern is stored and loaded unchanged, so `-0` and every NaN payload survive. A writer emits a NaN with no source payload as the quiet NaN `7FC00000` (f32) or `7FF8000000000000` (f64).
+
+**`const` in globals and field defaults** is 8 bytes, little-endian. An `i32`, `bool`, narrow integer or `f32` occupies the low 4 bytes and the high 4 bytes are zero (the verifier rejects anything else); a narrow integer holds its value as a sign-extended `i32` and must be in range for its type; `bool` is 0 or 1. An `i64` or `f64` fills all 8 bytes. A `string` is a `u32` data index (4 bytes). References have no bytes.
+
+**Branch offsets.** `L` is a byte count, added to the position of the first byte after the whole instruction. For `br`, `br_if` and `cont.push` that is the end of the offset; for `try.push` it is the end of the `local` immediate that follows `L`; for `br_table` it is the end of `Ldefault`, and every label of one `br_table` is measured from there. Positions ("pc") are byte offsets from the start of the function's `code` bytes. An offset of 0 targets the next instruction. The target must be the first byte of an instruction in the same body, so a target equal to the code length is invalid. A fixed 4-byte offset lets an emitter write a placeholder and patch it in one pass, with no size relaxation, at a cost of up to 3 bytes per branch over LEB128. For `br_table` the verifier checks that `n` labels fit in the remaining code bytes before reading them.
 
 ### 5.2 Container
 
@@ -27,11 +46,13 @@ vec(X)  = n:u32 X*               name = vec(u8)  ; UTF-8, no NUL
 | 2 | Import | `vec(module:name field:name kind:u8=0 type:u32 flags:u8)`; kind 0 is a function. Flags: bit 0 pure, bit 1 reserved. `module` names a Wiret module or a host namespace; resolution order is in section 7.3. |
 | 3 | Function | `vec(typeidx:u32 flags:u8)` for each defined function. Flags: bit 0 pure, bit 1 latent, bit 2 event. Function indices count imports first. |
 | 4 | Global | `vec(valtype mut:u8 init:const)` |
-| 5 | Export | `vec(name kind:u8 index:u32 flags:u8)`; kind 0 func, 1 global, 2 type. Flags: bit 0 event, 1 latent, 2 pure. Methods are exported as `Class.Method`. |
+| 5 | Export | `vec(name kind:u8 index:u32 flags:u8)`; kind 0 func, 1 global, 2 type. Flags: bit 0 event, 1 latent, 2 pure, 3 declared (the source marks it `@export`). Methods are exported as `Class.Method`. Which entries are present depends on the export mode, below. |
 | 6 | Data | `vec(vec(u8))`: string constants, UTF-8. |
 | 7 | Code | `vec(body)` where `body = size:u32 locals:vec(count:u32 valtype) max_stack:u32 max_cont:u32 code:bytes` |
 
-A `const` is 8 bytes (numeric bit pattern), or a `u32` data index for `string`, or empty for references (always null).
+A `const` is 8 bytes (numeric bit pattern), or a `u32` data index for `string`, or empty for references (always null); the exact layout is in section 5.1.1.
+
+**Export modes.** A normal build writes an export entry only for what the source marks `@export`, and sets flag bit 3 on each. An `--export-all` build (section 7) also writes an entry for every `func`, `event` and method, so that the editor can run any function by name; entries for `@export` items still carry bit 3, the others do not. Macros are inlined and never exported, and `var`s and types are exported only when marked `@export`. Export mode is a build option, not part of the source: it does not change the semantic hash or any function body, and `wr.meta` records which mode was used. The export table is the only thing that differs. **Linking** from another Wiret module resolves an import only against entries with bit 3 set, so `--export-all` does not make `@private` or unmarked functions importable by other modules. The host sees every entry, and tests bit 3 (`WR_EXPORT_DECLARED`, section 6) to find the public surface. `--export-all` builds are for development; release pipelines should build without it.
 
 ### 5.3 Value types and type entries
 
@@ -66,14 +87,36 @@ A `const` is 8 bytes (numeric bit pattern), or a `u32` data index for `string`, 
 | Name | Purpose |
 | --- | --- |
 | `name` | Names of functions, locals, types, fields and enum members, for tools and reflection. |
-| `wr.debug` | Maps code offsets to graph position. For each function: its graph item id, a string table of node ids (path-style after macro expansion, such as `loop/test`), and `vec(pc_delta:u32 node:u32)`. Drives node-level breakpoints, stepping and tracebacks. |
-| `wr.pins` | For each function: `vec(local:u32 node:u32 pin:u32)`, naming the node output pin that each local holds (indices into the `wr.debug` string table). Complete for `-Og` builds; otherwise it lists the pins that survive optimisation. Lets an editor show the value on a wire and lets the host call `wr_getpin`. |
+| `wr.debug` | Maps code offsets to graph position. For each function: its graph item id, a string table of node ids and pin names (path-style after macro expansion, such as `loop/test`), and a list of `(pc_delta, node)` entries. Drives node-level breakpoints, stepping and tracebacks. Layout in section 5.4.1. |
+| `wr.pins` | For each function: a list of `(local, node, pin)` triples, naming the node output pin that each local holds (`node` and `pin` are indices into that function's `wr.debug` string table). Complete for `-Og` builds; otherwise it lists the pins that survive optimisation. Lets an editor show the value on a wire and lets the host call `wr_getpin`. |
 | `wr.graph` | The canonical `.wiret` text, deflate-compressed. Lets a debugger or editor open a `.wbc` it did not build. |
 | `wr.meta` | Module id, compiler and registry versions, **semantic hash** and **layout hash** (section 2.5), source hash. |
 | `wr.reflect` | Attribute data for the host: `@doc`, `@category`, parameter names and defaults. |
 | `wr.caps` | Every capability the module's imports require, so a host can inspect or refuse a module before loading it. |
 
-**Sidecar.** `wiretc build --sidecar` writes `wr.debug`, `wr.pins`, `wr.graph` and `wr.reflect` to a separate `out.wdbg` file instead of embedding them. `wr.meta` in both files carries the same module id and semantic hash, so a debugger can match them. Release builds can ship the small `.wbc` alone.
+**Sidecar.** `wiretc build --sidecar` writes `wr.debug`, `wr.pins`, `wr.graph` and `wr.reflect` to a separate `out.wdbg` file instead of embedding them. `wr.meta` in both files carries the same module id and semantic hash, so a debugger can match them. Release builds can ship the small `.wbc` alone. A `.wdbg` file uses the container of section 5.2 with the magic `00 57 44 47` (NUL 'W' 'D' 'G'), `version` 1 and `flags` 0, and holds only custom sections.
+
+#### 5.4.1 Layout of `wr.debug` and `wr.pins`
+
+Debug data is strippable and never affects safety, so it uses compact numbers: inside these two sections every integer is a `uleb` (section 5.1.1), a `uvec(X)` is a `uleb` count followed by that many `X`, and a `str` is a `uleb` byte length followed by UTF-8 bytes with no NUL. The custom-section header (`name:name`) is the container's, as in section 5.2. A reader that finds either section malformed ignores it and reports a warning; the module still loads.
+
+```
+wr.debug = version:uleb funcs:uvec(dfunc)            ; version = 1
+dfunc    = funcidx:uleb item:str strings:uvec(str) entries:uvec(entry)
+entry    = pc_delta:uleb node:uleb
+
+wr.pins  = version:uleb funcs:uvec(pfunc)            ; version = 1
+pfunc    = funcidx:uleb pins:uvec(pin)
+pin      = local:uleb node:uleb pin:uleb
+```
+
+- **`funcidx`** is an index in the function index space (imports first, section 5.2) and must name a defined function. `dfunc` records appear in ascending `funcidx`, at most once each. Functions without debug data are simply absent.
+- **`item`** is the function's graph item id: its `@id` if it has one, otherwise its qualified name (`game.demo.Player.TakeDamage`).
+- **`strings`** is a per-function table of distinct strings, in order of first use. An entry's `node` is an index into it and names a node id. Nodes that come from a macro expansion are path-style: the macro node's id, then `/`, then the inner node's id, nested as deep as the expansion (`loop/test`, `outer/inner/test`). `wr.pins` uses the same table for both node ids and pin names.
+- **`entries`** map code to nodes. The first entry's `pc` is its `pc_delta`; every later `pc` is the previous `pc` plus `pc_delta`, and every later `pc_delta` is at least 1, so `pc` values strictly increase. Each `pc` is the first byte of an instruction. An entry covers its `pc` up to the next entry's `pc`, and the last one covers up to the end of the function's code; bytes before the first entry belong to no node. The compiler writes a new entry each time the node that produced the instructions changes, so one node can have several entries (a loop body reached again, or a pure node evaluated at two consumers). Instructions that evaluate a pure node are attributed to that pure node. A breakpoint on a node goes at the `pc` of each of its entries.
+- **`pins`** in `wr.pins` list, per function, which node output pin each local holds. `local` is the function-wide local index used by `local.get` (parameters first, then declared and compiler-made locals). `node` and `pin` index the `strings` table of the same function in `wr.debug`, so a function with a `wr.pins` record must have a `wr.debug` record, and `--no-debug` drops both. Triples are sorted ascending by `(local, node, pin)`. A local may appear more than once when optimisation lets two pins share it. Pins that are never held in a local are not listed, which at `-Og` is none of them.
+
+The layouts of `name`, `wr.meta`, `wr.reflect`, `wr.caps` and `wr.graph` are not yet fixed (section 9.2).
 
 ### 5.5 Verification
 
@@ -252,4 +295,4 @@ func game.demo.SumTo (i32) -> (i32)
   br .test
 ```
 
-Example encodings: `local.get 1` is `12 01`, `i32.const 1` is `20 01`, `i32.le_s` is `37`, `i32.add` is `3B`.
+Example encodings: `local.get 1` is `12 01`, `i32.const 1` is `20 01`, `i32.le_s` is `37`, `i32.add` is `3B`, and `br` back 10 bytes (the offset counts from the end of the instruction) is `02 F6 FF FF FF`.

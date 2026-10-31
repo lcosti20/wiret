@@ -111,8 +111,8 @@ Positions and appearance are not written on node lines. They live in the graph's
 
 ```
 layout {
-  chk       at (800, 0)
-  log_dead  at (960, -40) [label = "Log death", color = "#C0392B"]
+  chk at (800, 0)
+  log_dead at (960, -40) [label = "Log death", color = "#C0392B"]
   box death "Death handling" at (940, -90) size (330, 120) [members = [log_dead, ret_dead], color = "#C0392B"]
 }
 ```
@@ -163,7 +163,7 @@ value = literal | IDENT | tuple | list | map ;
 | `@reads` | `func` | Effect-free and deterministic for a given VM state, but not cacheable: may read variables, fields, state and objects, but not write them. A call is a pure node that is re-evaluated at each consumer (section 4.3), like `GetField`. May call only `@reads` and `@pure` functions (`E0302`) and may not contain a latent node. |
 | `@final` | method | Not virtual. Calls are bound at compile time. |
 | `@private` | declaration | Not visible outside the module. |
-| `@export` | `func`, `event`, `var`, type | Listed in the module's export table for the host and other modules. |
+| `@export` | `func`, `event`, `var`, type | Listed in the module's export table for the host and other modules. A normal build exports only what carries `@export`; an `--export-all` build (editor run and debug sessions) also exports every `func`, `event` and method, and marks the `@export` ones as declared (section 5.2). |
 | `@inline` | `func` | Hint to inline at call sites. |
 | `@deprecated("msg")` | declaration | Warning at every use. |
 | `@count(n)` | `Sequence`, `MakeArray`, ... | Number of dynamic pins. |
@@ -209,13 +209,14 @@ The canonical form is a function of the model alone, so two tools always write i
 7. A node longer than 100 columns wraps inside its parentheses or exec map, one binding per line.
 8. Numbers and strings are written in their shortest unambiguous form.
 9. Line comments are not representable. The formatter refuses to lose one silently (`W0603`, section 2.1); durable annotations are `note`s.
+10. **No alignment padding.** A node statement is written `node <id> = <Kind> ...` with exactly one space on each side of `=`, and a `place` line is `<id> at (x, y)` with one space before `at`. Nothing is padded to line up with its neighbours. Aligning would put the `=` of every node at the column of the longest id, so adding one long id would change every line of the graph and break the one-line-diff rule (section 1.2, principle 1); the same holds for `at` in the layout block. The reader accepts extra spaces and the formatter removes them. An editor may align in its own display, but never in the saved text.
 
 Two hashes are defined over the canonical form, both SHA-256:
 
 - **Semantic hash**: computed after removing the `layout` block, the `notes` block, `@doc`, `@category`, `@keywords`, and `Reroute` nodes, and after sorting declarations by name and nodes by id. It is embedded in the `.wbc`, so CI can prove that a commit changed behaviour or did not. Two properties must hold and should be tested: reversing the order of the nodes in a graph, or deleting its layout block and all documentation attributes, changes neither the semantic hash nor a single byte of the instruction stream.
 - **Layout hash**: computed over the entire canonical file. If two collaborators have the same layout hash, they see the identical graph.
 
-Because each node is one line, lines are sorted by id, and layout lives in its own block, plain line-based Git merges succeed whenever two people touch different nodes, and a move never collides with a rewire. Two people adding nodes also rarely collide, because ids are random slugs and sort into different places. The full merge algorithm, which works on the parsed model rather than on text, is in section 7.1. The examples in this document are shown in *flow order* for readability, which `wiretc view --flow` produces; the compiler accepts any order.
+Because each node is one line, lines are sorted by id, and layout lives in its own block, plain line-based Git merges succeed whenever two people touch different nodes, and a move never collides with a rewire. Two people adding nodes also rarely collide, because ids are random slugs and sort into different places. The full merge algorithm, which works on the parsed model rather than on text, is in section 7.1. The examples in this document are shown in *flow order* for readability, which `wiretc view --flow` produces; the compiler accepts any order. They follow rule 10 (no alignment), so apart from their order they are in canonical form.
 
 **Storage order is not review order.** Sorting by id gives the best merges but scatters a function's execution order across the file. So the id-sorted file is the storage format, and reviewers are not expected to read it raw. The Git setup in section 7 attaches a `textconv` filter that runs `wiretc view --flow` before Git computes a diff, so `git diff`, `git log -p` and hosting-site pull requests that honour the attribute show nodes in flow order. `wiretc diff` goes further and prints a node-aware semantic diff (added, removed and rewired nodes, with layout-only changes separate). Flow order is defined in section 7 so that it is itself deterministic. Whether id-sorted storage should stay the default is decided by the review trial in section 9.1, not assumed here.
 
@@ -236,31 +237,31 @@ class Player {
 
   func TakeDamage(amount: i32) -> (died: bool) {
     local new_hp: i32
-    node entry     = Entry -> set_new
-    node cur       = GetField health (obj: entry.self)
-    node sub       = Sub<i32>(a: cur.value, b: entry.amount)
-    node set_new   = SetLocal new_hp (value: sub.result) -> store
-    node hp        = GetLocal new_hp
-    node store     = SetField health (obj: entry.self, value: hp.value) -> chk
-    node is_dead   = Le<i32>(a: hp.value, b: 0)
-    node chk       = Branch(cond: is_dead.result) { then -> log_dead, else -> ret_alive }
-    node log_dead  = Call host.Log(message: "Player died") -> ret_dead
-    node ret_dead  = Return(died: true)
+    node entry = Entry -> set_new
+    node cur = GetField health (obj: entry.self)
+    node sub = Sub<i32>(a: cur.value, b: entry.amount)
+    node set_new = SetLocal new_hp (value: sub.result) -> store
+    node hp = GetLocal new_hp
+    node store = SetField health (obj: entry.self, value: hp.value) -> chk
+    node is_dead = Le<i32>(a: hp.value, b: 0)
+    node chk = Branch(cond: is_dead.result) { then -> log_dead, else -> ret_alive }
+    node log_dead = Call host.Log(message: "Player died") -> ret_dead
+    node ret_dead = Return(died: true)
     node ret_alive = Return(died: false)
     notes {
       note why_local on set_new "Store the new health once: pure nodes are re-evaluated per consumer (section 4.3)."
     }
     layout {
-      entry     at (0, 0)
-      set_new   at (160, 0)
-      cur       at (160, 120)
-      sub       at (320, 120)
-      store     at (480, 0)
-      hp        at (480, 120)
-      is_dead   at (640, 120)
-      chk       at (800, 0)
-      log_dead  at (960, -40) [label = "Log death"]
-      ret_dead  at (1120, -40)
+      entry at (0, 0)
+      set_new at (160, 0)
+      cur at (160, 120)
+      sub at (320, 120)
+      store at (480, 0)
+      hp at (480, 120)
+      is_dead at (640, 120)
+      chk at (800, 0)
+      log_dead at (960, -40) [label = "Log death"]
+      ret_dead at (1120, -40)
       ret_alive at (960, 60)
       box death "Death handling" at (940, -90) size (330, 120) [members = [log_dead, ret_dead], color = "#C0392B"]
     }
@@ -268,64 +269,64 @@ class Player {
 
   event Respawn() {
     node entry = Entry -> wait
-    node wait  = Delay(seconds: 2.0) -> reset
+    node wait = Delay(seconds: 2.0) -> reset
     node reset = SetField health (obj: entry.self, value: 100)
   }
 }
 
 func Clamp01(v: f32) -> (result: f32) @pure {
   node entry = Entry -> ret
-  node lo    = Max<f32>(a: entry.v, b: 0.0)
-  node hi    = Min<f32>(a: lo.result, b: 1.0)
-  node ret   = Return(result: hi.result)
+  node lo = Max<f32>(a: entry.v, b: 0.0)
+  node hi = Min<f32>(a: lo.result, b: 1.0)
+  node ret = Return(result: hi.result)
 }
 
 func Fib(n: i32) -> (result: i32) @pure {
-  node entry   = Entry -> is_base
-  node lt      = Lt<i32>(a: entry.n, b: 2)
+  node entry = Entry -> is_base
+  node lt = Lt<i32>(a: entry.n, b: 2)
   node is_base = Branch(cond: lt.result) { then -> ret_n, else -> ret_sum }
-  node ret_n   = Return(result: entry.n)
-  node n1      = Sub<i32>(a: entry.n, b: 1)
-  node n2      = Sub<i32>(a: entry.n, b: 2)
-  node f1      = Call Fib(n: n1.result)
-  node f2      = Call Fib(n: n2.result)
-  node sum     = Add<i32>(a: f1.result, b: f2.result)
+  node ret_n = Return(result: entry.n)
+  node n1 = Sub<i32>(a: entry.n, b: 1)
+  node n2 = Sub<i32>(a: entry.n, b: 2)
+  node f1 = Call Fib(n: n1.result)
+  node f2 = Call Fib(n: n2.result)
+  node sum = Add<i32>(a: f1.result, b: f2.result)
   node ret_sum = Return(result: sum.result)
 }
 
 macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, index: i32) {
   local i: i32
-  node entry  = Entry -> init
-  node init   = SetLocal i (value: entry.first) -> test
-  node cur    = GetLocal i
-  node cmp    = Le<i32>(a: cur.value, b: entry.last)
-  node test   = Branch(cond: cmp.result) { then -> seq, else -> finish }
-  node seq    = Sequence @count(2) { then0 -> each_out, then1 -> bump }
+  node entry = Entry -> init
+  node init = SetLocal i (value: entry.first) -> test
+  node cur = GetLocal i
+  node cmp = Le<i32>(a: cur.value, b: entry.last)
+  node test = Branch(cond: cmp.result) { then -> seq, else -> finish }
+  node seq = Sequence @count(2) { then0 -> each_out, then1 -> bump }
   node each_out = Exit each (index: cur.value)
-  node nxt    = Add<i32>(a: cur.value, b: 1)
-  node bump   = SetLocal i (value: nxt.result) -> test
+  node nxt = Add<i32>(a: cur.value, b: 1)
+  node bump = SetLocal i (value: nxt.result) -> test
   node finish = Exit done
 }
 
 macro DoOnce(in: exec, reset: exec) -> (out: exec) {
   state fired: bool
   node entry = Entry { in -> check, reset -> clear }
-  node flag  = GetState fired
+  node flag = GetState fired
   node check = Branch(cond: flag.value) { else -> mark }
-  node mark  = SetState fired (value: true) -> fire
-  node fire  = Exit out
+  node mark = SetState fired (value: true) -> fire
+  node fire = Exit out
   node clear = SetState fired (value: false)
 }
 
 func SumTo(n: i32) -> (total: i32) {
   local acc: i32
   node entry = Entry -> loop
-  node loop  = Macro ForRange(first: 1, last: entry.n) { each -> add, done -> ret }
-  node cur   = GetLocal acc
-  node sum   = Add<i32>(a: cur.value, b: loop.index)
-  node add   = SetLocal acc (value: sum.result)
+  node loop = Macro ForRange(first: 1, last: entry.n) { each -> add, done -> ret }
+  node cur = GetLocal acc
+  node sum = Add<i32>(a: cur.value, b: loop.index)
+  node add = SetLocal acc (value: sum.result)
   node total = GetLocal acc
-  node ret   = Return(total: total.value)
+  node ret = Return(total: total.value)
 }
 ```
 

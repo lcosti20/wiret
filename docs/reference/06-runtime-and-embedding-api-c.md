@@ -111,10 +111,12 @@ const char *wr_module_hash(wr_Module *m, int which);   /* 0 semantic, 1 layout; 
 typedef struct wr_ExportInfo {
   const char *name;        /* "SumTo", "Player.TakeDamage" */
   const char *signature;   /* "(i32)->(i32)" */
-  unsigned    flags;       /* WR_EXPORT_EVENT | _LATENT | _PURE */
+  unsigned    flags;       /* WR_EXPORT_EVENT | _LATENT | _PURE | _DECLARED */
 } wr_ExportInfo;
 void wr_module_each_export(wr_Module *m, void (*fn)(const wr_ExportInfo *, void *), void *ud);
 ```
+
+`WR_EXPORT_DECLARED` is set for exports the source marks `@export`. A module built with `--export-all` (section 5.2) also lists every other function, so a host that wants only the intended public surface filters on this flag; `wr_push_func` can call any listed entry.
 
 Loading decodes, **verifies**, then links. Link resolves each import against natives registered with `wr_register` and compares signatures; any mismatch is `WR_ERR_LINK`, with the offending name in `err->message`. A module cannot reach any capability the host did not register. Loading the same bytes twice gives two independent instances with separate globals.
 

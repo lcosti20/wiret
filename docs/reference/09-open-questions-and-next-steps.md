@@ -17,6 +17,7 @@ Three further questions are open.
 
 ### 9.2 Not covered in this draft
 
+- Byte layouts of the custom sections `name`, `wr.meta`, `wr.reflect`, `wr.caps` and `wr.graph` (including the deflate framing of `wr.graph`). Only `wr.debug` and `wr.pins` are fixed (section 5.4.1).
 - Exact pin lists and bodies for every `std.*` function and `std.flow` macro, and string `Format` syntax.
 - Interface method call nodes beyond `Call`, enum `Switch` ergonomics, and `Format Text`-style nodes.
 - Blueprint features that are really engine features: timelines, construction scripts, components, replication, soft references and data tables. These would be host-provided natives and extern types, or a layer on top of Wiret.
@@ -26,7 +27,7 @@ Three further questions are open.
 
 The steps below follow the tiers of section 1.6. Steps 1 to 3 and the interpreter half of step 4 are Tier 0; classes, async, `Try`, copy-on-write, the full C API and the debugger wait until Tier 1 is passing.
 
-1. Parser, printer and formatter with round-trip tests. Use section 2.6 as the first golden file and add a test that `fmt(fmt(x)) == fmt(x)`.
+1. Parser, printer and formatter with round-trip tests. Use the canonical form of section 2.6 (id-sorted, no alignment) as the first golden file and add a test that `fmt(fmt(x)) == fmt(x)`.
 2. Resolver, type checker and graph validator, driven by the diagnostics table.
 3. Lowering, the verifier and the disassembler. Section 5.8 gives expected output for `TakeDamage` and `SumTo`.
 4. A bytecode interpreter with fuel counting, then the C API and the host example in 6.11.
