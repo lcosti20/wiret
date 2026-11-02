@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import re
 
-from .model import (Attr, Binding, Box, Comment, Const, ExecOut, Extern, Graph, Lit, Local,
-                    Module, Node, Note, Param, PinRef, Place, Use, Var)
+from .model import (Attr, Attribute, Binding, Box, Comment, Const, ExecOut, Extern, Graph, Lit,
+                    Local, Module, Node, Param, PinRef, Place, Use, Var)
 
 KEYWORDS = set("wiret module use extern const var local enum struct interface class impl macro "
-               "func event dispatcher node state notes note on layout box at size".split())
+               "func event dispatcher node state flow markup attribute on layout box at size".split())
+
+# Kinds an `attribute` line may have, with the arguments each requires (section 2.3).
+ATTRIBUTE_KINDS = {"Note": {"message": "string"}}
 
 UNSUPPORTED_ITEMS = {"enum", "struct", "interface", "class"}
 
@@ -429,6 +432,7 @@ class Parser:
     def body(self, g: Graph):
         self.expect_p("{")
         self.skip_nl()
+        wires = []
         while not self.at_p("}"):
             t = self.peek()
             if self.at_kw("local") or self.at_kw("state"):
@@ -450,16 +454,25 @@ class Parser:
                 self.anchors[-1] = (self.anchors[-1][0], ("node", g.name, n.id))
                 g.nodes.append(n)
                 self.end_stmt()
-            elif self.at_kw("notes"):
+            elif self.at_kw("flow"):
                 self.next()
-                self.notes(g)
+                wires.extend(self.flow())
+            elif self.at_kw("markup"):
+                self.next()
+                self.markup(g)
             elif self.at_kw("layout"):
                 self.next()
                 self.layout(g)
             else:
-                self.error("expected 'local', 'state', 'node', 'notes' or 'layout'")
+                self.error("expected 'local', 'state', 'node', 'flow', 'markup' or 'layout'")
         self.next()
         self.end_stmt()
+        nodes = {n.id: n for n in g.nodes}
+        for tok, src, pin, e in wires:
+            if src not in nodes:
+                raise ParseError(f"flow wire starts at '{src}', which is not a node of "
+                                 f"'{g.name}'", tok.line, tok.col)
+            nodes[src].execs.append(ExecOut(pin, *e))
 
     def node(self) -> Node:
         nid = self.ident("node id")
@@ -498,55 +511,81 @@ class Parser:
                 elif not self.at_p(")"):
                     self.error("expected ',' or ')'")
             self.next()
-        seen_exec = False
-        while True:
-            if self.at_p("@"):
-                n.attrs.extend(self.attrs())
-            elif not seen_exec and self.at_p("->"):
-                self.next()
-                n.execs.append(ExecOut(None, *self.target()))
-                seen_exec = True
-            elif not seen_exec and self.at_p("{"):
-                self.next()
-                self.skip_nl()
-                while not self.at_p("}"):
-                    pin = self.ident("exec pin")
-                    self.expect_p("->")
-                    n.execs.append(ExecOut(pin, *self.target()))
-                    self.skip_nl()
-                    if self.at_p(","):
-                        self.next()
-                        self.skip_nl()
-                    elif not self.at_p("}"):
-                        self.error("expected ',' or '}'")
-                self.next()
-                seen_exec = True
-            else:
-                break
+        n.attrs.extend(self.attrs())
+        if self.at_p("->") or self.at_p("{"):
+            self.error("exec wires go in the graph's 'flow' block, not on the node line "
+                       f"(write '{nid} -> target' there)")
         return n
 
-    def target(self):
-        node = self.ident("exec target")
+    def endpoint(self, what):
+        node = self.ident(what)
         pin = None
         if self.at_p("."):
             self.next()
-            pin = self.ident()
+            pin = self.ident("exec pin")
         return node, pin
 
-    def notes(self, g: Graph):
+    def flow(self) -> list:
+        """`flow { src[.pin] -> dst[.pin] ... }`; returns (token, src, pin, (dst, dst_pin))."""
+        self.expect_p("{")
+        self.skip_nl()
+        out = []
+        while not self.at_p("}"):
+            tok = self.peek()
+            src, pin = self.endpoint("exec source")
+            self.expect_p("->")
+            out.append((tok, src, pin, self.endpoint("exec target")))
+            self.end_stmt()
+        self.next()
+        self.end_stmt()
+        return out
+
+    def markup(self, g: Graph):
         self.expect_p("{")
         self.skip_nl()
         while not self.at_p("}"):
-            if not self.at_kw("note"):
-                self.error("expected 'note'")
+            if not self.at_kw("attribute"):
+                self.error("expected 'attribute'")
             self.next()
-            nid = self.ident("note id")
+            aid = self.ident("attribute id")
             on = None
             if self.at_kw("on"):
                 self.next()
                 on = self.ident()
-            text = self.expect("str", None, "note text").value
-            g.notes.append(Note(nid, on, text, self.attrs()))
+            self.expect_p("=")
+            kt = self.peek()
+            kind = self.ident("attribute kind")
+            spec = ATTRIBUTE_KINDS.get(kind)
+            if spec is None:
+                raise ParseError(f"unknown attribute kind '{kind}' (expected one of: "
+                                 f"{', '.join(sorted(ATTRIBUTE_KINDS))})", kt.line, kt.col)
+            self.expect_p("(")
+            self.skip_nl()
+            args = []
+            while not self.at_p(")"):
+                at = self.peek()
+                key = self.ident("argument name")
+                self.expect_p(":")
+                v = self.literal()
+                if key not in spec:
+                    raise ParseError(f"{kind} has no argument '{key}'", at.line, at.col)
+                if any(k == key for k, _ in args):
+                    raise ParseError(f"argument '{key}' given twice", at.line, at.col)
+                if v.kind != spec[key]:
+                    raise ParseError(f"{kind} argument '{key}' must be a {spec[key]}",
+                                     at.line, at.col)
+                args.append((key, v))
+                self.skip_nl()
+                if self.at_p(","):
+                    self.next()
+                    self.skip_nl()
+                elif not self.at_p(")"):
+                    self.error("expected ',' or ')'")
+            self.next()
+            missing = [k for k in spec if all(k != a for a, _ in args)]
+            if missing:
+                raise ParseError(f"{kind} needs '{missing[0]}'", kt.line, kt.col)
+            g.markup.append(Attribute(aid, on, kind, args, self.attrs()))
             self.end_stmt()
         self.next()
         self.end_stmt()

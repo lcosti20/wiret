@@ -158,15 +158,15 @@ The editor also follows the graph-editor contract in section 7.5:
 | `verify FILE.wbc` | Run only the verifier |
 | `run FILE FUNC [ARGS…]` | Compile and run on the reference VM |
 | `hash FILE` | Semantic and layout hashes |
-| `view --flow FILE` | Reading view with nodes in flow order |
+| `view --flow FILE` | Reading view with nodes and `flow` wires in flow order |
 | `schema --json` | The node registry |
 
 ## What is implemented
 
 | Area | Status |
 | --- | --- |
-| Text syntax (2.1–2.4) | Full lexer and parser for `use`, `extern`, `const`, `var`, `func`, `event`, `macro`, `local`, `state`, nodes, bindings, exec maps, attributes, `notes` and `layout` (places and boxes). `enum`/`struct`/`interface`/`class` are rejected with a clear error. |
-| Canonical form and hashes (2.5) | Sorted items, nodes, notes and layout lines; registry pin order; default-valued bindings omitted; 100-column wrapping; attribute ordering. Semantic hash (ignores layout, notes, docs and `Reroute`) and layout hash. |
+| Text syntax (2.1–2.4) | Full lexer and parser for `use`, `extern`, `const`, `var`, `func`, `event`, `macro`, `local`, `state`, nodes, bindings, attributes, the `flow` block (exec wires), the `markup` block (`attribute ... = Note(...)`) and `layout` (places and boxes). `enum`/`struct`/`interface`/`class` are rejected with a clear error. |
+| Canonical form and hashes (2.5) | Sorted items, nodes, `flow` wires (by source node id, then exec pin order), markup attributes and layout lines; registry pin order; default-valued bindings omitted; 100-column wrapping; attribute ordering. Semantic hash (ignores layout, markup, docs and `Reroute`) and layout hash. |
 | Node kinds (3.3) | `Entry`, `Return`, `Branch`, `Sequence`, `Switch`, `Select`, `Macro`, `Exit`, `Reroute`, `Get/SetLocal`, `Get/SetVar` (and `const`s), `Get/SetState`, `Call`, `Convert`, all arithmetic, comparison, logic and bit kinds, and the array kinds `MakeArray`, `ArrayGet`, `ArrayLength`, `ArraySet`, `ArrayAdd`, `ArrayInsert`, `ArrayRemove`, `ArrayClear`. Types: `bool`, all integer widths, `f32`, `f64`, `string`, `array<T>`. |
 | Execution model (4.2–4.3) | Continuation stack, `Sequence` push/pop, macro inlining with path-style ids (`loop/test`, `loop!in`), `Exit` as a jump, joins, evaluation points with per-point sharing, impure output slots, `@pure` and `@reads` calls as pure nodes, per-expansion `state`. The §4.2 `SumTo(2)` trace is reproduced exactly (see tests). |
 | Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0201, E0301, E0302, E0304, E0401, E0501, E0502, W0201, W0301, W0302, W0310, W0320, W0601, W0602, W0603, W0604. |

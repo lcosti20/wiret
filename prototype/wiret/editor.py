@@ -1205,7 +1205,7 @@ class EditorApp:
             menu.grab_release()
 
     def edit_note(self, note_id):
-        nt = next((n for n in self.graph.notes if n.id == note_id), None)
+        nt = next((n for n in self.graph.markup if n.id == note_id), None)
         if nt is None:
             return
         text = simpledialog.askstring("Note", "Text:", initialvalue=nt.text, parent=self.root)
@@ -1214,7 +1214,7 @@ class EditorApp:
             self.commit(f"Edited note {note_id}")
 
     def delete_note(self, note_id):
-        self.graph.notes = [n for n in self.graph.notes if n.id != note_id]
+        self.graph.markup = [n for n in self.graph.markup if n.id != note_id]
         self.commit(f"Deleted note {note_id}")
 
     def node_menu(self, menu, nid):

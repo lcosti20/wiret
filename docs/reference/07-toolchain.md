@@ -6,9 +6,9 @@
 | `wiretc fmt file.wiret` | Rewrite in canonical form. `--check` fails if the file is not canonical (for CI). |
 | `wiretc build file.wiret -o out.wbc` | Compile and verify. `-O0` / `-O1`, `--embed-source`, `--no-debug`, `--export-all` (export every function, section 5.2; without it only `@export` items are exported). |
 | `wiretc dis out.wbc` | Disassemble, with node ids from `wr.debug`. |
-| `wiretc view --flow file.wiret` | Print a reading view in flow order (not canonical). Flow order is deterministic: from each `Entry`, depth-first along exec outputs in pin order; a node reached twice is printed at its first visit; each pure node is printed immediately before its first consumer; nodes unreachable from any entry come last, sorted by id. `--dot` exports Graphviz DOT, using `node:pin` ports and one cluster per layout box. |
+| `wiretc view --flow file.wiret` | Print a reading view in flow order (not canonical). Flow order is deterministic: from each `Entry`, depth-first along exec outputs in pin order; a node reached twice is printed at its first visit; each pure node is printed immediately before its first consumer; nodes unreachable from any entry come last, sorted by id. The `flow` block is printed in the same order, by source node. `--dot` exports Graphviz DOT, using `node:pin` ports and one cluster per layout box. |
 | `wiretc hash file.wiret` | Print the semantic and layout hashes. |
-| `wiretc diff a.wiret b.wiret` | Node-aware semantic diff, printed in flow order: added, removed and rewired nodes; note and layout-only changes reported separately. `--raw` prints the id-ordered text diff. |
+| `wiretc diff a.wiret b.wiret` | Node-aware semantic diff, printed in flow order: added, removed and rewired nodes; markup and layout-only changes reported separately. `--raw` prints the id-ordered text diff. |
 | `wiretc ids --check base..head` | Fail if a commit deleted an element whose id is not in `wiret.ids`, or reused a retired id (`E0140`). |
 | `wiretc merge base ours theirs` | Git merge driver. Line-merges, then re-validates (duplicate bindings, dangling ids). |
 | `wiretc verify out.wbc` | Run only the verifier. |
@@ -36,9 +36,9 @@ The `textconv` filter changes only what Git displays: `git diff`, `git log -p` a
 `wiretc merge` implements the following, and an editor's built-in merge should behave the same way.
 
 1. **Parse** base, ours and theirs into models. If any side does not parse, fall back to a plain text merge and say so.
-2. **Match by key.** Declarations are keyed by `@id`, otherwise by name; nodes by node id within their graph; parameters, fields and enum members by `@id`; notes by note id. An element with no `@id` is matched by name, so renaming it appears as a deletion plus an addition (and, if wires named it, as a conflict); this is the cost of `W0202`, and the reason editors always write ids.
+2. **Match by key.** Declarations are keyed by `@id`, otherwise by name; nodes by node id within their graph; parameters, fields and enum members by `@id`; flow wires by source node and exec output; markup attributes by attribute id. An element with no `@id` is matched by name, so renaming it appears as a deletion plus an addition (and, if wires named it, as a conflict); this is the cost of `W0202`, and the reason editors always write ids.
 3. **Merge each key.** Added on one side only: keep. Deleted on one side and unchanged on the other: delete. Deleted on one side and modified on the other: **conflict**. Modified on both sides: merge *per field*, where each input binding, each exec output, each type argument and each attribute is one field. A field changed on only one side takes that change, the same change on both sides is no change, and different changes to the same field are a conflict.
-4. **Merge layout and notes separately.** `place` lines are keyed by node id and `box` lines by box id, and their properties merge independently; a box's `members` merge as a set, so two people adding different members to one box both succeed. A layout disagreement never blocks a merge: the later commit wins and a notice is printed. Notes are keyed by note id and merge per field like nodes, but they are prose: if both sides changed the same note's text differently, that is a conflict and the merge exits non-zero, rather than letting one side's text win silently. Neither kind of conflict affects compilation. After the merge, `W0601`, `W0602` and `W0604` are re-checked.
+4. **Merge layout and markup separately.** `place` lines are keyed by node id and `box` lines by box id, and their properties merge independently; a box's `members` merge as a set, so two people adding different members to one box both succeed. A layout disagreement never blocks a merge: the later commit wins and a notice is printed. Markup attributes are keyed by attribute id and merge per field like nodes, but a `Note` is prose: if both sides changed the same note's `message` differently, that is a conflict and the merge exits non-zero, rather than letting one side's text win silently. Neither kind of conflict affects compilation. After the merge, `W0601`, `W0602` and `W0604` are re-checked.
 5. **Validate** the merged model: duplicate ids, an input bound twice, exec targets or pin references that name a node that no longer exists, and every other diagnostic in section 4.7. Violations are reported as **semantic conflicts** keyed by node and pin, so an editor can show them on the graph.
 6. **Write** canonical text. Unresolved conflicts are written as conflict markers around the single node line concerned, one line for each side, and the command exits non-zero, so ordinary tools show them too. The merge never silently drops a node, a wire or an unknown attribute.
 
@@ -53,7 +53,7 @@ A program that edits a graph (an editor, a refactoring tool, an LLM agent) shoul
 | `wire_exec` / `unwire_exec` | Connect or disconnect an exec output. |
 | `set_attr` / `remove_attr` | Change an attribute on a node or declaration. |
 | `place` | Change a node's or box's entry in the layout block (position, label, colour, and for a box its `members`), and only that. |
-| `add_note` / `set_note` / `delete_note` | Create, change or remove a `note` (section 2.3). `delete_node` never deletes notes; it reports them as detached (`W0604`). |
+| `add_attribute` / `set_attribute` / `delete_attribute` | Create, change or remove a markup `attribute` such as a `Note` (section 2.3). `delete_node` never deletes attributes; it reports them as detached (`W0604`). |
 | `delete_node` | Remove a node. Refused while other nodes still reference it, unless `cascade` is set, in which case the removed wires are listed in the reply. |
 | `rename` | Rename a declaration, parameter, field or local by its `@id` and rewrite every reference. |
 
@@ -105,10 +105,10 @@ Add the macro trace tests of section 4.2 (nested loops, `Sequence` inside macros
 
 An editor that reads and writes `.wiret` files must:
 
-1. **Preserve ids.** Never regenerate node, box, note, parameter or declaration ids on load or save; generate an `@id` only for an element that has none, and append every id you retire to `wiret.ids`.
+1. **Preserve ids.** Never regenerate node, box, markup attribute, parameter or declaration ids on load or save; generate an `@id` only for an element that has none, and append every id you retire to `wiret.ids`.
 2. **Write canonical form** with the shared formatter, so opening and saving an unchanged graph produces a byte-identical file and an empty diff.
 3. **Lay out only what has no layout.** Auto-place nodes that lack a `place` line and leave every other position alone.
-4. **Preserve unknown data**: unknown attributes, unknown layout properties and unknown custom sections. Preserve notes, show detached ones, and offer to convert `//` comments into notes rather than discarding them. Save box `members` as the user left them, whatever the rectangles say.
+4. **Preserve unknown data**: unknown attributes, unknown layout properties and unknown custom sections. Preserve markup attributes, show detached ones, and offer to convert `//` comments into `Note` attributes rather than discarding them. Save box `members` as the user left them, whatever the rectangles say.
 5. **Insert conversions explicitly.** When a connection needs a conversion, add a real `Convert` node; never change a wire's type silently.
 6. **Never delete wires silently.** If a pin changes type or disappears, keep the wire visible as an error and let the user decide.
 7. **Show diagnostics on the graph**, using the `node` and `pin` of each record from `wiretc check --json`.

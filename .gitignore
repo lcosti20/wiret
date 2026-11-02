@@ -1,0 +1,3 @@
+*.pyc
+*.wbc
+__pycache__
