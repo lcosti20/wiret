@@ -46,7 +46,7 @@ An exec input with several producers is a **join**. There is no merge of state a
 
 #### Worked trace: one `ForRange` iteration
 
-`SumTo(2)` from section 2.6, after macro expansion. The call site is `loop` with `each -> add` and `done -> ret`. Macro nodes carry path-style ids (`loop/test`, ...). `S` is shown with the top at the right; `[]` is empty. `i` is the macro local, `acc` is the caller's local.
+`SumTo(2)` from section 2.6, after macro expansion. The call site is `loop` with the flow wires `loop.each -> add` and `loop.done -> ret`. Macro nodes carry path-style ids (`loop/test`, ...). `S` is shown with the top at the right; `[]` is empty. `i` is the macro local, `acc` is the caller's local.
 
 | Step | Node | Action | `S` after |
 | --- | --- | --- | --- |
@@ -146,7 +146,7 @@ Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber
 | `E0110` | Wire type mismatch (and no supertype relation). |
 | `E0111` | The same input pin is bound twice. |
 | `E0120` | Exec output wired to a data pin, or a data wire to an exec pin. |
-| `E0121` | An exec output is listed twice. |
+| `E0121` | An exec output has more than one wire in the `flow` block. |
 | `E0301` | Cycle among pure nodes. |
 | `E0302` | `@pure` or `@reads` function writes variables, fields or state, contains a latent node, or (`@reads`) calls a function that is neither `@reads` nor `@pure`. |
 | `E0304` | `@pure` function reads variables, fields or state, dereferences a class reference or host handle, or calls anything that is not `@pure`. |
@@ -161,13 +161,13 @@ Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber
 | E0900 | Edit rejected: the document changed since the hash the edit was based on (section 7.2). |
 | E0201 | A function that is not latent contains a latent node or calls a latent function or event. |
 | E0303 | A path provably ends, with no pending continuation, in a function that declares results and has not returned. |
-| E0140 | A node, box, note or `@id` reuses an id recorded as retired in `wiret.ids` (section 7.3). |
+| E0140 | A node, box, markup attribute or `@id` reuses an id recorded as retired in `wiret.ids` (section 7.3). |
 | W0202 | Element has no `@id`, or the file is not in a project and non-reuse cannot be checked (section 2.4). |
 | W0320 | A `reads` node feeds more than one impure consumer (section 4.3). |
 | W0601 | A box lists a member id that names no node or box. |
 | W0602 | A node or box is listed as a member of more than one box. |
 | W0603 | `wiretc fmt` would drop a `//` comment (section 2.1). |
-| W0604 | A note's `on` target no longer exists. |
+| W0604 | A markup attribute's `on` target no longer exists. |
 
 Diagnostics are structured records, not only text: `code`, `severity`, `message`, `module`, `graph`, `node` and `pin`. `wiretc check --json` prints one record per line. An editor uses `node` and `pin` to highlight the exact place on the graph, and an LLM agent feeds the records back to itself until the check is clean (section 7.2). Diagnostics that arise inside an expanded macro carry the path-style node id (section 4.4).
 

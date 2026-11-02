@@ -391,6 +391,6 @@ def check_layout(g: Graph, ids: set, G, D):
                 D("W0602", f"'{m}' is a member of both '{owner[m]}' and '{b.id}'", G, b.id)
             else:
                 owner[m] = b.id
-    for nt in g.notes:
+    for nt in g.markup:
         if nt.on and nt.on not in ids:
-            D("W0604", f"note '{nt.id}' is attached to '{nt.on}', which no longer exists", G)
+            D("W0604", f"{nt.kind} attribute '{nt.id}' is attached to '{nt.on}', which no longer exists", G)

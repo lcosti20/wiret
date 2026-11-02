@@ -6,7 +6,7 @@ Draft 0.4 responds to a review of Draft 0.3. The table lists each finding, what 
 | --- | --- | --- |
 | Scope exceeds current validation | Implementation tiers; only Tier 0 is a prototype target; exact diagnostics and cross-platform determinism are targets until their tier passes; eager copy for containers in Tier 1 | 1.6, 7.4, 9.3 |
 | Canonical ordering hurts readability | Git `textconv` through `wiretc view --flow`, a deterministic flow-order definition, `wiretc diff` defaulting to flow order, and a review trial before storage order is frozen | 2.5, 7, 9.1 |
-| Annotation preservation is unclear | Persistent `notes` block; `//` comments are never dropped silently (`W0603`, `--convert-comments`); `@doc` narrowed to short tooltip text | 2.1, 2.3, 2.4, 2.5, 7.1, 7.2 |
+| Annotation preservation is unclear | Persistent `markup` block of `Note` attributes; `//` comments are never dropped silently (`W0603`, `--convert-comments`); `@doc` narrowed to short tooltip text | 2.1, 2.3, 2.4, 2.5, 7.1, 7.2 |
 | `@pure` lacks a precise contract | Effect-free, deterministic and cacheable defined separately; `@pure` and the new `@reads`; `E0304`, `W0320`; faults are results; native flags split and marked trusted; audit option | 2.4, 3.3, 3.5, 4.3, 4.7, 6.3, 6.6 |
 | Determinism is overpromised | Deterministic mode with five conditions and explicit exclusions; specified NaN, `Min`/`Max` and `std.math` behaviour (Provisional); logical heap accounting; cross-platform claim marked a target | 1.2, 3.1, 4.5, 4.10, 7.4 |
 | Macro continuations need formal semantics | Transition rules, join rules, a step-by-step `ForRange` trace with the stack after each step, and required macro tests | 3.3, 4.2, 7.4 |

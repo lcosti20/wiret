@@ -17,20 +17,28 @@ extern func host.Log(message: string)
 func Main() {
   local score: i32
   node as_text = Convert<i32, string>(value: now.value)
-  node bonus = SetLocal score (value: plus.result) -> show
-  node entry = Entry -> start
+  node bonus = SetLocal score (value: plus.result)
+  node entry = Entry
   node line = Call std.string.Concat(a: "Your score is ", b: as_text.result)
   node now = GetLocal score
   node old = GetLocal score
   node plus = Add<i32>(a: old.value, b: 5)
   node show = Call host.Log(message: line.result)
-  node start = SetLocal score (value: 10) -> bonus
-  notes {
-    note add_note on plus "Add reads the score (10) and adds 5."
-    note intro "Lesson 2: Variables. A local variable (here: score) is a named box that holds one value. SetLocal puts a value in the box. GetLocal reads what is in the box right now."
-    note text_note on as_text "Log needs text, so Convert turns the number into text."
-    note try_it "Try it: (1) Step through (F11) and watch the Variables panel in the Debugger tab: score changes from 0 to 10 to 15. (2) Change the bonus: double-click pin b on the Add node and type 100."
+  node start = SetLocal score (value: 10)
+
+  flow {
+    bonus -> show
+    entry -> start
+    start -> bonus
   }
+
+  markup {
+    attribute add_note on plus = Note(message: "Add reads the score (10) and adds 5.")
+    attribute intro = Note(message: "Lesson 2: Variables. A local variable (here: score) is a named box that holds one value. SetLocal puts a value in the box. GetLocal reads what is in the box right now.")
+    attribute text_note on as_text = Note(message: "Log needs text, so Convert turns the number into text.")
+    attribute try_it = Note(message: "Try it: (1) Step through (F11) and watch the Variables panel in the Debugger tab: score changes from 0 to 10 to 15. (2) Change the bonus: double-click pin b on the Add node and type 100.")
+  }
+
   layout {
     as_text at (600, 320)
     bonus at (560, 0)
