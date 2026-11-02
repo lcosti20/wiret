@@ -11,6 +11,7 @@ import csv
 import os
 import queue
 import re
+import sys
 import threading
 import time
 import tkinter as tk
@@ -47,9 +48,29 @@ func Main() {
 }
 """
 
-HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LESSONS_DIR = os.path.join(HERE, "lessons")
-WORK_DIR = os.path.join(HERE, "my_lessons")   # students edit copies, never the originals
+FROZEN = getattr(sys, "frozen", False)          # running from a PyInstaller build
+HERE = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LESSONS_DIR = os.path.join(HERE, "lessons")       # read-only originals
+
+
+def user_dir() -> str:
+    """Where a packaged app keeps the student's files: a writable, per-user folder.
+
+    `WIRET_HOME` overrides it. Otherwise ~/Documents/Wiret (easy for students to find),
+    or ~/Wiret if there is no Documents folder.
+    """
+    env = os.environ.get("WIRET_HOME")
+    if env:
+        return os.path.abspath(os.path.expanduser(env))
+    home = os.path.expanduser("~")
+    docs = os.path.join(home, "Documents")
+    return os.path.join(docs if os.path.isdir(docs) else home, "Wiret")
+
+
+# Students edit copies, never the originals. Running from source keeps them next to the
+# prototype; a packaged app cannot write there (its folder is read-only or temporary).
+WORK_DIR = (os.path.join(user_dir(), "my_lessons") if FROZEN or os.environ.get("WIRET_HOME")
+            else os.path.join(HERE, "my_lessons"))
 
 COMMON_TYPES = ["i32", "i64", "u8", "u32", "f32", "f64", "bool", "string"]
 MONO = ("Menlo", 12)
@@ -277,7 +298,7 @@ class EditorApp:
 
     # -- files --------------------------------------------------------------------
     def new_file(self):
-        path = filedialog.asksaveasfilename(defaultextension=".wiret",
+        path = filedialog.asksaveasfilename(defaultextension=".wiret", initialdir=self.files_dir(),
                                             filetypes=[("Wiret source", "*.wiret")])
         if not path:
             return
@@ -285,8 +306,19 @@ class EditorApp:
             f.write(NEW_FILE)
         self.open_path(path)
 
+    def files_dir(self) -> str:
+        """Start file dialogs next to the open file, else in the user's Wiret folder."""
+        if self.path:
+            return os.path.dirname(self.path)
+        if FROZEN:
+            d = user_dir()
+            os.makedirs(d, exist_ok=True)
+            return d
+        return os.getcwd()
+
     def open_dialog(self):
-        path = filedialog.askopenfilename(filetypes=[("Wiret source", "*.wiret"), ("All", "*")])
+        path = filedialog.askopenfilename(initialdir=self.files_dir(),
+                                          filetypes=[("Wiret source", "*.wiret"), ("All", "*")])
         if path:
             self.open_path(path)
 
@@ -351,7 +383,7 @@ class EditorApp:
         self.status(f"{self.lesson_title(name)} — read the yellow notes, then press ▶ Run.")
 
     def reset_lesson(self):
-        if not self.path or os.path.dirname(self.path) != WORK_DIR:
+        if not self.path or os.path.normcase(os.path.dirname(os.path.abspath(self.path))) != os.path.normcase(WORK_DIR):
             self.status("The open file is not a lesson.")
             return
         name = os.path.basename(self.path)

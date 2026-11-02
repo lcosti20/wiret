@@ -21,6 +21,22 @@ python3 wiretc.py run examples/demo.wiret Main  # the same program from the comm
 python3 -m unittest discover tests              # 48 tests
 ```
 
+## Building a desktop app
+
+To give the editor to people without Python or a terminal, build it with PyInstaller:
+
+```sh
+cd prototype
+python3 build.py --zip      # runs the tests, installs PyInstaller if needed, then builds
+```
+
+This produces `dist/Wiret/Wiret.exe` on Windows or `dist/Wiret.app` on macOS, plus
+`dist/Wiret-<os>.zip` to share. Build on each OS you want to support (PyInstaller does not
+cross-compile). The packaged app saves students' lesson copies in `~/Documents/Wiret/my_lessons`
+(or `~/Wiret` when there is no Documents folder); set `WIRET_HOME` to use another folder.
+Running from source still uses `prototype/my_lessons`. Unsigned builds show a SmartScreen or
+Gatekeeper warning on first launch.
+
 ## Demo script (about 5 minutes)
 
 1. Run `python3 wiret_editor.py`. Lesson 1 opens with its notes. Press **▶ Run**.
