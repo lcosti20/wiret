@@ -9,7 +9,7 @@ import re
 import string
 from typing import Optional
 
-from .model import (Binding, Box, ExecOut, Graph, Lit, Module, Node, Note, PinRef, Place)
+from .model import (Attribute, Binding, Box, ExecOut, Graph, Lit, Module, Node, PinRef, Place)
 
 _ALPHABET = string.ascii_lowercase + string.digits
 
@@ -22,7 +22,7 @@ def slug(text: str) -> str:
 
 def fresh_id(g: Graph, base: str, rng=random) -> str:
     """A readable slug plus a short random suffix, unique in the graph (section 2.3)."""
-    taken = {n.id for n in g.nodes} | {b.id for b in g.boxes} | {n.id for n in g.notes}
+    taken = {n.id for n in g.nodes} | {b.id for b in g.boxes} | {a.id for a in g.markup}
     while True:
         cand = f"{slug(base)}_{''.join(rng.choice(_ALPHABET) for _ in range(4))}"
         if cand not in taken:
@@ -105,7 +105,7 @@ def rename_node(g: Graph, old: str, new: str) -> None:
     for p in g.places:
         if p.id == old:
             p.id = new
-    for nt in g.notes:
+    for nt in g.markup:
         if nt.on == old:
             nt.on = new
     for b in g.boxes:
@@ -128,14 +128,15 @@ def place(g: Graph, nid: str, x: int, y: int) -> None:
         p.x, p.y = int(x), int(y)
 
 
-def add_note(g: Graph, on: Optional[str], text: str) -> Note:
-    nt = Note(fresh_id(g, "note"), on, text)
-    g.notes.append(nt)
+def add_note(g: Graph, on: Optional[str], text: str) -> Attribute:
+    """Add a `Note` attribute to the graph's markup block."""
+    nt = Attribute.note(fresh_id(g, "note"), on, text)
+    g.markup.append(nt)
     return nt
 
 
 def convert_comments(m: Module) -> list:
-    """`--convert-comments`: turn each `//` comment into a note (section 2.1).
+    """`--convert-comments`: turn each `//` comment into a Note attribute (section 2.1).
 
     Returns messages for comments that had nothing to attach to and were dropped.
     """
@@ -146,7 +147,7 @@ def convert_comments(m: Module) -> list:
         if g is None:
             dropped.append(f"line {c.line}: comment outside any graph was dropped: {c.text}")
             continue
-        nt = Note(fresh_id(g, "comment"), a[2] if a[0] == "node" else None, c.text)
-        g.notes.append(nt)
+        g.markup.append(Attribute.note(fresh_id(g, "comment"),
+                                       a[2] if a[0] == "node" else None, c.text))
     m.comments = []
     return dropped
