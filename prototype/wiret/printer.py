@@ -6,8 +6,8 @@ import hashlib
 import math
 import unicodedata
 
-from .model import (Attr, Binding, Box, Const, ExecOut, Extern, Graph, ITEM_ORDER, Lit, Module,
-                    Node, PinRef, Use, Var, item_kind)
+from .model import (Attr, Attribute, Binding, Box, Const, ExecOut, Extern, Graph, ITEM_ORDER, Lit,
+                    Module, Node, PinRef, Use, Var, item_kind)
 from .registry import ARRAY_MUTATORS, ModuleIndex, Sig, lit_equal, signature
 
 WRAP = 100
@@ -127,6 +127,20 @@ def fmt_target(e: ExecOut) -> str:
     return e.target + (f".{e.target_pin}" if e.target_pin else "")
 
 
+def fmt_wires(node: Node, sig: Sig) -> list:
+    """The node's exec wires as `flow` lines (without indentation)."""
+    execs = _ordered_execs(node, sig)
+    single = len(sig.exec_outs) == 1 or (not sig.exec_outs and len(execs) == 1 and execs[0].pin is None)
+    out = []
+    for e in execs:
+        if single and len(execs) == 1:
+            src = node.id                                     # shorthand
+        else:
+            src = f"{node.id}.{e.pin or (sig.exec_outs[0].name if sig.exec_outs else 'then')}"
+        out.append(f"{src} -> {fmt_target(e)}")
+    return out
+
+
 def fmt_node(node: Node, sig: Sig, indent: str) -> str:
     head = f"{indent}node {node.id} = {node.kind}"
     targs = "<" + ", ".join(node.targs) + ">" if node.targs else ""
@@ -138,40 +152,18 @@ def fmt_node(node: Node, sig: Sig, indent: str) -> str:
                              else fmt_lit(b.value))
              for b in _ordered_bindings(node, sig)]
     sep = "" if (not node.symbol or node.kind in ("Call", "Macro")) else " "
-    execs = _ordered_execs(node, sig)
-    single = len(sig.exec_outs) == 1 or (not sig.exec_outs and len(execs) == 1 and execs[0].pin is None)
-    if not execs:
-        ex = []
-    elif single and len(execs) == 1:
-        ex = None  # shorthand
-    else:
-        ex = [f"{e.pin or (sig.exec_outs[0].name if sig.exec_outs else 'then')} -> {fmt_target(e)}"
-              for e in execs]
     attrs = fmt_attrs(node.attrs)
-
-    def build(wrap_b, wrap_e):
-        s = head
-        if binds:
-            if wrap_b:
-                s += sep + "(\n" + ",\n".join(indent + IND + b for b in binds) + "\n" + indent + ")"
-            else:
-                s += sep + "(" + ", ".join(binds) + ")"
-        if ex is None:
-            s += " -> " + fmt_target(execs[0])
-        elif ex:
-            if wrap_e:
-                s += " {\n" + ",\n".join(indent + IND + e for e in ex) + "\n" + indent + "}"
-            else:
-                s += " { " + ", ".join(ex) + " }"
-        return s + attrs
-
-    line = build(False, False)
-    if len(line) <= WRAP:
+    line = head + (sep + "(" + ", ".join(binds) + ")" if binds else "") + attrs
+    if len(line) <= WRAP or not binds:
         return line
-    line = build(True, False)
-    if max(len(l) for l in line.split("\n")) <= WRAP or not ex or len(ex) < 2:
-        return line
-    return build(True, True)
+    return (head + sep + "(\n" + ",\n".join(indent + IND + b for b in binds) + "\n" + indent + ")"
+            + attrs)
+
+
+def fmt_attribute(a: Attribute) -> str:
+    on = f" on {a.on}" if a.on else ""
+    args = ", ".join(f"{k}: {fmt_lit(v)}" for k, v in a.args)
+    return f"attribute {a.id}{on} = {a.kind}({args}){fmt_attrs(a.attrs)}"
 
 
 # -- graphs and module -----------------------------------------------------------
@@ -209,19 +201,25 @@ def fmt_graph(g: Graph, idx: ModuleIndex, indent: str = "", semantic=False) -> l
         lines.append(fmt_local("local", l, inner))
     for l in sorted(g.states, key=lambda l: l.name):
         lines.append(fmt_local("state", l, inner))
+    wires = []
     for n in sorted(g.nodes, key=lambda n: n.id):
+        sig = signature(n, g, idx)
+        wires.extend(fmt_wires(n, sig))
         if semantic:
             n = copy.copy(n)
             n.attrs = [a for a in n.attrs if a.name not in DOC_ATTRS]
-        lines.append(fmt_node(n, signature(n, g, idx), inner))
-    if not semantic and g.notes:
-        lines.append(f"{inner}notes {{")
-        for nt in sorted(g.notes, key=lambda n: n.id):
-            on = f" on {nt.on}" if nt.on else ""
-            lines.append(f"{inner}{IND}note {nt.id}{on} {fmt_string(nt.text)}{fmt_attrs(nt.attrs)}")
+        lines.append(fmt_node(n, sig, inner))
+    if wires:
+        lines.extend(["", f"{inner}flow {{"])
+        lines.extend(f"{inner}{IND}{w}" for w in wires)
+        lines.append(f"{inner}}}")
+    if not semantic and g.markup:
+        lines.extend(["", f"{inner}markup {{"])
+        for a in sorted(g.markup, key=lambda a: a.id):
+            lines.append(f"{inner}{IND}{fmt_attribute(a)}")
         lines.append(f"{inner}}}")
     if not semantic and (g.places or g.boxes):
-        lines.append(f"{inner}layout {{")
+        lines.extend(["", f"{inner}layout {{"])
         for p in sorted(g.places, key=lambda p: p.id):
             lines.append(f"{inner}{IND}{p.id} at ({p.x}, {p.y}){fmt_props(p.props)}")
         for b in sorted(g.boxes, key=lambda b: b.id):

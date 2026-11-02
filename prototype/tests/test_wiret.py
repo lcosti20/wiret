@@ -29,16 +29,26 @@ def demo() -> str:
 FOR_RANGE = """
 macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, index: i32) {
   local i: i32
-  node bump = SetLocal i (value: nxt.result) -> test
+  node bump = SetLocal i (value: nxt.result)
   node cmp = Le<i32>(a: cur.value, b: entry.last)
   node cur = GetLocal i
   node each_out = Exit each (index: cur.value)
-  node entry = Entry -> init
+  node entry = Entry
   node finish = Exit done
-  node init = SetLocal i (value: entry.first) -> test
+  node init = SetLocal i (value: entry.first)
   node nxt = Add<i32>(a: cur.value, b: 1)
-  node seq = Sequence { then0 -> each_out, then1 -> bump } @count(2)
-  node test = Branch(cond: cmp.result) { then -> seq, else -> finish }
+  node seq = Sequence @count(2)
+  node test = Branch(cond: cmp.result)
+
+  flow {
+    bump -> test
+    entry -> init
+    init -> test
+    seq.then0 -> each_out
+    seq.then1 -> bump
+    test.then -> seq
+    test.else -> finish
+  }
 }
 """
 
@@ -87,15 +97,20 @@ class FormatTests(unittest.TestCase):
         text = module("""
 func F(x: i32) -> (y: i32) {
   node ret   = Return(y: s.result)
-  node entry = Entry { then -> ret }
+  node entry = Entry
   node s     = Add<i32>(
      a: entry.x,
      b: 0x10,
   )
+
+  flow {
+    entry.then -> ret
+  }
 }
 """, macros=False)
         out = print_module(parse(text))
-        self.assertIn("node entry = Entry -> ret\n", out)
+        self.assertIn("node entry = Entry\n", out)
+        self.assertIn("  flow {\n    entry -> ret\n  }\n", out)
         self.assertIn("node s = Add<i32>(a: entry.x, b: 16)\n", out)
         self.assertEqual(print_module(parse(out)), out)
 
@@ -116,8 +131,12 @@ func F() @x.acme.review("ok", level: 2) {
     def test_long_nodes_wrap(self):
         text = module("""
 func F() {
-  node entry = Entry -> log
+  node entry = Entry
   node log = Call host.Log(message: "a very long message that pushes this node line well past the hundred column limit")
+
+  flow {
+    entry -> log
+  }
 }
 """, macros=False)
         out = print_module(parse(text))
@@ -135,7 +154,7 @@ func F() {
         self.assertIn("W0603", {d.code for d in check(m)})
         convert_comments(m)
         out = print_module(m)
-        self.assertIn('on entry "explain the entry"', out)
+        self.assertIn('on entry = Note(message: "explain the entry")', out)
 
     def test_parse_errors_have_positions(self):
         with self.assertRaises(ParseError) as cm:
@@ -151,7 +170,7 @@ class HashTests(unittest.TestCase):
         m2 = parse(text)
         for g in m2.graphs():
             g.nodes.reverse()
-            g.places, g.boxes, g.notes = [], [], []
+            g.places, g.boxes, g.markup = [], [], []
         _, r2 = build(print_module(m2))
         self.assertEqual(semantic_hash(m1), semantic_hash(m2))
         self.assertNotEqual(layout_hash(m1), layout_hash(m2))
@@ -172,16 +191,25 @@ class HashTests(unittest.TestCase):
     def test_reroute_is_erased(self):
         plain = module("""
 func F(x: i32) -> (y: i32) {
-  node entry = Entry -> ret
+  node entry = Entry
   node ret = Return(y: entry.x)
+
+  flow {
+    entry -> ret
+  }
 }
 """, macros=False)
         rerouted = module("""
 func F(x: i32) -> (y: i32) {
   node bend = Reroute<i32>(in: entry.x)
-  node entry = Entry -> hop
-  node hop = Reroute<exec> -> ret
+  node entry = Entry
+  node hop = Reroute<exec>
   node ret = Return(y: bend.out)
+
+  flow {
+    entry -> hop
+    hop -> ret
+  }
 }
 """, macros=False)
         self.assertEqual(semantic_hash(parse(plain)), semantic_hash(parse(rerouted)))
@@ -216,14 +244,21 @@ class ExecutionTests(unittest.TestCase):
         text = module("""
 func Grid(n: i32) -> (count: i32) {
   local c: i32
-  node entry = Entry -> outer
-  node outer = Macro ForRange(first: 1, last: entry.n) { each -> inner, done -> ret }
-  node inner = Macro ForRange(first: 1, last: outer.index) { each -> bump }
+  node entry = Entry
+  node outer = Macro ForRange(first: 1, last: entry.n)
+  node inner = Macro ForRange(first: 1, last: outer.index)
   node cur = GetLocal c
   node inc = Add<i32>(a: cur.value, b: 1)
   node bump = SetLocal c (value: inc.result)
   node total = GetLocal c
   node ret = Return(count: total.value)
+
+  flow {
+    entry -> outer
+    outer.each -> inner
+    outer.done -> ret
+    inner.each -> bump
+  }
 }
 """)
         trace = []
@@ -235,18 +270,31 @@ func Grid(n: i32) -> (count: i32) {
     def test_sequence_inside_macro_runs_chains_in_order(self):
         text = module("""
 macro Twice(in: exec) -> (first: exec, second: exec) {
-  node entry = Entry -> seq
-  node seq = Sequence { then0 -> a, then1 -> b }
+  node entry = Entry
+  node seq = Sequence
   node a = Exit first
   node b = Exit second
+
+  flow {
+    entry -> seq
+    seq.then0 -> a
+    seq.then1 -> b
+  }
 }
 
 func F() {
-  node entry = Entry -> tw
-  node tw = Macro Twice { first -> log1, second -> log2 }
-  node log1 = Call host.Log(message: "one") -> log1b
+  node entry = Entry
+  node tw = Macro Twice
+  node log1 = Call host.Log(message: "one")
   node log1b = Call host.Log(message: "one-b")
   node log2 = Call host.Log(message: "two")
+
+  flow {
+    entry -> tw
+    tw.first -> log1
+    tw.second -> log2
+    log1 -> log1b
+  }
 }
 """)
         self.assertEqual(run(text, "F")[1], ["one", "one-b", "two"])
@@ -254,13 +302,20 @@ func F() {
     def test_early_return_discards_pending_continuations(self):
         text = module("""
 func FirstOver(limit: i32) -> (found: i32) {
-  node entry = Entry -> loop
-  node loop = Macro ForRange(first: 1, last: 100) { each -> chk, done -> none }
+  node entry = Entry
+  node loop = Macro ForRange(first: 1, last: 100)
   node sq = Mul<i32>(a: loop.index, b: loop.index)
   node over = Gt<i32>(a: sq.result, b: entry.limit)
-  node chk = Branch(cond: over.result) { then -> hit }
+  node chk = Branch(cond: over.result)
   node hit = Return(found: loop.index)
   node none = Return(found: -1)
+
+  flow {
+    entry -> loop
+    loop.each -> chk
+    loop.done -> none
+    chk.then -> hit
+  }
 }
 """)
         self.assertEqual(run(text, "FirstOver", 50)[0], [8])
@@ -269,11 +324,18 @@ func FirstOver(limit: i32) -> (found: i32) {
     def test_unwired_exit_is_a_chain_end(self):
         text = module("""
 func F() {
-  node entry = Entry -> seq
-  node seq = Sequence { then0 -> loop, then1 -> after }
-  node loop = Macro ForRange(first: 1, last: 2) { each -> log }
+  node entry = Entry
+  node seq = Sequence
+  node loop = Macro ForRange(first: 1, last: 2)
   node log = Call host.Log(message: "body")
   node after = Call host.Log(message: "after")
+
+  flow {
+    entry -> seq
+    seq.then0 -> loop
+    seq.then1 -> after
+    loop.each -> log
+  }
 }
 """)
         self.assertEqual(run(text, "F")[1], ["body", "body", "after"])
@@ -281,15 +343,26 @@ func F() {
     def test_join_and_W0310(self):
         text = module("""
 func F(c: bool) -> (r: string) {
-  node entry = Entry -> br
-  node br = Branch(cond: entry.c) { then -> make, else -> join }
-  node make = Call Make -> join
+  node entry = Entry
+  node br = Branch(cond: entry.c)
+  node make = Call Make
   node join = Return(r: make.s)
+
+  flow {
+    entry -> br
+    br.then -> make
+    br.else -> join
+    make -> join
+  }
 }
 
 func Make() -> (s: string) {
-  node entry = Entry -> ret
+  node entry = Entry
   node ret = Return(s: "made")
+
+  flow {
+    entry -> ret
+  }
 }
 """, macros=False)
         self.assertIn("W0310", codes(text))
@@ -302,13 +375,19 @@ var hp: i32 = 10
 
 func F() -> (a: i32, b: i32) {
   local first: i32
-  node entry = Entry -> save
+  node entry = Entry
   node cur = GetVar hp
-  node save = SetLocal first (value: cur.value) -> hit
+  node save = SetLocal first (value: cur.value)
   node dmg = Sub<i32>(a: cur.value, b: 3)
-  node hit = SetVar hp (value: dmg.result) -> ret
+  node hit = SetVar hp (value: dmg.result)
   node got = GetLocal first
   node ret = Return(a: got.value, b: cur.value)
+
+  flow {
+    entry -> save
+    save -> hit
+    hit -> ret
+  }
 }
 """, macros=False)
         self.assertIn("W0320", codes(text))
@@ -318,22 +397,38 @@ func F() -> (a: i32, b: i32) {
         text = module("""
 macro DoOnce(in: exec, reset: exec) -> (out: exec) {
   state fired: bool
-  node entry = Entry { in -> check, reset -> clear }
+  node entry = Entry
   node flag = GetState fired
-  node check = Branch(cond: flag.value) { else -> mark }
-  node mark = SetState fired (value: true) -> fire
+  node check = Branch(cond: flag.value)
+  node mark = SetState fired (value: true)
   node fire = Exit out
   node clear = SetState fired (value: false)
+
+  flow {
+    entry.in -> check
+    entry.reset -> clear
+    check.else -> mark
+    mark -> fire
+  }
 }
 
 func F() {
-  node entry = Entry -> loop
-  node loop = Macro ForRange(first: 1, last: 3) { each -> seq }
-  node seq = Sequence { then0 -> once_a, then1 -> once_b }
-  node once_a = Macro DoOnce { out -> log_a }
-  node once_b = Macro DoOnce { out -> log_b }
+  node entry = Entry
+  node loop = Macro ForRange(first: 1, last: 3)
+  node seq = Sequence
+  node once_a = Macro DoOnce
+  node once_b = Macro DoOnce
   node log_a = Call host.Log(message: "a")
   node log_b = Call host.Log(message: "b")
+
+  flow {
+    entry -> loop
+    loop.each -> seq
+    seq.then0 -> once_a
+    seq.then1 -> once_b
+    once_a.out -> log_a
+    once_b.out -> log_b
+  }
 }
 """)
         self.assertEqual(run(text, "F")[1], ["a", "b"])
@@ -341,22 +436,33 @@ func F() {
     def test_switch_select_and_conversions(self):
         text = module("""
 func Name(v: i32) -> (s: string) {
-  node entry = Entry -> sw
-  node sw = Switch<i32>(value: entry.v) { case0 -> one, case1 -> two, default -> other } @cases(1, 2)
+  node entry = Entry
+  node sw = Switch<i32>(value: entry.v) @cases(1, 2)
   node one = Return(s: "one")
   node two = Return(s: "two")
   node neg = Lt<i32>(a: entry.v, b: 0)
   node pick = Select<string>(cond: neg.result, a: "negative", b: "many")
   node other = Return(s: pick.result)
+
+  flow {
+    entry -> sw
+    sw.case0 -> one
+    sw.case1 -> two
+    sw.default -> other
+  }
 }
 
 func Conv(x: f64) -> (i: i32, b: u8, s: string, back: f32) {
-  node entry = Entry -> ret
+  node entry = Entry
   node i = Convert<f64, i32>(value: entry.x)
   node b = Convert<i32, u8>(value: i.result)
   node s = Convert<f64, string>(value: entry.x)
   node f = Convert<f64, f32>(value: entry.x)
   node ret = Return(i: i.result, b: b.result, s: s.result, back: f.result)
+
+  flow {
+    entry -> ret
+  }
 }
 """, macros=False)
         self.assertEqual(run(text, "Name", 1)[0], ["one"])
@@ -371,30 +477,46 @@ func Conv(x: f64) -> (i: i32, b: u8, s: string, back: f32) {
 class ArithmeticEdgeCases(unittest.TestCase):
     TEXT = module("""
 func Div(a: i32, b: i32) -> (q: i32, r: i32) {
-  node entry = Entry -> ret
+  node entry = Entry
   node q = Div<i32>(a: entry.a, b: entry.b)
   node r = Rem<i32>(a: entry.a, b: entry.b)
   node ret = Return(q: q.result, r: r.result)
+
+  flow {
+    entry -> ret
+  }
 }
 
 func Shift(a: i32, n: i32) -> (r: i32) {
-  node entry = Entry -> ret
+  node entry = Entry
   node s = Shl<i32>(a: entry.a, b: entry.n)
   node ret = Return(r: s.result)
+
+  flow {
+    entry -> ret
+  }
 }
 
 func AddU8(a: u8, b: u8) -> (r: u8) {
-  node entry = Entry -> ret
+  node entry = Entry
   node s = Add<u8>(a: entry.a, b: entry.b)
   node ret = Return(r: s.result)
+
+  flow {
+    entry -> ret
+  }
 }
 
 func MinMax(a: i32, b: i32) -> (lo: i32, hi: i32, abs: i32) {
-  node entry = Entry -> ret
+  node entry = Entry
   node lo = Min<i32>(a: entry.a, b: entry.b)
   node hi = Max<i32>(a: entry.a, b: entry.b)
   node ab = Abs<i32>(value: entry.a)
   node ret = Return(lo: lo.result, hi: hi.result, abs: ab.result)
+
+  flow {
+    entry -> ret
+  }
 }
 """, macros=False)
 
@@ -415,8 +537,13 @@ func MinMax(a: i32, b: i32) -> (lo: i32, hi: i32, abs: i32) {
     def test_fuel_limit(self):
         text = module("""
 func Spin() {
-  node entry = Entry -> again
-  node again = Sequence { then0 -> again }
+  node entry = Entry
+  node again = Sequence
+
+  flow {
+    entry -> again
+    again.then0 -> again
+  }
 }
 """, macros=False)
         _, r = build(text)
@@ -433,22 +560,33 @@ var names: array<string>
 func Main(at: i32) -> (r: i32) {
   local nums: array<i32>
   local total: i32
-  node add = ArrayAdd<i32> nums (item: 30) -> set
+  node add = ArrayAdd<i32> nums (item: 30)
   node cur = GetLocal nums
-  node entry = Entry -> init
+  node entry = Entry
   node fin = GetLocal total
-  node init = SetLocal nums (value: mk.result) -> add
+  node init = SetLocal nums (value: mk.result)
   node keep = SetLocal total (value: plus.result)
-  node loop = Macro std.flow.ForEach<i32>(array: cur.value) { each -> keep, done -> name }
+  node loop = Macro std.flow.ForEach<i32>(array: cur.value)
   node mk = MakeArray<i32>(item0: 10, item1: 20, item2: 5) @count(3)
-  node name = ArrayAdd<string> names (item: "Ada") -> say
+  node name = ArrayAdd<string> names (item: "Ada")
   node names_now = GetVar names
   node old = GetLocal total
   node plus = Add<i32>(a: old.value, b: loop.item)
   node r = Return(r: fin.value)
-  node say = Call host.Log(message: who.item) -> r
-  node set = ArraySet<i32> nums (index: entry.at, item: 7) -> loop
+  node say = Call host.Log(message: who.item)
+  node set = ArraySet<i32> nums (index: entry.at, item: 7)
   node who = ArrayGet<string>(array: names_now.value, index: 0)
+
+  flow {
+    add -> set
+    entry -> init
+    init -> add
+    loop.each -> keep
+    loop.done -> name
+    name -> say
+    say -> r
+    set -> loop
+  }
 }
 """
 
@@ -484,20 +622,26 @@ class DiagnosticTests(unittest.TestCase):
     """One failing graph per implemented diagnostic code (section 7.4)."""
 
     CASES = {
-        "E0101": "node entry = Entry -> nowhere",
+        "E0101": "node entry = Entry\n  flow {\n    entry -> nowhere\n  }",
         "E0102": "node entry = Entry\n  node entry = Return",
-        "E0103": "node entry = Entry -> r\n  node r = Return(bogus: 1)",
-        "E0110": "node entry = Entry -> r\n  node r = Return(y: \"text\")",
-        "E0111": "node entry = Entry -> r\n  node r = Return(y: 1, y: 2)",
-        "E0120": "node entry = Entry -> r\n  node r = Return(in: 1, y: 2)",
-        "E0121": "node entry = Entry { then -> r, then -> r }\n  node r = Return(y: 1)",
-        "E0130": "node entry = Entry -> c\n  node c = ArrayClear<i32> -> r\n  node r = Return(y: 1)",
-        "E0301": "node entry = Entry -> r\n  node a = Add<i32>(a: b.result, b: 1)\n"
-                 "  node b = Add<i32>(a: a.result, b: 1)\n  node r = Return(y: a.result)",
-        "E0501": "node entry = Entry -> r\n  node w = Frobnicate\n  node r = Return(y: 1)",
-        "E0502": "node entry = Entry -> r\n  node a = Add(a: 1, b: 2)\n  node r = Return(y: 1)",
-        "W0201": "node entry = Entry -> r\n  node r = Return",
-        "W0301": "node entry = Entry -> r\n  node r = Return(y: 1)\n  node lost = Return(y: 2)",
+        "E0103": "node entry = Entry\n  node r = Return(bogus: 1)\n  flow {\n    entry -> r\n  }",
+        "E0110": "node entry = Entry\n  node r = Return(y: \"text\")\n  flow {\n    entry -> r\n  }",
+        "E0111": "node entry = Entry\n  node r = Return(y: 1, y: 2)\n  flow {\n    entry -> r\n  }",
+        "E0120": "node entry = Entry\n  node r = Return(in: 1, y: 2)\n  flow {\n    entry -> r\n  }",
+        "E0121": "node entry = Entry\n  node r = Return(y: 1)\n"
+                 "  flow {\n    entry.then -> r\n    entry.then -> r\n  }",
+        "E0130": "node entry = Entry\n  node c = ArrayClear<i32>\n  node r = Return(y: 1)\n"
+                 "  flow {\n    entry -> c\n    c -> r\n  }",
+        "E0301": "node entry = Entry\n  node a = Add<i32>(a: b.result, b: 1)\n"
+                 "  node b = Add<i32>(a: a.result, b: 1)\n  node r = Return(y: a.result)\n"
+                 "  flow {\n    entry -> r\n  }",
+        "E0501": "node entry = Entry\n  node w = Frobnicate\n  node r = Return(y: 1)\n"
+                 "  flow {\n    entry -> r\n  }",
+        "E0502": "node entry = Entry\n  node a = Add(a: 1, b: 2)\n  node r = Return(y: 1)\n"
+                 "  flow {\n    entry -> r\n  }",
+        "W0201": "node entry = Entry\n  node r = Return\n  flow {\n    entry -> r\n  }",
+        "W0301": "node entry = Entry\n  node r = Return(y: 1)\n  node lost = Return(y: 2)\n"
+                 "  flow {\n    entry -> r\n  }",
         "W0302": "node entry = Entry",
     }
 
@@ -523,16 +667,25 @@ func Impure() {
 """, macros=False)
         e0302 = base + """
 func P() -> (y: i32) @pure {
-  node entry = Entry -> w
-  node w = SetVar g (value: 1) -> r
+  node entry = Entry
+  node w = SetVar g (value: 1)
   node r = Return(y: 1)
+
+  flow {
+    entry -> w
+    w -> r
+  }
 }
 """
         e0304 = base + """
 func P() -> (y: i32) @pure {
-  node entry = Entry -> r
+  node entry = Entry
   node v = GetVar g
   node r = Return(y: v.value)
+
+  flow {
+    entry -> r
+  }
 }
 """
         self.assertIn("E0302", codes(e0302))
@@ -541,9 +694,14 @@ func P() -> (y: i32) @pure {
     def test_macro_recursion(self):
         text = module("""
 macro Loop(in: exec) -> (out: exec) {
-  node entry = Entry -> again
-  node again = Macro Loop { out -> done }
+  node entry = Entry
+  node again = Macro Loop
   node done = Exit out
+
+  flow {
+    entry -> again
+    again.out -> done
+  }
 }
 """, macros=False)
         self.assertIn("E0401", codes(text))
@@ -552,8 +710,8 @@ macro Loop(in: exec) -> (out: exec) {
         text = module("""
 func F() {
   node entry = Entry
-  notes {
-    note lost on gone "orphan"
+  markup {
+    attribute lost on gone = Note(message: "orphan")
   }
   layout {
     box a "A" at (0, 0) size (10, 10) [members = [entry, ghost]]
@@ -570,7 +728,7 @@ func F() {
         g = m.graph("Main")
         removed = delete_node(g, "fib_text")
         self.assertTrue(removed)
-        self.assertTrue(any(n.on == "fib_text" for n in g.notes))
+        self.assertTrue(any(n.on == "fib_text" for n in g.markup))
         self.assertIn("W0604", {d.code for d in check(m)})
 
 
@@ -637,8 +795,12 @@ class BytecodeTests(unittest.TestCase):
 extern func host.Missing(x: i32)
 
 func F() {
-  node entry = Entry -> c
+  node entry = Entry
   node c = Call host.Missing(x: 1)
+
+  flow {
+    entry -> c
+  }
 }
 """, macros=False)
         _, r = build(text)
@@ -666,15 +828,25 @@ class StdFlowTests(unittest.TestCase):
     def test_macros(self):
         text = module("""
 func Main() {
-  node entry = Entry -> rep
-  node rep = Macro std.flow.Repeat(times: 3) { body -> flip, done -> five }
-  node flip = Macro std.flow.FlipFlop { a -> log_a, b -> log_b }
+  node entry = Entry
+  node rep = Macro std.flow.Repeat(times: 3)
+  node flip = Macro std.flow.FlipFlop
   node log_a = Call host.Log(message: "A")
   node log_b = Call host.Log(message: "B")
-  node five = Macro std.flow.ForRange(first: 1, last: 5) { each -> limited }
-  node limited = Macro std.flow.DoN(n: 2) { out -> log_n }
+  node five = Macro std.flow.ForRange(first: 1, last: 5)
+  node limited = Macro std.flow.DoN(n: 2)
   node n_text = Convert<i32, string>(value: limited.counter)
   node log_n = Call host.Log(message: n_text.result)
+
+  flow {
+    entry -> rep
+    rep.body -> flip
+    rep.done -> five
+    flip.a -> log_a
+    flip.b -> log_b
+    five.each -> limited
+    limited.out -> log_n
+  }
 }
 """, macros=False)
         self.assertEqual(run(text, "Main")[1], ["B", "A", "B", "1", "2"])
@@ -705,7 +877,7 @@ class LessonTests(unittest.TestCase):
                 self.assertEqual([str(d) for d in check(m)], [])
                 self.assertEqual(run(text, "Main")[1], self.EXPECTED[name])
                 for g in m.graphs():
-                    self.assertTrue(any(n.on is None for n in g.notes), f"{g.name} has no intro")
+                    self.assertTrue(any(n.on is None for n in g.markup), f"{g.name} has no intro")
                     placed = {p.id for p in g.places}
                     self.assertEqual(placed, {n.id for n in g.nodes}, f"{g.name} layout")
 
@@ -765,9 +937,13 @@ class ExplainTests(unittest.TestCase):
         from wiret.explain import explain
         text = module("""
 func F() {
-  node entry = Entry -> log
+  node entry = Entry
   node n = Add<i32>(a: 1, b: 2)
   node log = Call host.Log(message: n.result)
+
+  flow {
+    entry -> log
+  }
 }
 """, macros=False)
         d = next(d for d in check(parse(text)) if d.code == "E0110")

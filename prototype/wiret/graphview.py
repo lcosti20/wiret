@@ -430,7 +430,7 @@ class GraphView(tk.Canvas):
 
     def draw_notes(self, g):
         y = 10
-        for nt in sorted(g.notes, key=lambda n: n.id):
+        for nt in sorted((a for a in g.markup if a.kind == "Note"), key=lambda n: n.id):
             if nt.on and nt.on in self.geoms:
                 gm = self.geoms[nt.on]
                 sx, sy = self.to_screen(gm.x, gm.y + gm.h + 6)

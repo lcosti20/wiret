@@ -47,7 +47,8 @@ class Binding:
 
 @dataclass
 class ExecOut:
-    pin: Optional[str]          # None: the `-> target` shorthand
+    """One exec wire, written in the graph's `flow` block and stored on its source node."""
+    pin: Optional[str]          # None: the `source -> target` shorthand
     target: str
     target_pin: Optional[str] = None
 
@@ -92,11 +93,37 @@ class Local:
 
 
 @dataclass
-class Note:
+class Attribute:
+    """One line of a graph's `markup` block: a non-semantic annotation (section 2.3).
+
+    `kind` names what it is. Only `Note` exists today; others (colour, grouping, ...) may follow.
+    """
     id: str
     on: Optional[str]
-    text: str
-    attrs: list = field(default_factory=list)
+    kind: str = "Note"
+    args: list = field(default_factory=list)       # [(key, Lit)]
+    attrs: list = field(default_factory=list)      # trailing [Attr]
+
+    @classmethod
+    def note(cls, id: str, on: Optional[str], text: str) -> "Attribute":
+        return cls(id, on, "Note", [("message", Lit("string", text))])
+
+    def arg(self, key: str) -> Optional[Lit]:
+        for k, v in self.args:
+            if k == key:
+                return v
+        return None
+
+    @property
+    def text(self) -> str:
+        """The message of a Note."""
+        v = self.arg("message")
+        return v.value if v is not None and v.kind == "string" else ""
+
+    @text.setter
+    def text(self, value: str):
+        self.args = [(k, v) for k, v in self.args if k != "message"]
+        self.args.insert(0, ("message", Lit("string", value)))
 
 
 @dataclass
@@ -143,7 +170,7 @@ class Graph:
     locals: list = field(default_factory=list)     # [Local]
     states: list = field(default_factory=list)     # [Local]
     nodes: list = field(default_factory=list)      # [Node]
-    notes: list = field(default_factory=list)      # [Note]
+    markup: list = field(default_factory=list)     # [Attribute]
     places: list = field(default_factory=list)     # [Place]
     boxes: list = field(default_factory=list)      # [Box]
 
