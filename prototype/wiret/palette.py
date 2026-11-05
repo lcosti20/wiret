@@ -32,6 +32,9 @@ DESCRIBE = {
     "Throw": ("Stops with an error that a Try around it can catch, with your message and code.",
               "raise error fault exception fail"),
     "New": ("Makes a new object of a class.", "create object instance make class"),
+    "CallParent": ("Runs the parent class's version of this method, on the same object. Use "
+                   "it in an override to add to what the parent does instead of replacing it.",
+                   "super base parent inherited override call"),
     "CreateDelegate": ("Wraps a function (and, for a method, its object) into a value you can "
                        "store, pass around and call later.",
                        "callback function pointer handler event bind reference"),
@@ -313,6 +316,10 @@ def items(g: Graph, idx: ModuleIndex) -> list:
     for name, fg in sorted(idx.graphs.items()):
         if fg.kind == "func":
             out.append(_item("Call", f"Call {name}", "Call", name, idx=idx))
+    if g.owner and g.owner in idx.classes and idx.classes[g.owner].base and \
+            idx.find_method(idx.classes[g.owner].base, g.short_name) is not None:
+        out.append(_item("CallParent", f"CallParent {g.short_name}", "Call", g.short_name,
+                         idx=idx))
     for q in sorted(idx.externs):
         out.append(_item("Call", f"Call {q}", "Call", q, idx=idx))
     for q in sorted(STD):
@@ -356,6 +363,8 @@ def items(g: Graph, idx: ModuleIndex) -> list:
         out.append(_item("ArrayGet", f"ArrayGet::<{t}>", "Arrays", targs=[t]))
         out.append(_item("ArrayLength", f"ArrayLength::<{t}>", "Arrays", targs=[t]))
     places = [(l.name, l.type) for l in g.locals] + [(v.name, v.type) for v in idx.vars.values()]
+    places += [(f"{c}.{f.name}", f.type) for c in sorted(idx.classes)       # object fields
+               for owner, f in idx.class_fields(c) if owner == c]
     for name, ty in sorted(places):
         elem = array_elem(ty)
         if elem is None:

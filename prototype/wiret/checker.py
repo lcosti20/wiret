@@ -10,7 +10,7 @@ from .model import Const, Extern, Var
 
 # Names that are metadata, not semantic attributes: `@doc` is `#[doc]` (section 2.4).
 META_NAMES = {"doc", "category", "keywords", "note"}
-from .registry import (HANDLE_TYPES, assignable, handle_ok, BUILTIN_TYPE_NAMES, PLACE_MUTATORS, INT_RANGES, ModuleIndex, Sig,
+from .registry import (HANDLE_TYPES, assignable, field_place, handle_ok, parent_method, BUILTIN_TYPE_NAMES, PLACE_MUTATORS, INT_RANGES, ModuleIndex, Sig,
                        array_elem, enum_values, instantiate, lit_fits, lit_in_range, signature,
                        substitute, type_ok)
 
@@ -500,6 +500,9 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
         # purity
         if pure_attr or reads_attr:
             attr = "@pure" if pure_attr else "@reads"
+            if n.kind in PLACE_MUTATORS and field_place(n.symbol, g, idx) and \
+                    not g.local(n.symbol or ""):
+                D("E0302", f"{attr} function changes the field '{n.symbol}'", G, n.id)
             if n.kind in PLACE_MUTATORS and n.symbol in idx.vars and not g.local(n.symbol):
                 D("E0302", f"{attr} function changes the module variable '{n.symbol}'", G, n.id)
             if n.kind in ("SetVar", "SetState"):
@@ -518,7 +521,7 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
                 D("E0304", "@pure function reads state", G, n.id)
             if pure_attr and n.kind == "GetVar" and n.symbol not in idx.consts:
                 D("E0304", "@pure function reads a module variable", G, n.id)
-            if n.kind == "Call" and not sig.error:
+            if n.kind in ("Call", "CallParent") and not sig.error:
                 if pure_attr and sig.purity != "pure":
                     D("E0304", f"@pure function calls '{n.symbol}', which is not @pure", G, n.id)
                 elif reads_attr and sig.purity == "impure":
@@ -531,7 +534,6 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
     check_flow(info, G, D)
     check_try_nesting(info, G, D)
     check_latency(g, info, idx, G, D)
-    check_method_state(g, idx, G, D)
     check_layout(g, ids, G, D)
 
 
@@ -562,30 +564,6 @@ def macro_latent(name: str, idx: ModuleIndex, seen=None) -> bool:
     return False
 
 
-def macro_has_state(name: str, idx: ModuleIndex, seen=None) -> bool:
-    seen = set() if seen is None else seen
-    m = idx.macros.get(name)
-    if m is None or name in seen:
-        return False
-    seen.add(name)
-    return bool(m.states) or any(n.kind == "Macro" and macro_has_state(n.symbol or "", idx, seen)
-                                 for n in m.nodes)
-
-
-def check_method_state(g: Graph, idx: ModuleIndex, G, D):
-    """`state` in a method lives on the object (section 2.3), which this prototype does not
-    lay out yet: E0501 for a method that declares state or expands a macro that keeps it."""
-    if not g.owner:
-        return
-    if g.states:
-        D("E0501", f"state in a method is not supported by this prototype yet; use a field of "
-                   f"'{g.owner}'", G)
-    for n in g.nodes:
-        if n.kind == "Macro" and macro_has_state(n.symbol or "", idx):
-            D("E0501", f"macro '{n.symbol}' keeps state, which in a method would live on the "
-                       f"object; this prototype does not support that yet", G, n.id)
-
-
 def check_latency(g: Graph, info: GraphInfo, idx: ModuleIndex, G, D):
     """E0201 and E0302 for latency (section 4.5): a graph that can suspend must be latent, and
     a latent function is never @pure or @reads. Macros are checked where they expand."""
@@ -602,6 +580,10 @@ def check_latency(g: Graph, info: GraphInfo, idx: ModuleIndex, G, D):
         why = None
         if n.kind in LATENT_KINDS:
             why = f"{n.kind} suspends"
+        elif n.kind == "CallParent" and not info.sigs[nid].error:
+            pm = parent_method(n, g, idx)
+            if pm is not None and (pm.kind == "event" or pm.has_attr("latent")):
+                why = f"the parent '{pm.name}' is {'an event' if pm.kind == 'event' else 'latent'}"
         elif n.kind == "Call" and not info.sigs[nid].error:
             c = idx.callee(n.symbol or "")
             if c is not None and c.latent:

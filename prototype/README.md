@@ -446,6 +446,18 @@ class Boss : Player {
   or method call faults with code -3, catchable with `Try`; a failed `ref.cast` with -4. The
   host side has `vm.new(mod, "Player")`, `obj.get("health")` / `obj.set(...)`, and
   `vm.call_method(mod, obj, "TakeDamage", [args])`, which dispatches like `wr_push_virtual`.
+- **State on the object.** `state` in a method, and the state of a macro expanded in one
+  (`DoOnce`, `FlipFlop`), lives on each object: hidden slots after the class's fields and
+  dispatchers, named `Tick.count` or `Greet/once.done` (`obj.get("Tick.count")` reads one).
+  A free function's state stays a module global.
+- **Fields as places.** The array, map and set mutators change a field of an object:
+  `ArrayAdd::<i32> Player.items` with `.obj` and `.item`, or `ArrayAdd::<i32> items` inside
+  Player's own methods when no local or variable has that name. The field is read without
+  being shared, changed (in place when nothing else holds it), and written back; a null `obj`
+  faults with -3. `@pure` and `@reads` functions may not do this (`E0302`).
+- **`CallParent Tick`**, inside an override, runs the base class's version of the method on
+  the same object, as a direct `call` (Blueprint's Parent node). Its pins are the method's,
+  without `self`. Outside an override it is `E0501`.
 - `wiretc run file Player.TakeDamage 30` and the editor's Run give a method a new object of
   its class as `self`. The palette and the Add menu have a Classes section. Class
   declarations are edited in the Source pane.
@@ -671,10 +683,7 @@ pins for results, and flow wires for a macro's exec parameters and results.
   builds a local array and returns it still shares it, and the caller's first change to it
   makes one copy. The
   editor's debugger steps through one fiber, the one Run started.
-- **Classes, not yet:** `state` in a method (it would live on the object; `E0501`, including
-  a macro with state expanded in a method), calling a base class's version of an overridden
-  method, extern (host) types, and the container mutators on a class field place
-  (`ArrayAdd::<i32> Player.items`).
+- **Classes, not yet:** extern (host) types.
 - **Not implemented:** deterministic-mode float rules (section 4.10).
 - **Optimisation.** There is no `-O1`, so the `cont.push`/`cont.pop` pairs are never replaced
   by direct branches.
