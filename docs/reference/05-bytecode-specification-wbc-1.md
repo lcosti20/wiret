@@ -80,7 +80,7 @@ A `const` is 8 bytes (numeric bit pattern), or a `u32` data index for `string`, 
 | `59` | delegate | `functype:u32` |
 | `58` | dispatcher | `functype:u32` (no results) |
 
-`field = storagetype flags:u8 [const]` where flag bit 0 says a default value follows.
+`field = storagetype flags:u8 [const]` where flag bit 0 says a default value follows. In a struct entry only number and string fields carry one. A struct's default value holds each field's default, else that field type's default (a nested struct's own default, an empty array); the VM builds struct locals and globals from it.
 
 ### 5.4 Custom sections defined by this version
 
@@ -122,7 +122,7 @@ The layouts of `name`, `wr.meta`, `wr.reflect`, `wr.caps` and `wr.graph` are not
 
 A conforming VM verifies every module before running any of it. The verifier makes one linear pass over each function and requires all of the following.
 
-1. **Structure.** Sections are in order and sizes agree; every index is in range; exports are unique; the class hierarchy is acyclic; each vtable entry and interface implementation has the required signature.
+1. **Structure.** Sections are in order and sizes agree; every index is in range; exports are unique; the class hierarchy is acyclic; no struct type holds itself by value, directly or through other struct fields (a field that is an array of it is allowed); each vtable entry and interface implementation has the required signature. A type reference may point to a later type entry.
 2. **Decoding.** Every instruction decodes; every branch target is an instruction boundary inside the same function. A first pass collects the set of labels.
 3. **Empty stack at labels.** The operand stack is empty before every label, after `br`, `br_table`, `return`, `throw`, `unreachable`, and after `cont.pop` (which falls through only when no continuation exists). A branch may only occur when its own operands are the entire stack: `br_if` with exactly one `i32` on the stack, `br_table` likewise.
 4. **Typing.** Each instruction's operands match its signature (section 5.6). References follow subtyping: a class is a subtype of its superclass chain and interfaces; every reference type is a subtype of `anyref`; null has every reference type. `local.*` and `global.*` match the declared types.

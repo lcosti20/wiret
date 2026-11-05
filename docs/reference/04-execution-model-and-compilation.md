@@ -100,7 +100,7 @@ Section 7.4 requires each of these as a trace test (expected `S` after every ste
 
 Rules:
 
-- **Reads of mutable state.** `GetField`, `GetVar`, `GetState` and dereferencing a class reference or host handle are `reads` operations. They are fine in a `@reads` function and forbidden in a `@pure` one (`E0304`). A struct, enum, string or container passed as an argument is a value and may be read freely, since the caller's copy cannot change under the callee. A class reference may be passed, compared with `Eq` or tested with `IsValid`'s null check, but not dereferenced.
+- **Reads of mutable state.** `GetField`, `GetVar`, `GetState` and dereferencing a class reference or host handle are `reads` operations. They are fine in a `@reads` function and forbidden in a `@pure` one (`E0304`). A struct, enum, string or container passed as an argument is a value and may be read freely, since the caller's copy cannot change under the callee; `GetField` and `BreakStruct` on a struct are therefore `pure`, also in a `@pure` function. A class reference may be passed, compared with `Eq` or tested with `IsValid`'s null check, but not dereferenced.
 - **Calls.** A `@pure` function may call only `@pure` functions and natives flagged cacheable; a `@reads` function may also call `@reads` functions and natives flagged effect-free. Anything else is `E0304` (reads) or `E0302` (writes or latent).
 - **Cacheability is what the optimiser may use.** Common-subexpression elimination across a state change, hoisting out of loops and memoisation apply only to `@pure` calls and `pure`-purity kinds. A `reads` node is never moved across a write to anything it could read.
 - **Faults are results, not effects.** A fault is part of what a deterministic function returns: the same arguments fault the same way. So a pure call that may fault is kept when its result is unused (removing it would remove the fault), and it is never reordered past another node that could fault or write when that would change which fault is observed. Fuel exhaustion and an interrupt are not faults of the function; they are the VM's limits (section 5.7) and are exempt.
@@ -141,9 +141,9 @@ Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber
 
 | Code | Meaning |
 | --- | --- |
-| `E0101` / `E0102` | Binding or exec target names an unknown node / duplicate node id. |
+| `E0101` / `E0102` | Binding or exec target names an unknown node / a duplicate: node id, declaration, struct field or enum member; also a struct or enum named like a built-in type, and a node id that is also an enum's name (section 2.3). |
 | `E0103` | Unknown pin on a node. |
-| `E0110` | Wire type mismatch (and no supertype relation). |
+| `E0110` | Wire type mismatch (and no supertype relation); also a literal, field default, enum member value or `@cases` value that does not fit its type. |
 | `E0111` | The same input pin is bound twice. |
 | `E0120` | Exec output wired to a data pin, or a data wire to an exec pin. |
 | `E0121` | An exec output has more than one wire in the `flow` block. |
@@ -153,6 +153,7 @@ Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber
 | `E0401` | Macro expands itself. |
 | `E0412` | `Try` body is not properly nested. |
 | `E0501` / `E0502` | Unresolved symbol / missing type argument. |
+| `E0503` | A struct holds itself by value, directly or through other structs (section 2.2). |
 | `W0201` | Input left unbound and no declared default. |
 | `W0301` | Node unreachable from any entry. |
 | `W0302` | Chain can end in a function that declares results. |
@@ -202,6 +203,7 @@ Consequences:
 - Classes, delegates and host handles stay reference types. An `array::<Player>` copies the references, not the players.
 - The optimiser removes a `ref.share` when liveness analysis shows the source holder is dead after the read, which is the common case when a function builds a local array and returns it.
 - `Eq` and `Ne` on containers are structural (element-wise for arrays; set and map equality ignores insertion order) and compile to calls to `std.array.Equals`, `std.set.Equals` and `std.map.Equals`.
+- `Eq` and `Ne` on structs compare field by field, in declaration order, each with its own field type's equality, so a struct holding NaN is not equal to itself. They compile inline to `struct.get` and the field comparisons; there is no struct native, since a native has one fixed signature.
 
 ### 4.10 Deterministic mode
 

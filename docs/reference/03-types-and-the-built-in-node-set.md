@@ -10,7 +10,7 @@
 | `f32 f64` | IEEE-754 | In deterministic mode, NaN is canonical and arithmetic is fully specified (section 4.10). |
 | `string` | immutable UTF-8 reference | Never null; default is the empty string. Indexing is by byte offset via `std.string`. |
 | `enum` | its underlying integer (default `i32`) | Names are kept in the `name` custom section for editors and reflection. |
-| `struct` | immutable heap record with value semantics | Equality is structural. "Setting" a field makes a new struct (`WithField`). |
+| `struct` | immutable heap record with value semantics | Equality is structural, field by field. "Setting" a field makes a new struct (`WithField`). Default: each field's declared default, else that field type's default. |
 | `class` | nullable reference | Equality is identity. Default `null`. |
 | `array::<T>` | growable, zero-based; **value type** | Copied on assignment, argument passing and return. The VM copies lazily (copy-on-write, section 4.9), so two variables never alias one array. Equality is element-wise. |
 | `set::<T>`, `map::<K,V>` | insertion-ordered; **value types** | Same copy rules as arrays. Iteration order is insertion order, never hash order. Keys are primitives, `string`, enums or structs of those. Equality ignores order. |
@@ -33,7 +33,7 @@ The editor, like Blueprint's, offers to insert a conversion node when you connec
 | f64 / f32 | f32 / f64 | IEEE demote / promote. |
 | bool | integer | 0 or 1. |
 | integer | bool | Non-zero is true. |
-| enum | its integer type, and back | Back-conversion does not check that the value names a member. |
+| enum | its own underlying integer type, and back | Back-conversion does not check that the value names a member. Reaching another integer type takes a second `Convert`. |
 | bool, integer, float | string | Culture-independent decimal text. Floats use the shortest text that round-trips. |
 | string | number or bool | Not a `Convert`. Use `std.string.TryParse::<T>`, which returns `(ok: bool, value: T)`. |
 
@@ -66,10 +66,11 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 | --- | --- | --- |
 | `GetLocal` / `SetLocal` | `value` | Locals declared with `local`. `SetLocal` is impure. |
 | `GetVar` / `SetVar` | `value` | Module-level `var`. |
-| `GetField` | in `obj`; out `value` | Pure node with `reads` purity (section 4.3): re-evaluated at each consumer and sees the state at that consumer's evaluation point. Faults on a null class reference. Not allowed in a `@pure` function (`E0304`). |
-| `SetField` | in `obj`, `value` | Impure. On a struct use `WithField`. |
-| `WithField` | pure; in `obj`, `value`; out `result` | Returns a copy of a struct with one field replaced. |
-| `MakeStruct` / `BreakStruct` | one pin per field | Pure. |
+| `GetField` | symbol: `Vec2.x` on a struct, the field name on a class; in `obj`; out `value` | On a struct, `pure`: a struct is a value and cannot change under the reader. On a class reference, a pure node with `reads` purity (section 4.3): re-evaluated at each consumer and sees the state at that consumer's evaluation point. Faults on a null class reference. Not allowed in a `@pure` function (`E0304`). |
+| `SetField` | in `obj`, `value` | Impure; classes only. On a struct it is `E0501`: use `WithField`. |
+| `WithField` | pure; symbol `Vec2.x`; in `obj`, `value`; out `result` | Returns a copy of a struct with one field replaced. |
+| `MakeStruct` | pure; symbol: the struct; in: one pin per field, in declaration order; out `result` | An unbound input takes the field's declared default, else its type's default, so it never warns `W0201`. |
+| `BreakStruct` | pure; symbol: the struct; in `obj`; out: one pin per field | |
 | `New` | out `result`; exec out `then` | Allocates a class instance with declared defaults. Impure because it creates identity. |
 | `Cast` | pure; in `obj`; out `result`, `ok: bool` | `result` is null when the cast fails. |
 | `IsValid` | pure; in `obj`; out `result: bool` | Non-null and, for host handles, still alive. |

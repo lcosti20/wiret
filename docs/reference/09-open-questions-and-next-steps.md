@@ -19,7 +19,7 @@ Three further questions are open.
 
 - Byte layouts of the custom sections `name`, `wr.meta`, `wr.reflect`, `wr.caps` and `wr.graph` (including the deflate framing of `wr.graph`). Only `wr.debug` and `wr.pins` are fixed (section 5.4.1).
 - Exact pin lists and bodies for every `std.*` function and `std.flow` macro, and string `Format` syntax.
-- Interface method call nodes beyond `Call`, enum `Switch` ergonomics, and `Format Text`-style nodes.
+- Interface method call nodes beyond `Call`, and `Format Text`-style nodes.
 - Blueprint features that are really engine features: timelines, construction scripts, components, replication, soft references and data tables. These would be host-provided natives and extern types, or a layer on top of Wiret.
 - Hot reload and state migration (the `@id` attributes are there to make this possible), serialisation of suspended fibers for save games, multi-threaded VMs, a wire protocol for remote debugging, and a WebAssembly backend or JIT.
 
