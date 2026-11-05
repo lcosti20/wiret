@@ -1215,7 +1215,7 @@ class StructEditorTests(unittest.TestCase):
         self.assertIn("Get Enemy.mode", into)
 
     def test_pin_colours(self):
-        from wiret.graphview import type_color
+        from wiret.viewmodel import type_color
         self.assertEqual(type_color("array::<i32>"), "#f0a830")
         self.assertNotEqual(type_color("Vec2", self.idx), type_color("Vec2"))
         self.assertNotEqual(type_color("Mode", self.idx), type_color("Vec2", self.idx))
@@ -6372,6 +6372,39 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(len(r["steps"]), 10)
         self.assertEqual(len(r["output"]), 15)              # the run itself went on to the end
         self.assertEqual(sum(r["counts"]["Main"].values()) > 10, True)
+
+    def test_check_describes_graphs_for_drawing(self):
+        from wiret import webapi
+        r = json.loads(webapi.check(lesson("04_loops.wiret")))
+        (main,) = r["graphs"]
+        nodes = {n["id"]: n for n in main["nodes"]}
+        self.assertEqual((nodes["count"]["x"], nodes["count"]["y"]), (200, 0))
+        self.assertEqual([p["label"] for p in nodes["count"]["ins"]], ["", "first = 1", "last = 5"])
+        self.assertEqual([p["name"] for p in nodes["count"]["outs"]], ["each", "done", "index"])
+        self.assertTrue(nodes["count"]["outs"][0]["exec"] and nodes["count"]["outs"][0]["filled"])
+        self.assertIn({"exec": True, "from": ["count", "each"], "to": ["say", "in"], "color": "#f0f0f0"},
+                      main["wires"])
+        self.assertIn({"exec": False, "from": ["plus", "result"], "to": ["keep", "value"], "color": "#1abc9c"},
+                      main["wires"])
+        self.assertTrue(nodes["plus"]["pure"])
+        self.assertEqual(nodes["entry"]["header"], "#a93226")
+        self.assertTrue(any(n["on"] is None and "Loops" in n["text"] for n in main["notes"]))
+        r = json.loads(webapi.check(lesson("05_functions.wiret")))
+        squared = next(n for g in r["graphs"] if g["name"] == "Main" for n in g["nodes"] if n["id"] == "squared")
+        self.assertEqual(squared["opens"], "Square")
+
+    def test_check_marks_problem_nodes_and_lays_out_new_ones(self):
+        from wiret import webapi
+        text = lesson("02_variables.wiret").replace(".b <- 5", '.b <- "x"')
+        text = text.replace("  node show = Call host.Log", "  node extra = Add::<i32>\n  node show = Call host.Log")
+        r = json.loads(webapi.check(text))
+        nodes = {n["id"]: n for n in r["graphs"][0]["nodes"]}
+        self.assertEqual(nodes["plus"]["diag"], "error")
+        self.assertIsNone(nodes["start"]["diag"])
+        # a node without a place line is laid out automatically, and stays put on the next check
+        first = (nodes["extra"]["x"], nodes["extra"]["y"])
+        again = {n["id"]: n for n in json.loads(webapi.check(text + "\n"))["graphs"][0]["nodes"]}
+        self.assertEqual((again["extra"]["x"], again["extra"]["y"]), first)
 
     def test_web_stepping_matches_desktop(self):
         """web/debugger.js, stepping through a recording, pauses where the desktop editor's

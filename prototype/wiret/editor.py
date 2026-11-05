@@ -19,7 +19,7 @@ from collections import Counter, deque
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Optional
 
-from . import ops, palette
+from . import ops, palette, viewmodel
 from .checker import GraphInfo, check
 from .compiler import compile_module
 from .debugstate import DebugState
@@ -728,75 +728,13 @@ class EditorApp:
         return out
 
     def exec_targets(self) -> set:
-        g = self.graph
-        return {(e.target, e.target_pin or "in") for n in g.nodes for e in n.execs} if g else set()
+        return viewmodel.exec_targets(self.graph) if self.graph else set()
 
     def used_outputs(self) -> set:
-        g, info = self.graph, self.info
-        used = set()
-        for n in g.nodes:
-            for b in n.bindings:
-                if isinstance(b.value, PinRef):
-                    used.add((b.value.node, b.value.pin))
-            for e in n.execs:
-                used.add((n.id, info.exec_pin(n, e)))
-        return used
+        return viewmodel.used_outputs(self.graph, self.info)
 
     def positions(self) -> dict:
-        g, info = self.graph, self.info
-        pos = {p.id: (p.x, p.y) for p in g.places}
-        missing = [n for n in g.nodes if n.id not in pos]
-        if missing:
-            self.auto_layout(g, info, pos)
-        return pos
-
-    def auto_layout(self, g, info, pos):
-        """Place nodes without a `place` line (section 7.5: lay out only what has no layout)."""
-        for n in g.nodes:
-            if n.id not in pos and (g.name, n.id) in self.auto_pos:
-                pos[n.id] = self.auto_pos[(g.name, n.id)]
-        depth = {}
-        entry = info.entry()
-        if entry:
-            todo = [(entry, 0)]
-            while todo:
-                nid, d = todo.pop(0)
-                if nid in depth:
-                    continue
-                depth[nid] = d
-                todo += [(s, d + 1) for s in info.successors(nid)]
-        maxd = max(depth.values(), default=0)
-        col_rows = Counter()
-        for n in sorted(g.nodes, key=lambda n: (depth.get(n.id, maxd + 1), n.id)):
-            if n.id in pos or info.sigs[n.id].pure:
-                continue
-            d = depth.get(n.id, maxd + 1)
-            pos[n.id] = (d * 250, col_rows[d] * 200)
-            col_rows[d] += 1
-        stacked = Counter()
-
-        def place_pure(consumer):
-            cx, cy = pos[consumer]
-            for b in info.nodes[consumer].bindings:
-                if isinstance(b.value, PinRef):
-                    src = b.value.node
-                    if src in info.nodes and src not in pos and info.sigs[src].pure:
-                        k = stacked[consumer]
-                        stacked[consumer] += 1
-                        pos[src] = (cx - 200, cy + 110 + k * 90)
-                        place_pure(src)
-
-        for n in sorted(g.nodes, key=lambda n: n.id):
-            if n.id in pos:
-                place_pure(n.id)
-        y = 400
-        for n in sorted(g.nodes, key=lambda n: n.id):
-            if n.id not in pos:
-                pos[n.id] = (-250, y)
-                y += 90
-        for nid, p in pos.items():
-            if g.place(nid) is None:
-                self.auto_pos[(g.name, nid)] = p
+        return viewmodel.positions(self.graph, self.info, self.auto_pos)
 
     # -- graph navigation ---------------------------------------------------------
     def select_graph(self, name, fit=True):

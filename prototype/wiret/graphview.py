@@ -6,10 +6,10 @@ import tkinter.font as tkfont
 from dataclasses import dataclass, field
 
 from .checker import GraphInfo
-from .model import Graph, Lit, PinRef, note_detached, note_text
+from .model import Graph, PinRef, note_detached, note_text
 from .ops import note_key
-from .printer import fmt_lit
-from .registry import FLOAT_TYPES, INT_TYPES
+from .viewmodel import (HEADER, ROW, display_title, header_color, input_label, output_label,
+                        type_color)
 
 BG = "#1d1f23"
 GRID = "#25282e"
@@ -24,42 +24,6 @@ RAN = "#2ecc71"
 CURRENT = "#00e5ff"
 BREAK = "#ff3b30"
 
-HEADER_COLORS = {"Arrays": "#b9770e", "Flow": "#566573", "Call": "#2471a3", "Math": "#1e8449", "Compare": "#138d75",
-                 "Logic": "#9a7d0a", "Bits": "#873600", "Variables": "#6c3483", "Macro": "#7d3c98",
-                 "Structs": "#1f618d", "Time": "#a04000",
-                 "Classes": "#1a5276", "Delegates": "#6e2c00", "Other": "#566573"}
-
-
-def type_color(ty: str, idx=None) -> str:
-    if idx is not None and ty in idx.structs:
-        return "#5dade2"        # structs: light blue, whatever they hold
-    if idx is not None and ty in idx.enums:
-        return "#af7ac5"        # enums: lavender (yellow is for the debugger's value tags)
-    if ty == "exec":
-        return "#ffffff"
-    if ty == "bool":
-        return "#e74c3c"
-    if ty in ("i64", "u64"):
-        return "#48c9b0"
-    if ty in INT_TYPES:
-        return "#1abc9c"
-    if ty in FLOAT_TYPES:
-        return "#a3d65c"
-    if ty == "string":
-        return "#e056fd"
-    if ty.startswith("map::<"):
-        return "#dc7633"        # maps: dark orange
-    if ty.startswith("set::<"):
-        return "#f8c471"        # sets: pale orange
-    if ty.startswith("array::<"):
-        return "#f0a830"        # arrays: orange, whatever they hold
-    return "#95a5a6"
-
-
-HEADER = 24
-ROW = 20
-
-
 @dataclass
 class Geom:
     x: float
@@ -67,16 +31,6 @@ class Geom:
     w: float
     h: float
     pins: dict = field(default_factory=dict)   # (dir, name) -> (x, y, type)
-
-
-def node_title(n) -> str:
-    t = n.kind
-    if n.symbol:
-        t += " " + n.symbol.split(".")[-1] if n.kind == "Call" and n.symbol.startswith("std.") \
-            else " " + n.symbol
-    if n.targs:
-        t += "::<" + ", ".join(n.targs) + ">"
-    return t
 
 
 class GraphView(tk.Canvas):
@@ -163,19 +117,6 @@ class GraphView(tk.Canvas):
         self.redraw()
 
     # -- geometry -----------------------------------------------------------------
-    def input_label(self, n, pin) -> str:
-        if pin.is_exec:
-            return "" if pin.name == "in" else pin.name
-        b = n.binding(pin.name)
-        if b is not None and isinstance(b.value, Lit):
-            text = fmt_lit(b.value)
-            if len(text) > 22:
-                text = text[:20] + "…\""
-            return f"{pin.name} = {text}"
-        if b is None and pin.default is not None and n.kind != "Exit":
-            return f"{pin.name} ({fmt_lit(pin.default_lit())})"
-        return pin.name
-
     def compute_geoms(self, g: Graph, info: GraphInfo, positions: dict):
         f_title = self.font(11, True)
         f_pin = self.font(10)
@@ -188,10 +129,8 @@ class GraphView(tk.Canvas):
             x, y = positions.get(n.id, (0, 0))
             ins = sig.exec_ins + sig.data_ins
             outs = sig.exec_outs + sig.data_outs
-            place = g.place(n.id)
-            label = place.prop("label") if place else None
-            title = label.value if label is not None and label.kind == "string" else node_title(n)
-            in_w = max([f_pin.measure(self.input_label(n, p)) for p in ins] or [0]) / s
+            title = display_title(g, n)
+            in_w = max([f_pin.measure(input_label(n, p)) for p in ins] or [0]) / s
             out_w = max([f_pin.measure("" if p.is_exec and len(sig.exec_outs) == 1 else p.name)
                          for p in outs] or [0]) / s
             w = max(f_title.measure(title) / s + 28, in_w + out_w + 46, 96)
@@ -345,14 +284,7 @@ class GraphView(tk.Canvas):
         disabled = n.attr("disabled") is not None
         self.create_rectangle(x0 + 3, y0 + 4, x1 + 3, y1 + 4, fill="#101114", outline="", tags=tag)
         self.create_rectangle(x0, y0, x1, y1, fill=NODE_BG, outline=outline, width=width, tags=tag)
-        cat = "Flow" if n.kind in ("Entry", "Return") else sig.category
-        hcolor = "#a93226" if n.kind in ("Entry", "Return") else HEADER_COLORS.get(cat, "#566573")
-        place = self.app.graph.place(n.id)
-        c = place.prop("color") if place else None
-        if c is not None and c.kind == "string":
-            hcolor = c.value
-        if disabled:
-            hcolor = "#4d4d4d"
+        hcolor = header_color(self.app.graph, n, sig)
         self.create_rectangle(x0 + width / 2, y0 + width / 2, x1 - width / 2, y0 + HEADER * s,
                               fill=hcolor, outline="", tags=tag)
         self.create_text(x0 + 8 * s, y0 + HEADER * s / 2, anchor="w", text=gm.title, fill="white",
@@ -387,13 +319,14 @@ class GraphView(tk.Canvas):
                                   fill="", tags=ptag)
             if d == "in":
                 pin = sig.input(name)
-                label = self.input_label(n, pin) if pin else name
+                label = input_label(n, pin) if pin else name
                 b = n.binding(name)
                 fill = TEXT if b is not None else DIM
                 self.create_text(sx + 2.2 * r, sy, anchor="w", text=label, fill=fill, font=fpin,
                                  tags=tag)
             else:
-                label = "" if (name == "then" and ty == "exec" and len(sig.exec_outs) == 1) else name
+                pin = sig.output(name)
+                label = output_label(sig, pin) if pin else name
                 self.create_text(sx - 2.2 * r, sy, anchor="e", text=label, fill=TEXT, font=fpin,
                                  tags=tag)
         if (self.app.graph_name, n.id) in self.app.breakpoints:

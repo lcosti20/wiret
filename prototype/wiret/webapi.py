@@ -21,9 +21,12 @@ from .explain import explain, explain_runtime
 from .parser import ParseError, Parser
 from .registry import ModuleIndex
 from .runner import format_results, format_value, run_function
+from .viewmodel import graph_json
 from .vm import VM, WiretError
 
 MAX_STEPS = 5000      # pause points kept by debug_run; the run itself carries on past them
+_REMEMBERED: dict = {}  # (graph, node) -> where the automatic layout put a node without a
+                        # place line, so it stays put while the text is edited
 
 
 def _diag(d) -> dict:
@@ -89,11 +92,19 @@ def _fault(m, err: WiretError, out: dict):
 
 
 def check(source: str) -> str:
-    """Parse and check without running: `diags` and `nodes`, as in `run`. Cheap enough to call
-    while the text is being edited."""
+    """Parse and check without running: `diags` and `nodes`, as in `run`, and `graphs`, each
+    graph as viewmodel.graph_json describes it for drawing (also when it has problems). Cheap
+    enough to call while the text is being edited."""
     out = _new_result()
-    _compile(source, out, debug=False)
-    return json.dumps({"diags": out["diags"], "nodes": out["nodes"]})
+    m = _parse(source, out)
+    graphs = []
+    if m is not None:
+        r = compile_module(m, source)
+        out["diags"] = [_diag(d) for d in r.diags]
+        idx = ModuleIndex(m)
+        graphs = [graph_json(g, GraphInfo(g, idx), idx, r.diags, _REMEMBERED, m)
+                  for g in m.graphs()]
+    return json.dumps({"diags": out["diags"], "nodes": out["nodes"], "graphs": graphs})
 
 
 def run(source: str, func: str = "Main", deterministic: bool = False,
