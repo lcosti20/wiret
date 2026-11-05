@@ -19,7 +19,7 @@ from .checker import check
 from .ids import get_id
 from .model import (Binding, Box, Const, Enum, EnumMember, ExecOut, Extern, Field, Graph, Lit,
                     Local, Module, Node, Param, PinRef, Place, Struct, Use, Var, Class,
-                    IfaceMethod, Interface)
+                    IfaceMethod, Interface, Dispatcher)
 from .parser import ParseError, parse
 from .printer import fmt_args, fmt_attr, fmt_lit, fmt_params, print_module
 from .registry import ModuleIndex, signature
@@ -103,7 +103,7 @@ def sub_fields(x) -> dict:
         out["default"] = (fmt_lit(d), d)
     if isinstance(x, EnumMember) and x.value is not None:
         out["value"] = (str(x.value), x.value)
-    if isinstance(x, IfaceMethod):         # the signature merges as one field
+    if isinstance(x, (IfaceMethod, Dispatcher)):    # the signature merges as one field
         text = fmt_params(x.params) + (" -> " + fmt_params(x.results) if x.results is not None
                                        else "")
         out["sig"] = (text, (x.params, x.results))
@@ -122,6 +122,8 @@ def build_sub(proto, fields: dict):
         x.value = fields["value"][1] if "value" in fields else None
     if isinstance(x, IfaceMethod):
         x.params, x.results = copy.deepcopy(fields["sig"][1])
+    if isinstance(x, Dispatcher):
+        x.params = copy.deepcopy(fields["sig"][1][0])
     x.attrs = [a for k, v in sorted(fields.items()) if k.startswith("attr:") for a in v[1]]
     return x
 
@@ -393,6 +395,8 @@ class Merger:
             subs.append(("fields", "field"))
         if isinstance(it, Interface):
             subs.append(("methods", "method"))
+        if isinstance(it, Class):
+            subs.append(("dispatchers", "dispatcher"))
         if isinstance(it, Enum):
             subs.append(("members", "member"))
         for attr, kind in subs:

@@ -4799,6 +4799,368 @@ func F() -> (code: i32) {
                 pass
 
 
+DELEGATES = """
+class Counter {
+  hits: i32
+
+  func Add(amount: i32) {
+    node cur = GetField hits
+      .obj <- entry.self
+    node entry = Entry
+    node set = SetField hits
+      .obj <- entry.self
+      .value <- sum.result
+    node sum = Add::<i32>
+      .a <- cur.value
+      .b <- entry.amount
+
+    flow {
+      entry -> set
+    }
+  }
+
+  event Later(amount: i32) {
+    node entry = Entry
+    node log = Call host.Log
+      .message <- "later"
+    node y = Yield
+
+    flow {
+      entry -> y
+      y -> log
+    }
+  }
+}
+
+class Player {
+  dispatcher OnHit(amount: i32)
+
+  func Hit(amount: i32) {
+    node b = Broadcast OnHit
+      .obj <- entry.self
+      .amount <- entry.amount
+    node entry = Entry
+
+    flow {
+      entry -> b
+    }
+  }
+}
+
+func Boom(amount: i32) {
+  node d = Div::<i32>
+    .a <- 1
+    .b <- 0
+  node entry = Entry
+  node log = Call host.Log
+    .message <- s.result
+  node s = Convert::<i32, string>
+    .value <- d.result
+
+  flow {
+    entry -> log
+  }
+}
+
+func Run() -> (hits: i32, twice: i32) {
+  node add = CreateDelegate Counter.Add
+    .target <- c.result
+  node b1 = Bind Player.OnHit
+    .obj <- p.result
+    .handler <- add.result
+  node b2 = Bind Player.OnHit
+    .obj <- p.result
+    .handler <- boom.result
+  node b3 = Bind Player.OnHit
+    .obj <- p.result
+    .handler <- later.result
+  node b4 = Bind Player.OnHit
+    .obj <- p.result
+    .handler <- add.result
+  node boom = CreateDelegate Boom
+  node c = New Counter
+  node entry = Entry
+  node h1 = Call Player.Hit
+    .self <- p.result
+    .amount <- 5
+  node h2 = Call Player.Hit
+    .self <- p.result
+    .amount <- 7
+  node hits = GetField Counter.hits
+    .obj <- c.result
+  node inv = Invoke::<delegate::<(i32) -> (i32)>>
+    .delegate <- tw.result
+    .arg0 <- 21
+  node later = CreateDelegate Counter.Later
+    .target <- c.result
+  node p = New Player
+  node ret = Return
+    .hits <- hits.value
+    .twice <- inv.result0
+  node tw = CreateDelegate Twice
+  node ub = Unbind Player.OnHit
+    .obj <- p.result
+    .handler <- add.result
+
+  flow {
+    b1 -> b2
+    b2 -> b3
+    b3 -> b4
+    b4 -> h1
+    c -> p
+    entry -> c
+    h1 -> ub
+    h2 -> inv
+    inv -> ret
+    p -> b1
+    ub -> h2
+  }
+}
+
+func Twice(x: i32) -> (y: i32) {
+  node entry = Entry
+  node m = Mul::<i32>
+    .a <- entry.x
+    .b <- 2
+  node ret = Return
+    .y <- m.result
+
+  flow {
+    entry -> ret
+  }
+}
+"""
+
+
+def delegates_text(extra=""):
+    return module(DELEGATES + extra, macros=False)
+
+
+class DelegateTests(unittest.TestCase):
+    """Delegates and dispatchers (sections 2.2, 3.1, 3.3, 5.3 and 5.6)."""
+
+    def run_it(self, text=None):
+        _, r = build(text or delegates_text())
+        out = []
+        vm = VM(output=out.append)
+        mod = vm.load(r.wbc)
+        return vm, mod, out, vm.call(mod, "Run", [])
+
+    def test_round_trip_and_check(self):
+        text = delegates_text()
+        self.assertEqual(print_module(parse(text)), text)
+        self.assertEqual([c for c in codes(text) if c.startswith("E")], [])
+
+    def test_bind_broadcast_unbind_and_invoke(self):
+        vm, mod, out, res = self.run_it()
+        # Add ran on the first Hit only (bound once although Bind ran twice, then unbound);
+        # Twice(21) through Invoke
+        self.assertEqual(res, [5, 42])
+
+    def test_a_faulting_handler_is_reported_and_the_rest_run(self):
+        vm, mod, out, res = self.run_it()
+        self.assertEqual([e.message for e in vm.handler_faults],
+                         ["integer divide by zero"] * 2)
+        self.assertEqual(res[0], 5)            # Add, bound before Boom, still ran
+
+    def test_an_event_handler_starts_on_its_own_fiber(self):
+        vm, mod, out, res = self.run_it()
+        self.assertEqual([f.name for f in vm.fibers], ["t.Counter.Later"] * 2)
+        self.assertEqual(out, [])
+        vm.advance(0.0)                         # each yields once
+        vm.advance(0.0)
+        self.assertEqual(out, ["later", "later"])
+
+    def test_a_method_delegate_calls_the_override(self):
+        text = delegates_text("""
+class Loud : Counter {
+  func Add(amount: i32) {
+    node entry = Entry
+    node log = Call host.Log
+      .message <- "loud"
+
+    flow {
+      entry -> log
+    }
+  }
+}
+
+func Over() {
+  node d = CreateDelegate Counter.Add
+    .target <- l.result
+  node entry = Entry
+  node inv = Invoke::<delegate::<(i32)>>
+    .delegate <- d.result
+    .arg0 <- 1
+  node l = New Loud
+
+  flow {
+    entry -> l
+    l -> inv
+  }
+}
+""")
+        _, r = build(text)
+        out = []
+        vm = VM(output=out.append)
+        vm.call(vm.load(r.wbc), "Over", [])
+        self.assertEqual(out, ["loud"])
+
+    def test_null_delegate_and_null_object_fault(self):
+        text = delegates_text("""
+func NullInvoke() -> (code: i32) {
+  node caught = Return
+    .code <- t.code
+  node entry = Entry
+  node inv = Invoke::<delegate::<(i32) -> (i32)>>
+    .delegate <- null
+  node ok = Return
+    .code <- 0
+  node t = Try
+
+  flow {
+    entry -> t
+    inv -> ok
+    t.body -> inv
+    t.fault -> caught
+  }
+}
+""")
+        self.assertEqual(run(text, "NullInvoke")[0], [-3])
+
+    def test_host_delegate_and_broadcast(self):
+        _, r = build(delegates_text())
+        vm = VM(output=lambda s: None)
+        mod = vm.load(r.wbc)
+        p, c = vm.new(mod, "Player"), vm.new(mod, "Counter")
+        p.get("OnHit").handlers.append(vm.delegate(mod, "Counter.Add", c))
+        vm.broadcast(mod, p, "OnHit", [3])
+        vm.broadcast(mod, p, "OnHit", [4])
+        self.assertEqual(c.get("hits"), 7)
+        self.assertEqual(vm.call(mod, "Twice", [5]), [10])
+
+    def test_type_rules(self):
+        text = delegates_text("""
+func Bad() {
+  node d = CreateDelegate Twice
+  node entry = Entry
+  node eq = Eq::<delegate::<(i32) -> (i32)>>
+    .a <- d.result
+    .b <- d.result
+  node p = New Player
+  node wrong = Bind Player.OnHit
+    .obj <- p.result
+    .handler <- d.result
+
+  flow {
+    entry -> p
+    p -> wrong
+  }
+}
+
+func Waits() @latent {
+  node d = Delay
+    .seconds <- 1.0
+  node entry = Entry
+
+  flow {
+    entry -> d
+  }
+}
+
+func BindsLatent() {
+  node d = CreateDelegate Waits
+  node entry = Entry
+}
+
+func Native() {
+  node d = CreateDelegate host.Log
+  node entry = Entry
+}
+
+struct Holder {
+  d: dispatcher::<(i32)>
+}
+""")
+        diags = sorted((d.graph, d.code) for d in check(parse(text)) if d.code.startswith("E"))
+        self.assertEqual(diags, [("Bad", "E0110"), ("Bad", "E0110"), ("BindsLatent", "E0501"),
+                                 ("Holder", "E0501"), ("Native", "E0501")])
+
+    def test_dispatcher_members_and_purity(self):
+        text = delegates_text("""
+class Twin {
+  hit: i32
+  dispatcher hit(x: i32)
+}
+
+func P(p: Player) @pure {
+  node b = Broadcast Player.OnHit
+    .obj <- entry.p
+    .amount <- 1
+  node entry = Entry
+
+  flow {
+    entry -> b
+  }
+}
+""")
+        c = codes(text)
+        self.assertIn("E0102", c)
+        self.assertIn("E0302", c)
+
+    def test_delegate_types_written_with_empty_results_are_the_short_form(self):
+        m = parse(module("""
+func F(d: delegate::<(i32) -> ()>) {
+  node entry = Entry
+}
+""", macros=False))
+        self.assertEqual(m.graph("F").params[0].type, "delegate::<(i32)>")
+
+    def test_ids_name_dispatchers(self):
+        from wiret.ids import assign_ids
+        m = parse(delegates_text())
+        assign_ids(m, rng=random.Random(4))
+        self.assertIn('dispatcher OnHit(amount: i32) @id("dsp_', print_module(m))
+
+    def test_verifier_rules(self):
+        _, r = build(delegates_text())
+
+        def mutate(fn):
+            m = wbc.decode_module(r.wbc)
+            fn(m)
+            with self.assertRaises(WiretError) as cm:
+                VM().load(wbc.encode_module(m))
+            return cm.exception.status
+
+        def bad_flags(m):
+            m.bodies[-1].code = bytes([0xF4, 0x00, 0x04, 0x10, 0x05])
+        def receiver_without_bind(m):        # flag 2 needs flag 1
+            m.bodies[-1].code = bytes([0xF4, 0x00, 0x02, 0x10, 0x05])
+        def bind_an_i32(m):
+            t = next(i for i, x in enumerate(m.types) if isinstance(x, wbc.DispatcherType))
+            m.bodies[-1].code = bytes([0x25, 0, 0x20, 0x00, 0xF5, t, 0x05])
+        for fn in (bad_flags, receiver_without_bind, bind_an_i32):
+            with self.subTest(fn.__name__):
+                self.assertEqual(mutate(fn), "WR_ERR_VERIFY")
+
+    def test_fuzzed_delegate_modules_never_crash(self):
+        _, r = build(delegates_text())
+        rng = random.Random(7070)
+        data = bytes(r.wbc)
+        for _ in range(800):
+            d = bytearray(data)
+            for _ in range(rng.randint(1, 4)):
+                d[rng.randrange(len(d))] = rng.randrange(256)
+            vm = VM(output=lambda _s: None, fuel=20_000)
+            try:
+                mod = vm.load(bytes(d))
+                if "Run" in mod.exports:
+                    vm.call(mod, "Run", [])
+                    vm.advance(0.0)
+            except WiretError:
+                pass
+
+
 class BytecodeTests(unittest.TestCase):
     def test_disassembly_names_nodes(self):
         _, r = build(demo())

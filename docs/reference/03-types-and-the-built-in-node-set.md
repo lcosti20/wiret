@@ -107,10 +107,10 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 | Kind | Pins | Behaviour |
 | --- | --- | --- |
 | `Call` | symbol: function, method or extern; its parameters and results | Pure node if the callee is `@pure`, `@reads`, or a native flagged effect-free; otherwise impure. A method call has `self` as its first input; dispatch is virtual unless `@final`, and via the interface when the symbol names an interface method. |
-| `CreateDelegate` | pure; symbol: function; optional `target`; out `result` | Binds a function (and receiver) into a delegate. |
-| `Invoke::<D>` | `D` is a delegate type; in `delegate` plus the arguments | Impure. |
-| `Bind`, `Unbind` | symbol: dispatcher; in `obj`, `handler: delegate` | Impure. |
-| `Broadcast` | symbol: dispatcher; in `obj` plus the arguments | Impure. Handlers run in bind order. A fault in one handler is reported to the host and does not stop the others. |
+| `CreateDelegate` | pure; symbol: function, method or event; in `target` for a method; out `result` | Binds a function (and receiver) into a delegate, whose type is the function's signature without the receiver. A method delegate calls the target's own override. A `@latent` func, a native or an extern cannot be bound (`E0501`); an event can (see `Invoke`). |
+| `Invoke::<D>` | `D` is a delegate type; in `delegate`, `arg0`, `arg1`, ...; out `result0`, ... | Impure. Never suspends: a delegate of an event starts it on a new fiber, queued for the next `wr_advance`. A null delegate faults. |
+| `Bind`, `Unbind` | symbol: dispatcher (bare in its class's methods, else `Class.Name`); in `obj`, `handler: delegate` | Impure. Binding a handler that is already bound (same function and receiver) does nothing; `Unbind` removes it. |
+| `Broadcast` | symbol: dispatcher; in `obj` plus the arguments, named as in the dispatcher | Impure. Handlers bound when the broadcast starts run in bind order; an event handler starts on a new fiber. A fault in one handler is reported to the host and does not stop the others. |
 
 ### 3.4 The standard library
 

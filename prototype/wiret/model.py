@@ -325,12 +325,31 @@ class Class:
     attrs: list = field(default_factory=list)
     meta: list = field(default_factory=list)
     impls: list = field(default_factory=list)      # interface names after `impl`
+    dispatchers: list = field(default_factory=list)  # [Dispatcher], in the order written
 
     def field(self, name: str) -> Optional[Field]:
         for f in self.fields:
             if f.name == name:
                 return f
         return None
+
+
+@dataclass
+class Dispatcher:
+    """`dispatcher Name(params) @attrs` in a class: a multicast event slot on each object
+    (section 2.2), of type `dispatcher::<(param types)>`."""
+    name: str
+    params: list = field(default_factory=list)     # [Param]
+    attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
+    results = None                                 # a dispatcher returns nothing
+
+    @property
+    def result_list(self) -> list:
+        return []
+
+    def has_attr(self, name: str) -> bool:
+        return any(a.name == name for a in self.attrs)
 
 
 @dataclass

@@ -145,6 +145,9 @@ def check(module: Module, comments_ok=False, project=None) -> list:
 
 
 def unknown_type_message(ty: str, module_name: str) -> str:
+    if "dispatcher::<" in ty:
+        return (f"type '{ty}': a dispatcher is declared as a class member, "
+                f"'dispatcher OnDied(amount: i32)', and is not a type you can store")
     if any(h in ty for h in HANDLE_TYPES) and ty not in HANDLE_TYPES:
         return (f"type '{ty}': a signal can be a parameter, result, local, state or variable, "
                 f"but not a struct field or an item in an array, map or set")
@@ -270,13 +273,23 @@ def check_classes(module: Module, idx: ModuleIndex, D):
         check_implementations(c, idx, D)
         inherited = {f.name: owner for owner, f in idx.class_fields(c.base)} if c.base else {}
         seen = set()
-        for f in c.fields:
+        for d in c.dispatchers:
+            for p in d.params:
+                if p.type == "exec" or not handle_ok(p.type, idx):
+                    D("E0501", unknown_type_message(p.type, module.name), c.name, pin=d.name,
+                      type=p.type)
+        if c.base:
+            inherited.update({d.name: owner for owner in idx.class_chain(c.base)
+                              for d in idx.classes[owner].dispatchers})
+        for f in list(c.fields) + list(c.dispatchers):
             if f.name in seen:
-                D("E0102", f"duplicate field '{f.name}' in class '{c.name}'", c.name, pin=f.name)
+                D("E0102", f"duplicate member '{f.name}' in class '{c.name}'", c.name, pin=f.name)
             elif f.name in inherited:
                 D("E0102", f"field '{f.name}' of class '{c.name}' is already declared by "
                            f"'{inherited[f.name]}'", c.name, pin=f.name)
             seen.add(f.name)
+            if not hasattr(f, "type"):           # a dispatcher: checked above
+                continue
             if f.type == "exec" or not type_ok(f.type, idx):
                 D("E0501", unknown_type_message(f.type, module.name), c.name, pin=f.name,
                   type=f.type)
@@ -491,6 +504,9 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
             if n.kind in ("SetVar", "SetState"):
                 D("E0302", f"{attr} function writes {'a variable' if n.kind == 'SetVar' else 'state'}",
                   G, n.id)
+            if n.kind in ("Bind", "Unbind", "Broadcast", "Invoke"):
+                D("E0302", f"{attr} function uses {n.kind}, which changes objects or runs "
+                           f"code it cannot check", G, n.id)
             if n.kind == "SetField" and not sig.error:
                 D("E0302", f"{attr} function writes the field '{n.symbol}'", G, n.id)
             if n.kind == "New":

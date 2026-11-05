@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from .model import (Attr, Binding, Box, Class, Comment, IfaceMethod, Interface, Const, Enum, EnumMember, ExecOut, Extern,
+from .model import (Attr, Binding, Box, Class, Comment, Dispatcher, IfaceMethod, Interface, Const, Enum, EnumMember, ExecOut, Extern,
                     Field, Graph, Lit, Local, Module, Node, Param, PinRef, Place, Struct, Use,
                     Var)
 
@@ -342,7 +342,16 @@ class Parser:
                 self.skip_nl()
                 continue
             if self.at_kw("dispatcher"):
-                self.error("dispatchers are not supported by this prototype yet")
+                self.next()
+                d = Dispatcher(self.ident("dispatcher name"), meta=meta)
+                d.params = self.params()
+                if self.at_p("->"):
+                    self.error("a dispatcher has no results: its handlers' results would have "
+                               "nowhere to go")
+                d.attrs = self.attrs()
+                c.dispatchers.append(d)
+                self.end_stmt()
+                continue
             if self.at_kw("macro"):
                 self.error("a class cannot declare a macro; declare it at module level")
             if not self.at("id"):
@@ -501,6 +510,8 @@ class Parser:
             if self.at_p("->"):
                 self.next()
                 r = " -> " + self.tlist()
+                if r == " -> ()":            # no results: written the short way
+                    r = ""
             self.expect_p(">")
             return f"{name}::<{a}{r}>"
         self.error(f"'{name}' takes no type arguments")

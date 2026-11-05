@@ -19,7 +19,8 @@ from .checker import Diag, check, has_errors
 from .model import Const, Extern, Graph, Lit, Module, Node, PinRef, Var
 from .natives import INTERNAL, STD
 from .printer import layout_hash, print_module, semantic_hash
-from .registry import (class_field_target, ARRAY_MUTATORS, FLOAT_TYPES, INT_TYPES, MAP_PURE, PLACE_MUTATORS,
+from .registry import (class_field_target, delegate_sig, dispatcher_params, dispatcher_target,
+                       ARRAY_MUTATORS, FLOAT_TYPES, INT_TYPES, MAP_PURE, PLACE_MUTATORS,
                        REGISTRY_NAME, REGISTRY_VERSION, SET_PURE,
                        SIGNED_TYPES, ModuleIndex, Pin, Sig, array_elem, attr_int, enum_values,
                        is_container, map_types, set_elem, signature, zero_lit)
@@ -148,6 +149,12 @@ class Compiler:
             return wbc.Ref(self.class_type(ty))
         if ty in self.idx.interfaces:
             return wbc.Ref(self.interface_type(ty))
+        sig = delegate_sig(ty)
+        if sig is not None:
+            return wbc.Ref(self.callable_type("delegate", sig[0], sig[1]))
+        params = dispatcher_params(ty)
+        if params is not None:
+            return wbc.Ref(self.callable_type("dispatcher", params, []))
         return VT[self.base(ty)]
 
     def base(self, ty: str) -> str:
@@ -188,7 +195,20 @@ class Compiler:
                         f.default.kind != "null":
                     default = self.const_value(f.default, f.type)
                 fields.append((vt, default))
+            for d in c.dispatchers:             # after the fields: one dispatcher per object
+                fields.append((self.vt(f"dispatcher::<({', '.join(p.type for p in d.params)})>"),
+                               None))
             self.types[self.type_keys[key]] = wbc.ClassType(sup, tuple(fields), ())
+        return self.type_keys[key]
+
+    def callable_type(self, kind: str, params: list, results: list) -> int:
+        """Index of a `59` delegate or `58` dispatcher entry for a signature."""
+        key = (kind, tuple(params), tuple(results))
+        if key not in self.type_keys:
+            ft = self.func_type([self.vt(t) for t in params], [self.vt(t) for t in results])
+            self.type_keys[key] = len(self.types)
+            self.types.append(wbc.DelegateType(ft) if kind == "delegate"
+                              else wbc.DispatcherType(ft))
         return self.type_keys[key]
 
     def interface_type(self, name: str) -> int:
@@ -218,7 +238,7 @@ class Compiler:
         return out
 
     def class_field_index(self, cls: str, fname: str) -> int:
-        return [f.name for _, f in self.idx.class_fields(cls)].index(fname)
+        return [name for name, _ in self.idx.class_layout(cls)].index(fname)
 
     def field_index(self, struct: str, field_name: str) -> int:
         return [f.name for f in self.idx.structs[struct].fields].index(field_name)
@@ -420,10 +440,10 @@ class Compiler:
         for ti, name in classes:
             w.u32(ti)
             w.name(name)
-            fields = self.idx.class_fields(name) if name in self.idx.classes else []
+            fields = self.idx.class_layout(name) if name in self.idx.classes else []
             w.u32(len(fields))
-            for _, f in fields:
-                w.name(f.name)
+            for fname, _ in fields:
+                w.name(fname)
         out.append(("name", bytes(w.b)))
 
         w = wbc.Writer()
@@ -662,6 +682,26 @@ class FuncLowerer:
                     names = [s for s, _ in self.c.slots(callee.method_of)]
                     ir.extra["virtual"] = (self.c.class_type(callee.method_of),
                                            names.index(short))
+            elif n.kind == "CreateDelegate":
+                callee = self.c.idx.callee(n.symbol)
+                virtual = bool(callee.method_of) and not callee.final
+                ir.extra["delegate"] = (("func", callee.name),
+                                        (1 if callee.method_of else 0) | (2 if virtual else 0))
+                self.c.vt(sig.outputs[0].type)     # the delegate type entry delegate.new needs
+            elif n.kind == "Invoke":
+                ds = delegate_sig(n.targs[0])
+                ir.extra["functype"] = self.c.func_type([self.c.vt(t) for t in ds[0]],
+                                                        [self.c.vt(t) for t in ds[1]])
+                self.c.vt(n.targs[0])
+            elif n.kind in ("Bind", "Unbind", "Broadcast"):
+                cls, name = dispatcher_target(n, ctx.graph, self.c.idx)
+                d = self.c.idx.class_dispatcher(cls, name)[1]
+                dtype = f"dispatcher::<({', '.join(p.type for p in d.params)})>"
+                ir.extra["dispatcher"] = (self.c.class_type(cls),
+                                          self.c.class_field_index(cls, name),
+                                          self.c.vt(dtype).type)
+                if n.kind != "Broadcast":
+                    self.c.vt(sig.inputs[2].type)  # the handler's delegate type
             elif n.kind in ("GetField", "SetField") and sig.category == "Classes":
                 cls, fname = class_field_target(n, ctx.graph, self.c.idx)
                 ir.extra["class_field"] = (self.c.class_type(cls),
@@ -797,7 +837,8 @@ class FuncLowerer:
         if self.c.debug:   # every impure output gets a slot, read or not
             for nid in sorted(self.ir):
                 n = self.ir[nid]
-                if not n.pure and (n.kind in ("Call", "Try", "New") or n.kind in PLACE_MUTATORS):
+                if not n.pure and (n.kind in ("Call", "Try", "New", "Invoke")
+                                   or n.kind in PLACE_MUTATORS):
                     for p in n.data_outs:
                         key = (nid, p.name)
                         if key not in self.slots:
@@ -929,6 +970,30 @@ class FuncLowerer:
             # instruction with its continuation stack intact (section 4.5)
             self.emit_inputs(n)
             self.E("suspend", {"Yield": 0, "Delay": 1, "Await": 2}[k])
+            self.transfer(then, nxt)
+        elif k == "Invoke":
+            self.emit_inputs(n)                    # the delegate, then its arguments
+            self.E("call_delegate", n.extra["functype"])
+            for p in reversed(n.sig.data_outs):
+                slot = self.slots.get((n.id, p.name))
+                if slot is None:
+                    self.E("drop")
+                else:
+                    self.E("local.set", slot)
+            self.transfer(then, nxt)
+        elif k in ("Bind", "Unbind", "Broadcast"):
+            # obj, then its dispatcher (a hidden slot), then the handler or the arguments
+            cls_t, slot, disp_t = n.extra["dispatcher"]
+            ep = EvalPoint()
+            for _, _, s in n.inputs:
+                self.count(s, ep)
+            self.eval(n.inputs[0][2], ep)
+            self.E("class.get", cls_t, slot)
+            for _, _, s in n.inputs[1:]:
+                self.eval(s, ep)
+            self.ready(n)
+            self.E({"Bind": "dispatcher.bind", "Unbind": "dispatcher.unbind",
+                    "Broadcast": "dispatcher.broadcast"}[k], disp_t)
             self.transfer(then, nxt)
         elif k == "New":
             self.ready(n)
@@ -1070,8 +1135,8 @@ class FuncLowerer:
         if ty == "std.Signal":        # no literal: the null signal, a local never assigned
             self.E("local.get", self.add_local("$null.signal", ty))
             return
-        if ty == "anyref":
-            self.E("local.get", self.add_local("$null.anyref", ty))
+        if ty == "anyref" or delegate_sig(ty) is not None:   # null: a local never assigned
+            self.E("local.get", self.add_local(f"$null.{ty}", ty))
             return
         if ty in self.c.idx.classes or ty in self.c.idx.interfaces:   # the only literal is null
             self.E("ref.null", self.c.vt(ty).type)
@@ -1227,6 +1292,11 @@ class FuncLowerer:
         if k == "IsValid":
             self.eval(n.inputs[0][2], ep)
             self.E("ref.valid")
+            return
+        if k == "CreateDelegate":
+            for _, _, s in n.inputs:               # the target, for a method
+                self.eval(s, ep)
+            self.E("delegate.new", *n.extra["delegate"])
             return
         if k == "Cast":
             # result is obj when it is an instance of the class, else null; ok says which.
@@ -1442,6 +1512,8 @@ class FuncLowerer:
             return (pcs[imms[0]] - end, imms[1]) if final else (0, imms[1])
         if op == "call":
             return (self.c.func_index(imms[0]),)
+        if op == "delegate.new":
+            return (self.c.func_index(imms[0]), imms[1])
         return imms
 
 

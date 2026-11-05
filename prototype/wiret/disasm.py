@@ -77,6 +77,11 @@ def disassemble(data: bytes) -> str:
                 if slot < len(vt):
                     comment = f"{classes.get(t, ('class ' + str(t),))[0]} slot {slot}: " \
                               f"{names.get(vt[slot], vt[slot])}"
+            elif ins.name == "delegate.new":
+                f, fl = ins.imms
+                text += f" {f} {fl}"
+                comment = str(names.get(f, f)) + (" + receiver" if fl & 1 else "") + \
+                    (", its override" if fl & 2 else "")
             elif ins.name == "call_interface":
                 t, k = ins.imms
                 text += f" {t} {k}"

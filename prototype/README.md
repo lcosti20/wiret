@@ -187,9 +187,9 @@ The editor also follows the graph-editor contract in section 7.5:
 
 | Area | Status |
 | --- | --- |
-| Text syntax (2.1–2.4) | Full lexer and parser for `use`, `extern`, `const`, `var`, `enum`, `struct`, `class` (with methods, a base class and `impl`), `interface`, `func`, `event`, `macro`, `local`, `state`, nodes, bindings, semantic `@` attributes, `#[...]` metadata lines (`#[doc]`, `#[note]`, ...) above declarations, nodes and boxes, the `flow` block (exec wires) and `layout` (places and boxes). An old `markup` block is rejected with a hint, and an unknown `@` name such as `@doc` is `E0104`. See *Structs and enums* and *Classes* below. `dispatcher` is rejected with a clear error. |
+| Text syntax (2.1–2.4) | Full lexer and parser for `use`, `extern`, `const`, `var`, `enum`, `struct`, `class` (with methods, dispatchers, a base class and `impl`), `interface`, `func`, `event`, `macro`, `local`, `state`, nodes, bindings, semantic `@` attributes, `#[...]` metadata lines (`#[doc]`, `#[note]`, ...) above declarations, nodes and boxes, the `flow` block (exec wires) and `layout` (places and boxes). An old `markup` block is rejected with a hint, and an unknown `@` name such as `@doc` is `E0104`. See *Structs and enums*, *Classes*, *Interfaces* and *Delegates and dispatchers* below. |
 | Canonical form and hashes (2.5) | Sorted items (struct fields and enum members keep the order written), nodes, `flow` wires (by source node id, then exec pin order) and layout lines, each with its metadata lines above it (`doc`, `category`, `keywords`, then notes as written); registry pin order; default-valued bindings omitted; 100-column wrapping; attribute ordering. Semantic hash (ignores layout, every `#[...]` line and `Reroute`) and layout hash. |
-| Node kinds (3.3) | `Entry`, `Return`, `Branch`, `Sequence`, `Switch`, `Select`, `Macro`, `Exit`, `Reroute`, `Get/SetLocal`, `Get/SetVar` (and `const`s), `Get/SetState`, `Call`, `Convert`, all arithmetic, comparison, logic and bit kinds, and the array kinds `MakeArray`, `ArrayGet`, `ArrayLength`, `ArraySet`, `ArrayAdd`, `ArrayInsert`, `ArrayRemove`, `ArrayClear`, the struct kinds, the map and set kinds (see *Maps and sets* below), `Try` and `Throw` (see *Faults* below), the latent kinds `Delay`, `Yield` and `Await` (see *Fibers* below), and the class kinds `New`, `GetField`/`SetField` on objects, `Cast` and `IsValid` (see *Classes* below). Types: `bool`, all integer widths, `f32`, `f64`, `string`, `array::<T>`, `map::<K, V>`, `set::<T>`, structs, enums, classes, interfaces and `std.Signal`. |
+| Node kinds (3.3) | `Entry`, `Return`, `Branch`, `Sequence`, `Switch`, `Select`, `Macro`, `Exit`, `Reroute`, `Get/SetLocal`, `Get/SetVar` (and `const`s), `Get/SetState`, `Call`, `Convert`, all arithmetic, comparison, logic and bit kinds, and the array kinds `MakeArray`, `ArrayGet`, `ArrayLength`, `ArraySet`, `ArrayAdd`, `ArrayInsert`, `ArrayRemove`, `ArrayClear`, the struct kinds, the map and set kinds (see *Maps and sets* below), `Try` and `Throw` (see *Faults* below), the latent kinds `Delay`, `Yield` and `Await` (see *Fibers* below), the class kinds `New`, `GetField`/`SetField` on objects, `Cast` and `IsValid` (see *Classes* below), and `CreateDelegate`, `Invoke`, `Bind`, `Unbind` and `Broadcast` (see *Delegates and dispatchers* below). Types: `bool`, all integer widths, `f32`, `f64`, `string`, `array::<T>`, `map::<K, V>`, `set::<T>`, structs, enums, classes, interfaces, `delegate::<(A) -> (R)>` and `std.Signal`. |
 | Execution model (4.2–4.3) | Continuation stack, `Sequence` push/pop, macro inlining with path-style ids (`loop/test`, `loop!in`), `Exit` as a jump, joins, evaluation points with per-point sharing, impure output slots, `@pure` and `@reads` calls as pure nodes, per-expansion `state`. The §4.2 `SumTo(2)` trace is reproduced exactly (see tests). |
 | Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0150, E0151, E0152, E0201 (latency), E0301, E0302, E0304, E0401, E0412, E0501, E0502, E0503, W0201, W0301, W0302, W0310, W0320, W0601, W0602, W0603, W0604. |
 | Lowering (4.8) | `-O0`: one labelled block per impure node, `local.tee` for shared values, `cont.push`/`cont.pop` kept. Output closely matches the §5.8 listings. |
@@ -489,6 +489,55 @@ class Door : Prop impl Damageable, Openable { ... }
   `@id` prefixes are `cls_` for classes, `if_` for interfaces and `im_` for interface methods.
   Merge treats interface methods as keyed members, with the signature as one field.
 
+### Delegates and dispatchers
+
+The last Tier 2 language item (sections 2.2, 3.1, 3.3, 5.3 and 5.6).
+
+```
+class Player {
+  dispatcher OnHit(amount: i32)
+  ...
+}
+
+node handler = CreateDelegate Counter.Add     // a method: its object is the target
+  .target <- counter.result
+node bind = Bind Player.OnHit
+  .obj <- player.result
+  .handler <- handler.result
+node fire = Broadcast OnHit                   // bare name inside Player's own methods
+  .obj <- entry.self
+  .amount <- 5
+```
+
+- **Delegates.** `delegate::<(i32) -> (bool)>` is a reference type: a function plus, for a
+  method, the object it was made with. `CreateDelegate F` (pure) takes no inputs for a free
+  function and `target` for a method; its type follows from the function's signature, without
+  the receiver. A method delegate calls the target's own override, as a method call does.
+  `Invoke::<D>` has the inputs `delegate`, `arg0`, `arg1`, ... and the outputs `result0`, ...;
+  a null delegate faults with -3. Delegates have no `Eq`. A written `-> ()` is dropped, so
+  `delegate::<(i32) -> ()>` and `delegate::<(i32)>` are the same type.
+- **Waiting.** Invoking never suspends the caller. A delegate of an event starts the event on
+  a fiber of its own, queued for the next `advance`; a `@latent` func cannot be made a
+  delegate (`E0501`), nor can a native or extern.
+- **Dispatchers.** `dispatcher OnHit(amount: i32)` is a class member: every object gets an
+  empty handler list of its own. `Bind` and `Unbind` take `obj` and a
+  `handler: delegate::<(i32)>`; `Broadcast` takes `obj` and the dispatcher's parameters by
+  name. Binding a handler that is already bound (the same function and object) does nothing,
+  so a `Bind` that runs twice adds it once; `Unbind` removes it. A broadcast runs the handlers
+  bound when it starts, in bind order. A handler's fault does not stop the others: it is
+  added to `vm.handler_faults` and passed to `vm.on_handler_fault`. Running out of fuel still
+  stops everything. `Bind`, `Unbind`, `Broadcast` and `Invoke` are not allowed in `@pure` or
+  `@reads` functions (`E0302`). A dispatcher's name is unique among the class's members.
+- **Order and layout.** Inside a class: fields, then dispatchers (both as written), then
+  methods. In the object, each class's dispatchers follow its fields.
+- **Bytecode.** The `59` delegate and `58` dispatcher type entries, and `delegate.new`
+  (`F4 func flags`: bit 0 binds a receiver, bit 1, new here, binds the receiver's override),
+  `call_delegate` (`09`, a function type), and `dispatcher.bind`, `.unbind` and `.broadcast`
+  (`F5` to `F7`) on the dispatcher a `class.get` reads from the object. `delegate.new` names no
+  type, so the verifier finds the module's delegate type for the function's signature.
+- **Host.** `vm.delegate(mod, "Counter.Add", obj)`, `obj.get("OnHit").handlers`, and
+  `vm.broadcast(mod, obj, "OnHit", [args])`.
+
 ### Identity and the id registry
 
 A **project** is a directory with a `wiret.toml` (section 7.3); its `wiret.ids` lists every
@@ -561,9 +610,10 @@ pins for results, and flow wires for a macro's exec parameters and results.
 
 - **Exports.** Every `func` and `event` is exported, so the editor can run any of them. The
   spec exports only `@export` declarations.
-- **The rest of Tier 2 is not implemented:** delegates and dispatchers. A `dispatcher` is a
-  parse error, their node kinds are `E0501`, and their opcodes are rejected by the verifier.
-  `Try`, `Throw`, fibers, classes and interfaces are done (see above). The
+- **Tier 2, what is left:** the language half is done (`Try`/`Throw`, fibers, classes,
+  interfaces, delegates and dispatchers). Not yet: copy-on-write containers (`ref.share` is
+  still rejected; containers are copied eagerly), capabilities, the C API, debugger hooks
+  beyond the editor's, and the project manager and lockfile. The
   editor's debugger steps through one fiber, the one Run started.
 - **Classes, not yet:** `state` in a method (it would live on the object; `E0501`, including
   a macro with state expanded in a method), calling a base class's version of an overridden
