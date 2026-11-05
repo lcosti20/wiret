@@ -142,3 +142,35 @@ def format_results(m: Optional[Module], func: str, values: list) -> str:
     idx = ModuleIndex(m)
     return ", ".join(f"{r.name} = {format_value(r.type, v, idx)}"
                      for r, v in zip(g.result_list, values))
+
+
+MAX_ADVANCES = 100_000
+
+
+def run_function(vm, lm, func: str, args: list) -> list:
+    """Call `func` and return its results. A latent function or event runs as a fiber (section
+    4.5): idle virtual time is skipped, each wait jumping straight to the next timer, so a
+    `Delay` of five seconds finishes at once. Stops with WR_YIELD if it waits for a signal
+    that nothing can fire any more."""
+    from .vm import (FIBER_DONE, FIBER_FAULTED, FIBER_READY, STATUS_FUEL, STATUS_YIELD,
+                     WiretError)
+    from .wbc import FN_LATENT
+    f = lm.funcs[lm.exports[func]] if func in lm.exports else None
+    if f is None or not f.flags & FN_LATENT:
+        return vm.call(lm, func, args)
+    fb = vm.start(lm, func, args, now=True)
+    for _ in range(MAX_ADVANCES):
+        if fb.status == FIBER_DONE:
+            return fb.results
+        if fb.status == FIBER_FAULTED:
+            raise fb.error
+        nxt = vm.next_wake()
+        if any(x.status == FIBER_READY for x in vm.fibers):
+            vm.advance(0.0)
+        elif nxt is not None:
+            vm.advance(max(nxt - vm.time, 0.0))
+        else:
+            raise WiretError(STATUS_YIELD, f"'{func}' is waiting for a signal that nothing will "
+                                           f"fire")
+    raise WiretError(STATUS_FUEL, f"'{func}' was still running after {MAX_ADVANCES} steps of "
+                                  f"virtual time")

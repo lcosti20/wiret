@@ -100,7 +100,9 @@ def explain(d: Diag) -> str:
         return (f"Exec output {here} goes to two places. An exec output can only lead to one next "
                 f"step. To do several things in order, use a Sequence node.")
     if c == "E0201":
-        return "Calling events isn't supported yet in this prototype."
+        return ("This node waits (Delay, Yield, Await, or a call to something that waits), so the "
+                "function it is in can pause partway. Mark the function with @latent to say so; "
+                "then whatever calls it must be @latent too, or be an event.")
     if c == "E0301":
         return ("These calculations depend on each other in a circle, so none of them can be worked "
                 "out first. Break the circle, for example by storing a value in a local variable.")
@@ -241,6 +243,9 @@ def explain_runtime(status: str, message: str, where: str = "") -> str:
     if status == "WR_ERR_FUEL":
         return ("The program ran for too long and was stopped. This usually means a loop never "
                 "ends: check that the loop's condition can become false.")
+    if status == "WR_YIELD":
+        return (f"The program is waiting{loc} for a signal, and nothing is left running that "
+                f"could fire it, so it can never carry on. {message}")
     if status == "WR_ERR_INTERRUPT":
         return "You stopped the program."
     if status == "WR_ERR_LINK":

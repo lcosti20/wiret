@@ -1,14 +1,16 @@
 """Single-pass bytecode verifier (spec section 5.5)."""
 from __future__ import annotations
 
-from .wbc import (ANYREF, F32, F64, FAULT, FN_LATENT, FN_PURE, I32, I64, STRING, ArrayType, MapType,
+from .wbc import (ANYREF, F32, F64, FAULT, FN_LATENT, SIGNAL, FN_PURE, I32, I64, STRING, ArrayType, MapType,
                   Ref,
                   SetType, StructType, WbcError, WbcModule, decode_code, vt_name)
 
 REF_TYPES = (ArrayType, StructType, MapType, SetType)
 
 VALTYPES = {I32, I64, F32, F64, STRING}
-LOCAL_TYPES = VALTYPES | {FAULT}     # a `fault` lives in a local that `try.push` names
+# Types allowed in locals, globals and function types but not in struct fields or containers:
+# a fault (the local `try.push` names) and a signal (section 4.5).
+HANDLE_TYPES = {FAULT, SIGNAL}
 _PREFIX = {"i32": I32, "i64": I64, "f32": F32, "f64": F64}
 _INT_CMP = {"eq", "ne", "lt_s", "lt_u", "gt_s", "gt_u", "le_s", "le_u", "ge_s", "ge_u"}
 _INT_BIN = {"add", "sub", "mul", "div_s", "div_u", "rem_s", "rem_u", "and", "or", "xor", "shl",
@@ -122,7 +124,7 @@ def verify(m: WbcModule) -> list:
             # a function type may also use anyref, which a native such as std.array.Equals
             # takes so that one signature serves every container type (section 4.9)
             # and fault, which std.fault.Make, Message and Code take and return (section 4.6)
-            vts = [vt for vt in entry[0] + entry[1] if vt not in (ANYREF, FAULT)]
+            vts = [vt for vt in entry[0] + entry[1] if vt not in (ANYREF, FAULT, SIGNAL)]
         for vt in vts:
             if not valid_vt(m, vt):
                 raise VerifyError(f"type {i} uses an unsupported value type")
@@ -156,7 +158,7 @@ def verify(m: WbcModule) -> list:
         if kind not in (0, 1):
             raise VerifyError(f"export '{name}' has unsupported kind {kind}")
     for gi, (vt, mut, init) in enumerate(m.globals):
-        if not valid_vt(m, vt):
+        if vt != SIGNAL and not valid_vt(m, vt):
             raise VerifyError(f"global {gi} has unsupported type")
         if vt == STRING and init >= len(m.data):
             raise VerifyError(f"global {gi} initialiser names missing data {init}")
@@ -168,7 +170,7 @@ def verify_function(m: WbcModule, i: int):
     params, results, flags = m.func_type(fidx)
     body = m.bodies[i]
     for vt in body.locals:
-        if vt != FAULT and not valid_vt(m, vt):
+        if vt not in HANDLE_TYPES and not valid_vt(m, vt):
             raise VerifyError("local of unsupported type", fidx)
     local_types = list(params) + list(body.locals)
     try:
@@ -254,6 +256,16 @@ def verify_function(m: WbcModule, i: int):
             li = ins.imms[1]
             if li >= len(local_types) or local_types[li] != FAULT:
                 raise VerifyError("try.push must name a local of type fault", fidx, ins.pc)
+        elif n == "suspend":
+            kind = ins.imms[0]
+            if not flags & FN_LATENT:
+                raise VerifyError("suspend in a function that is not latent", fidx, ins.pc)
+            if kind > 2:
+                raise VerifyError(f"suspend kind {kind} is not 0, 1 or 2", fidx, ins.pc)
+            if kind:
+                pop(F64 if kind == 1 else SIGNAL, ins)
+            if stack:
+                raise VerifyError("suspend with more than its operand on the stack", fidx, ins.pc)
         elif n == "throw":
             pop(FAULT, ins)
             stack.clear()

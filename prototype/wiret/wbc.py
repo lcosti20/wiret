@@ -21,8 +21,9 @@ I32, I64, F32, F64, STRING = 0x7F, 0x7E, 0x7D, 0x7C, 0x6E
 REF = 0x6B                      # `6B t`: reference to type index t (arrays and structs)
 ANYREF = 0x6D                   # the top of the reference types; only in function types here
 FAULT = 0x6A                    # a caught fault: its message and code (section 4.6)
+SIGNAL = 0x69                   # a nullable reference to a signal that fibers await (4.5)
 VT_NAMES = {I32: "i32", I64: "i64", F32: "f32", F64: "f64", STRING: "string", ANYREF: "anyref",
-            FAULT: "fault"}
+            FAULT: "fault", SIGNAL: "signal"}
 FUNC_TYPE = 0x60
 ARRAY_TYPE = 0x5E
 STRUCT_TYPE = 0x5F
@@ -96,7 +97,7 @@ OPS: dict[str, tuple] = {
     "unreachable": (0x00, ""), "nop": (0x01, ""), "br": (0x02, "L"), "br_if": (0x03, "L"),
     "br_table": (0x04, "T"), "return": (0x05, ""), "call": (0x06, "u"),
     "cont.push": (0x0A, "L"), "cont.pop": (0x0B, ""), "try.push": (0x0C, "Lu"),
-    "throw": (0x0E, ""),
+    "throw": (0x0E, ""), "suspend": (0x0D, "b"),
     "drop": (0x10, ""), "select": (0x11, ""),
     "local.get": (0x12, "u"), "local.set": (0x13, "u"), "local.tee": (0x14, "u"),
     "global.get": (0x15, "u"), "global.set": (0x16, "u"),
@@ -142,7 +143,7 @@ BY_CODE: dict[int, tuple] = {code: (name, imm) for name, (code, imm) in OPS.item
 # Opcodes the spec defines for later tiers (objects, containers, fibers, faults). They decode,
 # but this prototype's verifier rejects them.
 LATER_TIER_OPS = {0x07: "call_virtual", 0x08: "call_interface", 0x09: "call_delegate",
-                  0x0D: "suspend", 0x25: "ref.null",
+                  0x25: "ref.null",
                   0x26: "ref.is_null", 0x27: "ref.eq", 0x28: "ref.cast", 0x29: "ref.test",
                   0x2A: "ref.valid", 0x2B: "ref.share"}
 for _c in range(0xD3, 0xD6):
@@ -326,6 +327,8 @@ def decode_code(code: bytes) -> list:
             imms = (r.sleb(32),)
         elif imm == "Lu":
             imms = (r.sleb(32), r.u32())
+        elif imm == "b":
+            imms = (r.u8(),)
         elif imm == "u":
             imms = (r.u32(),)
         elif imm == "uu":
@@ -355,6 +358,8 @@ def encode_instr(w: Writer, name: str, imms: tuple):
     elif imm == "Lu":
         w.sleb5(imms[0])
         w.u32(imms[1])
+    elif imm == "b":
+        w.u8(imms[0])
     elif imm == "u":
         w.u32(imms[0])
     elif imm == "uu":
@@ -413,8 +418,8 @@ class WbcModule:
 
 
 def _write_const(w: Writer, vt, value):
-    if isinstance(vt, Ref):
-        return                       # references start empty (an empty array)
+    if isinstance(vt, Ref) or vt == SIGNAL:
+        return                       # references start empty (an empty array), signals null
     if vt == I32:
         w.raw(struct.pack("<q", value))
     elif vt == I64:
@@ -430,7 +435,7 @@ def _write_const(w: Writer, vt, value):
 
 
 def _read_const(r: Reader, vt):
-    if isinstance(vt, Ref):
+    if isinstance(vt, Ref) or vt == SIGNAL:
         return None
     if vt in (I32, I64):
         return struct.unpack("<q", r.raw(8))[0]

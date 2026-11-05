@@ -37,7 +37,7 @@ from wiret.ops import convert_comments  # noqa: E402
 from wiret.parser import ParseError, parse  # noqa: E402
 from wiret.printer import layout_hash, print_module, semantic_hash  # noqa: E402
 from wiret.registry import registry_json  # noqa: E402
-from wiret.runner import parse_args_for, format_results  # noqa: E402
+from wiret.runner import format_results, parse_args_for, run_function  # noqa: E402
 from wiret.vm import VM, WiretError  # noqa: E402
 
 
@@ -273,11 +273,13 @@ def main(argv=None):
         try:
             lm = vm.load(data)
             args = parse_args_for(m, a.func, a.args) if m else [int(x) for x in a.args]
-            res = vm.call(lm, a.func, args)
+            res = run_function(vm, lm, a.func, args)
         except (WiretError, ValueError) as e:
             print(e, file=sys.stderr)
             return 1
         print(format_results(m, a.func, res))
+        if vm.time:
+            print(f"(finished at {vm.time:g} s of virtual time)")
         return 0
     if a.cmd == "hash":
         m, _ = load(a.file)

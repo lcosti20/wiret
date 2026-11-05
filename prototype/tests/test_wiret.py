@@ -3607,6 +3607,406 @@ func F() {
                 pass
 
 
+FIBERS = """
+event Beep(gap: f64) {
+  node a = Call host.Log
+    .message <- "before"
+  node b = Call host.Log
+    .message <- "after"
+  node d = Delay
+    .seconds <- entry.gap
+  node entry = Entry
+
+  flow {
+    a -> d
+    d -> b
+    entry -> a
+  }
+}
+
+event Listen(s: std.Signal, name: string) {
+  node entry = Entry
+  node log = Call host.Log
+    .message <- entry.name
+  node w = Await
+    .signal <- entry.s
+
+  flow {
+    entry -> w
+    w -> log
+  }
+}
+
+event Steps() {
+  node a = Call host.Log
+    .message <- "step 1"
+  node b = Call host.Log
+    .message <- "step 2"
+  node entry = Entry
+  node y = Yield
+
+  flow {
+    a -> y
+    entry -> a
+    y -> b
+  }
+}
+"""
+
+
+def fiber_vm(text):
+    _, r = build(text)
+    out = []
+    vm = VM(output=out.append)
+    return vm, vm.load(r.wbc), out
+
+
+class FiberTests(unittest.TestCase):
+    """Latent nodes, fibers and the scheduler (sections 4.5, 4.10 and 6.8)."""
+
+    def test_latent_module_round_trips_and_checks(self):
+        text = module(FIBERS, macros=False)
+        self.assertEqual(print_module(parse(text)), text)
+        self.assertEqual(codes(text), [])
+
+    def test_delay_waits_for_virtual_time(self):
+        vm, mod, out = fiber_vm(module(FIBERS, macros=False))
+        fb = vm.start(mod, "Beep", [1.0])
+        self.assertEqual((fb.status, out), ("READY", []))
+        vm.advance(0.0)
+        self.assertEqual((fb.status, fb.waiting, out), ("SUSPENDED", "time", ["before"]))
+        vm.advance(0.5)
+        self.assertEqual(out, ["before"])
+        vm.advance(0.5)
+        self.assertEqual((fb.status, out), ("DONE", ["before", "after"]))
+        self.assertEqual(vm.fibers, [])
+
+    def test_wake_order_is_wake_time_then_creation_order(self):
+        vm, mod, out = fiber_vm(module(FIBERS, macros=False))
+        late = vm.start(mod, "Beep", [2.0], now=True)
+        first = vm.start(mod, "Beep", [1.0], now=True)
+        second = vm.start(mod, "Beep", [1.0], now=True)
+        ran = vm.advance(5.0)
+        self.assertEqual([fb.id for fb in ran], [first.id, second.id, late.id])
+
+    def test_yield_resumes_on_the_next_advance_only(self):
+        vm, mod, out = fiber_vm(module(FIBERS, macros=False))
+        vm.start(mod, "Steps", [])
+        vm.advance(0.0)
+        self.assertEqual(out, ["step 1"])
+        vm.advance(0.0)
+        self.assertEqual(out, ["step 1", "step 2"])
+
+    def test_signal_wakes_waiters_in_the_order_they_began_waiting(self):
+        from wiret.natives import Signal
+        vm, mod, out = fiber_vm(module(FIBERS, macros=False))
+        s = Signal()
+        vm.start(mod, "Listen", [s, "b"], now=True)
+        vm.start(mod, "Listen", [s, "a"], now=True)
+        vm.advance(10.0)
+        self.assertEqual(out, [])
+        vm.fire(s)
+        self.assertEqual(out, [])           # woken fibers run on the next advance
+        vm.advance(0.0)
+        self.assertEqual(out, ["b", "a"])
+        late = vm.start(mod, "Listen", [s, "c"], now=True)
+        vm.advance(0.0)
+        self.assertEqual(late.status, "SUSPENDED")    # a fire is not remembered
+
+    def test_suspension_keeps_frames_and_continuations(self):
+        text = module("""
+func Wait(seconds: f64) -> (waited: f64) @latent {
+  node d = Delay
+    .seconds <- entry.seconds
+  node entry = Entry
+  node ret = Return
+    .waited <- entry.seconds
+
+  flow {
+    d -> ret
+    entry -> d
+  }
+}
+
+event Count(n: i32) {
+  node entry = Entry
+  node loop = Macro ForRange
+    .first <- 1
+    .last <- entry.n
+  node msg = Convert::<i32, string>
+    .value <- loop.index
+  node say = Call host.Log
+    .message <- msg.result
+  node w = Call Wait
+    .seconds <- 1.0
+
+  flow {
+    entry -> loop
+    loop.each -> w
+    w -> say
+  }
+}
+""")
+        vm, mod, out = fiber_vm(text)
+        trace = []
+        fb = vm.start(mod, "Count", [3], now=True)
+        self.assertEqual(len(fb.frames), 1)            # suspended inside Wait
+        self.assertEqual(fb.cont, [])                  # Wait's own stack
+        self.assertEqual(len(fb.frames[0][4]), 1)      # Count's pending loop/bump
+        for t in range(3):
+            vm.advance(1.0)
+        self.assertEqual((fb.status, out), ("DONE", ["1", "2", "3"]))
+
+    def test_a_fault_in_a_fiber_goes_to_on_fault_and_others_run_on(self):
+        text = module("""
+event Bad() {
+  node boom = Throw
+    .message <- "bad"
+    .code <- 9
+  node entry = Entry
+  node y = Yield
+
+  flow {
+    entry -> y
+    y -> boom
+  }
+}
+""" + FIBERS, macros=False)
+        vm, mod, out = fiber_vm(text)
+        faulted = []
+        vm.on_fault = faulted.append
+        bad = vm.start(mod, "Bad", [], now=True)
+        good = vm.start(mod, "Steps", [], now=True)
+        vm.advance(0.0)
+        self.assertEqual(faulted, [bad])
+        self.assertEqual((bad.status, bad.error.message, bad.error.code), ("FAULTED", "bad", 9))
+        self.assertEqual((good.status, out), ("DONE", ["step 1", "step 2"]))
+
+    def test_await_on_a_null_signal_is_a_catchable_fault(self):
+        text = module("""
+event E() {
+  node entry = Entry
+  node log = Call host.Log
+    .message <- t.message
+  node t = Try
+  node w = Await
+
+  flow {
+    entry -> t
+    t.body -> w
+    t.fault -> log
+  }
+}
+""", macros=False)
+        vm, mod, out = fiber_vm(text)
+        fb = vm.start(mod, "E", [], now=True)
+        self.assertEqual((fb.status, out), ("DONE", ["Await on a null signal"]))
+
+    def test_signals_made_and_fired_in_wiret(self):
+        text = module("""
+var bell: std.Signal
+
+event Ring() {
+  node entry = Entry
+  node fire = Call std.signal.Fire
+    .signal <- get.value
+  node get = GetVar bell
+
+  flow {
+    entry -> fire
+  }
+}
+
+event Wait() {
+  node aw = Await
+    .signal <- mk.signal
+  node entry = Entry
+  node log = Call host.Log
+    .message <- "rang"
+  node mk = Call std.signal.New
+  node keep = SetVar bell
+    .value <- mk.signal
+
+  flow {
+    aw -> log
+    entry -> mk
+    keep -> aw
+    mk -> keep
+  }
+}
+""", macros=False)
+        vm, mod, out = fiber_vm(text)
+        w = vm.start(mod, "Wait", [], now=True)
+        vm.start(mod, "Ring", [], now=True)
+        self.assertEqual(out, [])
+        vm.advance(0.0)
+        self.assertEqual((w.status, out), ("DONE", ["rang"]))
+
+    def test_kill_ends_a_waiting_fiber(self):
+        from wiret.natives import Signal
+        vm, mod, out = fiber_vm(module(FIBERS, macros=False))
+        s = Signal()
+        fb = vm.start(mod, "Listen", [s, "x"], now=True)
+        vm.kill(fb)
+        vm.fire(s)
+        vm.advance(0.0)
+        self.assertEqual((fb.status, out), ("FAULTED", []))
+
+    def test_call_refuses_a_latent_function(self):
+        vm, mod, out = fiber_vm(module(FIBERS, macros=False))
+        with self.assertRaises(WiretError) as cm:
+            vm.call(mod, "Beep", [1.0])
+        self.assertEqual(cm.exception.status, "WR_ERR_API")
+
+    def test_run_function_skips_idle_time(self):
+        from wiret.runner import run_function
+        from wiret.natives import Signal
+        vm, mod, out = fiber_vm(module(FIBERS, macros=False))
+        self.assertEqual(run_function(vm, mod, "Beep", [5.0]), [])
+        self.assertEqual((vm.time, out), (5.0, ["before", "after"]))
+        with self.assertRaises(WiretError) as cm:
+            run_function(vm, mod, "Listen", [Signal(), "x"])
+        self.assertEqual(cm.exception.status, "WR_YIELD")
+
+    def test_e0201_non_latent_graphs_cannot_wait(self):
+        text = module("""
+func Sleeper() {
+  node d = Delay
+    .seconds <- 1.0
+  node entry = Entry
+
+  flow {
+    entry -> d
+  }
+}
+
+func Waits() @latent {
+  node d = Delay
+    .seconds <- 1.0
+  node entry = Entry
+
+  flow {
+    entry -> d
+  }
+}
+
+func CallsLatent() {
+  node c = Call Waits
+  node entry = Entry
+
+  flow {
+    entry -> c
+  }
+}
+
+event Ev() {
+  node entry = Entry
+}
+
+func CallsEvent() {
+  node c = Call Ev
+  node entry = Entry
+
+  flow {
+    entry -> c
+  }
+}
+
+macro Pause(in: exec) -> (then: exec) {
+  node d = Yield
+  node entry = Entry
+  node out = Exit then
+
+  flow {
+    d -> out
+    entry -> d
+  }
+}
+
+func ExpandsLatent() {
+  node entry = Entry
+  node p = Macro Pause
+
+  flow {
+    entry -> p
+  }
+}
+""", macros=False)
+        diags = [(d.graph, d.code) for d in check(parse(text)) if d.code.startswith("E")]
+        self.assertEqual(sorted(diags), [("CallsEvent", "E0201"), ("CallsLatent", "E0201"),
+                                         ("ExpandsLatent", "E0201"), ("Sleeper", "E0201")])
+
+    def test_e0302_pure_functions_cannot_be_latent(self):
+        text = module("""
+func A() @latent @pure {
+  node entry = Entry
+}
+
+func B() -> (x: i32) @pure {
+  node d = Yield
+  node entry = Entry
+  node ret = Return
+    .x <- 1
+
+  flow {
+    d -> ret
+    entry -> d
+  }
+}
+""", macros=False)
+        diags = [(d.graph, d.code) for d in check(parse(text)) if d.code.startswith("E")]
+        self.assertEqual(sorted(diags), [("A", "E0302"), ("B", "E0302")])
+
+    def test_signals_cannot_be_fields_or_container_items(self):
+        text = module("""
+struct Holder {
+  s: std.Signal
+}
+
+func F(a: array::<std.Signal>) {
+  node entry = Entry
+}
+""", macros=False)
+        self.assertEqual(codes(text), ["E0501"])
+
+    def test_verifier_rules_for_suspend(self):
+        _, r = build(module(FIBERS, macros=False))
+
+        def mutate(fn):
+            m = wbc.decode_module(r.wbc)
+            fn(m)
+            with self.assertRaises(WiretError) as cm:
+                VM().load(wbc.encode_module(m))
+            return cm.exception.status
+
+        def bad_kind(m):
+            m.bodies[0].code = bytes([0x0D, 0x03, 0x05])
+        def extra_operand(m):         # an i32 left under the suspend
+            m.bodies[0].code = bytes([0x20, 0x00, 0x0D, 0x00, 0x05])
+        def timer_without_f64(m):
+            m.bodies[0].code = bytes([0x20, 0x00, 0x0D, 0x01, 0x05])
+        for fn in (bad_kind, extra_operand, timer_without_f64):
+            with self.subTest(fn.__name__):
+                self.assertEqual(mutate(fn), "WR_ERR_VERIFY")
+
+    def test_fuzzed_latent_modules_never_crash(self):
+        _, r = build(module(FIBERS, macros=False))
+        rng = random.Random(4500)
+        data = bytes(r.wbc)
+        for _ in range(600):
+            d = bytearray(data)
+            for _ in range(rng.randint(1, 4)):
+                d[rng.randrange(len(d))] = rng.randrange(256)
+            vm = VM(output=lambda _s: None, fuel=10_000)
+            try:
+                mod = vm.load(bytes(d))
+                if "Beep" in mod.exports:
+                    vm.start(mod, "Beep", [1.0], now=True)
+                    vm.advance(2.0)
+            except WiretError:
+                pass
+
+
 class BytecodeTests(unittest.TestCase):
     def test_disassembly_names_nodes(self):
         _, r = build(demo())

@@ -26,7 +26,7 @@ BREAK = "#ff3b30"
 
 HEADER_COLORS = {"Arrays": "#b9770e", "Flow": "#566573", "Call": "#2471a3", "Math": "#1e8449", "Compare": "#138d75",
                  "Logic": "#9a7d0a", "Bits": "#873600", "Variables": "#6c3483", "Macro": "#7d3c98",
-                 "Structs": "#1f618d", "Other": "#566573"}
+                 "Structs": "#1f618d", "Time": "#a04000", "Other": "#566573"}
 
 
 def type_color(ty: str, idx=None) -> str:

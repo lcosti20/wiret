@@ -12,9 +12,9 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from . import wbc
-from .natives import NO_FAULT, FaultValue, NativeFault, NativeSpec, _f32, all_natives
+from .natives import NO_FAULT, FaultValue, NativeFault, NativeSpec, Signal, _f32, all_natives
 from .verifier import VerifyError, verify
-from .wbc import (F32, F64, FAULT, I32, I64, STRING, OPS, ArrayType, MapType, Ref, SetType,
+from .wbc import (F32, F64, FAULT, I32, I64, SIGNAL, STRING, OPS, ArrayType, MapType, Ref, SetType,
                   StructType, WbcError)
 
 STATUS_OK = "WR_OK"
@@ -25,10 +25,15 @@ STATUS_VERIFY = "WR_ERR_VERIFY"
 STATUS_LINK = "WR_ERR_LINK"
 STATUS_API = "WR_ERR_API"
 STATUS_INTERRUPT = "WR_ERR_INTERRUPT"
+STATUS_YIELD = "WR_YIELD"
+
+# wr_FiberStatus (section 6.4)
+FIBER_READY, FIBER_RUNNING, FIBER_SUSPENDED, FIBER_DONE, FIBER_FAULTED = (
+    "READY", "RUNNING", "SUSPENDED", "DONE", "FAULTED")
 
 VT_OF = {"bool": I32, "i8": I32, "u8": I32, "i16": I32, "u16": I32, "i32": I32, "u32": I32,
          "i64": I64, "u64": I64, "f32": F32, "f64": F64, "string": STRING,
-         "anyref": wbc.ANYREF, "fault": FAULT}
+         "anyref": wbc.ANYREF, "fault": FAULT, "std.Signal": SIGNAL}
 
 MAX_FRAMES = 2000
 MAX_CONT = 10000
@@ -262,7 +267,7 @@ NUMERIC = _build_numeric()
 (OP_UNREACHABLE, OP_NOP, OP_BR, OP_BR_IF, OP_RETURN, OP_CALL, OP_CONT_PUSH, OP_CONT_POP,
  OP_DROP, OP_SELECT, OP_LGET, OP_LSET, OP_LTEE, OP_GGET, OP_GSET, OP_CONST) = (
     0x00, 0x01, 0x02, 0x03, 0x05, 0x06, 0x0A, 0x0B, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x20)
-OP_TRY_PUSH, OP_THROW = 0x0C, 0x0E
+OP_TRY_PUSH, OP_SUSPEND, OP_THROW = 0x0C, 0x0D, 0x0E
 _CONST_OPS = {0x20, 0x21, 0x22, 0x23}
 
 
@@ -286,12 +291,12 @@ def normalise(vt, v, types=None):
         return _f32(float(v))
     if vt == F64:
         return float(v)
-    if vt == FAULT:
+    if vt == FAULT or vt == SIGNAL:
         return v
     return str(v)
 
 
-ZERO = {I32: 0, I64: 0, F32: 0.0, F64: 0.0, STRING: "", FAULT: NO_FAULT}
+ZERO = {I32: 0, I64: 0, F32: 0.0, F64: 0.0, STRING: "", FAULT: NO_FAULT, SIGNAL: None}
 
 
 def zero(vt):
@@ -481,6 +486,29 @@ class FrameView:
                 if li < len(self.locals)}
 
 
+@dataclass(eq=False)
+class Fiber:
+    """One thread of execution with its own frames (section 4.5). A fiber runs one call; a
+    latent one suspends at `Delay`, `Yield` and `Await` and is resumed by the scheduler."""
+    id: int
+    mod: "LoadedModule"
+    name: str
+    status: str = FIBER_READY
+    results: Optional[list] = None
+    error: Optional["WiretError"] = None
+    wake: float = 0.0               # virtual time at which it became, or becomes, runnable
+    waiting: Optional[str] = None   # "time", "yield" or "signal" while suspended
+    signal: Optional[Signal] = None
+    # saved machine state: current function, ip, locals, operand stack, continuation stack,
+    # and the frames beneath it
+    f: Optional["Func"] = None
+    ip: int = 0
+    locs: list = field(default_factory=list)
+    stack: list = field(default_factory=list)
+    cont: list = field(default_factory=list)
+    frames: list = field(default_factory=list)
+
+
 @dataclass
 class LoadedModule:
     wbc: wbc.WbcModule
@@ -612,6 +640,12 @@ class VM:
         self.natives: dict[str, NativeSpec] = dict(all_natives())
         self.interrupted = False
         self.stats = {"instructions": 0, "calls": 0}
+        # The scheduler (sections 4.5 and 6.8). Time is virtual and moves only in advance().
+        self.time = 0.0
+        self.fibers: list[Fiber] = []      # live fibers: ready or suspended, by creation order
+        self.next_fiber = 1
+        # on_fault(fiber) is told when a fiber run by the scheduler faults (wr_Config.on_fault)
+        self.on_fault: Optional[Callable] = None
 
     def register(self, qname: str, spec: NativeSpec):
         self.natives[qname] = spec
@@ -716,20 +750,88 @@ class VM:
                             local_names, parse_global_names(m))
 
     # -- execution ----------------------------------------------------------------
-    def call(self, mod: LoadedModule, name: str, args: list) -> list:
+    def _fiber(self, mod: LoadedModule, name: str, args: list) -> Fiber:
         if name not in mod.exports:
             raise WiretError(STATUS_LINK, f"no exported function '{name}'")
         f = mod.funcs[mod.exports[name]]
-        if f.flags & wbc.FN_LATENT:
-            raise WiretError(STATUS_API, f"'{name}' is latent; latent execution (wr_start, "
-                                         f"wr_advance) is Tier 2 and not in this prototype")
         if len(args) != len(f.params):
             raise WiretError(STATUS_API, f"'{name}' takes {len(f.params)} argument(s), "
                                          f"got {len(args)}")
         args = [normalise(vt, a, mod.wbc.types) for vt, a in zip(f.params, args)]
+        fb = Fiber(self.next_fiber, mod, name, f=f, locs=args + list(f.zeros), wake=self.time)
+        self.next_fiber += 1
+        return fb
+
+    def call(self, mod: LoadedModule, name: str, args: list) -> list:
+        """wr_call on a function that cannot suspend: its results, or a WiretError."""
+        fb = self._fiber(mod, name, args)
+        if fb.f.flags & wbc.FN_LATENT:
+            raise WiretError(STATUS_API, f"'{name}' is latent and may suspend; run it with "
+                                         f"start() and advance()")
+        self._resume(fb)
+        return fb.results
+
+    def start(self, mod: LoadedModule, name: str, args: list, now: bool = False) -> Fiber:
+        """wr_start: a new fiber for `name`, queued to run on the next advance(). With
+        `now`, its first segment runs at once, as wr_call does for a latent export; a fault
+        in it is raised here."""
+        fb = self._fiber(mod, name, args)
+        self.fibers.append(fb)
+        if now:
+            self._resume(fb)
+        return fb
+
+    def advance(self, dt: float = 0.0) -> list:
+        """wr_advance: move virtual time forward by `dt`, then run every fiber that is runnable
+        at the new time, ordered by the time it became runnable, then by creation order. Each
+        runs until it suspends, finishes or faults, with a fresh fuel budget. A fiber made
+        runnable during this advance (a signal fired, a Yield, a zero Delay) runs on the next
+        one. Returns the fibers that ran."""
+        if dt < 0 or dt != dt:
+            raise WiretError(STATUS_API, "advance needs a time step of 0 or more")
+        self.time += dt
+        due = sorted((fb for fb in self.fibers
+                      if fb.status == FIBER_READY
+                      or (fb.waiting == "time" and fb.wake <= self.time)),
+                     key=lambda fb: (fb.wake, fb.id))
+        for fb in due:
+            try:
+                self._resume(fb)
+            except WiretError:
+                if self.on_fault is not None:
+                    self.on_fault(fb)
+        self.fibers = [fb for fb in self.fibers
+                       if fb.status in (FIBER_READY, FIBER_SUSPENDED)]
+        return due
+
+    def fire(self, signal: Signal):
+        """wr_signal_fire: every fiber waiting on `signal` becomes runnable, in the order they
+        began waiting. Fibers that Await it later wait for the next fire."""
+        waiters, signal.waiters = signal.waiters, []
+        for fb in waiters:
+            fb.status, fb.waiting, fb.signal, fb.wake = FIBER_READY, None, None, self.time
+
+    def kill(self, fb: Fiber):
+        """wr_fiber_kill: end a fiber without running anything more of it."""
+        if fb.signal is not None and fb in fb.signal.waiters:
+            fb.signal.waiters.remove(fb)
+        fb.status, fb.waiting, fb.signal = FIBER_FAULTED, None, None
+        fb.error = WiretError(STATUS_FAULT, "killed by the host")
+
+    def next_wake(self) -> Optional[float]:
+        """The earliest time a Delay is waiting for, if any: lets a host skip idle time."""
+        times = [fb.wake for fb in self.fibers if fb.waiting == "time"]
+        return min(times) if times else None
+
+    def _resume(self, fb: Fiber):
         self.fuel = self.fuel_limit
         self.interrupted = False
-        return self._run(mod, f, args)
+        fb.status = FIBER_RUNNING
+        try:
+            self._run(fb)
+        except WiretError as e:
+            fb.status, fb.error = FIBER_FAULTED, e
+            raise
 
     @staticmethod
     def _snapshot(frames, f, locs, node) -> list:
@@ -755,18 +857,16 @@ class VM:
             tb.append((f.name, f.fault_at[k] if k < len(f.fault_at) else None))
         return tb
 
-    def _run(self, mod: LoadedModule, entry: Func, args: list) -> list:
+    def _run(self, fb: Fiber):
+        """Run a fiber until it finishes (results in fb.results), suspends, or faults."""
+        mod = fb.mod
         funcs = mod.funcs
         gl = mod.globals
         numeric = NUMERIC
         hook = self.hook
-        f = entry
+        f, ip, locs, stack, cont = fb.f, fb.ip, fb.locs, fb.stack, fb.cont
+        frames = fb.frames   # saved (f, ip, locs, stack, cont)
         code = f.code
-        locs = args + list(f.zeros)
-        stack: list = []
-        cont: list = []
-        ip = 0
-        frames: list = []    # saved (f, ip, locs, stack, cont)
         fuel = self.fuel
         executed = 0
         try:
@@ -825,6 +925,25 @@ class VM:
                                 if type(k) is int:
                                     ip = k
                                     break
+                        elif op == OP_SUSPEND:
+                            # park the whole fiber, every frame included (section 4.5)
+                            if arg == 1:
+                                secs = stack.pop()
+                                fb.waiting, fb.wake = "time", self.time + (secs if secs > 0 else 0.0)
+                                fb.status = FIBER_SUSPENDED
+                            elif arg == 2:
+                                sig = stack.pop()
+                                if sig is None:
+                                    raise Fault("Await on a null signal", FAULT_NULL)
+                                sig.waiters.append(fb)
+                                fb.waiting, fb.signal = "signal", sig
+                                fb.status = FIBER_SUSPENDED
+                            else:            # Yield: runnable again on the next advance
+                                fb.waiting, fb.wake = None, self.time
+                                fb.status = FIBER_READY
+                            fb.f, fb.ip, fb.locs, fb.stack, fb.cont = f, ip, locs, stack, cont
+                            self.fuel = fuel
+                            return None
                         elif op == OP_THROW:
                             fv = stack.pop()
                             raise Fault(fv.message, fv.code)
@@ -852,7 +971,7 @@ class VM:
                                 try:
                                     res = callee.native(self, *cargs)
                                 except NativeFault as e:
-                                    raise Fault(f"{callee.native_name}: {e}", FAULT_NATIVE)
+                                    raise Fault(f"{callee.native_name}: {e}", e.code)
                                 stack.extend(normalise(vt, v) for vt, v in zip(callee.results, res))
                             else:
                                 if len(frames) >= MAX_FRAMES:
@@ -867,6 +986,7 @@ class VM:
                             res = stack[len(stack) - nr:] if nr else []
                             if not frames:
                                 self.fuel = fuel
+                                fb.status, fb.results = FIBER_DONE, res
                                 return res
                             f, ip, locs, stack, cont = frames.pop()
                             code = f.code

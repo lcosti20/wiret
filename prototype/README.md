@@ -189,9 +189,9 @@ The editor also follows the graph-editor contract in section 7.5:
 | --- | --- |
 | Text syntax (2.1–2.4) | Full lexer and parser for `use`, `extern`, `const`, `var`, `enum`, `struct`, `func`, `event`, `macro`, `local`, `state`, nodes, bindings, semantic `@` attributes, `#[...]` metadata lines (`#[doc]`, `#[note]`, ...) above declarations, nodes and boxes, the `flow` block (exec wires) and `layout` (places and boxes). An old `markup` block is rejected with a hint, and an unknown `@` name such as `@doc` is `E0104`. `enum` and `struct` parse, print, hash and type-check (see *Structs and enums* below), but cannot be compiled yet. `interface`/`class` are rejected with a clear error. |
 | Canonical form and hashes (2.5) | Sorted items (struct fields and enum members keep the order written), nodes, `flow` wires (by source node id, then exec pin order) and layout lines, each with its metadata lines above it (`doc`, `category`, `keywords`, then notes as written); registry pin order; default-valued bindings omitted; 100-column wrapping; attribute ordering. Semantic hash (ignores layout, every `#[...]` line and `Reroute`) and layout hash. |
-| Node kinds (3.3) | `Entry`, `Return`, `Branch`, `Sequence`, `Switch`, `Select`, `Macro`, `Exit`, `Reroute`, `Get/SetLocal`, `Get/SetVar` (and `const`s), `Get/SetState`, `Call`, `Convert`, all arithmetic, comparison, logic and bit kinds, and the array kinds `MakeArray`, `ArrayGet`, `ArrayLength`, `ArraySet`, `ArrayAdd`, `ArrayInsert`, `ArrayRemove`, `ArrayClear`, the struct kinds, the map and set kinds (see *Maps and sets* below), and `Try` and `Throw` (see *Faults* below). Types: `bool`, all integer widths, `f32`, `f64`, `string`, `array::<T>`, `map::<K, V>`, `set::<T>`, structs and enums. |
+| Node kinds (3.3) | `Entry`, `Return`, `Branch`, `Sequence`, `Switch`, `Select`, `Macro`, `Exit`, `Reroute`, `Get/SetLocal`, `Get/SetVar` (and `const`s), `Get/SetState`, `Call`, `Convert`, all arithmetic, comparison, logic and bit kinds, and the array kinds `MakeArray`, `ArrayGet`, `ArrayLength`, `ArraySet`, `ArrayAdd`, `ArrayInsert`, `ArrayRemove`, `ArrayClear`, the struct kinds, the map and set kinds (see *Maps and sets* below), `Try` and `Throw` (see *Faults* below), and the latent kinds `Delay`, `Yield` and `Await` (see *Fibers* below). Types: `bool`, all integer widths, `f32`, `f64`, `string`, `array::<T>`, `map::<K, V>`, `set::<T>`, structs, enums and `std.Signal`. |
 | Execution model (4.2–4.3) | Continuation stack, `Sequence` push/pop, macro inlining with path-style ids (`loop/test`, `loop!in`), `Exit` as a jump, joins, evaluation points with per-point sharing, impure output slots, `@pure` and `@reads` calls as pure nodes, per-expansion `state`. The §4.2 `SumTo(2)` trace is reproduced exactly (see tests). |
-| Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0201, E0301, E0302, E0304, E0401, E0412, E0501, E0502, E0503, W0201, W0301, W0302, W0310, W0320, W0601, W0602, W0603, W0604. |
+| Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0201 (latency), E0301, E0302, E0304, E0401, E0412, E0501, E0502, E0503, W0201, W0301, W0302, W0310, W0320, W0601, W0602, W0603, W0604. |
 | Lowering (4.8) | `-O0`: one labelled block per impure node, `local.tee` for shared values, `cont.push`/`cont.pop` kept. Output closely matches the §5.8 listings. |
 | WBC (5.2–5.4) | Type (function, `5E` array and `5F` struct entries), Import, Function, Global, Export, Data and Code sections, plus custom sections `name`, `wr.debug`, `wr.pins`, `wr.pure`, `wr.meta` (hashes), `wr.caps` and `wr.graph` (deflated canonical source). |
 | Verifier (5.5) | One linear pass: decoding, branch targets, empty stack at labels, operand typing (including `struct.new`/`get`/`with`), returns, `max_stack`, latency/purity flags. Type references may point forward, but a struct may not hold itself by value. Fuzz-tested. |
@@ -359,6 +359,47 @@ flow {
   `std.fault.Message` and `std.fault.Code`, since the instruction set has no opcodes for
   that. The tracer and debugger show a marker on the continuation stack as `t!fault`.
 
+### Fibers: `Delay`, `Yield` and `Await`
+
+The second Tier 2 item (sections 4.5 and 6.8). An `event` is latent; a `func` that waits is
+declared `@latent` after its signature (`func Wait(s: f64) @latent { ... }`).
+
+| Node | Pins | Waits until |
+| --- | --- | --- |
+| `Delay` | in `seconds: f64` | that much virtual time has passed |
+| `Yield` | none | the next `advance` |
+| `Await` | in `signal: std.Signal` | the signal is fired |
+
+- `E0201`: a func that is not `@latent` may not contain a latent node, call a latent func or an
+  event, or expand a macro that does any of these. `E0302`: a func is never both `@latent` and
+  `@pure` or `@reads`.
+- Each lowers to `suspend` (`0D`, kind 0 yield, 1 timer, 2 signal), which the verifier allows
+  only in latent functions and only with its own operand on the stack.
+- In the VM every call runs on a `Fiber`, which owns its frames, locals, operand stack and
+  continuation stacks; `suspend` saves them and returns to the scheduler, and resuming carries
+  on at the next instruction with every frame intact, `Try` markers included.
+- The Python API stands in for section 6.8: `vm.call` (a non-latent function, never
+  suspends), `vm.start(mod, name, args, now=False)` (`wr_start`, or `wr_call` on a latent
+  export with `now=True`), `vm.advance(dt)`, `vm.fire(signal)`, `vm.kill(fiber)`,
+  `vm.next_wake()`, `vm.time` and `vm.on_fault`. A fiber has `status` (`READY`, `RUNNING`,
+  `SUSPENDED`, `DONE`, `FAULTED`), `results` and `error`.
+- Scheduling is deterministic. `advance(dt)` moves time on, then runs every fiber that is
+  runnable at the new time, ordered by when it became runnable, then by creation order; each
+  gets a fresh fuel budget and runs until it suspends, finishes or faults. A fiber made
+  runnable during an advance (a fire, a `Yield`, a zero `Delay`) waits for the next one, so
+  one advance always ends. A negative or NaN `Delay` waits 0 seconds.
+- Signals: `std.Signal` is a handle type, allowed for parameters, results, locals, state and
+  variables but not as a struct field or container item, and with no `Eq`. Its default is
+  null; `Await` on a null signal is a fault (code -3, catchable). The natives
+  `std.signal.New()` and `std.signal.Fire(signal)` make and fire signals from Wiret; a host
+  fires one with `vm.fire`. A fire wakes the fibers waiting at that moment, in the order they
+  began waiting, and is not remembered.
+- A fault in a fiber run by `advance` marks it `FAULTED`, calls `on_fault`, and does not stop
+  the others.
+- `wiretc run` and the editor's Run run a latent function or event to the end, jumping
+  straight to the next timer, and stop with `WR_YIELD` if it waits for a signal that nothing
+  is left to fire. `wiretc run` then prints the virtual time it finished at.
+
 ### Identity and the id registry
 
 A **project** is a directory with a `wiret.toml` (section 7.3); its `wiret.ids` lists every
@@ -432,9 +473,9 @@ pins for results, and flow wires for a macro's exec parameters and results.
 - **Exports.** Every `func` and `event` is exported, so the editor can run any of them. The
   spec exports only `@export` declarations.
 - **The rest of Tier 2 is not implemented:** classes, interfaces,
-  delegates and dispatchers, and latent nodes and fibers (`Delay`, `Yield`, `Await`). Their
-  node kinds are reported as `E0501` and their opcodes are rejected by the verifier. `Try` and
-  `Throw` are done (see *Faults* above).
+  delegates and dispatchers. Their node kinds are reported as `E0501` and their opcodes are
+  rejected by the verifier. `Try`, `Throw` and fibers are done (see *Faults* and *Fibers*
+  above). The editor's debugger steps through one fiber, the one Run started.
 - **Not implemented:** the rest of the
   project manager (`wiret.lock`, `use` of other modules), the C API and deterministic-mode
   float rules.

@@ -12,7 +12,31 @@ from typing import Callable, Optional
 
 
 class NativeFault(Exception):
-    """Raised by a native to report a fault to the VM."""
+    """Raised by a native to report a fault to the VM. `code` is the fault code (section 4.6);
+    -6 means an error from a native."""
+
+    def __init__(self, message: str, code: int = -6):
+        super().__init__(message)
+        self.code = code
+
+
+class Signal:
+    """A value of type `std.Signal` (section 4.5): fibers `Await` it and resume, in the order
+    they began waiting, when it is fired. Equality is identity."""
+    __slots__ = ("waiters",)
+
+    def __init__(self):
+        self.waiters = []
+
+    def __repr__(self):
+        return f"<signal {id(self):x}, {len(self.waiters)} waiting>"
+
+
+def _signal_fire(vm, s):
+    if s is None:
+        raise NativeFault("Fire on a null signal", -3)
+    vm.fire(s)
+    return ()
 
 
 @dataclass(frozen=True)
@@ -161,6 +185,13 @@ STD: dict[str, NativeSpec] = {
                                      lambda _vm, s: (s.lower(),)),
     "std.string.Repeat": NativeSpec([("s", "string"), ("count", "i32")], [("result", "string")],
                                     "pure", lambda _vm, s, n: (s * max(0, n),)),
+    # Signals (section 4.5). New is impure because each call makes a new identity.
+    "std.signal.New": NativeSpec([], [("signal", "std.Signal")], "impure",
+                                 lambda _vm: (Signal(),),
+                                 "Make a new signal that fibers can Await."),
+    "std.signal.Fire": NativeSpec([("signal", "std.Signal")], [], "impure", _signal_fire,
+                                  "Wake every fiber waiting on the signal. They run on the "
+                                  "next advance of time."),
 }
 
 # Natives the compiler calls on its own to lower `Convert<X, string>` and float `Rem`.
