@@ -54,6 +54,15 @@ def allows(constraint: str, ty: str, idx: "Optional[ModuleIndex]" = None) -> boo
     return ("struct" in kinds and ty in idx.structs) or ("enum" in kinds and ty in idx.enums)
 
 
+def type_choices(constraint: str, idx: "Optional[ModuleIndex]" = None) -> list:
+    """Every type argument a constraint accepts, built-in types first, then the module's
+    structs and enums by name: what the palette and menus offer."""
+    out = list(CONSTRAINTS[constraint])
+    if idx is not None:
+        out += [t for t in sorted(idx.structs) + sorted(idx.enums) if allows(constraint, t, idx)]
+    return out
+
+
 def comparable(ty: str, idx: "ModuleIndex") -> bool:
     """Whether `Eq` can compare two values of a type field by field. Arrays cannot be
     compared in this prototype, so neither can a struct that holds one. Structs never hold

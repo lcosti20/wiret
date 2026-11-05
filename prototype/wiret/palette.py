@@ -9,8 +9,8 @@ from typing import Callable, Optional
 
 from .model import Graph, Node, meta_value
 from .natives import STD
-from .registry import (CONSTRAINTS, STATIC_KINDS, ModuleIndex, array_elem, can_convert,
-                       signature)
+from .registry import (STATIC_KINDS, ModuleIndex, array_elem, can_convert, signature,
+                       type_choices)
 
 # kind or symbol -> (description, extra search words)
 DESCRIBE = {
@@ -73,6 +73,13 @@ DESCRIBE = {
     "ArrayRemove": ("Removes the item at a position from an array variable.",
                     "list array remove delete"),
     "ArrayClear": ("Empties an array variable.", "list array clear empty reset"),
+    "MakeStruct": ("Builds a struct from a value for each of its fields.",
+                   "struct make build new create record fields"),
+    "BreakStruct": ("Splits a struct into its fields, one output per field.",
+                    "struct break split fields unpack parts"),
+    "GetField": ("Reads one field of a struct.", "struct field get read part member ."),
+    "WithField": ("A copy of a struct with one field changed. The original stays as it was.",
+                  "struct field set change update with copy"),
     "std.flow.ForEach": (None, "each every item list array for"),
     "host.Log": ("Prints a line of text in the console.", "print output say write console show"),
     "std.string.Concat": ("Joins two texts together.", "join append combine + text string"),
@@ -104,8 +111,8 @@ DESCRIBE = {
     "std.flow.FlipFlop": (None, "toggle alternate switch"),
 }
 
-CATEGORY_ORDER = ["Flow", "Call", "Variables", "Arrays", "Macro", "Math", "Compare", "Logic",
-                  "Bits"]
+CATEGORY_ORDER = ["Flow", "Call", "Variables", "Structs", "Arrays", "Macro", "Math", "Compare",
+                  "Logic", "Bits"]
 
 
 @dataclass
@@ -132,11 +139,29 @@ def describe(kind: str, symbol: Optional[str] = None, idx: Optional[ModuleIndex]
                 return doc
             if kind == "Call":
                 return f"Runs the function {symbol}."
+    if kind in ("MakeStruct", "BreakStruct", "GetField", "WithField") and symbol:
+        return describe_struct_node(kind, symbol, idx)
     if symbol and symbol in DESCRIBE and DESCRIBE[symbol][0]:
         return DESCRIBE[symbol][0]
     if kind == "Call" and symbol:
         return f"Calls {symbol}."
     return DESCRIBE.get(kind, ("", ""))[0]
+
+
+def describe_struct_node(kind: str, symbol: str, idx: Optional[ModuleIndex]) -> str:
+    name, _, fname = symbol.partition(".")
+    st = idx.structs.get(name) if idx is not None else None
+    doc = meta_value(st.meta, "doc") if st is not None else None
+    f = st.field(fname) if st is not None and fname else None
+    fdoc = meta_value(f.meta, "doc") if f is not None else None
+    a = "an" if name[:1].lower() in "aeiou" else "a"
+    text = {"MakeStruct": f"Builds {a} {name} from a value for each of its fields.",
+            "BreakStruct": f"Splits {a} {name} into its fields, one output per field.",
+            "GetField": f"Reads the field '{fname}' of {a} {name}.",
+            "WithField": f"A copy of {a} {name} with '{fname}' changed. The original stays as "
+                         f"it was."}[kind]
+    extra = fdoc if kind in ("GetField", "WithField") and fdoc else doc
+    return f"{text} {extra}" if extra else text
 
 
 def _item(kind, label, cat, symbol=None, targs=None, idx=None) -> Item:
@@ -153,25 +178,28 @@ def items(g: Graph, idx: ModuleIndex) -> list:
         out.append(_item("Return", "Return", "Flow"))
     if not any(n.kind == "Entry" for n in g.nodes):
         out.append(_item("Entry", "Entry", "Flow"))
-    for t in CONSTRAINTS["any"]:
+    values = type_choices("any", idx)
+    for t in values:
         out.append(_item("Select", f"Select::<{t}>", "Flow", targs=[t]))
-    for t in CONSTRAINTS["switch"]:
+    for t in type_choices("switch", idx):
         out.append(_item("Switch", f"Switch::<{t}>", "Flow", targs=[t]))
-    for t in ["exec"] + CONSTRAINTS["any"]:
+    for t in ["exec"] + values:
         out.append(_item("Reroute", f"Reroute::<{t}>", "Flow", targs=[t]))
     for k, (cat, _, tps, _) in sorted(STATIC_KINDS.items()):
         if k in ("Convert", "Select", "Branch"):
             continue
         if tps:
-            for t in CONSTRAINTS[tps[0]]:
+            for t in type_choices(tps[0], idx):
                 out.append(_item(k, f"{k}::<{t}>", cat, targs=[t]))
         else:
             out.append(_item(k, k, cat))
-    for f in CONSTRAINTS["any"]:
-        for t in CONSTRAINTS["any"]:
-            if can_convert(f, t):
+    convertible = type_choices("convertible", idx)
+    for f in convertible:
+        for t in convertible:
+            if can_convert(f, t, idx):
                 to = ("text" if t == "string" else "decimal" if t in ("f32", "f64")
-                      else "true/false" if t == "bool" else "whole number")
+                      else "true/false" if t == "bool" else f"a {t}" if t in idx.enums
+                      else "whole number")
                 out.append(_item("Convert", f"Convert::<{f}, {t}> (to {to})", "Math", targs=[f, t]))
     for l in sorted(g.locals, key=lambda l: l.name):
         out.append(_item("GetLocal", f"Get {l.name}", "Variables", l.name))
@@ -191,7 +219,14 @@ def items(g: Graph, idx: ModuleIndex) -> list:
         out.append(_item("Call", f"Call {q}", "Call", q, idx=idx))
     for q in sorted(STD):
         out.append(_item("Call", f"Call {q}", "Call", q, idx=idx))
-    for t in CONSTRAINTS["any"]:
+    for name in sorted(idx.structs):
+        out.append(_item("MakeStruct", f"Make {name}", "Structs", name, idx=idx))
+        out.append(_item("BreakStruct", f"Break {name}", "Structs", name, idx=idx))
+        for f in idx.structs[name].fields:
+            sym = f"{name}.{f.name}"
+            out.append(_item("GetField", f"Get {sym}", "Structs", sym, idx=idx))
+            out.append(_item("WithField", f"With {sym} (changed copy)", "Structs", sym, idx=idx))
+    for t in values:
         out.append(_item("MakeArray", f"MakeArray::<{t}>", "Arrays", targs=[t]))
         out.append(_item("ArrayGet", f"ArrayGet::<{t}>", "Arrays", targs=[t]))
         out.append(_item("ArrayLength", f"ArrayLength::<{t}>", "Arrays", targs=[t]))
@@ -207,7 +242,7 @@ def items(g: Graph, idx: ModuleIndex) -> list:
             continue
         tps = idx.macros[name].tparams
         if tps:
-            for t in CONSTRAINTS["any"]:
+            for t in values:
                 out.append(_item("Macro", f"Macro {name}::<{t}>", "Macro", name, [t] * len(tps),
                                  idx=idx))
         else:
