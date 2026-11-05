@@ -13,6 +13,10 @@
     --cur-bg: rgba(0, 170, 200, .18); --cur-edge: #0095b3;
     --frame-bg: rgba(220, 150, 0, .16); --bad-bg: rgba(210, 50, 40, .14);
     --sel-bg: rgba(245, 176, 65, .20); --sel-edge: #d08a10;
+    --text-sel: rgba(60, 110, 220, .25);
+    /* source colours: One Light here; the dark theme uses the desktop editor's (One Dark) */
+    --t-kw: #a626a4; --t-str: #50a14f; --t-attr: #b07600; --t-comment: #80828a;
+    --t-num: #986801; --t-kind: #3b6fe0;
     --mono: ui-monospace, "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace;
     --lh: 20px;
     /* the graph canvas is dark in both themes, as on the desktop: the wire colors need it */
@@ -26,6 +30,9 @@
       --cur-bg: rgba(40, 200, 230, .20); --cur-edge: #3cc8e6;
       --frame-bg: rgba(240, 170, 40, .16); --bad-bg: rgba(240, 90, 80, .18);
       --sel-bg: rgba(245, 176, 65, .18); --sel-edge: #f5b041;
+      --text-sel: rgba(90, 140, 240, .35);
+      --t-kw: var(--desk-kw, #c678dd); --t-str: var(--desk-str, #98c379); --t-attr: var(--desk-attr, #e5c07b);
+      --t-comment: var(--desk-comment, #7f848e); --t-num: var(--desk-num, #d19a66); --t-kind: var(--desk-kind, #61afef);
     }
   }
   * { box-sizing: border-box; }
@@ -176,10 +183,21 @@
   #hl .cur { background: var(--cur-bg); box-shadow: inset 3px 0 var(--cur-edge); }
   #hl .frame { background: var(--frame-bg); }
   #hl .bad { background: var(--bad-bg); box-shadow: inset 3px 0 var(--error); }
+  /* the text is drawn twice: coloured in #paint, and transparent in the textarea above it,
+     which keeps editing, the caret, selection and undo */
+  #paint { position: absolute; inset: 0; margin: 0; padding: 10px; overflow: hidden;
+           pointer-events: none; color: var(--text); font: inherit; white-space: pre; tab-size: 2;
+           font-variant-ligatures: none; }
+  #paint > div { will-change: transform; }
+  #code.readonly #paint { opacity: .6; }
+  .t-kw { color: var(--t-kw); } .t-str { color: var(--t-str); } .t-attr { color: var(--t-attr); }
+  .t-comment { color: var(--t-comment); font-style: italic; } .t-num { color: var(--t-num); }
+  .t-kind { color: var(--t-kind); }
   textarea { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 10px;
-             border: 0; outline: 0; resize: none; background: transparent; color: var(--text);
-             font: inherit; white-space: pre; overflow: auto; tab-size: 2; }
-  textarea[readonly] { color: var(--muted); }
+             border: 0; outline: 0; resize: none; background: transparent; color: transparent;
+             caret-color: var(--text); font: inherit; white-space: pre; overflow: auto; tab-size: 2;
+             font-variant-ligatures: none; }
+  textarea::selection { background: var(--text-sel); color: transparent; }
 
   #out { font: 13px/1.5 var(--mono); white-space: pre-wrap; max-height: 22vh; overflow: auto;
          min-height: 3em; }
@@ -254,7 +272,7 @@
       <div class="tabpane" id="pane-source" role="tabpanel">
         <div id="editor">
           <div id="gutter-clip"><div id="gutter"></div></div>
-          <div id="code"><div id="hl"></div><textarea id="src" spellcheck="false" aria-label="Source"></textarea></div>
+          <div id="code"><div id="hl"></div><pre id="paint" aria-hidden="true"><div></div></pre><textarea id="src" spellcheck="false" aria-label="Source"></textarea></div>
         </div>
       </div>
       <div class="tabpane" id="pane-debugger" role="tabpanel" hidden><div id="dbg-body"></div></div>
@@ -268,6 +286,7 @@
 <script type="module">
 import { Session, nodeKey } from "./debugger.js";
 import { GraphView } from "./graphview.js";
+import { makeHighlighter } from "./syntax.js";
 
 const $ = (id) => document.getElementById(id);
 const FUEL = 5_000_000;       // a runaway loop stops in seconds instead of freezing the tab
@@ -280,6 +299,7 @@ const el = (tag, cls, text) => {
 };
 
 let api;                      // wiret.webapi
+let highlighter = null;       // syntax.js, with the desktop's rules
 let nodes = {};               // graph -> node -> {line, what}, from the last good parse
 let lineNodes = new Map();    // line -> [graph, node]
 let graphs = [];              // from the last good parse, as webapi.check describes them
@@ -458,6 +478,11 @@ async function boot() {
   py.unpackArchive(zip, "zip", { extractDir: "/app" });
   py.runPython(`import sys; sys.path.insert(0, "/app")`);
   api = py.pyimport("wiret.webapi");
+  const rules = JSON.parse(api.syntax());
+  highlighter = makeHighlighter(rules);
+  for (const [tag, color] of Object.entries(rules.colors)) {
+    document.documentElement.style.setProperty(`--desk-${tag}`, color);
+  }
   const files = py.runPython(`
 import os
 [f"lessons/{n}" for n in sorted(os.listdir("/app/lessons")) if n.endswith(".wiret")] + ["examples/demo.wiret"]
@@ -612,7 +637,7 @@ async function record(mode) {
   counts = null; fault = null;
   shownDebugger = false;
   if (!debugging) return finish();
-  $("src").readOnly = true;                            // the recording is of this text
+  setReadOnly(true);                            // the recording is of this text
   session = new Session(trace, breakpoints);
   if (animate) return animateNext();
   move(mode);
@@ -640,7 +665,7 @@ function back() {
   clearTimeout(timer); timer = null;
   if (!session.back()) return;
   counts = fault = null;
-  $("src").readOnly = true;
+  setReadOnly(true);
   renderGutter();
   frameSel = -1;
   show({ paused: true, breakpoint: false });
@@ -662,7 +687,7 @@ function finish() {
     say(r.explain || r.error, true);
   }
   showOutput(lines);
-  $("src").readOnly = false;
+  setReadOnly(false);
   renderDebugger();
   renderGutter();
   renderHighlights();
@@ -675,7 +700,7 @@ function finish() {
 function stop() {
   clearTimeout(timer); timer = null;
   session = null; trace = null; frameSel = -1;
-  $("src").readOnly = false;
+  setReadOnly(false);
   renderDebugger();
   renderHighlights();
   updateGraph();
@@ -781,7 +806,20 @@ function setButtons() {
 }
 
 // ---------- the source editor ----------
+/** The coloured copy of the source behind the textarea. */
+function paintSource() {
+  if (!highlighter) return;
+  $("paint").firstElementChild.innerHTML = highlighter.html($("src").value) + "\n";
+}
+
+/** The source cannot be edited while a recording of it is being stepped through. */
+function setReadOnly(on) {
+  $("src").readOnly = on;
+  $("code").classList.toggle("readonly", on);
+}
+
 function renderGutter() {
+  paintSource();
   const n = $("src").value.split("\n").length;
   const rows = [];
   for (let line = 1; line <= n; line++) {
@@ -838,6 +876,7 @@ function renderHighlights() {
 function syncScroll() {
   const top = $("src").scrollTop;
   $("gutter").style.transform = `translateY(${-top}px)`;
+  $("paint").firstElementChild.style.transform = `translate(${-$("src").scrollLeft}px, ${-top}px)`;
   for (const d of $("hl").children) d.style.top = `${PAD + (d.dataset.line - 1) * LH - top}px`;
 }
 
