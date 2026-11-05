@@ -31,6 +31,14 @@ DESCRIBE = {
             "catch error fault exception handle recover"),
     "Throw": ("Stops with an error that a Try around it can catch, with your message and code.",
               "raise error fault exception fail"),
+    "Delay": ("Waits for some seconds of game time, then carries on. Only in an event or a "
+              "@latent function.", "wait sleep pause timer seconds later"),
+    "Yield": ("Waits until the next frame (the next time step), then carries on.",
+              "wait next frame tick later"),
+    "Await": ("Waits until a signal is fired, then carries on.",
+              "wait signal event until notify"),
+    "std.signal.New": ("Makes a new signal for Await to wait on.", "signal create make"),
+    "std.signal.Fire": ("Wakes everything waiting on a signal.", "signal fire notify wake"),
     "Convert": ("Turns a value into another type, for example a number into text.",
                 "cast change type to string text number"),
     "Add": ("Adds two numbers: a + b.", "+ plus sum total"),
@@ -139,7 +147,7 @@ DESCRIBE = {
     "std.flow.FlipFlop": (None, "toggle alternate switch"),
 }
 
-CATEGORY_ORDER = ["Flow", "Call", "Variables", "Structs", "Arrays", "Maps", "Sets", "Macro",
+CATEGORY_ORDER = ["Flow", "Time", "Call", "Variables", "Structs", "Arrays", "Maps", "Sets", "Macro",
                   "Math", "Compare", "Logic", "Bits"]
 
 

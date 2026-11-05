@@ -17,7 +17,7 @@
 | `delegate::<(A)->(R)>` | reference to a function plus optional bound receiver | Single-cast. |
 | `dispatcher::<(A)>` | reference to an ordered handler list | Multicast; the `dispatcher` member of a class. |
 | `extern type` | host handle (index plus generation) | `IsValid` is false once the host destroys the object. |
-| `std.Signal`, `std.Fault` | built-in opaque classes | Used by `Await` and `Try`. |
+| `std.Signal`, `std.Fault` | built-in opaque handles | Used by `Await` and `Try`. A `std.Signal` may be a parameter, result, local, `state` or `var`, but not a struct field or a container item, and has no `Eq`. Its default is null. `std.Fault` is internal to the lowering of `Try` and `Throw` and is not written in source. |
 
 Wires connect a source pin to a destination pin of the **same type**, or of a **supertype** (a class wire may feed a pin of its superclass or of an interface it implements). There is no other implicit conversion.
 
@@ -120,6 +120,7 @@ The VM ships these namespaces as natives (callable through `Call`) and as Wiret 
 - `std.string`: `Concat`, `Length`, `Substring`, `Find`, `Format`, `TryParse::<T>`, `Split`, ... (pure).
 - `std.array`, `std.set`, `std.map`: `Equals` (two `anyref`, section 4.9), `Sort::<T>` (stable, caller supplies a comparison delegate), `IndexOf::<T>`, ...
 - `std.fault`: `Make(message, code) -> fault`, `Message(fault) -> string`, `Code(fault) -> i32` (pure). The compiler calls them to lower `Throw` and the outputs of `Try`; they are not nodes in the palette.
+- `std.signal`: `New() -> std.Signal` and `Fire(signal)` (both impure). `Fire` does what `wr_signal_fire` does (section 6.8).
 - `std.random`: an explicit-state generator class (`New`, `NextI32`, `NextF64`). There is **no ambient randomness, clock or I/O**. The host provides any of those as natives, which keeps modules replayable.
 - `std.flow` (macros written in Wiret): `ForRange`, `ForEach::<T>`, `ForEachMap::<K,V>`, `While`, `DoOnce`, `DoN`, `Gate`, `FlipFlop`, `MultiGate`, `Retriggerable`. `ForEachMap::<K,V>` takes `map` and has the exec outputs `each` and `done` and the data outputs `key`, `value` and `index`, in insertion order.
 

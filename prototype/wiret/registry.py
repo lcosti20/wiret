@@ -122,6 +122,16 @@ def key_type_ok(ty: str, idx: "Optional[ModuleIndex]" = None) -> bool:
     return idx is not None and (ty in idx.enums or (ty in idx.structs and plain_struct(ty, idx)))
 
 
+# Built-in handle types (section 3.1): allowed for parameters, results, locals, state and
+# variables, but not as struct fields or container elements, and with no Eq (section 4.5).
+HANDLE_TYPES = {"std.Signal"}
+
+
+def handle_ok(ty: str, idx: "Optional[ModuleIndex]" = None) -> bool:
+    """type_ok, also accepting a handle type such as std.Signal."""
+    return ty in HANDLE_TYPES or type_ok(ty, idx)
+
+
 def type_ok(ty: str, idx: "Optional[ModuleIndex]" = None) -> bool:
     """A value type this prototype supports: a primitive, a struct or enum declared in the
     module (only when `idx` is given), or an array, map or set of supported types."""
@@ -287,6 +297,13 @@ STATIC_KINDS = {
                                    ("code", "out", "i32", None)]),
     "Throw": ("Flow", "impure", [], [("in", "in", "exec", None), ("message", "in", "string", None),
                                      ("code", "in", "i32", ZERO)]),
+    # Latent nodes (section 4.5): each suspends the fiber, only in latent graphs (E0201).
+    "Delay": ("Time", "impure", [], [("in", "in", "exec", None), ("seconds", "in", "f64", None),
+                                     ("then", "out", "exec", None)]),
+    "Yield": ("Time", "impure", [], [("in", "in", "exec", None), ("then", "out", "exec", None)]),
+    "Await": ("Time", "impure", [], [("in", "in", "exec", None),
+                                     ("signal", "in", "std.Signal", None),
+                                     ("then", "out", "exec", None)]),
     "BitNot": ("Bits", "pure", ["int"], _UN),
 }
 for _k in ("Add", "Sub", "Mul", "Div", "Rem", "Min", "Max"):
@@ -325,7 +342,7 @@ STRUCT_KINDS = {"MakeStruct": "struct", "BreakStruct": "struct", "GetField": "fi
 
 # Kinds from the specification that later tiers add (section 1.6).
 LATER_TIER_KINDS = {
-    "Delay", "Yield", "Await", "SetField", "New", "Cast", "IsValid",
+    "SetField", "New", "Cast", "IsValid",
     "CreateDelegate", "Invoke", "Bind", "Unbind", "Broadcast",
 }
 
@@ -377,6 +394,7 @@ class Callee:
     params: list       # [Pin]
     results: list      # [Pin]
     purity: str
+    latent: bool = False   # may suspend: an event, a @latent func (section 4.5)
 
 
 _STD_FLOW = None
@@ -440,7 +458,8 @@ class ModuleIndex:
             g = self.graphs[s]
             purity = "pure" if g.has_attr("pure") else "reads" if g.has_attr("reads") else "impure"
             return Callee(s, g.kind, [Pin(p.name, p.type, p.default) for p in g.params],
-                          [Pin(r.name, r.type) for r in g.result_list], purity)
+                          [Pin(r.name, r.type) for r in g.result_list], purity,
+                          g.kind == "event" or g.has_attr("latent"))
         if symbol in self.externs:
             e = self.externs[symbol]
             purity = "pure" if e.has_attr("pure") else "reads" if e.has_attr("reads") else "impure"
@@ -583,8 +602,6 @@ def signature(node: Node, graph: Graph, idx: ModuleIndex) -> Sig:
         if c is None:
             sig.error = ("E0501", f"unresolved function '{node.symbol}'")
             return sig
-        if c.kind == "event":
-            sig.error = ("E0201", "calling an event needs latent support (Tier 2)")
         sig.purity = c.purity
         sig.category = "Call"
         if c.purity == "impure":

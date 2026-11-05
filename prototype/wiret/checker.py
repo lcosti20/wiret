@@ -10,7 +10,7 @@ from .model import Const, Var
 
 # Names that are metadata, not semantic attributes: `@doc` is `#[doc]` (section 2.4).
 META_NAMES = {"doc", "category", "keywords", "note"}
-from .registry import (BUILTIN_TYPE_NAMES, PLACE_MUTATORS, INT_RANGES, ModuleIndex, Sig,
+from .registry import (HANDLE_TYPES, handle_ok, BUILTIN_TYPE_NAMES, PLACE_MUTATORS, INT_RANGES, ModuleIndex, Sig,
                        array_elem, enum_values, instantiate, lit_fits, lit_in_range, signature,
                        substitute, type_ok)
 
@@ -109,7 +109,7 @@ def check(module: Module, comments_ok=False, project=None) -> list:
             typed.append(it)
         for p in typed:
             ty = substitute(p.type, {t: "i32" for t in tparams})
-            if ty != "exec" and not type_ok(ty, idx):
+            if ty != "exec" and not handle_ok(ty, idx):
                 D("E0501", unknown_type_message(p.type, module.name),
                   getattr(it, "name", None), type=p.type)
                 continue
@@ -145,6 +145,9 @@ def check(module: Module, comments_ok=False, project=None) -> list:
 
 
 def unknown_type_message(ty: str, module_name: str) -> str:
+    if any(h in ty for h in HANDLE_TYPES) and ty not in HANDLE_TYPES:
+        return (f"type '{ty}': a signal can be a parameter, result, local, state or variable, "
+                f"but not a struct field or an item in an array, map or set")
     prefix = module_name + "."
     base = array_elem(ty) or ty
     if base.startswith(prefix):
@@ -405,7 +408,65 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
     check_pure_cycles(info, G, D)
     check_flow(info, G, D)
     check_try_nesting(info, G, D)
+    check_latency(g, info, idx, G, D)
     check_layout(g, ids, G, D)
+
+
+LATENT_KINDS = ("Delay", "Yield", "Await")
+
+
+def graph_latent(g: Graph) -> bool:
+    """Events are implicitly latent; a func is latent when declared @latent (section 4.4)."""
+    return g.kind == "event" or g.has_attr("latent")
+
+
+def macro_latent(name: str, idx: ModuleIndex, seen=None) -> bool:
+    """Whether expanding a macro brings in a latent node or a call to a latent function."""
+    seen = set() if seen is None else seen
+    m = idx.macros.get(name)
+    if m is None or name in seen:
+        return False
+    seen.add(name)
+    for n in m.nodes:
+        if n.kind in LATENT_KINDS:
+            return True
+        if n.kind == "Call":
+            c = idx.callee(n.symbol or "")
+            if c is not None and c.latent:
+                return True
+        if n.kind == "Macro" and macro_latent(n.symbol or "", idx, seen):
+            return True
+    return False
+
+
+def check_latency(g: Graph, info: GraphInfo, idx: ModuleIndex, G, D):
+    """E0201 and E0302 for latency (section 4.5): a graph that can suspend must be latent, and
+    a latent function is never @pure or @reads. Macros are checked where they expand."""
+    if g.kind == "macro":
+        return
+    pure = g.has_attr("pure") or g.has_attr("reads")
+    attr = "@pure" if g.has_attr("pure") else "@reads"
+    if pure and g.has_attr("latent"):
+        D("E0302", f"a function cannot be both @latent and {attr}: suspending is an effect", G)
+        return
+    if graph_latent(g):
+        return
+    for nid, n in sorted(info.nodes.items()):
+        why = None
+        if n.kind in LATENT_KINDS:
+            why = f"{n.kind} suspends"
+        elif n.kind == "Call" and not info.sigs[nid].error:
+            c = idx.callee(n.symbol or "")
+            if c is not None and c.latent:
+                why = f"'{n.symbol}' is {'an event' if c.kind == 'event' else 'latent'}"
+        elif n.kind == "Macro" and macro_latent(n.symbol or "", idx):
+            why = f"macro '{n.symbol}' can suspend"
+        if why is None:
+            continue
+        if pure:
+            D("E0302", f"{attr} function cannot wait: {why}", G, nid)
+        else:
+            D("E0201", f"{why}, so '{G}' must be declared @latent", G, nid)
 
 
 def check_try_nesting(info: GraphInfo, G, D):

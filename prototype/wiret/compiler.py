@@ -30,12 +30,13 @@ CONTAINER_OPS = {"MapFind": "map.find", "MapHas": "map.has", "MapLength": "map.l
                  "MapRemove": "map.remove", "MapClear": "map.clear", "SetHas": "set.has",
                  "SetLength": "set.len", "SetAt": "set.at", "SetAdd": "set.add",
                  "SetRemove": "set.remove", "SetClear": "set.clear"}
-from .wbc import F32, F64, FAULT, I32, I64, STRING
+from .wbc import F32, F64, FAULT, I32, I64, SIGNAL, STRING
 
 COMPILER_VERSION = "wiretc-proto 0.1"
 
 VT = {"bool": I32, "i8": I32, "u8": I32, "i16": I32, "u16": I32, "i32": I32, "u32": I32,
-      "i64": I64, "u64": I64, "f32": F32, "f64": F64, "string": STRING, "fault": FAULT}
+      "i64": I64, "u64": I64, "f32": F32, "f64": F64, "string": STRING, "fault": FAULT,
+      "std.Signal": SIGNAL}
 PFX = {I32: "i32", I64: "i64", F32: "f32", F64: "f64"}
 
 
@@ -233,7 +234,7 @@ class Compiler:
         if name in self.global_index:
             return self.global_index[name]
         lit = init if init is not None else zero_lit(ty)
-        if is_container(ty) or ty in self.idx.structs:
+        if is_container(ty) or ty in self.idx.structs or ty == "std.Signal":
             value = None                 # the VM builds the default array or struct
         else:
             value = self.const_value(lit, ty)
@@ -296,7 +297,8 @@ class Compiler:
         for fl in lowered:
             g = fl.g
             flags = (wbc.FN_PURE if g.has_attr("pure") else 0) | \
-                    (wbc.FN_EVENT | wbc.FN_LATENT if g.kind == "event" else 0)
+                    (wbc.FN_EVENT | wbc.FN_LATENT if g.kind == "event" else 0) | \
+                    (wbc.FN_LATENT if g.has_attr("latent") else 0)
             t = type_index([self.vt(p.type) for p in g.params],
                            [self.vt(r.type) for r in g.result_list])
             mod.funcs.append((t, flags))
@@ -305,6 +307,7 @@ class Compiler:
         for i, fl in enumerate(lowered):
             g = fl.g
             eflags = (wbc.EX_EVENT | wbc.EX_LATENT if g.kind == "event" else 0) | \
+                     (wbc.EX_LATENT if g.has_attr("latent") else 0) | \
                      (wbc.EX_PURE if g.has_attr("pure") else 0)
             mod.exports.append((g.name, 0, len(self.imports) + i, eflags))
         for v in sorted(self.idx.vars.values(), key=lambda v: v.name):
@@ -829,6 +832,12 @@ class FuncLowerer:
                     self.E("call", self.c.import_ref(native))
                     self.E("local.set", slot)
             self.transfer(t.get("fault"), nxt)
+        elif k in ("Delay", "Yield", "Await"):
+            # suspend parks the fiber, every frame included; it resumes at the next
+            # instruction with its continuation stack intact (section 4.5)
+            self.emit_inputs(n)
+            self.E("suspend", {"Yield": 0, "Delay": 1, "Await": 2}[k])
+            self.transfer(then, nxt)
         elif k == "Throw":
             self.emit_inputs(n)
             self.E("call", self.c.import_ref("std.fault.Make"))
@@ -944,6 +953,9 @@ class FuncLowerer:
                     self.E("local.get", ep.temps[(s.a, s.b)])
 
     def emit_const(self, lit: Lit, ty: str):
+        if ty == "std.Signal":        # no literal: the null signal, a local never assigned
+            self.E("local.get", self.add_local("$null.signal", ty))
+            return
         elem = array_elem(ty)
         if elem is not None:          # the only array constant is the empty array
             self.E("i32.const", 0)

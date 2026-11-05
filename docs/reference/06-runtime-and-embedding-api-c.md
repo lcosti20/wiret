@@ -226,7 +226,7 @@ void      wr_signal_fire(wr_Vm *vm, int signal_ref);       /* wake fibers awaiti
 
 Calling protocol, as in Lua: push the function, push the arguments left to right, call. `wr_call` pops the function and arguments. On `WR_OK` it pushes `nresults` results (or all of them for `WR_MULTRET`). On `WR_YIELD` the fiber is suspended; when the scheduler later finishes it (`wr_fiber_status` becomes `WR_FIBER_DONE`) the results are on that fiber's stack. A fiber runs one call at a time; reuse it after it is `DONE` by clearing its stack with `wr_settop(f, 0)`.
 
-`wr_advance` is deterministic. It adds `dt` to the virtual clock, wakes timers whose time has come (ordered by wake time, then by fiber creation order), and runs each woken or queued fiber until it suspends again or finishes. Each run gets `default_fuel`. A fault in a detached fiber is passed to `on_fault`.
+`wr_advance` is deterministic. It adds `dt` to the virtual clock, wakes timers whose time has come, and runs each woken or queued fiber until it suspends again or finishes, in the order of section 4.5. `wr_signal_fire` only makes the waiting fibers runnable; they run on the next `wr_advance`. Each run gets `default_fuel`. A fault in a detached fiber is passed to `on_fault`.
 
 Latency is part of a function's contract (section 4.5). `wr_call` on an export that is **not** flagged `WR_EXPORT_LATENT` returns `WR_OK` or an error and never `WR_YIELD`. Only latent exports and events can suspend, and a host that calls one with `wr_call` must be prepared for `WR_YIELD`.
 

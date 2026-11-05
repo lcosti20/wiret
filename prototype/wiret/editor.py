@@ -32,7 +32,7 @@ from .ids import assign_ids, find_project, retired_between
 from .registry import (ModuleIndex, STATIC_KINDS, can_convert, enum_values, lit_fits,
                        type_choices, type_ok)
 from .explain import explain, explain_runtime, type_words
-from .runner import format_results, format_value, parse_args_for, split_args
+from .runner import format_results, format_value, parse_args_for, run_function, split_args
 from .vm import STATUS_INTERRUPT, VM, WiretError
 
 NEW_FILE = """wiret 1
@@ -1418,6 +1418,12 @@ class EditorApp:
         flow.add_cascade(label="Reroute", menu=sub)
         menu.add_cascade(label="Flow", menu=flow)
 
+        time_m = tk.Menu(menu, tearoff=0)
+        add(time_m, "Delay (wait seconds)", "Delay")
+        add(time_m, "Yield (wait a frame)", "Yield")
+        add(time_m, "Await (wait for a signal)", "Await")
+        menu.add_cascade(label="Time", menu=time_m)
+
         math_m = tk.Menu(menu, tearoff=0)
         for k, (cat, _, tps, _) in sorted(STATIC_KINDS.items()):
             if cat == "Math" and k != "Convert":
@@ -1652,7 +1658,7 @@ class EditorApp:
                     data = f.read()
                 lm = self.vm.load(data)
                 self.loaded = lm
-                res = self.vm.call(lm, func, args)
+                res = run_function(self.vm, lm, func, args)
                 ms = (time.perf_counter() - t1) * 1000
                 self.out_queue.put(("done", (format_results(module, func, res), ms, counts, None)))
             except WiretError as e:

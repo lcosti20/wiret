@@ -38,7 +38,8 @@ def disassemble(data: bytes) -> str:
         fi = nimp + i
         params, results = m.types[t]
         lnames = local_names.get(fi, {})
-        tags = [s for b, s in ((wbc.FN_PURE, "pure"), (wbc.FN_EVENT, "event")) if flags & b]
+        tags = [s for b, s in ((wbc.FN_PURE, "pure"), (wbc.FN_EVENT, "event"),
+                               (wbc.FN_LATENT, "latent")) if flags & b]
         out.append("")
         out.append(f"func {names.get(fi, f'func{fi}')} ({', '.join(vt_name(p, m.types) for p in params)})"
                    f" -> ({', '.join(vt_name(r, m.types) for r in results)})"
