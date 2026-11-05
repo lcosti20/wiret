@@ -1,6 +1,9 @@
 // The graph canvas of the web page: draws one graph described by wiret.webapi.check (see
-// wiret/viewmodel.py), the way wiret/graphview.py draws it on the desktop. Read-only for now:
-// you can pan, zoom, select a node, open the graph a Call runs, and toggle breakpoints.
+// wiret/viewmodel.py), the way wiret/graphview.py draws it on the desktop, and turns pointer
+// input into edits as the desktop canvas does: drag a node or a box title to move it, drag
+// from a pin to a pin (or onto a node) to wire them, click a wire and press Delete to remove
+// it, double-click an input to type its value. The page makes the edits (on.move, on.connect,
+// ...); this file only reports them. Also: pan, zoom, select, open a call, breakpoints.
 //
 // Everything is in graph units inside one "world" element that a CSS transform pans and zooms.
 // Boxes, nodes, notes and value tags are HTML, so the browser measures text; wires and pins
@@ -28,7 +31,9 @@ const s = (tag, attrs) => {
 
 export class GraphView {
   /** host: an empty element to fill. on: {select(nodeId|null), open(graphName),
-   *  toggleBreakpoint(nodeId)}. */
+   *  toggleBreakpoint(nodeId), canEdit() -> true or the reason not, message(text),
+   *  move(id, x, y), connect(a, b), connectToNode(a, nodeId), disconnect(node, dir, pin),
+   *  deleteNode(id), editPin(node, pin, [screenX, screenY])}. A pin is [node, "in"/"out", pin]. */
   constructor(host, on) {
     this.host = host;
     this.on = on;
@@ -41,6 +46,9 @@ export class GraphView {
     this.world = h("div", "gv-world");
     this.notesBox = h("div", "gv-notes");
     this.notesOpen = null;      // null: open unless the view is narrow
+    this.selWire = null;        // "d|node|pin" (data wire into that input) or "e|node|pin"
+    this.temp = s("svg", { class: "gv-svg" });   // the wire being dragged out of a pin
+    host.tabIndex = 0;
     host.append(this.world, this.notesBox);
     this.#bindInput();
     new ResizeObserver(() => { if (this.autoFit) this.fit(true); else this.#applyView(); }).observe(host);
@@ -48,6 +56,7 @@ export class GraphView {
 
   /** Show `graph`; fit it to the view unless `keepView` (e.g. when the same graph is edited). */
   setGraph(graph, keepView = false) {
+    if (!keepView) this.selWire = null;
     this.graph = graph;
     this.render();
     if (!keepView) this.fit(true);
@@ -119,7 +128,7 @@ export class GraphView {
     if (!g) return;
     const boxes = h("div"), wires = s("svg", { class: "gv-svg" }), nodes = h("div");
     const pins = s("svg", { class: "gv-svg" }), over = h("div");
-    this.world.append(boxes, wires, nodes, pins, over);
+    this.world.append(boxes, wires, nodes, pins, over, this.temp);
 
     for (const b of g.boxes) {
       const d = h("div", "gv-box");
@@ -127,6 +136,7 @@ export class GraphView {
                                borderColor: b.color });
       const t = h("div", "gv-box-title", b.title);
       t.style.background = b.color;
+      t.dataset.box = b.id;
       d.append(t);
       boxes.append(d);
     }
@@ -144,6 +154,7 @@ export class GraphView {
       for (const p of n.ins) {
         const r = h("div", "gv-pin", p.label);
         if (!p.bound && !p.exec) r.classList.add("gv-unbound");
+        if (!p.exec) { r.dataset.row = p.name; r.title = `${p.name}: ${p.type}\nDouble-click to type a value`; }
         ins.append(r);
       }
       for (const p of n.outs) outs.append(h("div", "gv-pin", p.label));
@@ -170,7 +181,16 @@ export class GraphView {
       const src = pinAt(wv.from[0], "out", wv.from[1]);
       const dst = pinAt(wv.to[0], "in", wv.to[1]);
       if (src && dst) {
-        wires.append(this.#curve(src, dst, wv.exec ? C.exec : wv.color, wv.exec ? 3.5 : 2.5));
+        const key = wv.exec ? `e|${wv.from[0]}|${wv.from[1]}` : `d|${wv.to[0]}|${wv.to[1]}`;
+        const sel = this.selWire === key;
+        wires.append(this.#curve(src, dst, sel ? C.select : wv.exec ? C.exec : wv.color, wv.exec ? 3.5 : 2.5));
+        const hit = this.#curve(src, dst, "transparent", 12);
+        hit.classList.add("gv-wirehit");
+        hit.dataset.wire = key;
+        const tip = s("title", {});
+        tip.textContent = `${wv.from.join(".")} → ${wv.to.join(".")}: click, then Delete to remove`;
+        hit.append(tip);
+        wires.append(hit);
       } else if (dst && !wv.exec) {        // dangling: keep it visible as an error (section 7.5)
         wires.append(this.#curve([dst[0] - 60, dst[1] - 20], dst, C.error, 2.5, true));
         over.append(this.#text(dst[0] - 62, dst[1] - 20, `? ${wv.from[0]}.${wv.from[1]}`, "gv-dangle", "e"));
@@ -194,11 +214,14 @@ export class GraphView {
           shape.setAttribute("fill", fill);
           shape.setAttribute("stroke", p.color);
           shape.setAttribute("stroke-width", 1.5);
+          const hit = s("circle", { cx: px, cy: py, r: PIN_R * 2.4, fill: "transparent", class: "gv-pinhit" });
+          Object.assign(hit.dataset, { node: n.id, dir, pin: p.name });
           const tip = s("title", {});
           const v = dir === "out" ? st.values?.[`${n.id}.${p.name}`] : undefined;
-          tip.textContent = `${n.id}.${p.name}: ${p.type}${v !== undefined ? ` = ${v}` : ""}`;
-          shape.append(tip);
-          pins.append(shape);
+          tip.textContent = `${n.id}.${p.name}: ${p.type}${v !== undefined ? ` = ${v}` : ""}` +
+                            "\nDrag to wire it" + (dir === "in" && !p.exec ? "; double-click to type a value" : "");
+          hit.append(tip);
+          pins.append(shape, hit);
         }
       }
       let outline = C.nodeEdge, width = 1;
@@ -317,24 +340,90 @@ export class GraphView {
   }
 
   // ---------- input ----------
+  /** The node geometry the page passes with a connect (to place an inserted Convert node). */
+  geomsFor(ids) {
+    const out = {};
+    for (const id of ids) {
+      const g = this.geoms.get(id);
+      if (g) out[id] = [g.x, g.y, g.w];
+    }
+    return out;
+  }
+
+  /** A small text box over the canvas at point [x, y] (relative to the canvas). Resolves to
+   *  the text on Enter, or null on Escape or when it loses focus. */
+  ask([x, y], { label, value = "", placeholder = "" }) {
+    this.askBox?.remove();
+    const box = h("div", "gv-ask");
+    const input = h("input");
+    input.value = value;
+    input.placeholder = placeholder;
+    input.setAttribute("aria-label", label);
+    box.append(h("div", "gv-ask-label", label), input);
+    box.style.left = `${Math.max(4, Math.min(x, this.host.clientWidth - 250))}px`;
+    box.style.top = `${Math.max(4, Math.min(y + 12, this.host.clientHeight - 70))}px`;
+    box.addEventListener("pointerdown", (e) => e.stopPropagation());
+    this.host.append(box);
+    this.askBox = box;
+    input.focus();
+    input.select();
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (v) => {
+        if (done) return;
+        done = true;
+        box.remove();
+        if (this.askBox === box) this.askBox = null;
+        this.host.focus({ preventScroll: true });
+        resolve(v);
+      };
+      input.addEventListener("keydown", (e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") finish(input.value);
+        else if (e.key === "Escape") finish(null);
+      });
+      input.addEventListener("blur", () => finish(null));
+    });
+  }
+
   #bindInput() {
     const host = this.host;
     const pointers = new Map();
     let drag = null, pinch = null;
     const local = (e) => { const r = host.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+    const world = ([x, y]) => [(x - this.ox) / this.scale, (y - this.oy) / this.scale];
 
     host.addEventListener("pointerdown", (e) => {
       if (e.button !== 0 && e.pointerType === "mouse") return;
+      host.focus({ preventScroll: true });
       host.setPointerCapture(e.pointerId);
       pointers.set(e.pointerId, local(e));
-      if (pointers.size === 1) {
-        drag = { start: local(e), ox: this.ox, oy: this.oy, moved: false, target: e.target };
-      } else if (pointers.size === 2) {
+      if (pointers.size === 2) {
         const [a, b] = [...pointers.values()];
         pinch = { dist: Math.hypot(a[0] - b[0], a[1] - b[1]), scale: this.scale };
+        this.temp.replaceChildren();
+        if (drag?.kind === "move" && drag.moved) { drag.item.x = drag.x0; drag.item.y = drag.y0; this.render(); }
         drag = null;
+        return;
+      }
+      if (pointers.size !== 1) return;
+      const t = e.target;
+      drag = { start: local(e), ox: this.ox, oy: this.oy, moved: false, target: t, kind: "pan" };
+      const pin = t.closest?.(".gv-pinhit");
+      const nodeEl = t.closest?.(".gv-node");
+      const boxTitle = t.closest?.(".gv-box-title");
+      if (pin) {
+        drag.kind = "wire";
+        drag.from = [pin.dataset.node, pin.dataset.dir, pin.dataset.pin];
+        drag.at = this.geoms.get(pin.dataset.node)?.pins.get(`${pin.dataset.dir}|${pin.dataset.pin}`);
+      } else if (nodeEl || boxTitle) {
+        const id = nodeEl ? nodeEl.dataset.id : boxTitle.dataset.box;
+        const item = nodeEl ? this.graph.nodes.find((n) => n.id === id)
+                            : this.graph.boxes.find((b) => b.id === id);
+        if (item) Object.assign(drag, { kind: "move", id, item, x0: item.x, y0: item.y });
       }
     });
+
     host.addEventListener("pointermove", (e) => {
       if (!pointers.has(e.pointerId)) return;
       pointers.set(e.pointerId, local(e));
@@ -342,24 +431,61 @@ export class GraphView {
         const [a, b] = [...pointers.values()];
         const dist = Math.hypot(a[0] - b[0], a[1] - b[1]);
         this.zoomAt((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (pinch.scale * dist / pinch.dist) / this.scale);
-      } else if (drag) {
-        const [x, y] = local(e);
-        const dx = x - drag.start[0], dy = y - drag.start[1];
-        if (!drag.moved && Math.hypot(dx, dy) < 4) return;
-        drag.moved = true;
+        return;
+      }
+      if (!drag) return;
+      const [x, y] = local(e);
+      const dx = x - drag.start[0], dy = y - drag.start[1];
+      if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+      if (!drag.moved && drag.kind !== "pan") {
+        const ok = this.on.canEdit();
+        if (ok !== true) {                  // not now: say why, and pan instead
+          this.on.message(ok);
+          drag.kind = "pan";
+        }
+      }
+      drag.moved = true;
+      if (drag.kind === "pan") {
         this.autoFit = false;
         this.ox = drag.ox + dx; this.oy = drag.oy + dy;
         this.#applyView();
         host.classList.add("panning");
+      } else if (drag.kind === "move") {
+        drag.item.x = Math.round(drag.x0 + dx / this.scale);
+        drag.item.y = Math.round(drag.y0 + dy / this.scale);
+        this.render();
+      } else if (drag.kind === "wire" && drag.at) {
+        const end = world([x, y]);
+        const path = drag.from[1] === "in" ? this.#curve(end, drag.at, C.select, 2)
+                                           : this.#curve(drag.at, end, C.select, 2);
+        this.temp.replaceChildren(path);
       }
     });
+
     const end = (e) => {
       if (!pointers.has(e.pointerId)) return;
       pointers.delete(e.pointerId);
       host.classList.remove("panning");
       if (pointers.size < 2) pinch = null;
-      if (drag && !drag.moved && e.type === "pointerup") this.#click(drag.target);
+      const d = drag;
       drag = null;
+      this.temp.replaceChildren();
+      if (!d) return;
+      if (e.type !== "pointerup") {         // cancelled: put a dragged node back
+        if (d.kind === "move" && d.moved) { d.item.x = d.x0; d.item.y = d.y0; this.render(); }
+        return;
+      }
+      if (!d.moved) return this.#click(d.target, local(e));
+      if (d.kind === "move") {
+        this.on.move(d.id, d.item.x, d.item.y);
+      } else if (d.kind === "wire") {
+        const under = document.elementFromPoint(e.clientX, e.clientY);
+        const pin = under?.closest?.(".gv-pinhit");
+        const nodeEl = under?.closest?.(".gv-node");
+        if (pin) this.on.connect(d.from, [pin.dataset.node, pin.dataset.dir, pin.dataset.pin]);
+        else if (nodeEl && nodeEl.dataset.id !== d.from[0]) this.on.connectToNode(d.from, nodeEl.dataset.id);
+        else this.on.message("Drop the wire on a pin, or on a node to use its first pin that fits.");
+      }
     };
     host.addEventListener("pointerup", end);
     host.addEventListener("pointercancel", end);
@@ -368,20 +494,47 @@ export class GraphView {
       const [x, y] = local(e);
       this.zoomAt(x, y, Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0015)));
     }, { passive: false });
+    host.addEventListener("keydown", (e) => {
+      if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        if (this.selWire) {
+          const [kind, node, pin] = this.selWire.split("|");
+          this.on.disconnect(node, kind === "d" ? "in" : "out", pin);
+        } else if (this.state.selected) {
+          this.on.deleteNode(this.state.selected);
+        }
+      } else if (e.key === "Escape") {
+        this.selWire = null;
+        this.on.select(null);
+      }
+    });
   }
 
-  #click(target) {
+  #click(target, at) {
     // (pointer capture sends dblclick to the host, so double clicks are found here)
     const bp = target.closest?.(".gv-bp");
     if (bp) return this.on.toggleBreakpoint(bp.dataset.bp);
-    const id = target.closest?.(".gv-node")?.dataset.id ?? null;
+    const wire = target.closest?.(".gv-wirehit");
+    const pinHit = target.closest?.(".gv-pinhit");
+    const row = target.closest?.("[data-row]");
+    const nodeEl = target.closest?.(".gv-node");
+    const id = pinHit ? pinHit.dataset.node : nodeEl?.dataset.id ?? null;
+    const inPin = pinHit ? (pinHit.dataset.dir === "in" ? pinHit.dataset.pin : null) : row?.dataset.row ?? null;
+    const key = `${id}|${inPin}`;
     const now = performance.now(), last = this.lastClick;
-    this.lastClick = { id, at: now };
-    if (id && last?.id === id && now - last.at < 400) {
+    this.lastClick = { key, at: now };
+    if (id && last?.key === key && now - last.at < 400) {
       this.lastClick = null;
+      if (inPin) return this.on.editPin(id, inPin, at);
       const n = this.graph?.nodes.find((x) => x.id === id);
       if (n?.opens) return this.on.open(n.opens);
     }
+    if (wire && !id) {
+      this.selWire = wire.dataset.wire;
+      this.on.select(null);             // the page redraws, showing the wire selected
+      return;
+    }
+    this.selWire = null;
     this.on.select(id);
   }
 }

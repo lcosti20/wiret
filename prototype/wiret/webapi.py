@@ -15,13 +15,15 @@ import json
 from collections import Counter
 from typing import Optional
 
+from . import canvasedit, ops
 from .checker import GraphInfo
 from .compiler import compile_module
 from .explain import explain, explain_runtime
 from .parser import ParseError, Parser
+from .printer import print_module
 from .registry import ModuleIndex
 from .runner import format_results, format_value, run_function
-from .viewmodel import graph_json
+from .viewmodel import graph_json, positions
 from .vm import VM, WiretError
 
 MAX_STEPS = 5000      # pause points kept by debug_run; the run itself carries on past them
@@ -106,6 +108,100 @@ def check(source: str) -> str:
                   for g in m.graphs()]
     return json.dumps({"diags": out["diags"], "nodes": out["nodes"], "graphs": graphs})
 
+
+
+def literal_prompt(source: str, graph: str, node: str, pin: str) -> str:
+    """What to ask when an input's value is edited on the canvas: {"type", "current", "hint"},
+    or null when the pin takes no value."""
+    try:
+        m = Parser(source).parse_module()
+    except ParseError:
+        return "null"
+    g = m.graph(graph)
+    if g is None or g.node(node) is None:
+        return "null"
+    idx = ModuleIndex(m)
+    return json.dumps(canvasedit.literal_prompt(g, GraphInfo(g, idx), idx, node, pin))
+
+
+def edit(source: str, graph: str, request: str) -> str:
+    """Make one canvas edit on `graph` (through canvasedit, as the desktop editor does) and
+    return the new text in canonical form. `request` is JSON with an "op":
+      move             "moves": [[node or box id, x, y], ...]
+      connect          "a", "b": [node, "in"/"out", pin], in either order
+      connect_to_node  "a": [node, "in"/"out", pin], "node": the node it was dropped on
+      disconnect       "node", "dir", "pin": the wires at that pin
+      delete           "node": a node (with its wires) or a box
+      literal          "node", "pin", "text": the value typed for an input (empty unbinds it)
+      toggle           "node", "pin": flip a bool input
+    and optionally "geoms": {node: [x, y, width]} as drawn (to place an inserted Convert node)
+    and "comments": "convert". The result is {"ok", "text", "message", "select"} (`select`: a
+    node the edit added). When the edit is refused, `ok` is false and `message` says why. The
+    canonical text cannot keep `//` comments: then the result is {"ok": false, "comments": n}
+    and nothing changes, so the page can ask and send the edit again with "comments":
+    "convert", which turns them into notes."""
+    req = json.loads(request)
+    try:
+        m = Parser(source).parse_module()
+    except ParseError:
+        return json.dumps({"ok": False, "message": "Fix the parse error in the source before editing the graph."})
+    g = m.graph(graph)
+    if g is None:
+        return json.dumps({"ok": False, "message": f"There is no graph {graph}."})
+    if m.comments and req.get("comments") != "convert":
+        return json.dumps({"ok": False, "comments": len(m.comments)})
+    idx = ModuleIndex(m)
+    info = GraphInfo(g, idx)
+    positions(g, info, _REMEMBERED)            # where nodes without a place line are drawn
+    geoms = req.get("geoms") or {}
+
+    def geom(nid):
+        v = geoms.get(nid)
+        return tuple(v) if v else None
+
+    before = {n.id for n in g.nodes}
+    op = req.get("op")
+    try:
+        if op == "move":
+            for nid, x, y in req["moves"]:
+                if g.node(nid) or g.box(nid):
+                    ops.place(g, nid, round(x), round(y))
+            reason = "Moved " + ", ".join(str(x[0]) for x in req["moves"])
+        elif op == "connect":
+            reason = canvasedit.connect(g, info, idx, tuple(req["a"]), tuple(req["b"]), geom)
+        elif op == "connect_to_node":
+            reason = canvasedit.connect_to_node(g, info, idx, tuple(req["a"]), req["node"], geom)
+        elif op == "disconnect":
+            reason = canvasedit.disconnect(g, info, req["node"], req["dir"], req["pin"])
+        elif op == "delete":
+            nid = req["node"]
+            if g.node(nid) is not None:
+                removed = ops.delete_node(g, nid)
+                reason = f"Deleted {nid}" + (f" and {len(removed)} wire(s): {', '.join(removed)}"
+                                             if removed else "")
+            elif g.box(nid) is not None:
+                ops.delete_box(g, nid)
+                reason = f"Deleted box {nid}"
+            else:
+                reason = None
+        elif op == "literal":
+            reason = canvasedit.set_literal(g, info, idx, req["node"], req["pin"], req["text"])
+        elif op == "toggle":
+            reason = canvasedit.toggle_bool(g, req["node"], req["pin"])
+        else:
+            return json.dumps({"ok": False, "message": f"unknown edit '{op}'"})
+    except canvasedit.Refused as e:
+        return json.dumps({"ok": False, "message": str(e)})
+    if not reason:
+        return json.dumps({"ok": False, "message": ""})
+    if m.comments:
+        dropped = ops.convert_comments(m)
+        if dropped:
+            reason += " (" + "; ".join(dropped) + ")"
+    canvasedit.place_unplaced(g, _REMEMBERED)
+    added = [n.id for n in g.nodes if n.id not in before]
+    return json.dumps({"ok": True, "text": print_module(m), "message": reason,
+                       "select": added[0] if added else None})
 
 def run(source: str, func: str = "Main", deterministic: bool = False,
         fuel: int = 50_000_000) -> str:
