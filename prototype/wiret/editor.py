@@ -1478,6 +1478,13 @@ class EditorApp:
             for _, f in fields:
                 add(sub, f"Set {f.name}", "SetField", f"{name}.{f.name}")
             classes.add_cascade(label=name, menu=sub)
+        for name in sorted(idx.interfaces):
+            sub = tk.Menu(classes, tearoff=0)
+            add(sub, f"Cast to {name}", "Cast", name)
+            sub.add_separator()
+            for m in idx.interfaces[name].methods:
+                add(sub, f"Call {m.name}", "Call", f"{name}.{m.name}")
+            classes.add_cascade(label=f"{name} (interface)", menu=sub)
         if idx.classes:
             classes.add_separator()
             add(classes, "IsValid (not null)", "IsValid")

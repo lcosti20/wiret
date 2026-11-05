@@ -121,6 +121,10 @@ def explain(d: Diag) -> str:
                 "override), so it must take the same inputs and give the same outputs. A method "
                 "marked @final cannot be replaced at all. Rename this method, or match the "
                 "parent's signature.")
+    if c == "E0152":
+        return ("A class that says it implements an interface (with 'impl') must have a method for "
+                "every method the interface lists, with the same inputs and outputs. Add the "
+                "missing method, or fix its inputs and outputs to match.")
     if c == "E0151":
         return ("A class can only extend another class of this module, and a class cannot end up "
                 "extending itself through its parents. Check the name after ':' in the class "

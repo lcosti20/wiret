@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .model import Class, Const, Enum, Extern, Graph, Lit, Module, Node, Struct, Var
+from .model import Class, Interface, Const, Enum, Extern, Graph, Lit, Module, Node, Struct, Var
 from .natives import STD, NativeSpec
 
 INT_TYPES = ["i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64"]
@@ -52,7 +52,7 @@ def allows(constraint: str, ty: str, idx: "Optional[ModuleIndex]" = None) -> boo
         return False
     kinds = USER_CONSTRAINTS.get(constraint, ())
     return (("struct" in kinds and ty in idx.structs) or ("enum" in kinds and ty in idx.enums)
-            or ("class" in kinds and ty in idx.classes))
+            or ("class" in kinds and (ty in idx.classes or ty in idx.interfaces)))
 
 
 def type_choices(constraint: str, idx: "Optional[ModuleIndex]" = None) -> list:
@@ -133,9 +133,13 @@ def assignable(src: str, dst: str, idx: "Optional[ModuleIndex]" = None) -> bool:
     into one of its bases, or any class into `anyref` (section 3.1)."""
     if src == dst:
         return True
-    if idx is None or src not in idx.classes:
+    if idx is None:
         return False
-    return dst == "anyref" or idx.is_subclass(src, dst)
+    if src in idx.interfaces:
+        return dst == "anyref"
+    if src not in idx.classes:
+        return False
+    return dst == "anyref" or idx.is_subclass(src, dst) or idx.implements(src, dst)
 
 
 def handle_ok(ty: str, idx: "Optional[ModuleIndex]" = None) -> bool:
@@ -197,7 +201,8 @@ def lit_fits(lit: Lit, ty: str, idx: "Optional[ModuleIndex]" = None) -> bool:
     have no literal form; arrays take only `null`, the empty array. A class reference, a
     signal and `anyref` take `null` (with `idx`, to know the classes)."""
     if lit.kind == "null" and (ty in ("anyref", "std.Signal")
-                               or (idx is not None and ty in idx.classes)):
+                               or (idx is not None and (ty in idx.classes
+                                                        or ty in idx.interfaces))):
         return True
     if lit.kind == "enum":
         return lit.value.rsplit(".", 1)[0] == ty
@@ -443,6 +448,7 @@ class ModuleIndex:
         self.structs = {i.name: i for i in module.items if isinstance(i, Struct)}
         self.enums = {i.name: i for i in module.items if isinstance(i, Enum)}
         self.classes = {i.name: i for i in module.items if isinstance(i, Class)}
+        self.interfaces = {i.name: i for i in module.items if isinstance(i, Interface)}
         self._instances = {}
 
     # -- classes (section 2.2) ---------------------------------------------------------
@@ -480,13 +486,24 @@ class ModuleIndex:
                 return g
         return None
 
+    def class_interfaces(self, cls: str) -> list:
+        """Every interface a class implements, its bases' first, in declaration order."""
+        out = []
+        for c in reversed(self.class_chain(cls)):
+            out += [i for i in self.classes[c].impls if i in self.interfaces and i not in out]
+        return out
+
+    def implements(self, cls: str, iface: str) -> bool:
+        return iface in self.class_interfaces(cls)
+
     def methods(self, cls: str) -> list:
         return sorted((g for g in self.graphs.values() if g.owner == cls), key=lambda g: g.name)
 
     def user_type(self, ty: str):
         """The struct or enum a type name refers to. Types are named without the module
         prefix (`Vec2`, not `game.demo.Vec2`)."""
-        return self.structs.get(ty) or self.enums.get(ty) or self.classes.get(ty)
+        return (self.structs.get(ty) or self.enums.get(ty) or self.classes.get(ty)
+                or self.interfaces.get(ty))
 
     def enum_base(self, ty: str) -> Optional[str]:
         """The underlying integer type of an enum type (default `i32`), else None."""
@@ -510,6 +527,14 @@ class ModuleIndex:
     def callee(self, symbol: str) -> Optional[Callee]:
         s = self._strip(symbol)
         cls, _, short = s.rpartition(".")
+        if cls in self.interfaces:                 # dispatched through the interface (5.6)
+            m = self.interfaces[cls].method(short)
+            if m is None:
+                return None
+            return Callee(s, "interface",
+                          [Pin("self", cls)] + [Pin(p.name, p.type, p.default) for p in m.params],
+                          [Pin(r.name, r.type) for r in m.result_list], "impure",
+                          m.has_attr("latent"), cls)
         g = self.graphs.get(s)
         if g is None and cls in self.classes:
             g = self.find_method(cls, short)      # an inherited method: `Boss.Heal`
@@ -750,9 +775,11 @@ def _class_sig(node: Node, graph: Graph, idx: ModuleIndex, sig: Sig) -> Sig:
     if k == "Cast":
         sig.purity = "pure"
         target = node.symbol
-        if target not in idx.classes or node.targs:
-            sig.error = ("E0501", "Cast names the class to cast to, as in 'Cast Boss'")
-            target = target if target in idx.classes else None
+        known = target in idx.classes or target in idx.interfaces
+        if not known or node.targs:
+            sig.error = ("E0501", "Cast names the class or interface to cast to, as in "
+                                  "'Cast Boss'")
+            target = target if known else None
         sig.inputs = [Pin("obj", "anyref")]
         sig.outputs = [Pin("result", target or "anyref"), Pin("ok", "bool")]
         return sig

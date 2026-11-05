@@ -76,7 +76,7 @@ A `const` is 8 bytes (numeric bit pattern), or a `u32` data index for `string`, 
 | `5D` | map | `key:valtype value:valtype` |
 | `5C` | set | `elem:valtype` |
 | `5B` | class | `flags:u8 super:u32 interfaces:vec(iface:u32 impl:vec(funcidx)) fields:vec(field) vtable:vec(funcidx)`. `super` is 0 for none, else type index + 1. Flag bit 0 marks a host type: then a `name` follows and there are no fields. `fields` are the class's own; inherited fields come first in the layout. `vtable` holds the full slot list: the superclass's slots, with overrides replacing inherited slots, then the class's new methods ordered by name. |
-| `5A` | interface | `methods:vec(functype:u32)`; the method index is the dispatch slot. |
+| `5A` | interface | `methods:vec(functype:u32)`; the method index is the dispatch slot. A function type here leaves out the receiver. A class entry's `interfaces` lists every interface the class implements, including those of its superclasses, each with the function implementing each method, so `call_interface` never walks the hierarchy. The verifier requires a class to keep its superclass's interfaces, and each implementation to take the class or a superclass as its receiver, to have the method's function type after it, and not to be latent. |
 | `59` | delegate | `functype:u32` |
 | `58` | dispatcher | `functype:u32` (no results) |
 

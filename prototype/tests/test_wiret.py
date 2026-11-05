@@ -387,10 +387,10 @@ struct P {
                           ("struct S {\n  x: i32 y: i32\n}\n", "end of line"),
                           ("struct S::<T> {\n}\n", "no type parameters"),
                           ("struct S {\n  #[doc(\"x\")]\n}\n", "directly above"),
-                          ("class C impl I {\n}\n", "interfaces"),
                           ("class C::<T> {\n}\n", "no type parameters"),
                           ("class C {\n  macro M() {\n  }\n}\n", "module level"),
-                          ("interface I {\n}\n", "Tier 2")):
+                          ("interface I {\n  x: i32\n}\n", "lists methods"),
+                          ("interface I {\n  func F() {\n  }\n}\n", "no body")):
             with self.subTest(src):
                 with self.assertRaises(ParseError) as cm:
                     parse(module("\n" + src, macros=False))
@@ -4458,6 +4458,343 @@ class A {
                 mod = vm.load(bytes(d))
                 if "Make" in mod.exports:
                     vm.call(mod, "Make", [1])
+            except WiretError:
+                pass
+
+
+IFACE = """
+interface Damageable {
+  func Hit(amount: i32) -> (left: i32)
+  func Name() -> (name: string)
+}
+
+class Barrel impl Damageable {
+  hp: i32 = 10
+
+  func Hit(amount: i32) -> (left: i32) {
+    node cur = GetField hp
+      .obj <- entry.self
+    node entry = Entry
+    node ret = Return
+      .left <- sub.result
+    node set = SetField hp
+      .obj <- entry.self
+      .value <- sub.result
+    node sub = Sub::<i32>
+      .a <- cur.value
+      .b <- entry.amount
+
+    flow {
+      entry -> set
+      set -> ret
+    }
+  }
+
+  func Name() -> (name: string) {
+    node entry = Entry
+    node ret = Return
+      .name <- "barrel"
+
+    flow {
+      entry -> ret
+    }
+  }
+}
+
+class BigBarrel : Barrel {
+  func Name() -> (name: string) {
+    node entry = Entry
+    node ret = Return
+      .name <- "big barrel"
+
+    flow {
+      entry -> ret
+    }
+  }
+}
+
+class Door impl Damageable {
+  func Hit(amount: i32) -> (left: i32) {
+    node entry = Entry
+    node ret = Return
+      .left <- 99
+
+    flow {
+      entry -> ret
+    }
+  }
+
+  func Name() -> (name: string) {
+    node entry = Entry
+    node ret = Return
+      .name <- "door"
+
+    flow {
+      entry -> ret
+    }
+  }
+}
+
+func Smash(which: i32) -> (name: string, left: i32, is_d: bool) {
+  local t: Damageable
+  node b = New BigBarrel
+  node chk = Branch
+    .cond <- is0.result
+  node d = New Door
+  node entry = Entry
+  node get = GetLocal t
+  node hit = Call Damageable.Hit
+    .self <- get.value
+    .amount <- 4
+  node is0 = Eq::<i32>
+    .a <- entry.which
+    .b <- 0
+  node is_d = Cast Door
+    .obj <- get.value
+  node nm = Call Damageable.Name
+    .self <- get.value
+  node ret = Return
+    .name <- nm.name
+    .left <- hit.left
+    .is_d <- is_d.ok
+  node sb = SetLocal t
+    .value <- b.result
+  node sd = SetLocal t
+    .value <- d.result
+
+  flow {
+    b -> sb
+    chk.then -> b
+    chk.else -> d
+    d -> sd
+    entry -> chk
+    hit -> nm
+    nm -> ret
+    sb -> hit
+    sd -> hit
+  }
+}
+"""
+
+
+def iface_text(extra=""):
+    return module(IFACE + extra, macros=False)
+
+
+class InterfaceTests(unittest.TestCase):
+    """Interfaces (sections 2.2, 3.3, 5.3 and 5.6): `impl`, calls through an interface,
+    subtyping, Cast, E0151, E0152, and the verifier's interface tables."""
+
+    def test_round_trip_and_check(self):
+        text = iface_text()
+        self.assertEqual(print_module(parse(text)), text)
+        self.assertEqual([c for c in codes(text) if c.startswith("E")], [])
+
+    def test_calls_dispatch_through_the_interface(self):
+        text = iface_text()
+        self.assertEqual(run(text, "Smash", 0)[0], ["big barrel", 2, 0])   # Hit is Barrel's
+        self.assertEqual(run(text, "Smash", 1)[0], ["door", 99, 1])
+        _, r = build(text)
+        self.assertIn("call_interface", disassemble(r.wbc))
+
+    def test_subtyping_and_cast(self):
+        text = iface_text("""
+class Rock {
+}
+
+func Up() -> (d: Damageable) {
+  node entry = Entry
+  node n = New Door
+  node ret = Return
+    .d <- n.result
+
+  flow {
+    entry -> n
+    n -> ret
+  }
+}
+
+func Down(d: Damageable) -> (door: Door) {
+  node entry = Entry
+  node ret = Return
+    .door <- entry.d
+
+  flow {
+    entry -> ret
+  }
+}
+
+func NotOne() -> (d: Damageable) {
+  node entry = Entry
+  node n = New Rock
+  node ret = Return
+    .d <- n.result
+
+  flow {
+    entry -> n
+    n -> ret
+  }
+}
+
+func Probe() -> (rock_ok: bool, door_ok: bool) {
+  node door = New Door
+  node entry = Entry
+  node is_door = Cast Damageable
+    .obj <- door.result
+  node is_rock = Cast Damageable
+    .obj <- rock.result
+  node ret = Return
+    .rock_ok <- is_rock.ok
+    .door_ok <- is_door.ok
+  node rock = New Rock
+
+  flow {
+    door -> rock
+    entry -> door
+    rock -> ret
+  }
+}
+""")
+        diags = sorted((d.graph, d.code) for d in check(parse(text)) if d.code.startswith("E"))
+        self.assertEqual(diags, [("Down", "E0110"), ("NotOne", "E0110")])
+        ok = parse(text)
+        ok.items = [it for it in ok.items if getattr(it, "name", "") not in ("Down", "NotOne")]
+        self.assertEqual(run(print_module(ok), "Probe")[0], [0, 1])
+
+    def test_e0152_missing_or_mismatched_methods(self):
+        text = module("""
+interface Named {
+  func Name() -> (name: string)
+  func Rank() -> (rank: i32)
+}
+
+class A impl Named {
+  func Name() -> (name: i32) {
+    node entry = Entry
+  }
+}
+
+class B impl Named {
+  func Rank() -> (rank: i32) {
+    node entry = Entry
+  }
+
+  event Name() {
+    node entry = Entry
+  }
+}
+""", macros=False)
+        diags = sorted((d.graph, d.code, d.pin) for d in check(parse(text))
+                       if d.code.startswith("E"))
+        self.assertEqual(diags, [("A", "E0152", "Name"), ("A", "E0152", "Rank"),
+                                 ("B", "E0152", "Name")])
+
+    def test_e0151_impl_of_something_else_and_interface_rules(self):
+        text = module("""
+interface I {
+  func F()
+  func F()
+  func W() @latent
+}
+
+class A {
+}
+
+class B impl A, Missing {
+}
+""", macros=False)
+        diags = sorted((d.graph, d.code) for d in check(parse(text)) if d.code.startswith("E"))
+        self.assertEqual(diags, [("B", "E0151"), ("B", "E0151"), ("I", "E0102"),
+                                 ("I", "E0501")])
+
+    def test_null_receiver_faults(self):
+        text = iface_text("""
+func F() -> (code: i32) {
+  node c = Call Damageable.Name
+    .self <- null
+  node caught = Return
+    .code <- t.code
+  node entry = Entry
+  node ok = Return
+    .code <- 0
+  node t = Try
+
+  flow {
+    c -> ok
+    entry -> t
+    t.body -> c
+    t.fault -> caught
+  }
+}
+""")
+        self.assertEqual(run(text, "F")[0], [-3])
+
+    def test_ids_and_merge_know_classes_and_interfaces(self):
+        from wiret.ids import assign_ids
+        from wiret.merge import merge_texts
+        m = parse(iface_text())
+        assign_ids(m, rng=random.Random(3))
+        out = print_module(m)
+        self.assertIn('interface Damageable @id("if_', out)
+        self.assertIn('class Door impl Damageable @id("cls_', out)
+        self.assertIn('func Name() -> (name: string) @id("im_', out)
+        base = iface_text()
+        ours = base.replace("  func Name() -> (name: string)\n}",
+                            "  func Name() -> (name: string)\n  func Heal()\n}", 1)
+        theirs = base.replace("class Door impl Damageable {", "class Door impl Damageable {\n"
+                              "  open: bool", 1)
+        r = merge_texts(base, ours, theirs)
+        self.assertEqual(r.conflicts, [])
+        self.assertIn("  func Heal()\n}", r.text)
+        self.assertIn("  open: bool\n", r.text)
+
+    def test_verifier_checks_interface_tables(self):
+        _, r = build(iface_text())
+
+        def mutate(fn):
+            m = wbc.decode_module(r.wbc)
+            fn(m)
+            with self.assertRaises(WiretError) as cm:
+                VM().load(wbc.encode_module(m))
+            return cm.exception.status
+
+        def find(m, name):
+            return next(i for i, t in enumerate(m.types) if isinstance(t, wbc.ClassType)
+                        and t.interfaces and len(t.vtable) == 2 and t.super is None
+                        and len(t.fields) == (1 if name == "Barrel" else 0))
+
+        def short_table(m):
+            t = find(m, "Door")
+            e = m.types[t]
+            i, impl = e.interfaces[0]
+            m.types[t] = wbc.ClassType(e.super, e.fields, e.vtable, ((i, impl[:1]),))
+        def swapped_methods(m):          # Hit and Name have different signatures
+            t = find(m, "Door")
+            e = m.types[t]
+            i, impl = e.interfaces[0]
+            m.types[t] = wbc.ClassType(e.super, e.fields, e.vtable, ((i, impl[::-1]),))
+        def dropped_by_subclass(m):
+            t = next(i for i, x in enumerate(m.types)
+                     if isinstance(x, wbc.ClassType) and x.super is not None)
+            e = m.types[t]
+            m.types[t] = wbc.ClassType(e.super, e.fields, e.vtable, ())
+        for fn in (short_table, swapped_methods, dropped_by_subclass):
+            with self.subTest(fn.__name__):
+                self.assertEqual(mutate(fn), "WR_ERR_VERIFY")
+
+    def test_fuzzed_interface_modules_never_crash(self):
+        _, r = build(iface_text())
+        rng = random.Random(6262)
+        data = bytes(r.wbc)
+        for _ in range(800):
+            d = bytearray(data)
+            for _ in range(rng.randint(1, 4)):
+                d[rng.randrange(len(d))] = rng.randrange(256)
+            vm = VM(output=lambda _s: None, fuel=10_000)
+            try:
+                mod = vm.load(bytes(d))
+                if "Smash" in mod.exports:
+                    vm.call(mod, "Smash", [0])
             except WiretError:
                 pass
 

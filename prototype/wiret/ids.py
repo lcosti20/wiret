@@ -13,7 +13,7 @@ import random
 from dataclasses import dataclass, field
 from typing import Iterator, Optional
 
-from .model import (Attr, Class, Const, Enum, Extern, Graph, Lit, Module, Struct, Use, Var)
+from .model import (Attr, Class, Interface, Const, Enum, Extern, Graph, Lit, Module, Struct, Use, Var)
 
 ID_CHARS = "abcdefghijkmnpqrstuvwxyz23456789"     # no 0/o, 1/l: ids are read aloud
 
@@ -21,7 +21,7 @@ ID_CHARS = "abcdefghijkmnpqrstuvwxyz23456789"     # no 0/o, 1/l: ids are read al
 PREFIX = {"module": "mod", "use": "use", "extern": "ext", "const": "const", "var": "var",
           "enum": "en", "struct": "st", "func": "fn", "event": "ev", "macro": "mac",
           "param": "p", "result": "r", "field": "f", "member": "m", "local": "l",
-          "state": "s"}
+          "state": "s", "class": "cls", "interface": "if", "method": "im"}
 
 
 def get_id(attrs: list) -> Optional[str]:
@@ -48,7 +48,7 @@ def decl_kind(it) -> str:
     if isinstance(it, Graph):
         return it.kind
     return {Use: "use", Extern: "extern", Const: "const", Var: "var", Enum: "enum",
-            Struct: "struct", Class: "class"}[type(it)]
+            Struct: "struct", Class: "class", Interface: "interface"}[type(it)]
 
 
 def elements(m: Module) -> Iterator[Element]:
@@ -67,6 +67,9 @@ def elements(m: Module) -> Iterator[Element]:
                 yield Element("local", l.name, it.name, l)
             for st in it.states:
                 yield Element("state", st.name, it.name, st)
+        if isinstance(it, Interface):
+            for im in it.methods:
+                yield Element("method", im.name, it.name, im)
         if isinstance(it, (Struct, Class)):
             for f in it.fields:
                 yield Element("field", f.name, it.name, f)

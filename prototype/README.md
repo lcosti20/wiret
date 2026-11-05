@@ -187,11 +187,11 @@ The editor also follows the graph-editor contract in section 7.5:
 
 | Area | Status |
 | --- | --- |
-| Text syntax (2.1–2.4) | Full lexer and parser for `use`, `extern`, `const`, `var`, `enum`, `struct`, `class` (with methods and a base class), `func`, `event`, `macro`, `local`, `state`, nodes, bindings, semantic `@` attributes, `#[...]` metadata lines (`#[doc]`, `#[note]`, ...) above declarations, nodes and boxes, the `flow` block (exec wires) and `layout` (places and boxes). An old `markup` block is rejected with a hint, and an unknown `@` name such as `@doc` is `E0104`. See *Structs and enums* and *Classes* below. `interface`, `impl` and `dispatcher` are rejected with a clear error. |
+| Text syntax (2.1–2.4) | Full lexer and parser for `use`, `extern`, `const`, `var`, `enum`, `struct`, `class` (with methods, a base class and `impl`), `interface`, `func`, `event`, `macro`, `local`, `state`, nodes, bindings, semantic `@` attributes, `#[...]` metadata lines (`#[doc]`, `#[note]`, ...) above declarations, nodes and boxes, the `flow` block (exec wires) and `layout` (places and boxes). An old `markup` block is rejected with a hint, and an unknown `@` name such as `@doc` is `E0104`. See *Structs and enums* and *Classes* below. `dispatcher` is rejected with a clear error. |
 | Canonical form and hashes (2.5) | Sorted items (struct fields and enum members keep the order written), nodes, `flow` wires (by source node id, then exec pin order) and layout lines, each with its metadata lines above it (`doc`, `category`, `keywords`, then notes as written); registry pin order; default-valued bindings omitted; 100-column wrapping; attribute ordering. Semantic hash (ignores layout, every `#[...]` line and `Reroute`) and layout hash. |
-| Node kinds (3.3) | `Entry`, `Return`, `Branch`, `Sequence`, `Switch`, `Select`, `Macro`, `Exit`, `Reroute`, `Get/SetLocal`, `Get/SetVar` (and `const`s), `Get/SetState`, `Call`, `Convert`, all arithmetic, comparison, logic and bit kinds, and the array kinds `MakeArray`, `ArrayGet`, `ArrayLength`, `ArraySet`, `ArrayAdd`, `ArrayInsert`, `ArrayRemove`, `ArrayClear`, the struct kinds, the map and set kinds (see *Maps and sets* below), `Try` and `Throw` (see *Faults* below), the latent kinds `Delay`, `Yield` and `Await` (see *Fibers* below), and the class kinds `New`, `GetField`/`SetField` on objects, `Cast` and `IsValid` (see *Classes* below). Types: `bool`, all integer widths, `f32`, `f64`, `string`, `array::<T>`, `map::<K, V>`, `set::<T>`, structs, enums, classes and `std.Signal`. |
+| Node kinds (3.3) | `Entry`, `Return`, `Branch`, `Sequence`, `Switch`, `Select`, `Macro`, `Exit`, `Reroute`, `Get/SetLocal`, `Get/SetVar` (and `const`s), `Get/SetState`, `Call`, `Convert`, all arithmetic, comparison, logic and bit kinds, and the array kinds `MakeArray`, `ArrayGet`, `ArrayLength`, `ArraySet`, `ArrayAdd`, `ArrayInsert`, `ArrayRemove`, `ArrayClear`, the struct kinds, the map and set kinds (see *Maps and sets* below), `Try` and `Throw` (see *Faults* below), the latent kinds `Delay`, `Yield` and `Await` (see *Fibers* below), and the class kinds `New`, `GetField`/`SetField` on objects, `Cast` and `IsValid` (see *Classes* below). Types: `bool`, all integer widths, `f32`, `f64`, `string`, `array::<T>`, `map::<K, V>`, `set::<T>`, structs, enums, classes, interfaces and `std.Signal`. |
 | Execution model (4.2–4.3) | Continuation stack, `Sequence` push/pop, macro inlining with path-style ids (`loop/test`, `loop!in`), `Exit` as a jump, joins, evaluation points with per-point sharing, impure output slots, `@pure` and `@reads` calls as pure nodes, per-expansion `state`. The §4.2 `SumTo(2)` trace is reproduced exactly (see tests). |
-| Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0150, E0151, E0201 (latency), E0301, E0302, E0304, E0401, E0412, E0501, E0502, E0503, W0201, W0301, W0302, W0310, W0320, W0601, W0602, W0603, W0604. |
+| Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0150, E0151, E0152, E0201 (latency), E0301, E0302, E0304, E0401, E0412, E0501, E0502, E0503, W0201, W0301, W0302, W0310, W0320, W0601, W0602, W0603, W0604. |
 | Lowering (4.8) | `-O0`: one labelled block per impure node, `local.tee` for shared values, `cont.push`/`cont.pop` kept. Output closely matches the §5.8 listings. |
 | WBC (5.2–5.4) | Type (function, `5E` array and `5F` struct entries), Import, Function, Global, Export, Data and Code sections, plus custom sections `name`, `wr.debug`, `wr.pins`, `wr.pure`, `wr.meta` (hashes), `wr.caps` and `wr.graph` (deflated canonical source). |
 | Verifier (5.5) | One linear pass: decoding, branch targets, empty stack at labels, operand typing (including `struct.new`/`get`/`with`), returns, `max_stack`, latency/purity flags. Type references may point forward, but a struct may not hold itself by value. Fuzz-tested. |
@@ -450,6 +450,45 @@ class Boss : Player {
   its class as `self`. The palette and the Add menu have a Classes section. Class
   declarations are edited in the Source pane.
 
+### Interfaces
+
+The fourth Tier 2 item (sections 2.2, 3.3, 5.3 and 5.6).
+
+```
+interface Damageable {
+  func Hit(amount: i32) -> (left: i32)
+  func Name() -> (name: string)
+}
+
+class Barrel impl Damageable { ... }
+class Door : Prop impl Damageable, Openable { ... }
+```
+
+- An interface lists method signatures, in the order written: a method's position is its
+  dispatch slot, so the canonical form never sorts them. An interface is a reference type
+  (`null` by default) usable wherever a class is.
+- A class implements an interface by having a `func` of each name with the same parameters
+  and results, its own or inherited from a base class (`E0152` otherwise, and for an `event`
+  or a `@latent` func). A class also implements its bases' interfaces. An `impl` name that is
+  not an interface is `E0151`. A class flows into a pin of an interface it implements, and an
+  interface into `anyref`; never back without `Cast` (`E0110`).
+- `Call Damageable.Hit` takes `self: Damageable` and lowers to `call_interface`, which runs
+  the receiver's class's implementation; a null receiver faults with -3. `Cast Damageable`
+  checks whether an object implements it. `Eq` compares identity.
+- **Not latent.** An interface method cannot be `@latent` in this prototype (`E0501`), and
+  the verifier rejects a latent implementation: the `5A` entry records only function types,
+  so a non-latent caller could not know that `call_interface` might suspend.
+- **Bytecode.** The `5A` interface entry holds one function type per method, without the
+  receiver. A class entry lists every interface it implements, inherited ones included, with
+  the function implementing each method, so dispatch never walks the hierarchy. The verifier
+  checks that each implementation takes this class or a base as its receiver and has the
+  method's signature, and that a class keeps its superclass's interfaces; a class is a
+  subtype of the interfaces it lists. Interface names are in the `name` section's class
+  vector, with no fields.
+- The palette and the Add menu list each interface's methods under Call and a Cast to it;
+  `@id` prefixes are `cls_` for classes, `if_` for interfaces and `im_` for interface methods.
+  Merge treats interface methods as keyed members, with the signature as one field.
+
 ### Identity and the id registry
 
 A **project** is a directory with a `wiret.toml` (section 7.3); its `wiret.ids` lists every
@@ -522,9 +561,9 @@ pins for results, and flow wires for a macro's exec parameters and results.
 
 - **Exports.** Every `func` and `event` is exported, so the editor can run any of them. The
   spec exports only `@export` declarations.
-- **The rest of Tier 2 is not implemented:** interfaces (`impl`), delegates and dispatchers.
-  Their declarations are parse errors, their node kinds `E0501`, and their opcodes are
-  rejected by the verifier. `Try`, `Throw`, fibers and classes are done (see above). The
+- **The rest of Tier 2 is not implemented:** delegates and dispatchers. A `dispatcher` is a
+  parse error, their node kinds are `E0501`, and their opcodes are rejected by the verifier.
+  `Try`, `Throw`, fibers, classes and interfaces are done (see above). The
   editor's debugger steps through one fiber, the one Run started.
 - **Classes, not yet:** `state` in a method (it would live on the object; `E0501`, including
   a macro with state expanded in a method), calling a base class's version of an overridden
