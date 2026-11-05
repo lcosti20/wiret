@@ -3,9 +3,12 @@ module lessons.fizzbuzz
 
 extern func host.Log(message: string)
 
+#[note("Lesson 6: Challenge, FizzBuzz. For 1 to 15, print Fizz for multiples of 3, Buzz for multiples of 5, FizzBuzz for multiples of both, and otherwise the number. Rem gives the remainder: a number is a multiple of 3 when the remainder after dividing by 3 is 0.")]
+#[note("Try it: (1) Predict the output, then Run. (2) Swap the order of check15 and check3 and see what breaks. (3) Add 'Bang' for multiples of 7.")]
 func Main() {
   node buzz = Call host.Log
     .message <- "Buzz"
+  #[note("Why check 15 first? 15 is a multiple of 3 too. If check3 came first, 15 would only print Fizz.")]
   node check15 = Branch
     .cond <- is15.result
   node check3 = Branch
@@ -52,12 +55,6 @@ func Main() {
     check5.else -> number
     entry -> loop
     loop.each -> check15
-  }
-
-  markup {
-    attribute intro = Note(message: "Lesson 6: Challenge, FizzBuzz. For 1 to 15, print Fizz for multiples of 3, Buzz for multiples of 5, FizzBuzz for multiples of both, and otherwise the number. Rem gives the remainder: a number is a multiple of 3 when the remainder after dividing by 3 is 0.")
-    attribute order on check15 = Note(message: "Why check 15 first? 15 is a multiple of 3 too. If check3 came first, 15 would only print Fizz.")
-    attribute try_it = Note(message: "Try it: (1) Predict the output, then Run. (2) Swap the order of check15 and check3 and see what breaks. (3) Add 'Bang' for multiples of 7.")
   }
 
   layout {

@@ -118,12 +118,14 @@ func Fib(n: i32) -> (result: i32) @pure {
   }
 }
 
+#[note("Logs Fib(i) for the even numbers 1..10, then SumTo(100).")]
 func Main() @id("fn_main") {
   node count_run = SetVar runs
     .value <- runs_inc.result
   node entry = Entry
   node fib = Call Fib
     .n <- loop.index
+  #[note("fib is pure: it is re-evaluated at log_fib's evaluation point.")]
   node fib_text = Convert::<i32, string>
     .value <- fib.result
   node hello = Call host.Log
@@ -176,11 +178,6 @@ func Main() @id("fn_main") {
     loop.done -> sum
     parity.then -> log_fib
     sum -> log_sum
-  }
-
-  markup {
-    attribute overview = Note(message: "Logs Fib(i) for the even numbers 1..10, then SumTo(100).")
-    attribute why_slot on fib_text = Note(message: "fib is pure: it is re-evaluated at log_fib's evaluation point.")
   }
 
   layout {

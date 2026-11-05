@@ -50,7 +50,9 @@ def view_flow(m: Module) -> str:
         lines = fmt_graph(g, idx)
         order = flow_order(g, info)
         flowed = [fmt_node(info.nodes[nid], info.sigs[nid], IND) for nid in order]
-        node_lines = [l for l in lines if l.startswith(IND + "node ")]
+        # a node entry is its node line, any `#[...]` lines above it and its bindings
+        node_lines = [l for l in lines
+                      if any(x.startswith(IND + "node ") for x in l.splitlines())]
         if node_lines:
             start = lines.index(node_lines[0])
             lines[start:start + len(node_lines)] = flowed

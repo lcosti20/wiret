@@ -5,8 +5,11 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Optional
 
-from .model import Graph, Lit, Module, Node, PinRef
+from .model import Graph, Lit, Module, Node, PinRef, SEMANTIC_ATTRS, note_detached, notes
 from .model import Var
+
+# Names that are metadata, not semantic attributes: `@doc` is `#[doc]` (section 2.4).
+META_NAMES = {"doc", "category", "keywords", "note"}
 from .registry import (ARRAY_MUTATORS, ModuleIndex, Sig, instantiate, lit_fits, signature,
                        substitute, type_ok)
 
@@ -106,6 +109,12 @@ def check(module: Module, comments_ok=False) -> list:
             if ty != "exec" and not type_ok(ty):
                 D("E0501", f"type '{p.type}' is not supported by this prototype",
                   getattr(it, "name", None))
+    check_attr_names(module, D)
+    for owner in [module] + [i for i in module.items if not isinstance(i, Graph)]:
+        for nt in notes(owner.meta):
+            if note_detached(nt) is not None:
+                D("W0604", f"a note is detached from '{note_detached(nt)}', which was deleted",
+                  getattr(owner, "name", None) if owner is not module else None)
     if module.comments and not comments_ok:
         for c in module.comments:
             D("W0603", f"line {c.line}: '//' comment is not part of the model and would be dropped; "
@@ -381,6 +390,33 @@ def _pure_closure(info: GraphInfo, nid: str) -> set:
     return out
 
 
+def check_attr_names(module: Module, D):
+    """E0104: an `@` name that is not a semantic attribute (section 2.4)."""
+    def walk(owner, attrs, graph=None, node=None):
+        for a in attrs:
+            if a.name in SEMANTIC_ATTRS:
+                continue
+            if a.name in META_NAMES:
+                D("E0104", f"'@{a.name}' is metadata, written on its own line above "
+                           f"{owner}: #[{a.name}(...)]", graph, node)
+            else:
+                D("E0104", f"unknown attribute '@{a.name}' on {owner}; '@' is only for semantic "
+                           f"attributes, metadata is written #[{a.name}(...)] on the line above",
+                  graph, node)
+
+    walk(f"module {module.name}", module.attrs)
+    for it in module.items:
+        name = getattr(it, "name", "")
+        walk(name, it.attrs, name if isinstance(it, Graph) else None)
+        for p in list(getattr(it, "params", []) or []) + list(getattr(it, "results", []) or []):
+            walk(f"parameter '{p.name}'", p.attrs, name)
+        if isinstance(it, Graph):
+            for l in it.locals + it.states:
+                walk(f"'{l.name}'", l.attrs, name)
+            for n in it.nodes:
+                walk(f"node '{n.id}'", n.attrs, name, n.id)
+
+
 def check_layout(g: Graph, ids: set, G, D):
     owner = {}
     for b in sorted(g.boxes, key=lambda b: b.id):
@@ -391,6 +427,6 @@ def check_layout(g: Graph, ids: set, G, D):
                 D("W0602", f"'{m}' is a member of both '{owner[m]}' and '{b.id}'", G, b.id)
             else:
                 owner[m] = b.id
-    for nt in g.markup:
-        if nt.on and nt.on not in ids:
-            D("W0604", f"{nt.kind} attribute '{nt.id}' is attached to '{nt.on}', which no longer exists", G)
+    for nt in notes(g.meta):
+        if note_detached(nt) is not None:
+            D("W0604", f"a note is detached from '{note_detached(nt)}', which was deleted", G)

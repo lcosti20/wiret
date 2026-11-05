@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from tkinter import ttk
 from typing import Callable, Optional
 
-from .model import Graph, Node
+from .model import Graph, Node, meta_value
 from .natives import STD
 from .registry import (CONSTRAINTS, STATIC_KINDS, ModuleIndex, array_elem, can_convert,
                        signature)
@@ -127,7 +127,7 @@ def describe(kind: str, symbol: Optional[str] = None, idx: Optional[ModuleIndex]
     if symbol and idx is not None:
         g = idx.graphs.get(symbol) or idx.macros.get(symbol)
         if g is not None:
-            doc = next((a.arg().value for a in g.attrs if a.name == "doc" and a.arg()), None)
+            doc = meta_value(g.meta, "doc")
             if doc:
                 return doc
             if kind == "Call":
