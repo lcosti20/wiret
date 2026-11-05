@@ -209,6 +209,7 @@ class Parser:
             mod.items.append(it)
             self.skip_nl()
         mod.comments = self.attach_comments()
+        resolve_enum_values(mod)
         return mod
 
     def attach_comments(self):
@@ -540,6 +541,12 @@ class Parser:
         if t.kind == "id" and t.value == "null":
             self.next()
             return Lit("null", None)
+        if t.kind == "id" and self.at_p(".", 1) and self.at("id", k=2):
+            name = self.qname()
+            if name.count(".") == 1:
+                return Lit("enum", name)
+            raise ParseError(f"an enum value is written 'Enum.Member', not '{name}'",
+                             t.line, t.col)
         self.error("expected a literal")
 
     # -- graph bodies --------------------------------------------------------
@@ -709,6 +716,27 @@ class Parser:
                 self.skip_nl()
         self.next()
         return out
+
+
+def resolve_enum_values(mod: Module):
+    """`.pin <- Mode.Chase` reads like a wire from node `Mode`. When the graph has no node
+    with that id and the module declares an enum with that name, it is the enum value
+    instead. `@cases(Mode.Idle, ...)` arguments become enum values the same way."""
+    enums = {it.name for it in mod.items if isinstance(it, Enum)}
+    if not enums:
+        return
+    for g in mod.graphs():
+        ids = {n.id for n in g.nodes}
+        for n in g.nodes:
+            for b in n.bindings:
+                v = b.value
+                if isinstance(v, PinRef) and v.node in enums and v.node not in ids:
+                    b.value = Lit("enum", f"{v.node}.{v.pin}")
+            for a in n.attrs:
+                if a.name == "cases" and a.args:
+                    a.args = [(k, Lit("enum", v.value) if v.kind == "ident"
+                               and v.value.count(".") == 1 and v.value.split(".")[0] in enums
+                               else v) for k, v in a.args]
 
 
 def parse(text: str) -> Module:

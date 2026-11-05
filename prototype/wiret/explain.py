@@ -30,7 +30,7 @@ def type_words(ty: str) -> str:
     if ty and ty[0] in "iu" and ty[1:].isdigit():
         sign = "" if ty[0] == "i" else "non-negative "
         return f"a {sign}whole number ({ty})"
-    return ty
+    return f"a {ty} value" if ty and ty.isidentifier() else ty
 
 
 def zero_words(ty: str) -> str:
@@ -57,6 +57,9 @@ def explain(d: Diag) -> str:
         if "built-in type" in m:
             return (f"'{_quoted(m)}' is already the name of a built-in type, so a struct or enum "
                     f"can't use it. Pick a different name, such as {_quoted(m).capitalize()}Info.")
+        if "also the name of an enum" in m:
+            return (f"This node is called '{_quoted(m)}', the same as an enum, so "
+                    f"'{_quoted(m)}.something' could mean either. Rename the node.")
         if "duplicate field" in m or "duplicate member" in m:
             return (f"'{_quoted(m)}' is listed twice in '{_quoted(m, 1)}'. Each field or member "
                     f"needs its own name.")
@@ -72,6 +75,14 @@ def explain(d: Diag) -> str:
             return (f"The starting value of field '{_quoted(m)}' isn't "
                     f"{type_words(data['dst'])}. Change it, or remove it to start at "
                     f"{zero_words(data['dst'])}.")
+        if m.startswith("case "):
+            dst = data["dst"]
+            fix = (f" Write each case as {dst}.Member." if "Member" in m else "")
+            return (f"Case {m.split()[1]} of this Switch isn't {type_words(dst)}, so the value "
+                    f"could never match it.{fix}")
+        if "default of '" in m:
+            return (f"The starting value of '{_quoted(m)}' is a value of a different enum. It "
+                    f"needs to be {type_words(data['dst'])}.")
         if data.get("literal"):
             return f"The value typed into {here} isn't {type_words(data['dst'])}."
         if "src" in data:
@@ -113,6 +124,33 @@ def explain(d: Diag) -> str:
             return f"There is no function called '{_quoted(m)}'. Check the spelling or create it."
         if "unresolved macro" in m:
             return f"There is no macro called '{_quoted(m)}'. Built-in ones start with std.flow."
+        if "names the struct" in m:
+            kind = m.split()[0]
+            example = f"{kind} Vec2.x" if "and the field" in m else f"{kind} Vec2"
+            return (f"{kind} needs to know which struct it works on. Write it like "
+                    f"'{example}', using your own struct's name.")
+        if "takes no type arguments; the struct" in m:
+            return ("Struct nodes don't take a ::<...> type. The struct's name already says "
+                    "what type the node works with.")
+        if "unknown struct" in m:
+            if "is an enum" in m:
+                return (f"'{_quoted(m)}' is an enum, not a struct, so it has no fields to make, "
+                        f"break or read.")
+            return (f"There is no struct called '{_quoted(m)}'. Check the spelling, or declare "
+                    f"it with 'struct {_quoted(m)} {{ ... }}'.")
+        if "has no field" in m:
+            return (f"Struct '{_quoted(m)}' doesn't have a field called '{_quoted(m, 1)}'. Check "
+                    f"the spelling against the struct's declaration.")
+        if "structs are immutable" in m:
+            return ("A struct can't be changed in place. WithField makes a copy with one field "
+                    "changed; store the copy where the old one was.")
+        if "unknown enum" in m:
+            return (f"There is no enum called '{_quoted(m)}'. Check the spelling, or declare it "
+                    f"with 'enum {_quoted(m)} {{ ... }}'.")
+        if "has no member" in m:
+            names = ", ".join(data.get("members") or [])
+            listing = f" Its members are: {names}." if names else " It has no members yet."
+            return f"Enum '{_quoted(m)}' doesn't have a member called '{_quoted(m, 1)}'.{listing}"
         if "module prefix" in m:
             return (f"Inside its own module, a type is written without the module name: write "
                     f"'{_quoted(m, 1)}' instead of '{_quoted(m)}'.")

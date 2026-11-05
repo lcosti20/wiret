@@ -9,7 +9,7 @@ import unicodedata
 from .model import (Attr, Binding, Box, Const, Enum, ExecOut, Extern, Graph, ITEM_ORDER, Lit,
                     META_ORDER, Module, Node, PinRef, SEMANTIC_ATTRS, Struct, Use, Var,
                     item_kind)
-from .registry import ARRAY_MUTATORS, ModuleIndex, Sig, lit_equal, signature
+from .registry import ARRAY_MUTATORS, ModuleIndex, Sig, lit_equal, lit_fits, signature
 
 IND = "  "
 
@@ -59,7 +59,7 @@ def fmt_lit(v: Lit) -> str:
         return "null"
     if k == "string":
         return fmt_string(v.value)
-    if k == "ident":
+    if k in ("ident", "enum"):
         return v.value
     if k == "tuple":
         return "(" + ", ".join(fmt_lit(x) for x in v.value) + ")"
@@ -124,7 +124,8 @@ def _ordered_bindings(node: Node, sig: Sig) -> list:
         pin = sig.input(b.pin)
         if pin is not None and isinstance(b.value, Lit):
             d = pin.default_lit()
-            if d is not None and lit_equal(d, b.value):
+            # never drop a binding that does not fit its pin: the checker reports it
+            if d is not None and lit_fits(b.value, pin.type) and lit_equal(d, b.value):
                 continue
         out.append(b)
     return sorted(out, key=lambda b: order.get(b.pin, len(order)))

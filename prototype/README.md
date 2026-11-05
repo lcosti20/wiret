@@ -18,7 +18,7 @@ cd prototype
 python3 wiret_editor.py                         # the editor, opening Lesson 1
 python3 wiret_editor.py examples/demo.wiret     # the editor on a larger example
 python3 wiretc.py run examples/demo.wiret Main  # the same program from the command line
-python3 -m unittest discover tests              # 69 tests
+python3 -m unittest discover tests              # 78 tests
 ```
 
 ## Building a desktop app
@@ -227,10 +227,33 @@ Declarations are checked, and their names can be used as types in signatures, `l
 - A struct that holds itself by value, directly or through other structs, is `E0503`. Holding
   it in an array is fine.
 
-Not done yet: struct and enum nodes (`MakeStruct`, `BreakStruct`, `GetField`, `WithField`,
-`Switch` on an enum, enum `Convert`), a way to write an enum value on a pin, lowering, and editor
-support. Until lowering exists, compiling a file that uses one of these types reports `E0501`
-instead of running it.
+An enum value is written `Mode.Chase`: on a pin (`.b <- Mode.Flee`), as a default
+(`mode: Mode = Mode.Idle`) and in `@cases(Mode.Idle, Mode.Chase)`. On a pin it reads like a wire,
+so it means the enum value only when the graph has no node called `Mode`. A node with the same id
+as an enum is `E0102`. A missing enum or member is `E0501`, and a value of the wrong enum is
+`E0110`.
+
+Struct nodes name their struct, and the field nodes name the field too:
+
+| Node | Pins |
+| --- | --- |
+| `MakeStruct Vec2` | in: one per field (default: the field's default, else zero); out `result` |
+| `BreakStruct Vec2` | in `obj`; out: one per field |
+| `GetField Vec2.x` | in `obj`; out `value` |
+| `WithField Vec2.x` | in `obj`, `value`; out `result`, a copy with that field replaced |
+
+All four are pure, also in a `@pure` function: a struct is a value, so reading one cannot see a
+change. The draft makes `GetField` a `reads` node, but that is for class fields. `SetField` on a
+struct is `E0501` with a pointer to `WithField`.
+
+`Eq`/`Ne` take enums and structs, `Lt`/`Le`/`Gt`/`Ge` take enums, `Select` takes either, and
+`Switch` takes enums. `Convert` turns an enum into its own underlying type and back, and nothing
+else. Each `@cases` value must be a value of the `Switch`'s type (`E0110`); this now applies to
+every `Switch`.
+
+Not done yet: lowering and editor support (palette entries, a "Break struct" helper, a lesson).
+Until lowering exists, compiling a file that uses one of these types reports `E0501` instead of
+running it.
 
 ### Deviations and known gaps
 
