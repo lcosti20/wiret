@@ -3,6 +3,8 @@ module lessons.loops
 
 extern func host.Log(message: string)
 
+#[note("Lesson 4: Loops. ForRange runs the 'each' path once for every number from first to last. index is the current number. When the 'each' path reaches its end, the loop goes round again. After the last number it follows 'done'.")]
+#[note("Try it: (1) Turn on Animate and press Run to watch the loop go round. (2) Count to 10 instead of 5. (3) What total do you get for 1 to 100?")]
 func Main() {
   local total: i32
   node count = Macro std.flow.ForRange
@@ -10,6 +12,7 @@ func Main() {
     .last <- 5
   node entry = Entry
   node final = GetLocal total
+  #[note("Adds index to the running total each time round.")]
   node keep = SetLocal total
     .value <- plus.result
   node line = Call std.string.Concat
@@ -36,12 +39,6 @@ func Main() {
     count.done -> report
     entry -> count
     say -> keep
-  }
-
-  markup {
-    attribute intro = Note(message: "Lesson 4: Loops. ForRange runs the 'each' path once for every number from first to last. index is the current number. When the 'each' path reaches its end, the loop goes round again. After the last number it follows 'done'.")
-    attribute keep_note on keep = Note(message: "Adds index to the running total each time round.")
-    attribute try_it = Note(message: "Try it: (1) Turn on Animate and press Run to watch the loop go round. (2) Count to 10 instead of 5. (3) What total do you get for 1 to 100?")
   }
 
   layout {

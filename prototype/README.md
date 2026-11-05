@@ -157,7 +157,7 @@ The editor also follows the graph-editor contract in section 7.5:
 - Nodes with no `place` line are laid out automatically, and get a `place` line the first time
   the graph is saved.
 - Unknown attributes and layout properties are kept.
-- Notes are kept even when the node they point at is deleted (shown as detached, `W0604`).
+- Notes are kept even when the node or box they explain is deleted: they move to the graph as `#[note("...", detached: "id")]` and show as detached (`W0604`).
 - A wire whose source or target no longer exists stays on screen as a red dashed stub.
 - `//` comments are never dropped silently: before the first graph edit, the editor asks
   whether to convert them to notes or drop them (`W0603`).
@@ -181,8 +181,8 @@ The editor also follows the graph-editor contract in section 7.5:
 
 | Area | Status |
 | --- | --- |
-| Text syntax (2.1–2.4) | Full lexer and parser for `use`, `extern`, `const`, `var`, `func`, `event`, `macro`, `local`, `state`, nodes, bindings, attributes, the `flow` block (exec wires), the `markup` block (`attribute ... = Note(...)`) and `layout` (places and boxes). `enum`/`struct`/`interface`/`class` are rejected with a clear error. |
-| Canonical form and hashes (2.5) | Sorted items, nodes, `flow` wires (by source node id, then exec pin order), markup attributes and layout lines; registry pin order; default-valued bindings omitted; 100-column wrapping; attribute ordering. Semantic hash (ignores layout, markup, docs and `Reroute`) and layout hash. |
+| Text syntax (2.1–2.4) | Full lexer and parser for `use`, `extern`, `const`, `var`, `func`, `event`, `macro`, `local`, `state`, nodes, bindings, semantic `@` attributes, `#[...]` metadata lines (`#[doc]`, `#[note]`, ...) above declarations, nodes and boxes, the `flow` block (exec wires) and `layout` (places and boxes). An old `markup` block is rejected with a hint, and an unknown `@` name such as `@doc` is `E0104`. `enum`/`struct`/`interface`/`class` are rejected with a clear error. |
+| Canonical form and hashes (2.5) | Sorted items, nodes, `flow` wires (by source node id, then exec pin order) and layout lines, each with its metadata lines above it (`doc`, `category`, `keywords`, then notes as written); registry pin order; default-valued bindings omitted; 100-column wrapping; attribute ordering. Semantic hash (ignores layout, every `#[...]` line and `Reroute`) and layout hash. |
 | Node kinds (3.3) | `Entry`, `Return`, `Branch`, `Sequence`, `Switch`, `Select`, `Macro`, `Exit`, `Reroute`, `Get/SetLocal`, `Get/SetVar` (and `const`s), `Get/SetState`, `Call`, `Convert`, all arithmetic, comparison, logic and bit kinds, and the array kinds `MakeArray`, `ArrayGet`, `ArrayLength`, `ArraySet`, `ArrayAdd`, `ArrayInsert`, `ArrayRemove`, `ArrayClear`. Types: `bool`, all integer widths, `f32`, `f64`, `string`, `array::<T>`. |
 | Execution model (4.2–4.3) | Continuation stack, `Sequence` push/pop, macro inlining with path-style ids (`loop/test`, `loop!in`), `Exit` as a jump, joins, evaluation points with per-point sharing, impure output slots, `@pure` and `@reads` calls as pure nodes, per-expansion `state`. The §4.2 `SumTo(2)` trace is reproduced exactly (see tests). |
 | Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0201, E0301, E0302, E0304, E0401, E0501, E0502, W0201, W0301, W0302, W0310, W0320, W0601, W0602, W0603, W0604. |

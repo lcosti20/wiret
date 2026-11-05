@@ -6,15 +6,12 @@ import hashlib
 import math
 import unicodedata
 
-from .model import (Attr, Attribute, Binding, Box, Const, ExecOut, Extern, Graph, ITEM_ORDER, Lit,
-                    Module, Node, PinRef, Use, Var, item_kind)
+from .model import (Attr, Binding, Box, Const, ExecOut, Extern, Graph, ITEM_ORDER, Lit,
+                    META_ORDER, Module, Node, PinRef, SEMANTIC_ATTRS, Use, Var, item_kind)
 from .registry import ARRAY_MUTATORS, ModuleIndex, Sig, lit_equal, signature
 
 IND = "  "
 
-SEMANTIC_ATTRS = {"id", "pure", "reads", "final", "private", "export", "inline", "deprecated",
-                  "count", "cases", "disabled", "capability", "latent"}
-DOC_ATTRS = {"doc", "category", "keywords"}
 PLACE_PROP_ORDER = ["label", "color", "size", "collapsed", "hidden", "members"]
 
 
@@ -72,22 +69,37 @@ def fmt_lit(v: Lit) -> str:
     raise ValueError(k)
 
 
-def fmt_attr(a: Attr) -> str:
+def fmt_args(a: Attr) -> str:
     if a.args is None:
-        return f"@{a.name}"
-    args = ", ".join((f"{k}: " if k else "") + fmt_lit(v) for k, v in a.args)
-    return f"@{a.name}({args})"
+        return ""
+    return "(" + ", ".join((f"{k}: " if k else "") + fmt_lit(v) for k, v in a.args) + ")"
+
+
+def fmt_attr(a: Attr) -> str:
+    return f"@{a.name}{fmt_args(a)}"
 
 
 def sorted_attrs(attrs: list) -> list:
+    """Known semantic attributes alphabetically, then unknown ones (E0104) as written."""
     sem = sorted((a for a in attrs if a.name in SEMANTIC_ATTRS), key=lambda a: a.name)
-    doc = [a for a in attrs if a.name == "doc"]
-    rest = [a for a in attrs if a.name not in SEMANTIC_ATTRS and a.name != "doc"]
-    return sem + doc + rest
+    return sem + [a for a in attrs if a.name not in SEMANTIC_ATTRS]
 
 
 def fmt_attrs(attrs: list) -> str:
     return "".join(" " + fmt_attr(a) for a in sorted_attrs(attrs))
+
+
+def sorted_meta(meta: list) -> list:
+    """`doc`, `category`, `keywords`, then notes, then anything else; stable within each."""
+    order = {k: i for i, k in enumerate(META_ORDER)}
+    return sorted(meta, key=lambda a: order.get(a.name, len(order)))
+
+
+def fmt_meta(meta: list, indent: str, semantic=False) -> list:
+    """The `#[...]` lines above a statement (section 2.4); none in the semantic text."""
+    if semantic:
+        return []
+    return [f"{indent}#[{a.name}{fmt_args(a)}]" for a in sorted_meta(meta)]
 
 
 def fmt_params(ps: list) -> str:
@@ -144,7 +156,7 @@ def fmt_targs(targs: list) -> str:
     return "::<" + ", ".join(targs) + ">" if targs else ""
 
 
-def fmt_node(node: Node, sig: Sig, indent: str) -> str:
+def fmt_node(node: Node, sig: Sig, indent: str, semantic=False) -> str:
     """The node line, then one `.pin <- value` line per bound input."""
     head = f"{indent}node {node.id} = {node.kind}"
     targs = fmt_targs(node.targs)
@@ -152,7 +164,7 @@ def fmt_node(node: Node, sig: Sig, indent: str) -> str:
         head += targs + (f" {node.symbol}" if node.symbol else "")
     else:
         head += (f" {node.symbol}" if node.symbol else "") + targs
-    lines = [head + fmt_attrs(node.attrs)]
+    lines = fmt_meta(node.meta, indent, semantic) + [head + fmt_attrs(node.attrs)]
     for b in _ordered_bindings(node, sig):
         val = (f"{b.value.node}.{b.value.pin}" if isinstance(b.value, PinRef)
                else fmt_lit(b.value))
@@ -160,18 +172,12 @@ def fmt_node(node: Node, sig: Sig, indent: str) -> str:
     return "\n".join(lines)
 
 
-def fmt_attribute(a: Attribute) -> str:
-    on = f" on {a.on}" if a.on else ""
-    args = ", ".join(f"{k}: {fmt_lit(v)}" for k, v in a.args)
-    return f"attribute {a.id}{on} = {a.kind}({args}){fmt_attrs(a.attrs)}"
-
-
 # -- graphs and module -----------------------------------------------------------
-def fmt_local(kw, l, indent) -> str:
+def fmt_local(kw, l, indent, semantic=False) -> list:
     s = f"{indent}{kw} {l.name}: {l.type}"
     if l.default is not None:
         s += f" = {fmt_lit(l.default)}"
-    return s + fmt_attrs(l.attrs)
+    return fmt_meta(l.meta, indent, semantic) + [s + fmt_attrs(l.attrs)]
 
 
 def fmt_props(props: list, sort_members=True) -> str:
@@ -194,35 +200,27 @@ def fmt_graph(g: Graph, idx: ModuleIndex, indent: str = "", semantic=False) -> l
     head += fmt_params(g.params)
     if g.results is not None:
         head += " -> " + fmt_params(g.results)
-    attrs = [a for a in g.attrs if not (semantic and a.name in DOC_ATTRS)]
-    lines = [head + fmt_attrs(attrs) + " {"]
+    lines = fmt_meta(g.meta, indent, semantic) + [head + fmt_attrs(g.attrs) + " {"]
     inner = indent + IND
     for l in sorted(g.locals, key=lambda l: l.name):
-        lines.append(fmt_local("local", l, inner))
+        lines.extend(fmt_local("local", l, inner, semantic))
     for l in sorted(g.states, key=lambda l: l.name):
-        lines.append(fmt_local("state", l, inner))
+        lines.extend(fmt_local("state", l, inner, semantic))
     wires = []
     for n in sorted(g.nodes, key=lambda n: n.id):
         sig = signature(n, g, idx)
         wires.extend(fmt_wires(n, sig))
-        if semantic:
-            n = copy.copy(n)
-            n.attrs = [a for a in n.attrs if a.name not in DOC_ATTRS]
-        lines.append(fmt_node(n, sig, inner))
+        lines.append(fmt_node(n, sig, inner, semantic))
     if wires:
         lines.extend(["", f"{inner}flow {{"])
         lines.extend(f"{inner}{IND}{w}" for w in wires)
-        lines.append(f"{inner}}}")
-    if not semantic and g.markup:
-        lines.extend(["", f"{inner}markup {{"])
-        for a in sorted(g.markup, key=lambda a: a.id):
-            lines.append(f"{inner}{IND}{fmt_attribute(a)}")
         lines.append(f"{inner}}}")
     if not semantic and (g.places or g.boxes):
         lines.extend(["", f"{inner}layout {{"])
         for p in sorted(g.places, key=lambda p: p.id):
             lines.append(f"{inner}{IND}{p.id} at ({p.x}, {p.y}){fmt_props(p.props)}")
         for b in sorted(g.boxes, key=lambda b: b.id):
+            lines.extend(fmt_meta(b.meta, inner + IND))
             lines.append(f"{inner}{IND}box {b.id} {fmt_string(b.title)} at ({b.x}, {b.y}) "
                          f"size ({b.w}, {b.h}){fmt_props(b.props)}")
         lines.append(f"{inner}}}")
@@ -231,6 +229,12 @@ def fmt_graph(g: Graph, idx: ModuleIndex, indent: str = "", semantic=False) -> l
 
 
 def fmt_item(it, idx: ModuleIndex, semantic=False) -> list:
+    if isinstance(it, Graph):
+        return fmt_graph(it, idx, "", semantic)
+    return fmt_meta(it.meta, "", semantic) + _fmt_decl(it)
+
+
+def _fmt_decl(it) -> list:
     if isinstance(it, Use):
         return [f"use {it.name}" + (f" as {it.alias}" if it.alias else "") + fmt_attrs(it.attrs)]
     if isinstance(it, Extern):
@@ -239,20 +243,19 @@ def fmt_item(it, idx: ModuleIndex, semantic=False) -> list:
         s = f"extern func {it.name}{fmt_params(it.params)}"
         if it.results is not None:
             s += " -> " + fmt_params(it.results)
-        return [s + fmt_attrs([a for a in it.attrs if not (semantic and a.name in DOC_ATTRS)])]
+        return [s + fmt_attrs(it.attrs)]
     if isinstance(it, Const):
         return [f"const {it.name}: {it.type} = {fmt_lit(it.value)}{fmt_attrs(it.attrs)}"]
     if isinstance(it, Var):
         d = f" = {fmt_lit(it.default)}" if it.default is not None else ""
         return [f"var {it.name}: {it.type}{d}{fmt_attrs(it.attrs)}"]
-    if isinstance(it, Graph):
-        return fmt_graph(it, idx, "", semantic)
     raise TypeError(it)
 
 
 def print_module(m: Module, semantic=False) -> str:
     idx = ModuleIndex(m)
-    lines = [f"wiret {m.version}", f"module {m.name}{fmt_attrs(m.attrs)}"]
+    lines = ([f"wiret {m.version}"] + fmt_meta(m.meta, "", semantic)
+             + [f"module {m.name}{fmt_attrs(m.attrs)}"])
     items = sorted(m.items, key=lambda it: (ITEM_ORDER.index(item_kind(it)), it.name))
     prev_kind = None
     for it in items:

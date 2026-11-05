@@ -1,7 +1,8 @@
 wiret 1
 module std.flow
 
-macro DoN(in: exec, reset: exec, n: i32) -> (out: exec, counter: i32) @doc("Lets execution through at most n times, until reset.") {
+#[doc("Lets execution through at most n times, until reset.")]
+macro DoN(in: exec, reset: exec, n: i32) -> (out: exec, counter: i32) {
   state count: i32
   node add = Add::<i32>
     .a <- cur.value
@@ -28,7 +29,8 @@ macro DoN(in: exec, reset: exec, n: i32) -> (out: exec, counter: i32) @doc("Lets
   }
 }
 
-macro DoOnce(in: exec, reset: exec) -> (out: exec) @doc("Lets execution through once, until reset.") {
+#[doc("Lets execution through once, until reset.")]
+macro DoOnce(in: exec, reset: exec) -> (out: exec) {
   state fired: bool
   node check = Branch
     .cond <- flag.value
@@ -48,7 +50,8 @@ macro DoOnce(in: exec, reset: exec) -> (out: exec) @doc("Lets execution through 
   }
 }
 
-macro FlipFlop(in: exec) -> (a: exec, b: exec, is_a: bool) @doc("Alternates between output a and output b each time it runs.") {
+#[doc("Alternates between output a and output b each time it runs.")]
+macro FlipFlop(in: exec) -> (a: exec, b: exec, is_a: bool) {
   state on_b: bool
   node check = Branch
     .cond <- flag.value
@@ -71,7 +74,8 @@ macro FlipFlop(in: exec) -> (a: exec, b: exec, is_a: bool) @doc("Alternates betw
   }
 }
 
-macro ForEach::<T>(in: exec, array: array::<T>) -> (each: exec, done: exec, item: T, index: i32) @doc("Loops over an array: runs 'each' once for every item, in order (index counts 0, 1, 2, ...), then runs 'done'.") {
+#[doc("Loops over an array: runs 'each' once for every item, in order (index counts 0, 1, 2, ...), then runs 'done'.")]
+macro ForEach::<T>(in: exec, array: array::<T>) -> (each: exec, done: exec, item: T, index: i32) {
   local i: i32
   node bump = SetLocal i
     .value <- nxt.result
@@ -109,7 +113,8 @@ macro ForEach::<T>(in: exec, array: array::<T>) -> (each: exec, done: exec, item
   }
 }
 
-macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, index: i32) @doc("Runs 'each' once for every number from first to last (inclusive), then runs 'done'.") {
+#[doc("Runs 'each' once for every number from first to last (inclusive), then runs 'done'.")]
+macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, index: i32) {
   local i: i32
   node bump = SetLocal i
     .value <- nxt.result
@@ -141,7 +146,8 @@ macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, inde
   }
 }
 
-macro Repeat(in: exec, times: i32) -> (body: exec, done: exec, index: i32) @doc("Runs 'body' the given number of times (index counts 0, 1, 2, ...), then runs 'done'.") {
+#[doc("Runs 'body' the given number of times (index counts 0, 1, 2, ...), then runs 'done'.")]
+macro Repeat(in: exec, times: i32) -> (body: exec, done: exec, index: i32) {
   local i: i32
   node body_out = Exit body
     .index <- cur.value

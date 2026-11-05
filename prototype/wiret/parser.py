@@ -3,14 +3,14 @@ from __future__ import annotations
 
 import re
 
-from .model import (Attr, Attribute, Binding, Box, Comment, Const, ExecOut, Extern, Graph, Lit,
+from .model import (Attr, Binding, Box, Comment, Const, ExecOut, Extern, Graph, Lit,
                     Local, Module, Node, Param, PinRef, Place, Use, Var)
 
 KEYWORDS = set("wiret module use extern const var local enum struct interface class impl macro "
-               "func event dispatcher node state flow markup attribute on layout box at size".split())
+               "func event dispatcher node state flow layout box at size".split())
 
-# Kinds an `attribute` line may have, with the arguments each requires (section 2.3).
-ATTRIBUTE_KINDS = {"Note": {"message": "string"}}
+MARKUP_HINT = ("the 'markup' block was removed: write each note as #[note(\"...\")] on its own "
+               "line directly above the node, box or graph it explains")
 
 UNSUPPORTED_ITEMS = {"enum", "struct", "interface", "class"}
 
@@ -80,7 +80,7 @@ def lex(text: str):
             m = _IDENT.match(text, i)
             toks.append(Tok("id", m.group(0), line, col))
             i = m.end()
-        elif text.startswith(("->", "<-", "::"), i):
+        elif text.startswith(("->", "<-", "::", "#["), i):
             toks.append(Tok("punct", text[i:i + 2], line, col))
             i += 2
         elif c in "(){}[]<>,:=.@":
@@ -193,13 +193,17 @@ class Parser:
         if version > 1:
             raise ParseError(f"unsupported wiret version {version}", self.peek().line, 0)
         self.end_stmt()
+        meta = self.meta_lines()
         if not self.at_kw("module"):
             self.error("expected 'module'")
         self.next()
-        mod = Module(version, self.qname(), self.attrs())
+        mod = Module(version, self.qname(), self.attrs(), meta=meta)
         self.end_stmt()
         while not self.at("eof"):
-            mod.items.append(self.item())
+            meta = self.meta_lines()
+            it = self.item()
+            it.meta = meta
+            mod.items.append(it)
             self.skip_nl()
         mod.comments = self.attach_comments()
         return mod
@@ -368,27 +372,48 @@ class Parser:
 
     # -- attributes and values -----------------------------------------------
     def attrs(self) -> list:
+        """Trailing semantic attributes, `@name` or `@name(args)` (section 2.4)."""
         out = []
         while self.at_p("@"):
             self.next()
             name = self.qname()
-            args = None
-            if self.at_p("("):
+            out.append(Attr(name, self.attr_args() if self.at_p("(") else None))
+        return out
+
+    def attr_args(self) -> list:
+        self.expect_p("(")
+        args = []
+        self.skip_nl()
+        while not self.at_p(")"):
+            key = None
+            if self.at("id") and self.at_p(":", 1):
+                key = self.ident()
                 self.next()
-                args = []
+            args.append((key, self.value()))
+            self.skip_nl()
+            if self.at_p(","):
+                self.next()
                 self.skip_nl()
-                while not self.at_p(")"):
-                    key = None
-                    if self.at("id") and self.at_p(":", 1):
-                        key = self.ident()
-                        self.next()
-                    args.append((key, self.value()))
-                    self.skip_nl()
-                    if self.at_p(","):
-                        self.next()
-                        self.skip_nl()
-                self.next()
-            out.append(Attr(name, args))
+            elif not self.at_p(")"):
+                self.error("expected ',' or ')'")
+        self.next()
+        return args
+
+    def meta_lines(self) -> list:
+        """`#[name(args)]` lines, each directly above the statement they describe (section 2.4)."""
+        out = []
+        while self.at_p("#["):
+            t = self.next()
+            name = self.qname()
+            out.append(Attr(name, self.attr_args() if self.at_p("(") else None))
+            self.expect_p("]")
+            if not self.at("nl"):
+                self.error("a metadata line ends at its ']'; put the statement it describes on "
+                           "the next line")
+            self.next()
+            if self.at("nl") or self.at_p("}") or self.at("eof"):
+                raise ParseError("a metadata line must stand directly above the statement it "
+                                 "describes, with no blank line between", t.line, t.col)
         return out
 
     def value(self) -> Lit:
@@ -452,7 +477,12 @@ class Parser:
         self.skip_nl()
         wires = []
         while not self.at_p("}"):
+            mt = self.peek()
+            meta = self.meta_lines()
             t = self.peek()
+            if meta and not (self.at_kw("local") or self.at_kw("state") or self.at_kw("node")):
+                raise ParseError("in a graph body, a metadata line may only stand above a "
+                                 "'local', 'state' or 'node' statement", mt.line, mt.col)
             if self.at_kw("local") or self.at_kw("state"):
                 self.next()
                 name = self.ident()
@@ -463,12 +493,13 @@ class Parser:
                     self.next()
                     default = self.literal()
                 (g.locals if t.value == "local" else g.states).append(
-                    Local(name, ty, default, self.attrs()))
+                    Local(name, ty, default, self.attrs(), meta))
                 self.end_stmt()
             elif self.at_kw("node"):
                 self.anchors.append((self.i, None))
                 self.next()
                 n = self.node()
+                n.meta = meta
                 self.anchors[-1] = (self.anchors[-1][0], ("node", g.name, n.id))
                 g.nodes.append(n)
                 self.end_stmt()
@@ -476,13 +507,12 @@ class Parser:
                 self.next()
                 wires.extend(self.flow())
             elif self.at_kw("markup"):
-                self.next()
-                self.markup(g)
+                self.error(MARKUP_HINT)
             elif self.at_kw("layout"):
                 self.next()
                 self.layout(g)
             else:
-                self.error("expected 'local', 'state', 'node', 'flow', 'markup' or 'layout'")
+                self.error("expected 'local', 'state', 'node', 'flow' or 'layout'")
         self.next()
         self.end_stmt()
         nodes = {n.id: n for n in g.nodes}
@@ -547,6 +577,8 @@ class Parser:
         out = []
         while not self.at_p("}"):
             tok = self.peek()
+            if self.at_p("#["):
+                self.error("flow wires cannot carry metadata; put a note above the node instead")
             src, pin = self.endpoint("exec source")
             self.expect_p("->")
             out.append((tok, src, pin, self.endpoint("exec target")))
@@ -555,60 +587,15 @@ class Parser:
         self.end_stmt()
         return out
 
-    def markup(self, g: Graph):
-        self.expect_p("{")
-        self.skip_nl()
-        while not self.at_p("}"):
-            if not self.at_kw("attribute"):
-                self.error("expected 'attribute'")
-            self.next()
-            aid = self.ident("attribute id")
-            on = None
-            if self.at_kw("on"):
-                self.next()
-                on = self.ident()
-            self.expect_p("=")
-            kt = self.peek()
-            kind = self.ident("attribute kind")
-            spec = ATTRIBUTE_KINDS.get(kind)
-            if spec is None:
-                raise ParseError(f"unknown attribute kind '{kind}' (expected one of: "
-                                 f"{', '.join(sorted(ATTRIBUTE_KINDS))})", kt.line, kt.col)
-            self.expect_p("(")
-            self.skip_nl()
-            args = []
-            while not self.at_p(")"):
-                at = self.peek()
-                key = self.ident("argument name")
-                self.expect_p(":")
-                v = self.literal()
-                if key not in spec:
-                    raise ParseError(f"{kind} has no argument '{key}'", at.line, at.col)
-                if any(k == key for k, _ in args):
-                    raise ParseError(f"argument '{key}' given twice", at.line, at.col)
-                if v.kind != spec[key]:
-                    raise ParseError(f"{kind} argument '{key}' must be a {spec[key]}",
-                                     at.line, at.col)
-                args.append((key, v))
-                self.skip_nl()
-                if self.at_p(","):
-                    self.next()
-                    self.skip_nl()
-                elif not self.at_p(")"):
-                    self.error("expected ',' or ')'")
-            self.next()
-            missing = [k for k in spec if all(k != a for a, _ in args)]
-            if missing:
-                raise ParseError(f"{kind} needs '{missing[0]}'", kt.line, kt.col)
-            g.markup.append(Attribute(aid, on, kind, args, self.attrs()))
-            self.end_stmt()
-        self.next()
-        self.end_stmt()
-
     def layout(self, g: Graph):
         self.expect_p("{")
         self.skip_nl()
         while not self.at_p("}"):
+            mt = self.peek()
+            meta = self.meta_lines()
+            if meta and not self.at_kw("box"):
+                raise ParseError("in a layout block, a metadata line may only stand above a "
+                                 "'box' line", mt.line, mt.col)
             if self.at_kw("box"):
                 self.next()
                 bid = self.ident("box id")
@@ -617,7 +604,7 @@ class Parser:
                 x, y = self.int_pair()
                 self.expect("id", "size")
                 w, h = self.int_pair()
-                g.boxes.append(Box(bid, x, y, self.props(), title=title, w=w, h=h))
+                g.boxes.append(Box(bid, x, y, self.props(), title=title, w=w, h=h, meta=meta))
             else:
                 nid = self.ident("node id")
                 self.expect("id", "at")

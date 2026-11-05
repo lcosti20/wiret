@@ -6,7 +6,8 @@ import tkinter.font as tkfont
 from dataclasses import dataclass, field
 
 from .checker import GraphInfo
-from .model import Graph, Lit, PinRef
+from .model import Graph, Lit, PinRef, note_detached, note_text
+from .ops import note_key
 from .printer import fmt_lit
 from .registry import FLOAT_TYPES, INT_TYPES
 
@@ -430,20 +431,22 @@ class GraphView(tk.Canvas):
 
     def draw_notes(self, g):
         y = 10
-        for nt in sorted((a for a in g.markup if a.kind == "Note"), key=lambda n: n.id):
-            if nt.on and nt.on in self.geoms:
-                gm = self.geoms[nt.on]
+        for on, i, nt in g.all_notes():
+            key = note_key(on, i)
+            if on and on in self.geoms:
+                gm = self.geoms[on]
                 sx, sy = self.to_screen(gm.x, gm.y + gm.h + 6)
-                self.create_text(sx, sy, anchor="nw", text="✎ " + nt.text, fill="#f7dc6f",
+                self.create_text(sx, sy, anchor="nw", text="✎ " + note_text(nt), fill="#f7dc6f",
                                  width=max(140, gm.w * self.scale * 1.4), font=self.font(9),
-                                 tags=("note", f"t={nt.id}"))
+                                 tags=("note", f"t={key}"))
             else:
-                detached = nt.on is not None and g.box(nt.on) is None
-                text = ("✎ (detached from %s) " % nt.on if detached else "✎ ") + nt.text
+                gone = note_detached(nt)
+                detached = gone is not None
+                text = ("✎ (detached from %s) " % gone if detached else "✎ ") + note_text(nt)
                 item = self.create_text(10, y, anchor="nw", text=text, width=460,
                                         fill=DIM if detached else "#f7dc6f",
                                         font=("Helvetica", 12),
-                                        tags=("note", "graphnote", f"t={nt.id}"))
+                                        tags=("note", "graphnote", f"t={key}"))
                 y = self.bbox(item)[3] + 8
 
     # -- hit testing --------------------------------------------------------------

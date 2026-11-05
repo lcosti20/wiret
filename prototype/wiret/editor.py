@@ -24,7 +24,7 @@ from .checker import GraphInfo, check
 from .compiler import compile_module
 from .disasm import disassemble
 from .graphview import BG, DIM, TEXT, GraphView
-from .model import Box, Graph, Lit, Local, Module, Param, PinRef
+from .model import Box, Graph, Lit, Local, Module, Param, PinRef, note_text, set_note_text
 from .natives import STD
 from .parser import KEYWORDS, ParseError, parse, parse_literal
 from .printer import layout_hash, print_module, semantic_hash
@@ -496,15 +496,15 @@ class EditorApp:
         for tag in ("kw", "str", "attr", "comment", "num", "kind"):
             t.tag_remove(tag, "1.0", "end")
         for i, line in enumerate(self.text.split("\n"), start=1):
-            for m in re.finditer(r'"(?:[^"\\]|\\.)*"|//.*$|@[A-Za-z_.]+|\b[A-Za-z_]\w*\b|-?\b\d[\w.]*',
-                                 line):
+            for m in re.finditer(r'"(?:[^"\\]|\\.)*"|//.*$|@[A-Za-z_.]+|#\[[A-Za-z_.]+|\]$|'
+                                 r'\b[A-Za-z_]\w*\b|-?\b\d[\w.]*', line):
                 s = m.group(0)
                 tag = None
                 if s.startswith('"'):
                     tag = "str"
                 elif s.startswith("//"):
                     tag = "comment"
-                elif s.startswith("@"):
+                elif s.startswith(("@", "#[")) or s == "]":
                     tag = "attr"
                 elif s[0].isdigit() or s[0] == "-":
                     tag = "num"
@@ -966,8 +966,7 @@ class EditorApp:
                                         if removed else ""))
 
     def delete_box(self, bid):
-        g = self.graph
-        g.boxes = [b for b in g.boxes if b.id != bid]
+        ops.delete_box(self.graph, bid)
         self.commit(f"Deleted box {bid}")
 
     def rename_node(self, nid):
@@ -1242,18 +1241,18 @@ class EditorApp:
         finally:
             menu.grab_release()
 
-    def edit_note(self, note_id):
-        nt = next((n for n in self.graph.markup if n.id == note_id), None)
+    def edit_note(self, key):
+        _, nt = ops.find_note(self.graph, key)
         if nt is None:
             return
-        text = simpledialog.askstring("Note", "Text:", initialvalue=nt.text, parent=self.root)
+        text = simpledialog.askstring("Note", "Text:", initialvalue=note_text(nt), parent=self.root)
         if text:
-            nt.text = text
-            self.commit(f"Edited note {note_id}")
+            set_note_text(nt, text)
+            self.commit("Edited note")
 
-    def delete_note(self, note_id):
-        self.graph.markup = [n for n in self.graph.markup if n.id != note_id]
-        self.commit(f"Deleted note {note_id}")
+    def delete_note(self, key):
+        ops.delete_note(self.graph, key)
+        self.commit("Deleted note")
 
     def node_menu(self, menu, nid):
         n = self.graph.node(nid)

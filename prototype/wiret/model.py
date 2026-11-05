@@ -22,8 +22,16 @@ class Lit:
     suffix: Optional[str] = None
 
 
+# Semantic attributes (`@name`, section 2.4). Any other `@` name is E0104.
+SEMANTIC_ATTRS = {"id", "pure", "reads", "final", "private", "export", "inline", "deprecated",
+                  "count", "cases", "disabled", "capability", "latent"}
+# Metadata attributes (`#[name]`) in canonical order; any other name follows them (section 2.5).
+META_ORDER = ["doc", "category", "keywords", "note"]
+
+
 @dataclass
 class Attr:
+    """A semantic attribute (`@name(...)`) or, in a `meta` list, a metadata line (`#[name(...)]`)."""
     name: str
     args: Optional[list] = None  # None: written without parentheses; else [(key|None, Lit)]
 
@@ -31,6 +39,46 @@ class Attr:
         if not self.args or i >= len(self.args):
             return None
         return self.args[i][1]
+
+    def kwarg(self, key: str):
+        for k, v in self.args or []:
+            if k == key:
+                return v
+        return None
+
+
+def note(text: str, detached: Optional[str] = None) -> Attr:
+    """A `#[note("text")]` line; `detached` names the deleted target it came from (section 2.4)."""
+    args = [(None, Lit("string", text))]
+    if detached is not None:
+        args.append(("detached", Lit("string", detached)))
+    return Attr("note", args)
+
+
+def note_text(a: Attr) -> str:
+    v = a.arg()
+    return v.value if v is not None and v.kind == "string" else ""
+
+
+def set_note_text(a: Attr, text: str) -> None:
+    a.args = [(None, Lit("string", text))] + list((a.args or [])[1:])
+
+
+def note_detached(a: Attr) -> Optional[str]:
+    v = a.kwarg("detached")
+    return v.value if v is not None and v.kind == "string" else None
+
+
+def notes(meta: list) -> list:
+    return [a for a in meta if a.name == "note"]
+
+
+def meta_value(meta: list, name: str) -> Optional[str]:
+    """The string argument of the first `#[name("...")]` line, e.g. a declaration's doc."""
+    for a in meta:
+        if a.name == name and a.arg() is not None and a.arg().kind == "string":
+            return a.arg().value
+    return None
 
 
 @dataclass
@@ -62,6 +110,7 @@ class Node:
     bindings: list = field(default_factory=list)   # [Binding]
     execs: list = field(default_factory=list)      # [ExecOut]
     attrs: list = field(default_factory=list)      # [Attr]
+    meta: list = field(default_factory=list)       # [Attr], written as `#[...]` lines above
 
     def binding(self, pin: str) -> Optional[Binding]:
         for b in self.bindings:
@@ -90,40 +139,7 @@ class Local:
     type: str
     default: Optional[Lit] = None
     attrs: list = field(default_factory=list)
-
-
-@dataclass
-class Attribute:
-    """One line of a graph's `markup` block: a non-semantic annotation (section 2.3).
-
-    `kind` names what it is. Only `Note` exists today; others (colour, grouping, ...) may follow.
-    """
-    id: str
-    on: Optional[str]
-    kind: str = "Note"
-    args: list = field(default_factory=list)       # [(key, Lit)]
-    attrs: list = field(default_factory=list)      # trailing [Attr]
-
-    @classmethod
-    def note(cls, id: str, on: Optional[str], text: str) -> "Attribute":
-        return cls(id, on, "Note", [("message", Lit("string", text))])
-
-    def arg(self, key: str) -> Optional[Lit]:
-        for k, v in self.args:
-            if k == key:
-                return v
-        return None
-
-    @property
-    def text(self) -> str:
-        """The message of a Note."""
-        v = self.arg("message")
-        return v.value if v is not None and v.kind == "string" else ""
-
-    @text.setter
-    def text(self, value: str):
-        self.args = [(k, v) for k, v in self.args if k != "message"]
-        self.args.insert(0, ("message", Lit("string", value)))
+    meta: list = field(default_factory=list)
 
 
 @dataclass
@@ -150,6 +166,7 @@ class Box(Place):
     title: str = ""
     w: int = 200
     h: int = 120
+    meta: list = field(default_factory=list)
 
     def members(self) -> list:
         m = self.prop("members")
@@ -170,7 +187,7 @@ class Graph:
     locals: list = field(default_factory=list)     # [Local]
     states: list = field(default_factory=list)     # [Local]
     nodes: list = field(default_factory=list)      # [Node]
-    markup: list = field(default_factory=list)     # [Attribute]
+    meta: list = field(default_factory=list)       # [Attr]: doc, graph-level notes, ...
     places: list = field(default_factory=list)     # [Place]
     boxes: list = field(default_factory=list)      # [Box]
 
@@ -207,6 +224,19 @@ class Graph:
     def has_attr(self, name: str) -> bool:
         return any(a.name == name for a in self.attrs)
 
+    def note_owner(self, on: Optional[str]):
+        """The graph (`on` is None), node or box whose `meta` holds the notes on `on`."""
+        if on is None:
+            return self
+        return self.node(on) or self.box(on)
+
+    def all_notes(self) -> list:
+        """(target id, or None for the graph; index among that target's notes; the note)."""
+        out = [(None, i, a) for i, a in enumerate(notes(self.meta))]
+        for o in list(self.nodes) + list(self.boxes):
+            out += [(o.id, i, a) for i, a in enumerate(notes(o.meta))]
+        return out
+
     @property
     def result_list(self) -> list:
         return self.results or []
@@ -217,6 +247,7 @@ class Use:
     name: str
     alias: Optional[str] = None
     attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
 
 
 @dataclass
@@ -226,6 +257,7 @@ class Extern:
     params: list = field(default_factory=list)
     results: Optional[list] = None
     attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
 
     def has_attr(self, name: str) -> bool:
         return any(a.name == name for a in self.attrs)
@@ -237,6 +269,7 @@ class Const:
     type: str
     value: Lit
     attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
 
 
 @dataclass
@@ -245,6 +278,7 @@ class Var:
     type: str
     default: Optional[Lit] = None
     attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
 
 
 @dataclass
@@ -261,6 +295,7 @@ class Module:
     name: str
     attrs: list = field(default_factory=list)
     items: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
     comments: list = field(default_factory=list)
 
     def graphs(self, kinds=("func", "event", "macro")) -> list:

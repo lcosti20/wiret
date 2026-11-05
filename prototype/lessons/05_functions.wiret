@@ -3,6 +3,8 @@ module lessons.functions
 
 extern func host.Log(message: string)
 
+#[note("Lesson 5: Functions. Square is a function: a small graph with a name, an input (x) and a result. Main uses it like any other node. Double-click it to look inside.")]
+#[note("Try it: (1) Step (F11) into Square and look at the call stack in the Debugger tab. (2) Make a Cube function: Graph → New function…, type  Cube(x: i32) -> (result: i32) @pure  and build x × x × x. (3) Print cubes as well as squares.")]
 func Main() {
   node entry = Entry
   node loop = Macro std.flow.ForRange
@@ -28,11 +30,6 @@ func Main() {
     loop.each -> say
   }
 
-  markup {
-    attribute intro = Note(message: "Lesson 5: Functions. Square is a function: a small graph with a name, an input (x) and a result. Main uses it like any other node. Double-click it to look inside.")
-    attribute try_it = Note(message: "Try it: (1) Step (F11) into Square and look at the call stack in the Debugger tab. (2) Make a Cube function: Graph → New function…, type  Cube(x: i32) -> (result: i32) @pure  and build x × x × x. (3) Print cubes as well as squares.")
-  }
-
   layout {
     entry at (0, 0)
     loop at (200, 0)
@@ -45,7 +42,9 @@ func Main() {
   }
 }
 
-func Square(x: i32) -> (result: i32) @pure @doc("Multiplies a number by itself.") {
+#[doc("Multiplies a number by itself.")]
+#[note("@pure means Square only calculates: the same x always gives the same result, and it changes nothing else. That is why it has no white arrows on the outside.")]
+func Square(x: i32) -> (result: i32) @pure {
   node entry = Entry
   node ret = Return
     .result <- times.result
@@ -55,10 +54,6 @@ func Square(x: i32) -> (result: i32) @pure @doc("Multiplies a number by itself."
 
   flow {
     entry -> ret
-  }
-
-  markup {
-    attribute intro = Note(message: "@pure means Square only calculates: the same x always gives the same result, and it changes nothing else. That is why it has no white arrows on the outside.")
   }
 
   layout {

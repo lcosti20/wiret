@@ -3,9 +3,12 @@ module lessons.arrays
 
 extern func host.Log(message: string)
 
+#[note("Lesson 7: Arrays. An array is one variable that holds a list of values, in order. MakeArray builds a list from the items wired into it. Each item has a position (its index), and positions start at 0, not 1.")]
+#[note("Try it: (1) Step (F11) and watch scores in the Variables panel of the Debugger tab. (2) Add a fifth score with another ArrayAdd. (3) Use ArrayGet::<i32> to print only the first score (index 0). (4) Ask ArrayGet for index 10 and read the error message.")]
 func Main() {
   local scores: array::<i32>
   local total: i32
+  #[note("ArrayAdd puts one more item on the end of the array. scores now holds 4 items.")]
   node add = ArrayAdd::<i32> scores
     .item <- 25
   node count = ArrayLength::<i32>
@@ -22,6 +25,7 @@ func Main() {
     .a <- part2.result
     .b <- item_text.result
   node list = GetLocal scores
+  #[note("ForEach runs 'each' once for every item. item is the value, index is its position. After the last item it follows 'done'.")]
   node loop = Macro std.flow.ForEach::<i32>
     .array <- list.value
   node make = MakeArray::<i32> @count(3)
@@ -62,13 +66,6 @@ func Main() {
     loop.done -> report
     say -> keep
     start -> add
-  }
-
-  markup {
-    attribute add_note on add = Note(message: "ArrayAdd puts one more item on the end of the array. scores now holds 4 items.")
-    attribute intro = Note(message: "Lesson 7: Arrays. An array is one variable that holds a list of values, in order. MakeArray builds a list from the items wired into it. Each item has a position (its index), and positions start at 0, not 1.")
-    attribute loop_note on loop = Note(message: "ForEach runs 'each' once for every item. item is the value, index is its position. After the last item it follows 'done'.")
-    attribute try_it = Note(message: "Try it: (1) Step (F11) and watch scores in the Variables panel of the Debugger tab. (2) Add a fifth score with another ArrayAdd. (3) Use ArrayGet::<i32> to print only the first score (index 0). (4) Ask ArrayGet for index 10 and read the error message.")
   }
 
   layout {

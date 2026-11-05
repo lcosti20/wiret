@@ -14,7 +14,9 @@ from wiret import wbc  # noqa: E402
 from wiret.checker import check  # noqa: E402
 from wiret.compiler import compile_module  # noqa: E402
 from wiret.disasm import disassemble  # noqa: E402
-from wiret.ops import convert_comments, delete_node  # noqa: E402
+from wiret.flow import view_flow  # noqa: E402
+from wiret.model import note_detached, note_text, notes  # noqa: E402
+from wiret.ops import add_note, convert_comments, delete_box, delete_node  # noqa: E402
 from wiret.parser import ParseError, parse  # noqa: E402
 from wiret.printer import layout_hash, print_module, semantic_hash  # noqa: E402
 from wiret.vm import VM, WiretError  # noqa: E402
@@ -123,19 +125,75 @@ func F(x: i32) -> (y: i32) {
         self.assertIn("  node s = Add::<i32>\n    .a <- entry.x\n    .b <- 16\n", out)
         self.assertEqual(print_module(parse(out)), out)
 
-    def test_unknown_attributes_and_layout_props_survive(self):
+    def test_unknown_metadata_and_layout_props_survive(self):
         text = module("""
-func F() @x.acme.review("ok", level: 2) {
-  node entry = Entry @Hash(1)
+#[x.acme.review("ok", level: 2)]
+func F() {
+  #[Hash(1)]
+  node entry = Entry
   layout {
     entry at (1, 2) [label = "Start", x.acme.pin = [a, b]]
   }
 }
 """, macros=False)
         out = print_module(parse(text))
-        self.assertIn('@x.acme.review("ok", level: 2)', out)
-        self.assertIn("@Hash(1)", out)
+        self.assertIn('#[x.acme.review("ok", level: 2)]\nfunc F() {', out)
+        self.assertIn("  #[Hash(1)]\n  node entry = Entry", out)
         self.assertIn('x.acme.pin = [a, b]', out)
+
+    def test_metadata_lines_stand_above_their_statement(self):
+        text = module("""
+#[note("second")]
+#[keywords("a", "b")]
+#[note("first")]
+#[doc("Does F.")]
+func F() @pure {
+  #[note("why")]
+  local x: i32
+  #[doc("the start")]
+  node entry = Entry
+  layout {
+    #[note("a group")]
+    box g "G" at (0, 0) size (10, 10) [members = [entry]]
+  }
+}
+""", macros=False)
+        m = parse(text)
+        out = print_module(m)
+        self.assertIn('#[doc("Does F.")]\n#[keywords("a", "b")]\n#[note("second")]\n'
+                      '#[note("first")]\nfunc F() @pure {', out)
+        self.assertIn('  #[note("why")]\n  local x: i32\n', out)
+        self.assertIn('  #[doc("the start")]\n  node entry = Entry\n', out)
+        self.assertIn('    #[note("a group")]\n    box g "G"', out)
+        self.assertEqual(print_module(parse(out)), out)
+        self.assertEqual(m.graph("F").meta[0].name, "note")   # the model keeps written order
+
+    def test_metadata_must_touch_its_statement(self):
+        for body, hint in (('#[note("x")]\n\n  node entry = Entry', "no blank line"),
+                           ('node entry = Entry\n  #[note("x")]', "directly above"),
+                           ('node entry = Entry\n  flow {\n    #[note("x")]\n    entry -> entry\n  }',
+                            "flow wires"),
+                           ('node entry = Entry\n  layout {\n    #[note("x")]\n    entry at (0, 0)\n  }',
+                            "'box' line"),
+                           ('#[note("x")] node entry = Entry', "next line")):
+            with self.subTest(body):
+                with self.assertRaises(ParseError) as cm:
+                    parse(module(f"\nfunc F() {{\n  {body}\n}}\n", macros=False))
+                self.assertIn(hint, cm.exception.msg)
+
+    def test_markup_block_is_rejected_with_a_hint(self):
+        with self.assertRaises(ParseError) as cm:
+            parse(module("\nfunc F() {\n  node entry = Entry\n  markup {\n"
+                         '    attribute a = Note(message: "x")\n  }\n}\n', macros=False))
+        self.assertIn('#[note(', cm.exception.msg)
+
+    def test_at_doc_is_e0104_with_a_hint(self):
+        text = module('\nfunc F() @doc("x") {\n  node entry = Entry @x.acme.review\n}\n',
+                      macros=False)
+        diags = [d for d in check(parse(text)) if d.code == "E0104"]
+        self.assertEqual(len(diags), 2)
+        self.assertIn("#[doc(", diags[0].message)
+        self.assertEqual(diags[1].node, "entry")
 
     def test_inputs_go_on_their_own_lines(self):
         text = module("""
@@ -177,7 +235,7 @@ func F() {
         self.assertIn("W0603", {d.code for d in check(m)})
         convert_comments(m)
         out = print_module(m)
-        self.assertIn('on entry = Note(message: "explain the entry")', out)
+        self.assertIn('  #[note("explain the entry")]\n  node entry = Entry', out)
 
     def test_parse_errors_have_positions(self):
         with self.assertRaises(ParseError) as cm:
@@ -193,7 +251,9 @@ class HashTests(unittest.TestCase):
         m2 = parse(text)
         for g in m2.graphs():
             g.nodes.reverse()
-            g.places, g.boxes, g.markup = [], [], []
+            g.places, g.boxes, g.meta = [], [], []
+            for n in g.nodes:
+                n.meta = []
         _, r2 = build(print_module(m2))
         self.assertEqual(semantic_hash(m1), semantic_hash(m2))
         self.assertNotEqual(layout_hash(m1), layout_hash(m2))
@@ -836,11 +896,9 @@ macro Loop(in: exec) -> (out: exec) {
 
     def test_layout_and_note_warnings(self):
         text = module("""
+#[note("orphan", detached: "gone")]
 func F() {
   node entry = Entry
-  markup {
-    attribute lost on gone = Note(message: "orphan")
-  }
   layout {
     box a "A" at (0, 0) size (10, 10) [members = [entry, ghost]]
     box b "B" at (0, 0) size (10, 10) [members = [entry]]
@@ -856,8 +914,44 @@ func F() {
         g = m.graph("Main")
         removed = delete_node(g, "fib_text")
         self.assertTrue(removed)
-        self.assertTrue(any(n.on == "fib_text" for n in g.markup))
+        self.assertTrue(any(note_detached(a) == "fib_text" for a in notes(g.meta)))
         self.assertIn("W0604", {d.code for d in check(m)})
+        out = print_module(m)
+        self.assertIn('detached: "fib_text")]', out)
+        self.assertEqual(print_module(parse(out)), out)
+
+    def test_delete_box_keeps_notes(self):
+        text = module("""
+func F() {
+  node entry = Entry
+  layout {
+    #[note("the group")]
+    box g "G" at (0, 0) size (10, 10) [members = [entry]]
+  }
+}
+""", macros=False)
+        m = parse(text)
+        g = m.graph("F")
+        delete_box(g, "g")
+        self.assertEqual([(note_text(a), note_detached(a)) for a in notes(g.meta)],
+                         [("the group", "g")])
+
+    def test_notes_do_not_change_the_semantic_hash(self):
+        m1 = parse(demo())
+        m2 = parse(demo())
+        g = m2.graph("Main")
+        add_note(g, None, "a new graph note")
+        add_note(g, g.nodes[0].id, "a new node note")
+        self.assertEqual(semantic_hash(m1), semantic_hash(m2))
+        self.assertNotEqual(layout_hash(m1), layout_hash(m2))
+
+    def test_flow_view_keeps_notes_above_their_nodes(self):
+        out = view_flow(parse(demo()))
+        self.assertEqual(out.count("#[note("), demo().count("#[note("))
+        for line_no, line in enumerate(out.split("\n")):
+            if line.strip().startswith("#[note("):
+                nxt = out.split("\n")[line_no + 1].strip()
+                self.assertTrue(nxt.startswith(("#[", "node ", "func ", "event ", "macro ")), nxt)
 
 
 class BytecodeTests(unittest.TestCase):
@@ -1014,7 +1108,7 @@ class LessonTests(unittest.TestCase):
                 self.assertEqual([str(d) for d in check(m)], [])
                 self.assertEqual(run(text, "Main")[1], self.EXPECTED[name])
                 for g in m.graphs():
-                    self.assertTrue(any(n.on is None for n in g.markup), f"{g.name} has no intro")
+                    self.assertTrue(notes(g.meta), f"{g.name} has no intro")
                     placed = {p.id for p in g.places}
                     self.assertEqual(placed, {n.id for n in g.nodes}, f"{g.name} layout")
 
