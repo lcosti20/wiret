@@ -771,7 +771,7 @@ class EditorApp:
                     text += f".{p.name}: {type_words(p.type)}"
                     v = self.view.pin_values.get((nid, p.name)) if h[2] == "out" else None
                     if v is not None:
-                        text += f" = {format_value(p.type, v)}"
+                        text += f" = {format_value(p.type, v, self.idx)}"
             elif n is not None:
                 desc = palette.describe(n.kind, n.symbol, self.idx)
                 if desc:
@@ -1614,14 +1614,14 @@ class EditorApp:
                 for p in items:
                     if p.name in values:
                         self.vars_tree.insert("", "end", values=(
-                            p.name, f"{kind} {p.type}", format_value(p.type, values[p.name])))
+                            p.name, f"{kind} {p.type}", format_value(p.type, values[p.name], self.idx)))
         lm = getattr(self, "loaded", None)
         if lm is not None:
             for v in sorted(self.idx.vars.values(), key=lambda v: v.name):
                 gi = lm.global_names.get(v.name)
                 if gi is not None:
                     self.vars_tree.insert("", "end", values=(
-                        v.name, f"variable {v.type}", format_value(v.type, lm.globals[gi])))
+                        v.name, f"variable {v.type}", format_value(v.type, lm.globals[gi], self.idx)))
 
     def on_stack_select(self, _e=None):
         """Show the graph and wire values of the frame picked in the call stack."""

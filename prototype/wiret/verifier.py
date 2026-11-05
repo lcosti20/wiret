@@ -1,8 +1,8 @@
 """Single-pass bytecode verifier (spec section 5.5)."""
 from __future__ import annotations
 
-from .wbc import (F32, F64, FN_LATENT, FN_PURE, I32, I64, STRING, ArrayType, Ref, WbcError,
-                  WbcModule, decode_code, vt_name)
+from .wbc import (F32, F64, FN_LATENT, FN_PURE, I32, I64, STRING, ArrayType, Ref, StructType,
+                  WbcError, WbcModule, decode_code, vt_name)
 
 VALTYPES = {I32, I64, F32, F64, STRING}
 _PREFIX = {"i32": I32, "i64": I64, "f32": F32, "f64": F64}
@@ -58,25 +58,56 @@ def simple_effect(name: str):
     return None
 
 
-def valid_vt(m: WbcModule, vt, before=None) -> bool:
-    """A supported value type. Array element types must refer to earlier entries (no cycles)."""
+def valid_vt(m: WbcModule, vt) -> bool:
+    """A supported value type: a number, a string, or a reference to an array or struct type.
+    References may point forward (`struct Tree { children: array::<Tree> }`); the check that a
+    struct does not hold itself by value is `check_struct_cycles`."""
     if isinstance(vt, Ref):
-        limit = len(m.types) if before is None else before
-        return vt.type < limit and isinstance(m.types[vt.type], ArrayType)
+        return vt.type < len(m.types) and isinstance(m.types[vt.type], (ArrayType, StructType))
     return vt in VALTYPES
 
 
 def is_func_type(m: WbcModule, t: int) -> bool:
-    return t < len(m.types) and not isinstance(m.types[t], ArrayType)
+    return t < len(m.types) and isinstance(m.types[t], tuple)
+
+
+def check_struct_cycles(m: WbcModule):
+    """A struct field that is a struct (not an array of one) is held by value, so these
+    edges must form no cycle: otherwise the struct has no finite default value."""
+    state = {}                      # type index -> 1 visiting, 2 done
+
+    def visit(t):
+        if state.get(t) == 2:
+            return
+        if state.get(t) == 1:
+            raise VerifyError(f"struct type {t} contains itself by value")
+        state[t] = 1
+        for vt, _ in m.types[t].fields:
+            if isinstance(vt, Ref) and isinstance(m.types[vt.type], StructType):
+                visit(vt.type)
+        state[t] = 2
+
+    for t, entry in enumerate(m.types):
+        if isinstance(entry, StructType):
+            visit(t)
 
 
 def verify(m: WbcModule) -> list:
     """Verify a decoded module. Returns, per defined function, (instrs, max_height)."""
     for i, entry in enumerate(m.types):
-        vts = [entry.elem] if isinstance(entry, ArrayType) else entry[0] + entry[1]
+        if isinstance(entry, ArrayType):
+            vts = [entry.elem]
+        elif isinstance(entry, StructType):
+            vts = [vt for vt, _ in entry.fields]
+            for vt, default in entry.fields:
+                if vt == STRING and default is not None and default >= len(m.data):
+                    raise VerifyError(f"type {i} has a field default naming missing data")
+        else:
+            vts = entry[0] + entry[1]
         for vt in vts:
-            if not valid_vt(m, vt, before=i if isinstance(entry, ArrayType) else None):
+            if not valid_vt(m, vt):
                 raise VerifyError(f"type {i} uses an unsupported value type")
+    check_struct_cycles(m)
     for mod, fld, t, _ in m.imports:
         if not is_func_type(m, t):
             raise VerifyError(f"import {mod}.{fld} has bad type index {t}")
@@ -142,6 +173,16 @@ def verify_function(m: WbcModule, i: int):
             raise VerifyError(f"{ins.name}: expected {vt_name(expected, m.types)}, found "
                               f"{vt_name(got, m.types)}", fidx, ins.pc)
         return got
+
+    def struct_type(ins):
+        t = ins.imms[0]
+        if t >= len(m.types) or not isinstance(m.types[t], StructType):
+            raise VerifyError(f"{ins.name}: type {t} is not a struct type", fidx, ins.pc)
+        fields = [vt for vt, _ in m.types[t].fields]
+        if len(ins.imms) > 1 and ins.imms[1] >= len(fields):
+            raise VerifyError(f"{ins.name}: struct type {t} has no field {ins.imms[1]}",
+                              fidx, ins.pc)
+        return Ref(t), fields
 
     def array_type(ins):
         t = ins.imms[0]
@@ -247,6 +288,20 @@ def verify_function(m: WbcModule, i: int):
             for t in reversed(operands):
                 pop(t, ins)
             stack.append(elem if n == "array.get" else ref)
+        elif n == "struct.new":
+            ref, fields = struct_type(ins)
+            for t in reversed(fields):
+                pop(t, ins)
+            stack.append(ref)
+        elif n == "struct.get":
+            ref, fields = struct_type(ins)
+            pop(ref, ins)
+            stack.append(fields[ins.imms[1]])
+        elif n == "struct.with":
+            ref, fields = struct_type(ins)
+            pop(fields[ins.imms[1]], ins)
+            pop(ref, ins)
+            stack.append(ref)
         elif n == "string.const":
             if ins.imms[0] >= len(m.data):
                 raise VerifyError(f"data index {ins.imms[0]} out of range", fidx, ins.pc)

@@ -20,8 +20,8 @@ from .model import Const, Extern, Graph, Lit, Module, Node, PinRef, Var
 from .natives import INTERNAL, STD
 from .printer import layout_hash, print_module, semantic_hash
 from .registry import (ARRAY_MUTATORS, FLOAT_TYPES, INT_TYPES, REGISTRY_NAME, REGISTRY_VERSION,
-                       SIGNED_TYPES, ModuleIndex, Pin, Sig, array_elem, attr_int, signature,
-                       zero_lit)
+                       SIGNED_TYPES, ModuleIndex, Pin, Sig, array_elem, attr_int, enum_values,
+                       signature, zero_lit)
 from .wbc import F32, F64, I32, I64, STRING
 
 COMPILER_VERSION = "wiretc-proto 0.1"
@@ -120,11 +120,54 @@ class Compiler:
 
     # -- tables -------------------------------------------------------------------
     def vt(self, ty: str):
-        """The WBC value type of a Wiret type; arrays become references to type entries."""
+        """The WBC value type of a Wiret type. An enum is its underlying integer; arrays and
+        structs become references to type entries."""
         elem = array_elem(ty)
-        if elem is None:
-            return VT[ty]
-        return wbc.Ref(self.array_type(elem))
+        if elem is not None:
+            return wbc.Ref(self.array_type(elem))
+        if ty in self.idx.structs:
+            return wbc.Ref(self.struct_type(ty))
+        return VT[self.base(ty)]
+
+    def base(self, ty: str) -> str:
+        """The underlying integer type of an enum; any other type unchanged."""
+        return self.idx.enum_base(ty) or ty
+
+    def struct_type(self, name: str) -> int:
+        """Index of the struct's `5F` type entry. The index is reserved before the fields are
+        lowered, so `children: array::<Tree>` inside `Tree` can refer to it."""
+        key = ("struct", name)
+        if key not in self.type_keys:
+            self.type_keys[key] = len(self.types)
+            self.types.append(None)
+            fields = []
+            for f in self.idx.structs[name].fields:
+                vt = self.vt(f.type)
+                default = None
+                if f.default is not None and not isinstance(vt, wbc.Ref):
+                    default = self.const_value(f.default, f.type)
+                fields.append((vt, default))
+            self.types[self.type_keys[key]] = wbc.StructType(tuple(fields))
+        return self.type_keys[key]
+
+    def field_index(self, struct: str, field_name: str) -> int:
+        return [f.name for f in self.idx.structs[struct].fields].index(field_name)
+
+    def enum_value(self, lit: Lit) -> int:
+        """The integer of `Mode.Chase`."""
+        name, member = lit.value.split(".")
+        return dict(enum_values(self.idx.enums[name]))[member]
+
+    def const_value(self, lit: Lit, ty: str):
+        """A literal as the number or data index stored for a global or field default."""
+        if ty == "string":
+            return self.string_index(lit.value)
+        if ty == "bool":
+            return 1 if lit.value else 0
+        if ty in FLOAT_TYPES:
+            return float(lit.value)
+        v = self.enum_value(lit) if lit.kind == "enum" else int(lit.value)
+        return wrap_int(self.base(ty), v)
 
     def array_type(self, elem: str) -> int:
         """Index of the `array<elem>` type entry."""
@@ -152,16 +195,10 @@ class Compiler:
         if name in self.global_index:
             return self.global_index[name]
         lit = init if init is not None else zero_lit(ty)
-        if array_elem(ty) is not None:
-            value = None
-        elif ty == "string":
-            value = self.string_index(lit.value)
-        elif ty == "bool":
-            value = 1 if lit.value else 0
-        elif ty in FLOAT_TYPES:
-            value = float(lit.value)
+        if array_elem(ty) is not None or ty in self.idx.structs:
+            value = None                 # the VM builds the default array or struct
         else:
-            value = wrap_int(ty, int(lit.value))
+            value = self.const_value(lit, ty)
         self.global_index[name] = len(self.globals)
         self.globals.append((name, ty, value))
         return self.global_index[name]
@@ -175,7 +212,6 @@ class Compiler:
     # -- driver -------------------------------------------------------------------
     def compile(self) -> CompileResult:
         self.diags = check(self.m, comments_ok=True)
-        self.reject_user_types()
         if has_errors(self.diags):
             return CompileResult(False, self.diags)
         for v in sorted(self.idx.vars.values(), key=lambda v: v.name):
@@ -190,38 +226,6 @@ class Compiler:
             return CompileResult(False, self.diags)
         mod = self.build(lowered)
         return CompileResult(True, self.diags, wbc.encode_module(mod), mod)
-
-    def reject_user_types(self):
-        """Struct and enum types pass the checker but are not lowered yet: say so instead of
-        failing inside the code generator."""
-        def user(ty):
-            base = array_elem(ty) or ty
-            return self.idx.user_type(base) is not None
-
-        uses = []
-        for it in self.m.items:
-            if isinstance(it, Graph):
-                typed = it.params + it.result_list + it.locals + it.states
-            elif isinstance(it, Extern):
-                typed = it.params + (it.results or [])
-            elif isinstance(it, (Var, Const)):
-                typed = [it]
-            else:
-                continue
-            found = next((p.type for p in typed if user(p.type)), None)
-            if found is None and isinstance(it, Graph) and it.kind != "macro":
-                for n in it.nodes:      # e.g. a MakeStruct whose result only feeds a Call
-                    sig = signature(n, it, self.idx)
-                    found = next((p.type for p in sig.inputs + sig.outputs if user(p.type)),
-                                 None)
-                    if found:
-                        break
-            if found:
-                uses.append((it.name, found))
-        for owner, ty in uses:
-            self.diags.append(Diag("E0501", f"type '{ty}' is declared, but this prototype cannot "
-                                            f"compile struct and enum values yet", self.m.name,
-                                   owner, data={"type": ty}))
 
     def func_index(self, ref) -> int:
         kind, name = ref
@@ -855,6 +859,14 @@ class FuncLowerer:
             self.E("i32.const", 0)
             self.E("array.new", self.c.array_type(elem))
             return
+        if ty in self.c.idx.structs:  # structs have no literal: this is the default struct
+            for f in self.c.idx.structs[ty].fields:
+                self.emit_const(f.default if f.default is not None else zero_lit(f.type), f.type)
+            self.E("struct.new", self.c.struct_type(ty))
+            return
+        if lit.kind == "enum":
+            lit = Lit("int", self.c.enum_value(lit))
+        ty = self.c.base(ty)
         vt = VT[ty]
         if ty == "bool":
             self.E("i32.const", 1 if lit.value else 0)
@@ -882,6 +894,23 @@ class FuncLowerer:
             self.E("i32.and")
 
     def emit_eq(self, ty: str):
+        """[a, b] -> [i32]. Structs compare field by field (section 3.1)."""
+        if ty in self.c.idx.structs:
+            t = self.c.struct_type(ty)
+            fields = self.c.idx.structs[ty].fields
+            tb, ta = self.temp(ty), self.temp(ty)
+            self.E("local.set", tb)
+            self.E("local.set", ta)
+            self.E("i32.const", 1)
+            for i, f in enumerate(fields):
+                self.E("local.get", ta)
+                self.E("struct.get", t, i)
+                self.E("local.get", tb)
+                self.E("struct.get", t, i)
+                self.emit_eq(f.type)
+                self.E("i32.and")
+            return
+        ty = self.c.base(ty)
         if ty == "string":
             self.E("string.eq")
         else:
@@ -916,6 +945,9 @@ class FuncLowerer:
             self.eval(n.inputs[0][2], ep)
             self.E("array.len")
             return
+        if k in ("MakeStruct", "BreakStruct", "GetField", "WithField"):
+            self.emit_struct_node(n, ep)
+            return
         if k == "Select":
             ty = n.targs[0]
             (_, _, cond), (_, _, a), (_, _, b) = n.inputs
@@ -942,6 +974,12 @@ class FuncLowerer:
             self.E(f"i32.{k.lower()}")
             return
         T = n.targs[0]
+        if T in self.c.idx.structs:   # only Eq and Ne take a struct
+            self.emit_eq(T)
+            if k == "Ne":
+                self.E("i32.eqz")
+            return
+        T = self.c.base(T)
         vt = VT[T]
         p = PFX.get(vt)
         signed = T in SIGNED_TYPES
@@ -1019,7 +1057,30 @@ class FuncLowerer:
         else:
             raise AssertionError(f"cannot lower pure node kind {k}")
 
+    def emit_struct_node(self, n: IRNode, ep: EvalPoint):
+        """MakeStruct, BreakStruct, GetField, WithField. All are pure."""
+        k = n.kind
+        name, _, fname = (n.symbol or "").partition(".")
+        t = self.c.struct_type(name)
+        for _, _, src in n.inputs:            # fields in order, or obj (and value)
+            self.eval(src, ep)
+        if k == "MakeStruct":
+            self.E("struct.new", t)
+        elif k == "GetField":
+            self.E("struct.get", t, self.c.field_index(name, fname))
+        elif k == "WithField":
+            self.E("struct.with", t, self.c.field_index(name, fname))
+        else:                                 # BreakStruct: push every field, in order
+            tmp = self.temp(name)
+            self.E("local.set", tmp)
+            for i in range(len(self.c.idx.structs[name].fields)):
+                self.E("local.get", tmp)
+                self.E("struct.get", t, i)
+
     def emit_convert(self, f: str, t: str):
+        f, t = self.c.base(f), self.c.base(t)    # an enum converts to its integer as-is
+        if f == t:
+            return
         vf, vt = VT[f], VT[t]
         if t == "string":
             name = {"bool": "FromBool", "u32": "FromU32", "i64": "FromI64", "u64": "FromU64",

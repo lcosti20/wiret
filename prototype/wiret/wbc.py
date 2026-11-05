@@ -18,10 +18,11 @@ FLAG_HAS_SOURCE = 1
 
 # value types (section 5.3)
 I32, I64, F32, F64, STRING = 0x7F, 0x7E, 0x7D, 0x7C, 0x6E
-REF = 0x6B                      # `6B t`: reference to type index t (here: arrays)
+REF = 0x6B                      # `6B t`: reference to type index t (arrays and structs)
 VT_NAMES = {I32: "i32", I64: "i64", F32: "f32", F64: "f64", STRING: "string"}
 FUNC_TYPE = 0x60
 ARRAY_TYPE = 0x5E
+STRUCT_TYPE = 0x5F
 
 
 @dataclass(frozen=True)
@@ -36,10 +37,21 @@ class ArrayType:
     elem: object                # a value type
 
 
-def vt_name(vt, types=None) -> str:
+@dataclass(frozen=True)
+class StructType:
+    """Type entry `5F fields:vec(field)`, `field = valtype flags:u8 [const]` (section 5.3).
+    Each field is (value type, default or None); flag bit 0 says a default follows. A default
+    is only written for numbers and strings (a string default is a data index)."""
+    fields: tuple
+
+
+def vt_name(vt, types=None, depth=0) -> str:
     if isinstance(vt, Ref):
-        if types is not None and vt.type < len(types) and isinstance(types[vt.type], ArrayType):
-            return f"array::<{vt_name(types[vt.type].elem, types)}>"
+        entry = types[vt.type] if types is not None and vt.type < len(types) else None
+        if isinstance(entry, ArrayType) and depth < 8:
+            return f"array::<{vt_name(entry.elem, types, depth + 1)}>"
+        if isinstance(entry, StructType):
+            return f"struct {vt.type}"
         return f"ref {vt.type}"
     return VT_NAMES.get(vt, f"0x{vt:02X}")
 
@@ -71,6 +83,7 @@ OPS: dict[str, tuple] = {
     "array.new": (0xD6, "u"), "array.len": (0xD7, ""), "array.get": (0xD8, "u"),
     "array.set": (0xD9, "u"), "array.push": (0xDA, "u"), "array.insert": (0xDB, "u"),
     "array.remove": (0xDC, "u"), "array.clear": (0xDD, "u"), "array.clone": (0xDE, "u"),
+    "struct.new": (0xD0, "u"), "struct.get": (0xD1, "uu"), "struct.with": (0xD2, "uu"),
 }
 INT_OPS = ["eqz", "eq", "ne", "lt_s", "lt_u", "gt_s", "gt_u", "le_s", "le_u", "ge_s", "ge_u",
            "add", "sub", "mul", "div_s", "div_u", "rem_s", "rem_u", "and", "or", "xor", "shl",
@@ -102,7 +115,7 @@ LATER_TIER_OPS = {0x07: "call_virtual", 0x08: "call_interface", 0x09: "call_dele
                   0x0C: "try.push", 0x0D: "suspend", 0x0E: "throw", 0x25: "ref.null",
                   0x26: "ref.is_null", 0x27: "ref.eq", 0x28: "ref.cast", 0x29: "ref.test",
                   0x2A: "ref.valid", 0x2B: "ref.share"}
-for _c in list(range(0xD0, 0xD6)) + list(range(0xE0, 0xF0)):
+for _c in list(range(0xD3, 0xD6)) + list(range(0xE0, 0xF0)):
     LATER_TIER_OPS.setdefault(_c, f"object.0x{_c:02X}")
 for _c in (0xF4, 0xF5, 0xF6, 0xF7):
     LATER_TIER_OPS[_c] = f"object.0x{_c:02X}"
@@ -283,6 +296,8 @@ def decode_code(code: bytes) -> list:
             imms = (r.sleb(32),)
         elif imm == "u":
             imms = (r.u32(),)
+        elif imm == "uu":
+            imms = (r.u32(), r.u32())
         elif imm == "s":
             imms = (r.sleb(32),)
         elif imm == "S":
@@ -307,6 +322,9 @@ def encode_instr(w: Writer, name: str, imms: tuple):
         w.sleb5(imms[0])
     elif imm == "u":
         w.u32(imms[0])
+    elif imm == "uu":
+        w.u32(imms[0])
+        w.u32(imms[1])
     elif imm in ("s", "S"):
         w.sleb(imms[0])
     elif imm == "f":
@@ -335,7 +353,7 @@ class Body:
 @dataclass
 class WbcModule:
     flags: int = 0
-    types: list = field(default_factory=list)      # [(params[vt], results[vt]) | ArrayType]
+    types: list = field(default_factory=list)      # [(params, results) | ArrayType | StructType]
     imports: list = field(default_factory=list)    # [(module, field, typeidx, flags)]
     funcs: list = field(default_factory=list)      # [(typeidx, flags)]
     globals: list = field(default_factory=list)    # [(vt, mut, init)]
@@ -406,6 +424,15 @@ def encode_module(m: WbcModule) -> bytes:
         if isinstance(entry, ArrayType):
             w.u8(ARRAY_TYPE)
             write_vt(w, entry.elem)
+            continue
+        if isinstance(entry, StructType):
+            w.u8(STRUCT_TYPE)
+            w.u32(len(entry.fields))
+            for vt, default in entry.fields:
+                write_vt(w, vt)
+                w.u8(0 if default is None else 1)
+                if default is not None:
+                    _write_const(w, vt, default)
             continue
         params, results = entry
         w.u8(FUNC_TYPE)
@@ -516,6 +543,18 @@ def decode_module(data: bytes) -> WbcModule:
                 code = s.u8()
                 if code == ARRAY_TYPE:
                     m.types.append(ArrayType(s.vt()))
+                    continue
+                if code == STRUCT_TYPE:
+                    fields = []
+                    for _ in range(s.u32()):
+                        vt = s.vt()
+                        flags = s.u8()
+                        if flags & ~1:
+                            raise WbcError(f"struct field flags 0x{flags:02X} are not supported")
+                        if flags and isinstance(vt, Ref):
+                            raise WbcError("a reference field cannot have a default")
+                        fields.append((vt, _read_const(s, vt) if flags else None))
+                    m.types.append(StructType(tuple(fields)))
                     continue
                 if code != FUNC_TYPE:
                     raise WbcError(f"type entry 0x{code:02X} is not supported by this VM")

@@ -2,10 +2,12 @@
 
 Run from `prototype/`:  python3 -m unittest discover tests
 """
+import math
 import os
 import random
 import sys
 import unittest
+import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
@@ -418,11 +420,8 @@ func Move(p: Vec2, ps: array::<Vec2>) -> (m: Mode) {
 }
 """
         self.assertEqual(self.found(body), [])
-        # They check, but cannot be lowered yet: compiling says so instead of crashing.
         r = compile_module(parse(module(body, macros=False)))
-        self.assertFalse(r.ok)
-        self.assertEqual({d.graph for d in r.diags if d.code == "E0501"}, {"mode", "Move"})
-        self.assertTrue(all("cannot compile struct and enum" in d.message for d in r.diags))
+        self.assertTrue(r.ok, [str(d) for d in r.diags])
 
     def test_unknown_types(self):
         diags = self.diags("""
@@ -559,8 +558,7 @@ struct S {
   e: exec
 }
 """)
-        diags += compile_module(parse(module("\nstruct V {}\n\nvar v: V\n", macros=False))).diags
-        self.assertEqual(len(diags), 10)
+        self.assertEqual(len(diags), 9)
         for d in diags:
             with self.subTest(d=str(d)):
                 friendly = explain(d)
@@ -797,7 +795,7 @@ func F(p: A = B.Y) {
             parse_literal("a.b.c")
         self.assertIn("Enum.Member", cm.exception.msg)
 
-    def test_compiling_reports_instead_of_crashing(self):
+    def test_a_struct_used_only_inside_a_graph_runs(self):
         text = module("""
 struct Vec2 {
   x: f32
@@ -820,9 +818,7 @@ func Main() {
 }
 """, macros=False)
         self.assertEqual(codes(text), [])
-        r = compile_module(parse(text))
-        self.assertFalse(r.ok)
-        self.assertEqual([(d.code, d.graph) for d in r.diags], [("E0501", "Main")])
+        self.assertEqual(run(text, "Main")[1], ["2.0"])
 
     def test_palette_and_explanations(self):
         from wiret import palette
@@ -859,6 +855,312 @@ func G(e: Enemy, v: Vec2, m: Mode, p: Mode = Other.X) {
                 self.assertNotEqual(friendly, d.message)
                 self.assertNotIn(d.code, friendly)
                 self.assertNotIn("None", friendly)
+
+
+STRUCT_DATA = """
+const START: Mode = Mode.Chase
+
+var best: Enemy
+
+var mode: Mode = Mode.Flee
+
+enum Mode: u8 {
+  Idle
+  Chase
+  Flee = 5
+}
+
+enum Wide: i64 {
+  Far = 5000000000
+}
+
+struct Enemy {
+  pos: Vec2
+  mode: Mode = Mode.Idle
+  hp: i32 = 10
+  name: string = "grunt"
+}
+
+struct Path {
+  points: array::<Vec2>
+}
+
+struct Tree {
+  label: string
+  children: array::<Tree>
+}
+
+struct Vec2 {
+  x: f32
+  y: f32 = 1.5
+}
+
+func Defaults() -> (local_e: Enemy, global_e: Enemy, m: Mode, s: Mode, made: Enemy) {
+  local e: Enemy
+  node entry = Entry
+  node ge = GetVar best
+  node gm = GetVar mode
+  node le = GetLocal e
+  node mk = MakeStruct Enemy
+  node r = Return
+    .local_e <- le.value
+    .global_e <- ge.value
+    .m <- gm.value
+    .s <- st.value
+    .made <- mk.result
+  node st = GetVar START
+
+  flow {
+    entry -> r
+  }
+}
+
+func Equal(a: Enemy, b: Enemy) -> (eq: bool, ne: bool) {
+  node entry = Entry
+  node eq = Eq::<Enemy>
+    .a <- entry.a
+    .b <- entry.b
+  node ne = Ne::<Enemy>
+    .a <- entry.a
+    .b <- entry.b
+  node r = Return
+    .eq <- eq.result
+    .ne <- ne.result
+
+  flow {
+    entry -> r
+  }
+}
+
+func Far() -> (w: Wide, back: i64) {
+  node entry = Entry
+  node to_int = Convert::<Wide, i64>
+    .value <- Wide.Far
+  node r = Return
+    .w <- Wide.Far
+    .back <- to_int.result
+
+  flow {
+    entry -> r
+  }
+}
+
+func Leaf(name: string) -> (t: Tree) {
+  node entry = Entry
+  node r = Return
+    .t <- tree.result
+  node tree = MakeStruct Tree
+    .label <- entry.name
+
+  flow {
+    entry -> r
+  }
+}
+
+func Points(n: i32) -> (path: Path, last_x: f32, count: i32) {
+  local pts: array::<Vec2>
+  node add = ArrayAdd::<Vec2> pts
+    .item <- point.result
+  node entry = Entry
+  node get = ArrayGet::<Vec2>
+    .array <- now.value
+    .index <- last.result
+  node last = Sub::<i32>
+    .a <- len.length
+    .b <- 1
+  node len = ArrayLength::<Vec2>
+    .array <- now.value
+  node loop = Macro std.flow.ForRange
+    .first <- 0
+    .last <- entry.n
+  node now = GetLocal pts
+  node path = MakeStruct Path
+    .points <- now.value
+  node point = MakeStruct Vec2
+    .x <- x.result
+  node r = Return
+    .path <- path.result
+    .last_x <- x_of.value
+    .count <- len.length
+  node x = Convert::<i32, f32>
+    .value <- loop.index
+  node x_of = GetField Vec2.x
+    .obj <- get.item
+
+  flow {
+    entry -> loop
+    loop.each -> add
+    loop.done -> r
+  }
+}
+
+func Pick(m: Mode) -> (word: string) {
+  node chase = Return
+    .word <- "chase"
+  node entry = Entry
+  node other = Return
+    .word <- "other"
+  node sw = Switch::<Mode> @cases(Mode.Idle, Mode.Chase)
+    .value <- entry.m
+  node wait = Return
+    .word <- "wait"
+
+  flow {
+    entry -> sw
+    sw.case0 -> wait
+    sw.case1 -> chase
+    sw.default -> other
+  }
+}
+"""
+
+
+class StructRunTests(unittest.TestCase):
+    """Step 4 of struct/enum support: lowering, the verifier and the VM."""
+
+    def setUp(self):
+        self.text = module(STRUCT_DATA)
+        _, self.r = build(self.text)
+        self.vm = VM()
+        self.mod = self.vm.load(self.r.wbc)
+
+    def call(self, func, *args):
+        return self.vm.call(self.mod, func, list(args))
+
+    def test_step3_program(self):
+        text = module(STRUCT_NODES, macros=False)
+        e, = run(text, "Spawn")[0]
+        self.assertEqual(e, ((0.0, 1.5), 1, 10))
+        self.assertEqual(run(text, "Step", e)[0], [((1.0, 1.5), 1, 10), 0])
+        self.assertEqual(run(text, "Step", ((0.0, 1.5), 5, 10))[0], [((0.0, 1.5), 5, 10), 0])
+
+    def test_defaults(self):
+        grunt = ((0.0, 1.5), 0, 10, "grunt")
+        self.assertEqual(self.call("Defaults"), [grunt, grunt, 5, 1, grunt])
+
+    def test_equality_is_field_by_field(self):
+        a = ((1.0, 2.0), 1, 10, "a")
+        self.assertEqual(self.call("Equal", a, a), [1, 0])
+        for b in (((1.0, 2.5), 1, 10, "a"), ((1.0, 2.0), 0, 10, "a"), ((1.0, 2.0), 1, 10, "b")):
+            with self.subTest(b=b):
+                self.assertEqual(self.call("Equal", a, b), [0, 1])
+        nan = ((math.nan, 2.0), 1, 10, "a")
+        self.assertEqual(self.call("Equal", nan, nan), [0, 1])   # as Eq::<f32> on NaN
+
+    def test_arrays_of_structs_and_recursive_types(self):
+        path, last_x, count = self.call("Points", 3)
+        self.assertEqual(path, (((0.0, 1.5), (1.0, 1.5), (2.0, 1.5), (3.0, 1.5)),))
+        self.assertEqual((last_x, count), (3.0, 4))
+        self.assertEqual(self.call("Leaf", "root"), [("root", ())])
+
+    def test_enums(self):
+        self.assertEqual(self.call("Far"), [5000000000, 5000000000])
+        self.assertEqual([self.call("Pick", m)[0] for m in (0, 1, 5)], ["wait", "chase", "other"])
+
+    def test_debug_build_runs_the_same(self):
+        r = compile_module(parse(self.text), self.text, debug=True)
+        vm = VM()
+        mod = vm.load(r.wbc)
+        self.assertEqual(vm.call(mod, "Points", [2])[1:], [2.0, 3])
+        self.assertEqual(vm.call(mod, "Defaults", [])[2:4], [5, 1])
+
+    def test_cli_values(self):
+        from wiret.runner import format_results, parse_args_for
+        m = parse(self.text)
+        self.assertEqual(format_results(m, "Defaults", self.call("Defaults")).split(", m =")[0],
+                         'local_e = Enemy { pos: Vec2 { x: 0.0, y: 1.5 }, mode: Mode.Idle, '
+                         'hp: 10, name: \'grunt\' }, global_e = Enemy { pos: Vec2 { x: 0.0, '
+                         'y: 1.5 }, mode: Mode.Idle, hp: 10, name: \'grunt\' }')
+        self.assertEqual(format_results(m, "Leaf", self.call("Leaf", "r")),
+                         "t = Tree { label: 'r', children: [] }")
+        self.assertEqual(parse_args_for(m, "Pick", ["Mode.Flee"]), [5])
+        for bad in ("5", "Mode.Run", "Wide.Far"):
+            with self.subTest(bad), self.assertRaises(ValueError) as cm:
+                parse_args_for(m, "Pick", [bad])
+            self.assertIn("Mode.Idle, Mode.Chase, Mode.Flee", str(cm.exception))
+        with self.assertRaises(ValueError) as cm:
+            parse_args_for(m, "Equal", ["1", "2"])
+        self.assertIn("cannot be typed", str(cm.exception))
+
+    def test_struct_holding_an_array_cannot_be_compared(self):
+        from wiret.explain import explain
+        diags = check(parse(module(STRUCT_DATA + """
+func Same(a: Path) -> (same: bool) {
+  node entry = Entry
+  node eq = Eq::<Path>
+    .a <- entry.a
+    .b <- entry.a
+  node r = Return
+    .same <- eq.result
+
+  flow {
+    entry -> r
+  }
+}
+""")))
+        d = next(d for d in diags if d.code == "E0110")
+        self.assertIn("cannot compare arrays", d.message)
+        self.assertIn("'Path' holds a list", explain(d))
+
+    def test_verifier_rejects_bad_struct_code(self):
+        good = wbc.decode_module(self.r.wbc)
+        st = next(i for i, t in enumerate(good.types) if isinstance(t, wbc.StructType)
+                  and len(t.fields) == 2)                   # Vec2
+        fn = next(i for i, b in enumerate(good.bodies) if b.code)
+
+        def status(fn_):
+            m = wbc.decode_module(self.r.wbc)
+            fn_(m)
+            with self.assertRaises(WiretError) as cm:
+                VM().load(wbc.encode_module(m))
+            return cm.exception.status
+
+        def code(*b):
+            def f(m):
+                m.bodies[fn].code = bytes(b)
+            return f
+
+        def self_by_value(m):
+            m.types[st] = wbc.StructType(((wbc.Ref(st), None),))
+
+        def ref_to_func_type(m):
+            ft = next(i for i, t in enumerate(m.types) if isinstance(t, tuple))
+            m.types[st] = wbc.StructType(((wbc.Ref(ft), None),))
+
+        cases = {
+            "field out of range": code(0x22, 0, 0, 0, 0, 0x22, 0, 0, 0, 0, 0xD0, st, 0xD1, st, 9,
+                                       0x10, 0x05),
+            "wrong field type": code(0x20, 1, 0x22, 0, 0, 0, 0, 0xD0, st, 0x10, 0x05),
+            "get on a number": code(0x20, 1, 0xD1, st, 0, 0x10, 0x05),
+            "not a struct type": code(0x20, 0, 0xD0, 0, 0x10, 0x05),
+            "self by value": self_by_value,
+            "ref to a func type": ref_to_func_type,
+        }
+        for name, fn_ in cases.items():
+            with self.subTest(name):
+                self.assertEqual(status(fn_), "WR_ERR_VERIFY")
+
+    def test_fuzzed_struct_modules_never_crash_the_loader(self):
+        rng = random.Random(4321)
+        data = bytearray(self.r.wbc)
+        for _ in range(1500):
+            d = bytearray(data)
+            for _ in range(rng.randint(1, 4)):
+                d[rng.randrange(len(d))] = rng.randrange(256)
+            if rng.random() < 0.2:
+                d = d[:rng.randrange(len(d))]
+            try:
+                VM().load(bytes(d))
+            except WiretError:
+                pass
+
+    def test_embedded_source_and_disassembly(self):
+        m = wbc.decode_module(self.r.wbc)
+        self.assertEqual(zlib.decompress(m.custom("wr.graph")).decode(),
+                         print_module(parse(self.text)))
+        dis = disassemble(self.r.wbc)
+        self.assertIn("struct.new", dis)
+        self.assertIn("struct.get", dis)
 
 
 class HashTests(unittest.TestCase):

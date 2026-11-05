@@ -14,7 +14,7 @@ from typing import Callable, Optional
 from . import wbc
 from .natives import NativeFault, NativeSpec, _f32, all_natives
 from .verifier import VerifyError, verify
-from .wbc import F32, F64, I32, I64, STRING, OPS, ArrayType, Ref, WbcError
+from .wbc import F32, F64, I32, I64, STRING, OPS, ArrayType, Ref, StructType, WbcError
 
 STATUS_OK = "WR_OK"
 STATUS_FAULT = "WR_ERR_FAULT"
@@ -248,7 +248,10 @@ _CONST_OPS = {0x20, 0x21, 0x22, 0x23}
 
 def normalise(vt, v, types=None):
     if isinstance(vt, Ref):
-        elem = types[vt.type].elem if types is not None else None
+        entry = types[vt.type] if types is not None else None
+        if isinstance(entry, StructType):
+            return tuple(normalise(fvt, x, types) for (fvt, _), x in zip(entry.fields, v))
+        elem = entry.elem if isinstance(entry, ArrayType) else None
         return tuple(normalise(elem, x, types) if elem is not None else x for x in v)
     if vt == I32:
         return i32(int(v))
@@ -269,7 +272,29 @@ def zero(vt):
     return () if isinstance(vt, Ref) else ZERO[vt]
 
 
-def _array_ops(types: list) -> dict:
+def default_values(types: list, data: list):
+    """The default value of each value type, for locals, globals and new array elements.
+
+    A struct is an immutable tuple of its fields. Its default holds each field's declared
+    default, else that field's default (section 5.3). The verifier has checked that structs
+    do not hold themselves by value, so the recursion ends."""
+    cache = {}
+
+    def default(vt):
+        if not isinstance(vt, Ref):
+            return ZERO[vt]
+        entry = types[vt.type]
+        if not isinstance(entry, StructType):
+            return ()
+        if vt.type not in cache:
+            cache[vt.type] = tuple(
+                default(fvt) if d is None else data[d] if fvt == STRING else d
+                for fvt, d in entry.fields)
+        return cache[vt.type]
+    return default
+
+
+def _array_ops(types: list, default=zero) -> dict:
     """Array instructions (section 5.6). Arrays are tuples, so every change makes a new array:
     the eager copy that Tier 1 allows instead of copy-on-write, with the same observable
     value semantics (section 4.9)."""
@@ -278,7 +303,7 @@ def _array_ops(types: list) -> dict:
             raise Fault(f"array index {i} is out of range (length {len(a)})")
 
     def new(elem_vt):
-        z = zero(elem_vt)
+        z = default(elem_vt)
 
         def f(n):
             if n < 0:
@@ -319,6 +344,7 @@ class Func:
     native: Optional[Callable] = None
     native_name: str = ""
     locals: list = field(default_factory=list)
+    zeros: list = field(default_factory=list)      # the starting value of each local
     code: list = field(default_factory=list)       # [(op, arg)]
     pcs: list = field(default_factory=list)        # instruction index -> byte pc
     node_at: list = field(default_factory=list)    # instruction index -> node id
@@ -500,6 +526,8 @@ class VM:
         except (WbcError, IndexError, ValueError) as e:
             raise WiretError(STATUS_LOAD, f"bad custom section: {e}")
         funcs = []
+        defaults = default_values(m.types, m.data)
+        arrays = _array_ops(m.types, defaults)
         for i, (mod, fld, t, flags) in enumerate(m.imports):
             q = f"{mod}.{fld}"
             spec = self.natives.get(q)
@@ -517,8 +545,8 @@ class VM:
             params, results = m.types[t]
             f = Func(fi, names.get(fi, f"func{fi}"), params, results, flags)
             f.locals = list(body.locals)
+            f.zeros = [defaults(vt) for vt in f.locals]
             index_of = {ins.pc: k for k, ins in enumerate(instrs)}
-            arrays = _array_ops(m.types)
             for ins in instrs:
                 if ins.name in ("br", "br_if", "cont.push"):
                     arg = index_of[ins.target()]
@@ -532,6 +560,10 @@ class VM:
                     arg = len
                 elif ins.name.startswith("array."):
                     arg = arrays[ins.name[6:]]
+                elif ins.name == "struct.new":
+                    arg = len(m.types[ins.imms[0]].fields)
+                elif ins.name in ("struct.get", "struct.with"):
+                    arg = ins.imms[1]
                 else:
                     arg = ins.imms[0] if ins.imms else None
                 f.code.append((ins.op, arg))
@@ -558,7 +590,7 @@ class VM:
                     f.steps[k] = step_pcs[ins.pc]
             funcs.append(f)
         exports = {name: index for name, kind, index, _ in m.exports if kind == 0}
-        gvals = [m.data[init] if vt == STRING else zero(vt) if isinstance(vt, Ref) else init
+        gvals = [m.data[init] if vt == STRING else defaults(vt) if isinstance(vt, Ref) else init
                  for vt, _, init in m.globals]
         return LoadedModule(m, meta.get("module", ""), funcs, exports, gvals, m.data, meta,
                             local_names, parse_global_names(m))
@@ -604,7 +636,7 @@ class VM:
         hook = self.hook
         f = entry
         code = f.code
-        locs = args + [zero(vt) for vt in f.locals]
+        locs = args + list(f.zeros)
         stack: list = []
         cont: list = []
         ip = 0
@@ -692,7 +724,7 @@ class VM:
                         frames.append((f, ip, locs, stack, cont))
                         f = callee
                         code = f.code
-                        locs = cargs + [zero(vt) for vt in f.locals]
+                        locs = cargs + list(f.zeros)
                         stack, cont, ip = [], [], 0
                 elif op == OP_RETURN:
                     nr = len(f.results)
@@ -716,6 +748,18 @@ class VM:
                         stack[-1] = arg(stack[-1], b, c)
                     if op != 0xD7 and op != 0xD8:     # allocation: 1 fuel per 8 elements
                         fuel -= len(stack[-1]) >> 3
+                elif op == 0xD0:                       # struct.new
+                    vals = tuple(stack[len(stack) - arg:]) if arg else ()
+                    del stack[len(stack) - arg:]
+                    stack.append(vals)
+                    fuel -= arg >> 3
+                elif op == 0xD1:                       # struct.get
+                    stack[-1] = stack[-1][arg]
+                elif op == 0xD2:                       # struct.with
+                    v = stack.pop()
+                    s0 = stack[-1]
+                    stack[-1] = s0[:arg] + (v,) + s0[arg + 1:]
+                    fuel -= len(s0) >> 3
                 elif op == OP_NOP:
                     pass
                 elif op == OP_UNREACHABLE:

@@ -18,7 +18,7 @@ cd prototype
 python3 wiret_editor.py                         # the editor, opening Lesson 1
 python3 wiret_editor.py examples/demo.wiret     # the editor on a larger example
 python3 wiretc.py run examples/demo.wiret Main  # the same program from the command line
-python3 -m unittest discover tests              # 78 tests
+python3 -m unittest discover tests              # 89 tests
 ```
 
 ## Building a desktop app
@@ -187,8 +187,8 @@ The editor also follows the graph-editor contract in section 7.5:
 | Execution model (4.2–4.3) | Continuation stack, `Sequence` push/pop, macro inlining with path-style ids (`loop/test`, `loop!in`), `Exit` as a jump, joins, evaluation points with per-point sharing, impure output slots, `@pure` and `@reads` calls as pure nodes, per-expansion `state`. The §4.2 `SumTo(2)` trace is reproduced exactly (see tests). |
 | Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0201, E0301, E0302, E0304, E0401, E0501, E0502, E0503 (not in the draft: a struct that contains itself by value), W0201, W0301, W0302, W0310, W0320, W0601, W0602, W0603, W0604. |
 | Lowering (4.8) | `-O0`: one labelled block per impure node, `local.tee` for shared values, `cont.push`/`cont.pop` kept. Output closely matches the §5.8 listings. |
-| WBC (5.2–5.4) | Type, Import, Function, Global, Export, Data and Code sections, plus custom sections `name`, `wr.debug`, `wr.pins`, `wr.pure`, `wr.meta` (hashes), `wr.caps` and `wr.graph` (deflated canonical source). |
-| Verifier (5.5) | One linear pass: decoding, branch targets, empty stack at labels, operand typing, returns, `max_stack`, latency/purity flags. Fuzz-tested. |
+| WBC (5.2–5.4) | Type (function, `5E` array and `5F` struct entries), Import, Function, Global, Export, Data and Code sections, plus custom sections `name`, `wr.debug`, `wr.pins`, `wr.pure`, `wr.meta` (hashes), `wr.caps` and `wr.graph` (deflated canonical source). |
+| Verifier (5.5) | One linear pass: decoding, branch targets, empty stack at labels, operand typing (including `struct.new`/`get`/`with`), returns, `max_stack`, latency/purity flags. Type references may point forward, but a struct may not hold itself by value. Fuzz-tested. |
 | VM (5–6) | Interpreter with exact fuel counting (5.7), faults with node-level tracebacks (6.9), a node hook that drives the editor's trace, linking against `std.*` natives and the host native `host.Log`. |
 
 ### Encoding choices the draft leaves open
@@ -251,15 +251,29 @@ struct is `E0501` with a pointer to `WithField`.
 else. Each `@cases` value must be a value of the `Switch`'s type (`E0110`); this now applies to
 every `Switch`.
 
-Not done yet: lowering and editor support (palette entries, a "Break struct" helper, a lesson).
-Until lowering exists, compiling a file that uses one of these types reports `E0501` instead of
-running it.
+They compile and run:
+
+- An enum is its underlying integer at run time, and `Convert` to or from it emits nothing.
+- A struct is a `5F` type entry and an immutable value. `MakeStruct` is `struct.new`,
+  `GetField` is `struct.get`, `WithField` is `struct.with`, and `BreakStruct` reads every field
+  in turn.
+- A struct's default value holds each field's declared default, else that field's default. The
+  defaults are written into the type entry (field flag bit 0, section 5.3), so the VM builds
+  struct locals and globals from it, and the compiler builds the same value for an unbound
+  struct pin.
+- `Eq` and `Ne` on structs compare field by field, inline. Arrays cannot be compared in this
+  prototype, so `Eq` on a struct that holds an array is `E0110`.
+- `wiretc run` takes enum arguments as `Mode.Chase` and prints results as
+  `Vec2 { x: 1.0, y: 1.5 }` and `Mode.Chase`, and the debugger shows values the same way.
+  Struct arguments cannot be typed on the command line.
+
+Not done yet: editor support (palette entries, a "Break struct" helper, a lesson).
 
 ### Deviations and known gaps
 
 - **Exports.** Every `func` and `event` is exported, so the editor can run any of them. The
   spec exports only `@export` declarations.
-- **Later tiers (Tier 1 and 2) are not implemented:** structs, enums, classes, `set` and `map`,
+- **Later tiers (Tier 1 and 2) are not implemented:** classes, `set` and `map`,
   delegates and dispatchers, latent nodes and fibers (`Delay`, `Yield`, `Await`), and
   `Try`/`Throw`. Their node kinds are reported as `E0501` and their opcodes are rejected by
   the verifier.
