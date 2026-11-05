@@ -37,12 +37,14 @@ cross-compile). The packaged app saves students' lesson copies in `~/Documents/W
 Running from source still uses `prototype/my_lessons`. Unsigned builds show a SmartScreen or
 Gatekeeper warning on first launch.
 
-## Running it in a browser (spike)
+## Running it in a browser
 
 `web/` runs the same compiler and VM in the browser with [Pyodide](https://pyodide.org)
-(CPython compiled to WebAssembly). It has no graph view yet: you edit the source text, run it,
-and debug it with Step (F11), Over (F10), Back (Shift+F11), Run/Continue (F5), Animate and
-breakpoints (click beside a node's line number, or F9). The Tkinter modules, the Git
+(CPython compiled to WebAssembly). Like the desktop editor, it shows the graph on the left
+(pan, zoom, double-click a call to open it) and the Source, Debugger and Problems tabs on the
+right. The graph is read-only for now: you edit the source text. You can debug with Step (F11),
+Over (F10), Back (Shift+F11), Run/Continue (F5), Animate and breakpoints (click the circle at a
+node's top-left corner or beside its line number, or press F9). The Tkinter modules, the Git
 commands and file watching are left out.
 
 ```sh
@@ -56,7 +58,9 @@ thread to block at a breakpoint, so `debug_run` runs the program once and record
 where the debugger could pause (up to 5,000), with the call stack, variables and wire values.
 `web/debugger.js` then steps through that recording, forwards and back, pausing where the
 desktop editor would: both use the rules in `wiret/debugstate.py`, and a test (which needs
-Node.js) checks they agree. `web/` is a static
+Node.js) checks they agree. The canvas (`web/graphview.js`) draws from `webapi.check`, which describes
+each graph with the same titles, pin labels, colors and automatic layout as the desktop canvas
+(`wiret/viewmodel.py`). `web/` is a static
 site, so any static host (GitHub Pages, for example) can serve it. The first visit downloads
 about 10 MB of Pyodide from the jsDelivr CDN.
 
