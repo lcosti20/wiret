@@ -138,7 +138,9 @@ The **Lessons** menu opens fourteen short programs from `lessons/`:
 
 Each one has an intro note and a "Try it" note on the graph. Lessons open as copies in
 `my_lessons/` (git-ignored), so the originals never change. **Lessons → Start this lesson over**
-restores a copy.
+restores a copy, and **Start all lessons over…** restores every one you have opened, which is
+what to do after updating the prototype if your copies still hold the old lessons. Other files
+you saved in `my_lessons/` are left alone.
 
 Loops use the built-in `std.flow` macros (`ForRange`, `Repeat`, `ForEach`, `ForEachMap`, `DoOnce`, `DoN`, `FlipFlop`).
 They are written in Wiret in `wiret/std/flow.wiret`, as section 3.4 describes, and are
