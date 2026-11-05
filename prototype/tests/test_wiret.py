@@ -10,6 +10,7 @@ import math
 import os
 import random
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -5736,6 +5737,248 @@ class B : A {
 }
 """, macros=False)
         self.assertEqual([c for c in codes(text) if c.startswith("E")], [])
+
+
+DET = """
+event Countdown() {
+  node entry = Entry
+  node go = Call host.Log
+    .message <- "Go!"
+  node loop = Macro ForRange
+    .first <- 1
+    .last <- 3
+  node say = Call host.Log
+    .message <- txt.result
+  node txt = Convert::<i32, string>
+    .value <- loop.index
+  node wait = Delay
+    .seconds <- 0.5
+
+  flow {
+    entry -> loop
+    loop.done -> go
+    loop.each -> say
+    say -> wait
+  }
+}
+
+func Maths(x: f64) -> (s: f64, p: f64, mn: f64, mx: f64, nan_eq: bool) {
+  node entry = Entry
+  node max = Max::<f64>
+    .a <- 0.0
+    .b <- neg_zero.result
+  node min = Min::<f64>
+    .a <- 0.0
+    .b <- neg_zero.result
+  node nan = Div::<f64>
+    .a <- 0.0
+    .b <- 0.0
+  node nan_eq = Eq::<f64>
+    .a <- nan.result
+    .b <- nan.result
+  node neg_zero = Neg::<f64>
+    .value <- 0.0
+  node pow = Call std.math.Pow
+    .a <- entry.x
+    .b <- 0.5
+  node ret = Return
+    .s <- sin.result
+    .p <- pow.result
+    .mn <- min.result
+    .mx <- max.result
+    .nan_eq <- nan_eq.result
+  node sin = Call std.math.Sin
+    .x <- entry.x
+
+  flow {
+    entry -> ret
+  }
+}
+"""
+
+
+class DeterministicTests(unittest.TestCase):
+    """Deterministic mode (section 4.10): float rules, bundled std.math, the input log and
+    replay."""
+
+    GOLDEN = [("sin", (1.0,), "0x1.aed548f090ceep-1"), ("cos", (1.0,), "0x1.14a280fb5068cp-1"),
+              ("tan", (0.5,), "0x1.17b4f5bf3474ap-1"), ("exp", (1.0,), "0x1.5bf0a8b145769p+1"),
+              ("log", (10.0,), "0x1.26bb1bbb55516p+1"), ("pow", (2.0, 0.5), "0x1.6a09e667f3bcdp+0"),
+              ("atan2", (1.0, 2.0), "0x1.dac670561bb4fp-2"),
+              ("sin", (1e22,), "-0x1.b453ab76bf397p-1")]
+
+    def test_bundled_math_golden_vectors(self):
+        from wiret import detmath
+        for name, args, want in self.GOLDEN:
+            with self.subTest(name=name, args=args):
+                got = getattr(detmath, name)(*args)
+                self.assertEqual(got.hex(), want)
+                self.assertLessEqual(abs(got - getattr(math, name)(*args)),
+                                     math.ulp(got))      # and within an ulp of libm
+
+    def test_bundled_math_special_values_match_c99(self):
+        from wiret import detmath
+        same = (lambda a, b: (math.isnan(a) and math.isnan(b))
+                or (a == b and math.copysign(1, a) == math.copysign(1, b)))
+        vals = [0.0, -0.0, 1.0, -1.0, 2.0, -2.0, 0.5, -3.0, math.inf, -math.inf, math.nan]
+        for x in vals:
+            for y in vals:
+                with self.subTest(x=x, y=y):
+                    self.assertTrue(same(detmath.atan2(x, y), math.atan2(x, y)))
+                    try:
+                        want = math.pow(x, y)
+                    except (ValueError, ZeroDivisionError, OverflowError):
+                        continue
+                    self.assertTrue(same(detmath.pow(x, y), want))
+
+    def test_integer_to_f32_rounds_once(self):
+        from wiret.vm import _int_to_f32
+        from wiret.natives import _f32
+        n = 2 ** 62 + 2 ** 38 + 1      # just above an f32 tie; through f64 it lands on it
+        self.assertEqual(_int_to_f32(n), 2.0 ** 62 + 2.0 ** 39)
+        self.assertEqual(_f32(float(n)), 2.0 ** 62)          # the double rounding avoided
+        self.assertEqual(_int_to_f32(-n), -(2.0 ** 62 + 2.0 ** 39))
+        self.assertEqual(_int_to_f32(2 ** 24 + 1), 2.0 ** 24)  # a tie goes to even
+
+    def test_nan_bits_are_canonical(self):
+        from wiret.vm import NUMERIC
+        payload = struct.unpack("<d", struct.pack("<Q", 0xFFF0000000000123))[0]
+        to_i64 = NUMERIC[wbc.OPS["i64.reinterpret_f64"][0]][1]
+        to_i32 = NUMERIC[wbc.OPS["i32.reinterpret_f32"][0]][1]
+        self.assertEqual(to_i64(payload), 0x7FF8000000000000)
+        self.assertEqual(to_i32(payload), 0x7FC00000)
+        self.assertEqual(to_i64(1.0), 0x3FF0000000000000)
+
+    def test_deterministic_vm_uses_bundled_math_and_float_rules(self):
+        _, r = build(module(DET))
+        vm = VM(deterministic=True, output=lambda s: None)
+        s, p, mn, mx, nan_eq = vm.call(vm.load(r.wbc), "Maths", [1.0])
+        self.assertEqual(s.hex(), "0x1.aed548f090ceep-1")
+        self.assertEqual(p, 1.0)
+        self.assertEqual((math.copysign(1, mn), math.copysign(1, mx)), (-1.0, 1.0))  # -0 < +0
+        self.assertEqual(nan_eq, 0)
+
+    def test_nondeterministic_natives_are_refused(self):
+        from wiret.natives import NativeSpec
+        clock = NativeSpec([], [("t", "f64")], "impure", lambda _vm: (0.0,), deterministic=False)
+        VM().register("host.Clock", clock)                  # fine outside the mode
+        with self.assertRaises(WiretError) as cm:
+            VM(deterministic=True).register("host.Clock", clock)
+        self.assertEqual(cm.exception.status, "WR_ERR_LINK")
+
+    def test_record_and_replay_a_run_with_fibers_objects_and_signals(self):
+        from wiret.vm import replay
+        text = module(DET) + """
+class Box {
+  n: i32
+  dispatcher Changed(n: i32)
+
+  func Set(n: i32) {
+    node b = Broadcast Changed
+      .obj <- entry.self
+      .n <- entry.n
+    node entry = Entry
+    node s = SetField n
+      .obj <- entry.self
+      .value <- entry.n
+
+    flow {
+      entry -> s
+      s -> b
+    }
+  }
+}
+
+event Wait(s: std.Signal) {
+  node entry = Entry
+  node log = Call host.Log
+    .message <- "woken"
+  node w = Await
+    .signal <- entry.s
+
+  flow {
+    entry -> w
+    w -> log
+  }
+}
+"""
+        _, r = build(text)
+        out = []
+        vm = VM(deterministic=True, output=out.append)
+        mod = vm.load(r.wbc)
+        vm.start(mod, "Countdown", [], now=True)
+        sig = vm.signal()
+        vm.start(mod, "Wait", [sig])
+        box = vm.new(mod, "Box")
+        vm.call_method(mod, box, "Set", [7])
+        vm.advance(0.5)
+        vm.fire(sig)
+        vm.advance(1.0)
+        vm.call(mod, "Maths", [2.0])
+        with self.assertRaises(WiretError):
+            vm.call(mod, "Maths", [1.0, 2.0])              # a fault is logged too
+        log = json.loads(json.dumps(vm.input_log))           # the log is plain JSON
+        again = replay(r.wbc, log, output=lambda s: None)
+        self.assertEqual(again.input_log, log)
+        self.assertEqual(sum((e["output"] for e in log), []), out)
+
+    def test_replay_finds_the_first_difference(self):
+        from wiret.vm import ReplayMismatch, replay
+        _, r = build(module(DET))
+        vm = VM(deterministic=True, output=lambda s: None)
+        vm.call(vm.load(r.wbc), "Maths", [3.0])
+        log = json.loads(json.dumps(vm.input_log))
+        log[1]["out"]["a"][0] = {"f": (0.5).hex()}
+        with self.assertRaises(ReplayMismatch) as cm:
+            replay(r.wbc, log, output=lambda s: None)
+        self.assertEqual((cm.exception.index, cm.exception.what), (1, "out"))
+        other = build(module(DET.replace("0.5", "0.25")))[1].wbc
+        with self.assertRaises(ReplayMismatch) as cm:
+            replay(other, vm.input_log)
+        self.assertEqual(cm.exception.what, "module")
+
+    def test_values_from_outside_the_api_cannot_be_logged(self):
+        from wiret.natives import Signal
+        _, r = build(module(DET) + """
+event Wait(s: std.Signal) {
+  node entry = Entry
+  node w = Await
+    .signal <- entry.s
+
+  flow {
+    entry -> w
+  }
+}
+""")
+        vm = VM(deterministic=True, output=lambda s: None)
+        mod = vm.load(r.wbc)
+        with self.assertRaises(WiretError) as cm:
+            vm.start(mod, "Wait", [Signal()])               # not from vm.signal()
+        self.assertEqual(cm.exception.status, "WR_ERR_API")
+
+    def test_an_interrupt_makes_the_run_unreplayable(self):
+        vm = VM(deterministic=True)
+        self.assertTrue(vm.stats["replayable"])
+        vm.interrupt()
+        self.assertFalse(vm.stats["replayable"])
+
+    def test_cli_record_and_replay(self):
+        d = tempfile.mkdtemp()
+        try:
+            src = os.path.join(d, "t.wiret")
+            with open(src, "w", encoding="utf-8") as f:
+                f.write(module(DET))
+            log = os.path.join(d, "log.json")
+            wiretc = os.path.join(os.path.dirname(HERE), "wiretc.py")
+            rec = subprocess.run([sys.executable, wiretc, "run", "--deterministic", "--record",
+                                  log, src, "Countdown"], capture_output=True, text=True)
+            self.assertEqual(rec.returncode, 0, rec.stderr)
+            rep = subprocess.run([sys.executable, wiretc, "replay", src, log],
+                                 capture_output=True, text=True)
+            self.assertEqual(rep.returncode, 0, rep.stderr)
+            self.assertIn("same results", rep.stdout)
+        finally:
+            shutil.rmtree(d)
 
 
 class BytecodeTests(unittest.TestCase):

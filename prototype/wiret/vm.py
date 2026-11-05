@@ -170,6 +170,34 @@ def _sqrt(x):
     return math.sqrt(x)
 
 
+def _int_to_f32(n: int) -> float:
+    """An integer rounded once to the nearest binary32, ties to even (section 4.10). Going
+    through binary64 first would round twice, and some 64-bit integers would end up one f32
+    step away from the right value."""
+    a = abs(n)
+    if a < 1 << 24:
+        return float(n)
+    shift = a.bit_length() - 24
+    q, r = a >> shift, a & ((1 << shift) - 1)
+    half = 1 << (shift - 1)
+    if r > half or (r == half and q & 1):
+        q += 1
+    return _f32(math.copysign(float(q << shift), n))
+
+
+CANONICAL_NAN32 = 0x7FC00000                     # the quiet NaN of section 4.10, as bits
+
+
+def _reinterpret_to_int(src_fmt, dst_fmt, canonical):
+    """f32 or f64 bits as an integer. Every NaN gives the canonical quiet NaN's bits, so NaN
+    payloads and signs are never observable (section 4.10)."""
+    def f(a):
+        if a != a:
+            return canonical
+        return struct.unpack(dst_fmt, struct.pack(src_fmt, a))[0]
+    return f
+
+
 def _trunc_sat(lo, hi, wrap):
     def f(x):
         if math.isnan(x):
@@ -246,12 +274,13 @@ def _build_numeric():
         "i64.trunc_f32_u": _trunc_sat(0, 2**64 - 1, i64),
         "i64.trunc_f64_s": _trunc_sat(-2**63, 2**63 - 1, i64),
         "i64.trunc_f64_u": _trunc_sat(0, 2**64 - 1, i64),
-        "f32.convert_i32_s": lambda a: _f32(float(a)), "f32.convert_i32_u": lambda a: _f32(float(u32(a))),
-        "f32.convert_i64_s": lambda a: _f32(float(a)), "f32.convert_i64_u": lambda a: _f32(float(u64(a))),
+        "f32.convert_i32_s": _int_to_f32, "f32.convert_i32_u": lambda a: _int_to_f32(u32(a)),
+        "f32.convert_i64_s": _int_to_f32, "f32.convert_i64_u": lambda a: _int_to_f32(u64(a)),
         "f64.convert_i32_s": float, "f64.convert_i32_u": lambda a: float(u32(a)),
         "f64.convert_i64_s": float, "f64.convert_i64_u": lambda a: float(u64(a)),
         "f32.demote_f64": _f32, "f64.promote_f32": float,
-        "i32.reinterpret_f32": reinterp("<f", "<i"), "i64.reinterpret_f64": reinterp("<d", "<q"),
+        "i32.reinterpret_f32": _reinterpret_to_int("<f", "<i", CANONICAL_NAN32),
+        "i64.reinterpret_f64": _reinterpret_to_int("<d", "<q", 0x7FF8000000000000),
         "f32.reinterpret_i32": reinterp("<i", "<f"), "f64.reinterpret_i64": reinterp("<q", "<d"),
     }
     for name, fn in conv.items():
@@ -772,10 +801,26 @@ def parse_customs(m: wbc.WbcModule):
     return names, local_names, debug, meta
 
 
+def _replace_fn(spec: NativeSpec, fn) -> NativeSpec:
+    from dataclasses import replace
+    return replace(spec, fn=fn)
+
+
 class VM:
     def __init__(self, output: Callable[[str], None] = print, fuel: int = 50_000_000,
-                 hook: Optional[Callable] = None, capabilities=None):
-        self.output = output
+                 hook: Optional[Callable] = None, capabilities=None,
+                 deterministic: bool = False):
+        # WR_CFG_DETERMINISTIC (section 4.10): bundled std.math instead of the platform's
+        # libm, no native that is not deterministic, and an input log of every API call that
+        # replay() can run again and check.
+        self.deterministic = deterministic
+        self.sink = output
+        self.output = self._emit
+        self.input_log: list = []
+        self._depth = 0           # API calls in progress: only the outermost is logged
+        self._printed: list = []  # lines printed during the API call being logged
+        self._handles: dict = {}  # id(object) -> handle number in the log
+        self._handle_objs: list = []
         self.fuel_limit = fuel
         self.fuel = fuel
         # hook(function, node id, pending continuation node ids, call depth, snapshot, phase) runs
@@ -783,6 +828,14 @@ class VM:
         # are evaluated (phase "ready"). snapshot() returns the frames for a debugger (6.10).
         self.hook = hook
         self.natives: dict[str, NativeSpec] = dict(all_natives())
+        if deterministic:
+            from .detmath import BUNDLED, BUNDLED2
+            for q, fn in BUNDLED.items():
+                self.natives[q] = _replace_fn(self.natives[q], lambda _vm, x, fn=fn: (fn(x),))
+            for q, fn in BUNDLED2.items():
+                self.natives[q] = _replace_fn(self.natives[q],
+                                              lambda _vm, a, b, fn=fn: (fn(a, b),))
+            self.natives = {q: s for q, s in self.natives.items() if s.deterministic}
         # Capabilities granted (wr_grant, section 6.5). This class is both libwiret and the
         # reference host: by default it grants what its own host natives need; pass a list,
         # possibly empty, for a sandbox that grants only those.
@@ -790,7 +843,7 @@ class VM:
             capabilities = {s.capability for s in self.natives.values() if s.capability}
         self.granted: set = set(capabilities)
         self.interrupted = False
-        self.stats = {"instructions": 0, "calls": 0}
+        self.stats = {"instructions": 0, "calls": 0, "replayable": True}
         self.alloc = [0]          # elements allocated by container instructions, for fuel
         # The scheduler (sections 4.5 and 6.8). Time is virtual and moves only in advance().
         self.time = 0.0
@@ -803,14 +856,32 @@ class VM:
         self.on_handler_fault: Optional[Callable] = None
 
     def register(self, qname: str, spec: NativeSpec):
+        """wr_register. A deterministic VM refuses a native not marked deterministic, so a
+        replay cannot quietly depend on a clock or a random source (section 6.6)."""
+        if self.deterministic and not spec.deterministic:
+            raise WiretError(STATUS_LINK, f"{qname} is not deterministic, so a deterministic "
+                                          f"VM cannot use it")
         self.natives[qname] = spec
+
+    def _emit(self, line: str):
+        if self._depth:
+            self._printed.append(line)
+        self.sink(line)
+
+    def signal(self) -> Signal:
+        """wr_push_signal: a new signal for the host to pass to Wiret and fire later."""
+        return Signal()
 
     def grant(self, capability: str):
         """wr_grant: let modules loaded from now on use imports that need `capability`."""
         self.granted.add(capability)
 
     def interrupt(self):
+        """wr_interrupt. It still stops the running fiber in deterministic mode, but the run
+        can no longer be replayed: an interrupt comes from outside the input log (4.10)."""
         self.interrupted = True
+        if self.deterministic:
+            self.stats["replayable"] = False
 
     # -- loading ------------------------------------------------------------------
     def load(self, data: bytes) -> LoadedModule:
@@ -1436,3 +1507,124 @@ class VM:
         finally:
             self.stats["instructions"] += executed
             self.fuel = max(fuel, 0)
+
+
+# -- the input log and replay (section 4.10) -----------------------------------------------------
+LOGGED = ("load", "grant", "signal", "call", "start", "advance", "fire", "kill", "new",
+          "call_method", "delegate", "broadcast")
+
+
+class ReplayMismatch(Exception):
+    """A replay that did not do what the log recorded: the first entry that differs."""
+
+    def __init__(self, index: int, op: str, what: str, expected, got):
+        super().__init__(f"entry {index} ({op}): {what} differs: recorded {expected!r}, "
+                         f"replay gave {got!r}")
+        self.index, self.op, self.what, self.expected, self.got = index, op, what, expected, got
+
+
+def _is_handle(v) -> bool:
+    return isinstance(v, (Obj, Signal, Fiber, Delegate, DispatcherObj, LoadedModule))
+
+
+def _encode(vm: "VM", v, new_ok: bool):
+    """A value as JSON: numbers exactly (floats as hex), containers by value, and objects,
+    signals, fibers, delegates and modules as handles numbered in the order the log first
+    meets them. An argument must be a handle the log already has (`new_ok` False)."""
+    if v is None or isinstance(v, (bool, int, str)):
+        return v
+    if isinstance(v, float):
+        return {"f": v.hex()}
+    if isinstance(v, (tuple, list)):
+        return {"a": [_encode(vm, x, new_ok) for x in v]}
+    if isinstance(v, dict):
+        return {"m": [[_encode(vm, k, new_ok), _encode(vm, x, new_ok)] for k, x in v.items()]}
+    if _is_handle(v):
+        h = vm._handles.get(id(v))
+        if h is None:
+            if not new_ok:
+                raise WiretError(STATUS_API, f"{type(v).__name__} did not come from this VM's "
+                                             f"API, so a deterministic run cannot log it")
+            h = vm._handles[id(v)] = len(vm._handle_objs)
+            vm._handle_objs.append(v)
+        return {"h": h}
+    raise WiretError(STATUS_API, f"cannot log a {type(v).__name__}")
+
+
+def _decode(vm: "VM", v):
+    if isinstance(v, dict):
+        if "f" in v:
+            return float.fromhex(v["f"])
+        if "a" in v:
+            return tuple(_decode(vm, x) for x in v["a"])
+        if "m" in v:
+            return {_decode(vm, k): _decode(vm, x) for k, x in v["m"]}
+        return vm._handle_objs[v["h"]]
+    return v
+
+
+def _logged(name, fn):
+    def api(self, *args, **kw):
+        if not self.deterministic:
+            return fn(self, *args, **kw)
+        if self._depth:                     # inside another API call: part of that entry
+            self._depth += 1
+            try:
+                return fn(self, *args, **kw)
+            finally:
+                self._depth -= 1
+        if name == "load":
+            import hashlib
+            enc_args = [hashlib.sha256(bytes(args[0])).hexdigest()]
+        else:
+            enc_args = [_encode(self, a, False) for a in args]
+        enc_kw = {k: _encode(self, a, False) for k, a in kw.items()}
+        before = self.stats["instructions"]
+        self._depth, self._printed = 1, []
+        entry = {"op": name, "args": enc_args, "kw": enc_kw}
+        try:
+            result = fn(self, *args, **kw)
+            entry["out"], entry["error"] = _encode(self, result, True), None
+            return result
+        except WiretError as e:
+            entry["out"], entry["error"] = None, [e.status, e.message, e.code]
+            raise
+        finally:
+            self._depth = 0
+            entry["instructions"] = self.stats["instructions"] - before
+            entry["fuel"] = self.fuel
+            entry["output"] = list(self._printed)
+            self.input_log.append(entry)
+    api.__name__, api.__doc__ = fn.__name__, fn.__doc__
+    return api
+
+
+for _name in LOGGED:
+    setattr(VM, _name, _logged(_name, getattr(VM, _name)))
+
+
+def replay(data: bytes, log: list, **vm_args) -> "VM":
+    """Run an input log again on a new deterministic VM and check that every call gives the
+    same result or fault, executes the same number of instructions, leaves the same fuel and
+    prints the same lines (section 4.10). Raises ReplayMismatch at the first difference;
+    returns the VM, whose own input_log then equals `log`."""
+    vm = VM(deterministic=True, **vm_args)
+    for i, entry in enumerate(log):
+        op = entry["op"]
+        if op == "load":
+            import hashlib
+            if hashlib.sha256(bytes(data)).hexdigest() != entry["args"][0]:
+                raise ReplayMismatch(i, op, "module", entry["args"][0], "different bytes")
+            args = [data]
+        else:
+            args = [_decode(vm, a) for a in entry["args"]]
+        kw = {k: _decode(vm, a) for k, a in entry["kw"].items()}
+        try:
+            getattr(vm, op)(*args, **kw)
+        except WiretError:
+            pass
+        got = vm.input_log[-1]
+        for what in ("out", "error", "instructions", "fuel", "output"):
+            if got[what] != entry[what]:
+                raise ReplayMismatch(i, op, what, entry[what], got[what])
+    return vm

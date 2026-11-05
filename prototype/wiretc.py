@@ -6,7 +6,10 @@
   wiretc build FILE [-o OUT.wbc] [--no-source]
   wiretc dis FILE.wbc                  disassemble with node ids
   wiretc verify FILE.wbc               run only the verifier
-  wiretc run [--grant CAP]... [--sandbox] FILE.wiret|FILE.wbc FUNC [ARGS...]
+  wiretc run [--grant CAP]... [--sandbox] [--deterministic [--record LOG.json]]
+             FILE.wiret|FILE.wbc FUNC [ARGS...]
+  wiretc replay FILE.wiret|FILE.wbc LOG.json
+                                       run a recorded input log again and check it (4.10)
   wiretc caps FILE.wiret|FILE.wbc      the capabilities a module needs (wr.caps)
   wiretc hash FILE                     semantic and layout hashes
   wiretc view --flow FILE              reading view in flow order
@@ -39,7 +42,7 @@ from wiret.parser import ParseError, parse  # noqa: E402
 from wiret.printer import layout_hash, print_module, semantic_hash  # noqa: E402
 from wiret.registry import registry_json  # noqa: E402
 from wiret.runner import format_results, parse_args_for, run_function  # noqa: E402
-from wiret.vm import VM, WiretError, module_capabilities  # noqa: E402
+from wiret.vm import VM, ReplayMismatch, WiretError, module_capabilities, replay  # noqa: E402
 
 
 def load(path):
@@ -128,6 +131,13 @@ def main(argv=None):
                    help="grant a capability (section 6.5); repeat for more")
     p.add_argument("--sandbox", action="store_true",
                    help="grant nothing but the --grant ones, not even console.write")
+    p.add_argument("--deterministic", action="store_true",
+                   help="deterministic mode (section 4.10): bundled std.math, an input log")
+    p.add_argument("--record", metavar="LOG.json",
+                   help="with --deterministic, write the input log for wiretc replay")
+    p = sub.add_parser("replay")
+    p.add_argument("file")
+    p.add_argument("log")
     p = sub.add_parser("caps")
     p.add_argument("file")
     p = sub.add_parser("hash")
@@ -276,19 +286,45 @@ def main(argv=None):
             data, m = open(a.file, "rb").read(), None
         else:
             m, _, data = build(a.file)
-        vm = VM(fuel=a.fuel, capabilities=[] if a.sandbox else None)
+        if a.record and not a.deterministic:
+            print("--record needs --deterministic: only a deterministic run can be replayed",
+                  file=sys.stderr)
+            return 2
+        vm = VM(fuel=a.fuel, capabilities=[] if a.sandbox else None,
+                deterministic=a.deterministic)
         for cap in a.grant:
             vm.grant(cap)
+        status = 0
         try:
             lm = vm.load(data)
             args = parse_args_for(m, a.func, a.args) if m else [int(x) for x in a.args]
             res = run_function(vm, lm, a.func, args)
+            print(format_results(m, a.func, res))
+            if vm.time:
+                print(f"(finished at {vm.time:g} s of virtual time)")
         except (WiretError, ValueError) as e:
             print(e, file=sys.stderr)
+            status = 1
+        if a.record:                    # a fault is part of the run too, so it is kept
+            with open(a.record, "w", encoding="utf-8") as f:
+                json.dump(vm.input_log, f, indent=1)
+            print(f"(input log: {len(vm.input_log)} calls written to {a.record})",
+                  file=sys.stderr)
+        return status
+    if a.cmd == "replay":
+        if a.file.endswith(".wbc"):
+            data = open(a.file, "rb").read()
+        else:
+            _, _, data = build(a.file)
+        with open(a.log, encoding="utf-8") as f:
+            log = json.load(f)
+        try:
+            vm = replay(data, log, output=lambda _line: None)   # output is compared, not shown
+        except ReplayMismatch as e:
+            print(f"replay differs: {e}", file=sys.stderr)
             return 1
-        print(format_results(m, a.func, res))
-        if vm.time:
-            print(f"(finished at {vm.time:g} s of virtual time)")
+        print(f"replayed {len(log)} calls: same results, faults, instructions, fuel and output"
+              f" ({vm.stats['instructions']} instructions)")
         return 0
     if a.cmd == "caps":
         if a.file.endswith(".wbc"):

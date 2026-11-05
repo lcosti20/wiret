@@ -77,6 +77,10 @@ class NativeSpec:
     doc: str = ""
     cost: Optional[Callable] = None  # cost(*args) -> fuel beyond the call's own (section 5.7)
     capability: Optional[str] = None  # what an import of it must be granted (section 6.5)
+    # WR_NATIVE_DETERMINISTIC (section 6.6): the same arguments and VM state give the same
+    # results. A native that reads a clock, input or files is not, and a deterministic VM
+    # refuses it (section 4.10).
+    deterministic: bool = True
 
 
 def _f32(x: float) -> float:
