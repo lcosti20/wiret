@@ -91,7 +91,7 @@ A `const` is 8 bytes (numeric bit pattern), or a `u32` data index for `string`, 
 | `wr.pins` | For each function: a list of `(local, node, pin)` triples, naming the node output pin that each local holds (`node` and `pin` are indices into that function's `wr.debug` string table). Complete for `-Og` builds; otherwise it lists the pins that survive optimisation. Lets an editor show the value on a wire and lets the host call `wr_getpin`. |
 | `wr.graph` | The canonical `.wiret` text, deflate-compressed. Lets a debugger or editor open a `.wbc` it did not build. |
 | `wr.meta` | Module id, compiler and registry versions, **semantic hash** and **layout hash** (section 2.5), source hash. |
-| `wr.reflect` | Attribute data for the host: `@doc`, `@category`, parameter names and defaults. |
+| `wr.reflect` | Attribute data for the host: `#[doc]`, `#[category]`, parameter names and defaults. |
 | `wr.caps` | Every capability the module's imports require, so a host can inspect or refuse a module before loading it. |
 
 **Sidecar.** `wiretc build --sidecar` writes `wr.debug`, `wr.pins`, `wr.graph` and `wr.reflect` to a separate `out.wdbg` file instead of embedding them. `wr.meta` in both files carries the same module id and semantic hash, so a debugger can match them. Release builds can ship the small `.wbc` alone. A `.wdbg` file uses the container of section 5.2 with the magic `00 57 44 47` (NUL 'W' 'D' 'G'), `version` 1 and `flags` 0, and holds only custom sections.

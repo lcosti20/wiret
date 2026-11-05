@@ -145,7 +145,7 @@ The kinds in section 3.3 and every `std.*` function are described by a **registr
 Rules:
 
 - A `.wiret` file never re-declares the pins of a registry kind. This keeps one line per node and one source of truth. Pins that depend on attributes (`@count`, `@cases`) are described in the registry by a pin pattern such as `then{i}`.
-- Functions, methods, events and `extern func` declarations get generated registry entries from their signatures plus `@doc` and `@category`, so the same palette and tooling cover user and host code.
+- Functions, methods, events and `extern func` declarations get generated registry entries from their signatures plus `#[doc]` and `#[category]`, so the same palette and tooling cover user and host code.
 - `purity` is one of `impure`, `reads` (a pure node that reads mutable state, such as `GetField`, `GetVar`, `GetState`) or `pure`. Only `pure` kinds may appear in a `@pure` function; `pure` and `reads` kinds may appear in a `@reads` function.
 - Display names are for editors and may be localised. They never appear in `.wiret`.
 - The registry name and version are recorded in `wr.meta` and in the project lockfile (section 7.3). An unknown kind is `E0501`.

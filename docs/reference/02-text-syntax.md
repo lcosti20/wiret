@@ -4,7 +4,7 @@
 
 A `.wiret` file is UTF-8 (no BOM) with LF line endings and holds exactly one module. Statements end at a newline. Newlines are ignored inside `( )`, so long signatures can wrap. A node's inputs are not written in parentheses: each one is its own line below the node line (section 2.3).
 
-`//` starts a line comment. Line comments are *trivia* and are not part of the model, so the canonical writer cannot keep them. It never drops one silently: `wiretc fmt` reports `W0603` for each comment it would lose and exits non-zero, unless told what to do with them: `--convert-comments` turns each comment into a `Note` attribute attached to the next node or declaration (section 2.3), and `--drop-comments` discards them. An editor that opens a file containing comments offers the same choice. Anything that must survive a round trip is written as a `Note` attribute in the `markup` block (graph, node or box explanations), a `@doc` attribute (the short tooltip text of a declaration), or a `box` (visual grouping).
+`//` starts a line comment. Line comments are *trivia* and are not part of the model, so the canonical writer cannot keep them. It never drops one silently: `wiretc fmt` reports `W0603` for each comment it would lose and exits non-zero, unless told what to do with them: `--convert-comments` turns each comment into a `#[note("...")]` line above the next node, declaration or box (section 2.4), so the text stays where it was written, and `--drop-comments` discards them. An editor that opens a file containing comments offers the same choice. Anything that must survive a round trip is written as a `#[note]` (an explanation of a graph, node or box), a `#[doc]` (the short tooltip text of a declaration or node), or a `box` (visual grouping).
 
 | Token | Form |
 | --- | --- |
@@ -18,8 +18,10 @@ A `.wiret` file is UTF-8 (no BOM) with LF line endings and holds exactly one mod
 | Other literals | `true`, `false`, `null` |
 | String | `"text"` with escapes `\\n`, `\\t`, `\\"`, `\\\\` and `\\u{1F600}` |
 | Tuple / list / map | `(1, 2)`, `[a, b]`, `{k: v}`; used only inside attributes |
+| Semantic attribute | `@pure`, `@count(2)`; at the end of the line it modifies (section 2.4) |
+| Metadata attribute | `#[doc("text")]`; on its own line, above what it describes (section 2.4) |
 
-A literal takes the type of the pin it is bound to, so suffixes are only needed where a literal is used without a pin (attribute arguments). Keywords are reserved: `wiret module use extern const var local enum struct interface class impl macro func event dispatcher node state flow markup attribute on layout box at size`.
+A literal takes the type of the pin it is bound to, so suffixes are only needed where a literal is used without a pin (attribute arguments). Keywords are reserved: `wiret module use extern const var local enum struct interface class impl macro func event dispatcher node state flow layout box at size`.
 
 ### 2.2 Module header and declarations
 
@@ -30,7 +32,7 @@ wiret 1
 module game.demo @id("mod_k3f9")
 ```
 
-The module name is the namespace prefix of everything declared in the file (`game.demo.Player`). The grammar below uses `NL` for a newline and `attrs` for zero or more trailing attributes (section 2.4).
+The module name is the namespace prefix of everything declared in the file (`game.demo.Player`). The grammar below uses `NL` for a newline and `attrs` for zero or more trailing semantic attributes (section 2.4). Metadata lines (`#[...]`, section 2.4) may precede the module line, any item, any member of an `enum`, `struct`, `interface` or `class`, and, inside a body, any `local`, `state` or `node` statement or `box` line; they are left out of the productions to keep them readable.
 
 ```
 file       = "wiret" INT NL "module" qname attrs NL { item } ;
@@ -74,10 +76,10 @@ Notes on the declarations:
 
 ### 2.3 Graph bodies: nodes, bindings, exec wiring
 
-The body of a `func`, `event` or `macro` is a list of `local` and `state` declarations and `node` statements, followed by at most one `flow` block, at most one `markup` block and at most one `layout` block. Everything that decides behaviour is in the node statements and the flow block: node statements say *what* each node does and where its data comes from, the flow block says *in which order* nodes run. Explanations for humans are in the markup block. Everything about where things are drawn is in the layout block.
+The body of a `func`, `event` or `macro` is a list of `local` and `state` declarations and `node` statements, followed by at most one `flow` block and at most one `layout` block. Everything that decides behaviour is in the node statements and the flow block: node statements say *what* each node does and where its data comes from, the flow block says *in which order* nodes run. Explanations for humans are `#[note]` lines directly above the node, box or graph they explain (section 2.4). Everything about where things are drawn is in the layout block.
 
 ```
-body      = { local | state | node } [ flow ] [ markup ] [ layout ] ;
+body      = { local | state | node } [ flow ] [ layout ] ;
 local     = "local" IDENT ":" type [ "=" literal ] NL ;
 state     = "state" IDENT ":" type [ "=" literal ] NL ;
 node      = "node" IDENT "=" KIND [ symbol ] [ targs ] attrs NL { binding } ;
@@ -88,10 +90,6 @@ flow      = "flow" "{" { wire } "}" NL ;
 wire      = source "->" target NL ;
 source    = IDENT [ "." IDENT ] ;             (* node, or node.exec_output *)
 target    = IDENT [ "." IDENT ] ;             (* node, or node.exec_input *)
-markup    = "markup" "{" { attribute } "}" NL ;
-attribute = "attribute" IDENT [ "on" IDENT ] "=" KIND
-            "(" [ IDENT ":" literal { "," IDENT ":" literal } ] ")" attrs NL ;
-                                              (* no "on": the whole graph *)
 layout    = "layout" "{" { place | box } "}" NL ;
 place   = IDENT "at" "(" INT "," INT ")" [ props ] NL ;
 box     = "box" IDENT STRING "at" "(" INT "," INT ")" "size" "(" INT "," INT ")" props NL ;
@@ -154,36 +152,30 @@ layout {
 
 This split is what makes collaboration work: one person moving a node and another rewiring it edit different lines, and they merge without a conflict.
 
-#### The markup block
+### 2.4 Attributes and metadata
 
-Annotations that belong to the design rather than to the diagram persist in a `markup` block, one `attribute` per line, each with its own id:
+There are two kinds of attribute, and they are written differently so that a reader can tell at a glance which ones affect the program:
 
-```
-markup {
-  attribute why_local on set_new = Note(message: "Store the new health once: pure nodes are re-evaluated per consumer (section 4.3).")
-  attribute overview = Note(message: "Applies damage and reports death. Called by the combat loop.")
-  attribute death_rules on death = Note(message: "Death side effects live here so they can be disabled together.")
-}
-```
-
-- `attribute <id> on <target> = Kind(...)` attaches to the node or box named `<target>`. `attribute <id> = Kind(...)` attaches to the graph as a whole. The arguments are named (`message: "..."`) and are literals.
-- The kind says what the attribute is. **`Note`** is the only kind defined today: `Note(message: "text")` is a piece of explanatory prose. `message` is required and is a string; it may contain `\n`; long notes are written as one long line, since line diffs of prose are no worse than for any other node. Further kinds (for example colour or grouping) may be added by later versions; an unknown kind or argument is currently a syntax error.
-- Attribute ids follow the node-id rules (unique in the graph, readable slug plus suffix). Attributes are keyed by id for merging (section 7.1) and sorted by id in canonical form.
-- Markup has no effect on compiled output, so it is outside the semantic hash and inside the layout hash. Unknown trailing `@` attributes on an attribute line are preserved.
-- An attribute whose `on` target no longer exists is kept, shown by editors as detached, and reported as `W0604`. An attribute is never deleted by a tool as a side effect of deleting its target.
-- `@doc` remains the short tooltip and reflection text of a declaration or node. Long-form explanation, rationale and region-level comments go in `Note` attributes.
-
-### 2.4 Attributes and editor metadata
-
-Attributes are written after the head of the statement they describe, on the same line (for blocks, before the `{`):
+- A **semantic attribute** (`@pure`, `@count(2)`, `@id("...")`) is part of the program. It is written at the end of the line it modifies (for blocks, before the `{`), it is short, and only the attributes in the first table below exist. It is covered by the semantic hash.
+- A **metadata attribute** (`#[doc("...")]`, `#[note("...")]`) is information *about* the program and never changes compiled output. It is written on its own line, directly above the statement it describes and at the same indentation, so it can be as long as it needs to be without crowding that statement. It is outside the semantic hash and inside the layout hash (section 2.5).
 
 ```
 attr  = "@" IDENT [ "(" [ arg { "," arg } ] ")" ] ;
+meta  = "#[" mname [ "(" [ arg { "," arg } ] ")" ] "]" NL ;
+mname = IDENT { "." IDENT } ;
 arg   = [ IDENT ":" ] value ;
 value = literal | IDENT | tuple | list | map ;
 ```
 
-**Semantic attributes** may change compiled output. Only the ones in this table do; everything else is metadata.
+```
+#[doc("Clamps a value to the range 0 to 1.")]
+#[category("Math")]
+func Clamp01(v: f32) -> (result: f32) @pure {
+```
+
+A metadata line attaches to the next statement that is not itself a metadata line. Section 2.2 lists the statements that may carry one; parameters, bindings, flow wires and `place` lines may not. A metadata line followed by a blank line, a closing `}` or the end of the file is a syntax error, so metadata can never float free in the text.
+
+**Semantic attributes** may change compiled output. Only the attributes in this table exist: an unknown `@` name is `E0104`, and when the name is a metadata attribute (`@doc`, `@category`, `@keywords`) the message shows the `#[...]` form instead.
 
 | Attribute | Applies to | Meaning |
 | --- | --- | --- |
@@ -201,12 +193,32 @@ value = literal | IDENT | tuple | list | map ;
 | @capability("name") | extern func | The import needs this host capability. Listed in the wr.caps section; the load fails unless the host granted it (section 6.5). |
 | @latent | func | The function may suspend. Required when it contains a latent node or calls a latent function or event (E0201). Events are implicitly latent. A latent function is never @pure or @reads. |
 
-**Documentation attributes** never change bytecode. They are stored and diffed, and they are covered by the layout hash but not the semantic hash (section 2.5). Node positions, labels, colours and sizes are not attributes; they live in the layout block (section 2.3).
+**Metadata attributes** never change bytecode. They are stored and diffed, and they are covered by the layout hash but not the semantic hash (section 2.5). Node positions, labels, colours and sizes are not attributes; they live in the layout block (section 2.3).
 
 | Attribute | Applies to | Meaning |
 | --- | --- | --- |
-| `@doc("text")` | any declaration or node | Short tooltip and reflection text. Long-form and region-level explanations are `Note` attributes in the `markup` block (section 2.3). |
-| `@category("Math")`, `@keywords("a", "b")` | `func`, `macro` | Palette organisation. |
+| `#[doc("text")]` | any declaration or node | Short tooltip and reflection text, for whoever *uses* the declaration or node: one sentence, shown in the palette and on hover, and copied to `wr.reflect` (section 5.4). |
+| `#[category("Math")]`, `#[keywords("a", "b")]` | `func`, `macro` | Palette organisation. |
+| `#[note("text")]` | any declaration, node or `box` | Explanatory prose for whoever *maintains* the graph: rationale, warnings, region-level explanations. A note on a `func`, `event` or `macro` explains the whole graph. See *Notes* below. |
+
+#### Notes
+
+```
+#[note("Store the new health once: pure nodes are re-evaluated per consumer (section 4.3).")]
+node set_new = SetLocal new_hp
+  .value <- sub.result
+```
+
+- A target may carry any number of notes. They keep the order they were written in.
+- The text is a string and may contain `\n`. A long note is written as one long line, since line diffs of prose are no worse than for any other line. Because a note is a line of its own, rewording it never touches the line of the statement it describes, so it cannot conflict with an edit to that statement (section 7.1).
+- A note on a box is written above the `box` line in the layout block.
+- **Notes are never deleted as a side effect.** A tool that deletes a node or box moves its notes up to the enclosing graph and records where they came from, as in `#[note("...", detached: "set_new")]`. A note on a deleted declaration moves to the enclosing declaration (the class, for a method), or to the module line for a top-level item. A detached note is reported as `W0604` until someone re-homes it (moves it above another target and removes `detached`) or deletes it.
+
+**Preservation rules.**
+
+- Unknown metadata attributes are preserved exactly: the order of arguments and of repeated attributes is kept. A tool may not drop an attribute because it does not recognise it.
+- **Unsafe attributes** (borrowed from GML): a metadata attribute whose name starts with a capital letter, for example `#[Hash(...)]` or `#[Cached(...)]`, is derived data. Any tool that modifies the graph must delete it, and tools should not write one they cannot keep correct.
+- Third parties use a namespaced name such as `#[x.acme.review("ok")]`. Names without a dot are reserved for this specification.
 
 A node with no `place` line in the layout block is auto-laid-out by the editor and gets a position when first saved, so graphs written by a tool or an LLM are valid without any layout.
 
@@ -219,30 +231,24 @@ Wires refer to pins by name, so renaming a parameter or result would otherwise b
 - **Operational non-reuse.** That an id is never used again after its element is deleted is guaranteed only by the project registry `wiret.ids` (section 7.3). Editors and `wiretc edit` append retired ids to it, and CI runs `wiretc ids --check base..head` to catch a commit that deleted an element without registering it. A retired id reappearing is `E0140`.
 - **Never regenerated.** Tools keep existing ids on load and save (section 7.5); they only generate ids for elements that have none.
 
-**Preservation rules.**
-
-- Unknown attributes are preserved exactly: the order of arguments and of repeated attributes is kept. A tool may not drop an attribute because it does not recognise it.
-- **Unsafe attributes** (borrowed from GML): an attribute whose name starts with a capital letter, for example `@Hash(...)` or `@Cached(...)`, is derived data. Any tool that modifies the graph must delete it, and tools should not write one they cannot keep correct.
-- Third parties use a namespaced name such as `@x.acme.review("ok")`. Names without a dot are reserved for this specification.
-
 ### 2.5 Canonical form, hashes and Git
 
 The canonical form is a function of the model alone, so two tools always write identical bytes for the same graph. The formatter (`wiretc fmt`) and every editor save produce it.
 
 1. UTF-8 NFC, LF, two-space indentation, one trailing newline.
 2. Items ordered by kind (`use`, `extern`, `const`, `var`, `enum`, `struct`, `interface`, `class`, `macro`, `func`, `event`), then by name.
-3. Inside a body: `local` statements by name, then `state` statements by name, then `node` statements sorted by **node id** (ASCII order), then the `flow` block, then the `markup` block, then the `layout` block last. Each block is preceded by one blank line, and an empty block is omitted. Wiring never reorders node statements; it only adds or removes `flow` lines.
-4. Inside the layout block: `place` lines sorted by node id, then `box` lines sorted by box id. Inside a box, `members` are sorted by id. Moving a node changes only its own `place` line; moving a box changes only its own `box` line. Inside the flow block, wires are sorted by source node id, then by the source's exec-output order from the registry; the bare `source -> target` form is used exactly when the source has one exec output. Inside the markup block, `attribute` lines are sorted by attribute id.
+3. Inside a body: `local` statements by name, then `state` statements by name, then `node` statements sorted by **node id** (ASCII order), then the `flow` block, then the `layout` block last. Each block is preceded by one blank line, and an empty block is omitted. Wiring never reorders node statements; it only adds or removes `flow` lines.
+4. Inside the layout block: `place` lines sorted by node id, then `box` lines sorted by box id. Inside a box, `members` are sorted by id. Moving a node changes only its own `place` line; moving a box changes only its own `box` line. Inside the flow block, wires are sorted by source node id, then by the source's exec-output order from the registry; the bare `source -> target` form is used exactly when the source has one exec output.
 5. Bindings are written one per line below their node line, indented two spaces further, as `.pin <- value`, in the node kind's pin order (from the registry); bindings equal to the pin default are omitted.
-6. Attributes: semantic ones alphabetically, then `@doc`. They end the node line, before the bindings.
-7. Nothing wraps: a node line and each binding line are always single lines, and so are flow wires.
+6. Semantic attributes are sorted alphabetically and end the line they modify (on a node, before the bindings). Metadata lines stand directly above their statement, with no blank line between, in this order: `doc`, `category`, `keywords`, then `note` lines in the order they were written, then any other metadata in the order it was written. A metadata line moves with its statement when statements are sorted.
+7. Nothing wraps: a node line, each binding line and each metadata line are always single lines, and so are flow wires.
 8. Numbers and strings are written in their shortest unambiguous form.
-9. Line comments are not representable. The formatter refuses to lose one silently (`W0603`, section 2.1); durable annotations are `Note` attributes.
+9. Line comments are not representable. The formatter refuses to lose one silently (`W0603`, section 2.1); durable annotations are `#[note]` lines.
 10. **No alignment padding.** A node statement is written `node <id> = <Kind> ...` with exactly one space on each side of `=`, and a `place` line is `<id> at (x, y)` with one space before `at`. Nothing is padded to line up with its neighbours. Aligning would put the `=` of every node at the column of the longest id, so adding one long id would change every line of the graph and break the one-line-diff rule (section 1.2, principle 1); the same holds for `at` in the layout block. The reader accepts extra spaces and the formatter removes them. An editor may align in its own display, but never in the saved text.
 
 Two hashes are defined over the canonical form, both SHA-256:
 
-- **Semantic hash**: computed after removing the `layout` block, the `markup` block, `@doc`, `@category`, `@keywords`, and `Reroute` nodes, and after sorting declarations by name and nodes by id. It is embedded in the `.wbc`, so CI can prove that a commit changed behaviour or did not. Two properties must hold and should be tested: reversing the order of the nodes in a graph, or deleting its layout block and all documentation attributes, changes neither the semantic hash nor a single byte of the instruction stream.
+- **Semantic hash**: computed after removing the `layout` block, every metadata line (`#[...]`), and `Reroute` nodes, and after sorting declarations by name and nodes by id. Because every metadata attribute is written with `#[` and nothing else is, a tool can strip them without knowing their names. The hash is embedded in the `.wbc`, so CI can prove that a commit changed behaviour or did not. Two properties must hold and should be tested: reversing the order of the nodes in a graph, or deleting its layout block and all metadata lines, changes neither the semantic hash nor a single byte of the instruction stream.
 - **Layout hash**: computed over the entire canonical file. If two collaborators have the same layout hash, they see the identical graph.
 
 Because each node is one node line plus one line per input, lines are sorted by id, and layout lives in its own block, plain line-based Git merges succeed whenever two people touch different nodes, and a move never collides with a rewire. Two people adding nodes also rarely collide, because ids are random slugs and sort into different places. The full merge algorithm, which works on the parsed model rather than on text, is in section 7.1. The examples in this document are shown in *flow order* for readability (both node statements and `flow` wires), which `wiretc view --flow` produces; the compiler accepts any order. They follow rule 10 (no alignment), so apart from their order they are in canonical form.
@@ -272,6 +278,7 @@ class Player {
     node sub = Sub::<i32>
       .a <- cur.value
       .b <- entry.amount
+    #[note("Store the new health once: pure nodes are re-evaluated per consumer (section 4.3).")]
     node set_new = SetLocal new_hp
       .value <- sub.result
     node hp = GetLocal new_hp
@@ -297,10 +304,6 @@ class Player {
       chk.then -> log_dead
       chk.else -> ret_alive
       log_dead -> ret_dead
-    }
-
-    markup {
-      attribute why_local on set_new = Note(message: "Store the new health once: pure nodes are re-evaluated per consumer (section 4.3).")
     }
 
     layout {
@@ -334,6 +337,8 @@ class Player {
   }
 }
 
+#[doc("Clamps a value to the range 0 to 1.")]
+#[category("Math")]
 func Clamp01(v: f32) -> (result: f32) @pure {
   node entry = Entry
   node lo = Max::<f32>
@@ -462,6 +467,7 @@ Things to notice:
 
 - `TakeDamage` stores the new health in a local before using it twice. `cur` is pure, so it would be re-evaluated by every impure consumer; reading `health` again after `store` would subtract the damage a second time (section 4.3).
 - Node lines carry no positions and no exec wires. Moving `chk` edits one line of the `layout` block, and rewiring it edits lines of the `flow` block, so neither can conflict with someone changing `chk`'s bindings. Each input is its own line, so rewiring one input of a node changes exactly one line.
+- `@capability`, `@pure` and `@count(2)` end the line they modify and change what is compiled. `#[doc]`, `#[category]` and the `#[note]` on `set_new` sit on their own lines above what they describe; deleting all of them changes neither the semantic hash nor the bytecode.
 - Nodes with several exec outputs name the one each wire leaves from: `chk.then`, `loop.each`, `seq.then0`. `DoOnce`'s macro `Entry` has two exec parameters, so its wires start at `entry.in` and `entry.reset`.
 - `Respawn` is an `event`, which is implicitly latent, so it may contain `Delay`. `TakeDamage` has no latent nodes and is not latent, so a host can call it with `wr_call` and rely on getting a result (section 4.5).
 - `add` has no wire in the flow block. A chain that ends returns control to whatever pushed it, here the macro (section 4.2), which is what makes the loop continue.
