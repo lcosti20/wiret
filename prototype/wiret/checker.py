@@ -10,7 +10,7 @@ from .model import Const, Var
 
 # Names that are metadata, not semantic attributes: `@doc` is `#[doc]` (section 2.4).
 META_NAMES = {"doc", "category", "keywords", "note"}
-from .registry import (ARRAY_MUTATORS, BUILTIN_TYPE_NAMES, INT_RANGES, ModuleIndex, Sig,
+from .registry import (BUILTIN_TYPE_NAMES, PLACE_MUTATORS, INT_RANGES, ModuleIndex, Sig,
                        array_elem, enum_values, instantiate, lit_fits, lit_in_range, signature,
                        substitute, type_ok)
 
@@ -379,7 +379,7 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
         # purity
         if pure_attr or reads_attr:
             attr = "@pure" if pure_attr else "@reads"
-            if n.kind in ARRAY_MUTATORS and n.symbol in idx.vars and not g.local(n.symbol):
+            if n.kind in PLACE_MUTATORS and n.symbol in idx.vars and not g.local(n.symbol):
                 D("E0302", f"{attr} function changes the module variable '{n.symbol}'", G, n.id)
             if n.kind in ("SetVar", "SetState"):
                 D("E0302", f"{attr} function writes {'a variable' if n.kind == 'SetVar' else 'state'}",

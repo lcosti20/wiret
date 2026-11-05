@@ -18,7 +18,7 @@ cd prototype
 python3 wiret_editor.py                         # the editor, opening Lesson 1
 python3 wiret_editor.py examples/demo.wiret     # the editor on a larger example
 python3 wiretc.py run examples/demo.wiret Main  # the same program from the command line
-python3 -m unittest discover tests              # 95 tests
+python3 -m unittest discover tests              # 107 tests
 ```
 
 ## Building a desktop app
@@ -133,7 +133,7 @@ Each one has an intro note and a "Try it" note on the graph. Lessons open as cop
 `my_lessons/` (git-ignored), so the originals never change. **Lessons → Start this lesson over**
 restores a copy.
 
-Loops use the built-in `std.flow` macros (`ForRange`, `Repeat`, `ForEach`, `DoOnce`, `DoN`, `FlipFlop`).
+Loops use the built-in `std.flow` macros (`ForRange`, `Repeat`, `ForEach`, `ForEachMap`, `DoOnce`, `DoN`, `FlipFlop`).
 They are written in Wiret in `wiret/std/flow.wiret`, as section 3.4 describes, and are
 available to every module as `Macro std.flow.ForRange` and so on.
 
@@ -184,7 +184,7 @@ The editor also follows the graph-editor contract in section 7.5:
 | --- | --- |
 | Text syntax (2.1–2.4) | Full lexer and parser for `use`, `extern`, `const`, `var`, `enum`, `struct`, `func`, `event`, `macro`, `local`, `state`, nodes, bindings, semantic `@` attributes, `#[...]` metadata lines (`#[doc]`, `#[note]`, ...) above declarations, nodes and boxes, the `flow` block (exec wires) and `layout` (places and boxes). An old `markup` block is rejected with a hint, and an unknown `@` name such as `@doc` is `E0104`. `enum` and `struct` parse, print, hash and type-check (see *Structs and enums* below), but cannot be compiled yet. `interface`/`class` are rejected with a clear error. |
 | Canonical form and hashes (2.5) | Sorted items (struct fields and enum members keep the order written), nodes, `flow` wires (by source node id, then exec pin order) and layout lines, each with its metadata lines above it (`doc`, `category`, `keywords`, then notes as written); registry pin order; default-valued bindings omitted; 100-column wrapping; attribute ordering. Semantic hash (ignores layout, every `#[...]` line and `Reroute`) and layout hash. |
-| Node kinds (3.3) | `Entry`, `Return`, `Branch`, `Sequence`, `Switch`, `Select`, `Macro`, `Exit`, `Reroute`, `Get/SetLocal`, `Get/SetVar` (and `const`s), `Get/SetState`, `Call`, `Convert`, all arithmetic, comparison, logic and bit kinds, and the array kinds `MakeArray`, `ArrayGet`, `ArrayLength`, `ArraySet`, `ArrayAdd`, `ArrayInsert`, `ArrayRemove`, `ArrayClear`. Types: `bool`, all integer widths, `f32`, `f64`, `string`, `array::<T>`. |
+| Node kinds (3.3) | `Entry`, `Return`, `Branch`, `Sequence`, `Switch`, `Select`, `Macro`, `Exit`, `Reroute`, `Get/SetLocal`, `Get/SetVar` (and `const`s), `Get/SetState`, `Call`, `Convert`, all arithmetic, comparison, logic and bit kinds, and the array kinds `MakeArray`, `ArrayGet`, `ArrayLength`, `ArraySet`, `ArrayAdd`, `ArrayInsert`, `ArrayRemove`, `ArrayClear`, the struct kinds, and the map and set kinds (see *Maps and sets* below). Types: `bool`, all integer widths, `f32`, `f64`, `string`, `array::<T>`, `map::<K, V>`, `set::<T>`, structs and enums. |
 | Execution model (4.2–4.3) | Continuation stack, `Sequence` push/pop, macro inlining with path-style ids (`loop/test`, `loop!in`), `Exit` as a jump, joins, evaluation points with per-point sharing, impure output slots, `@pure` and `@reads` calls as pure nodes, per-expansion `state`. The §4.2 `SumTo(2)` trace is reproduced exactly (see tests). |
 | Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0201, E0301, E0302, E0304, E0401, E0501, E0502, E0503, W0201, W0301, W0302, W0310, W0320, W0601, W0602, W0603, W0604. |
 | Lowering (4.8) | `-O0`: one labelled block per impure node, `local.tee` for shared values, `cont.push`/`cont.pop` kept. Output closely matches the §5.8 listings. |
@@ -214,7 +214,7 @@ The editor also follows the graph-editor contract in section 7.5:
 - `Convert::<X, string>` and float `Rem` lower to calls to internal `std.convert.*` and
   `std.math.FRem*` natives, since the instruction set has no opcodes for them.
 
-### Structs and enums (in progress)
+### Structs and enums
 
 Declarations are checked, and their names can be used as types in signatures, `local`, `state`,
 `var` and fields, including inside `array::<T>`:
@@ -284,11 +284,36 @@ In the editor:
 
 Struct and enum declarations are edited in the Source pane; there is no dialog for them yet.
 
+### Maps and sets
+
+`map::<K, V>` and `set::<T>` are value types that keep insertion order (section 3.1). Keys and
+set items are primitives, enums, or structs of those (`E0501` otherwise). The pins, which the
+draft leaves open, follow the array kinds:
+
+| Node | Pins |
+| --- | --- |
+| `MapFind::<K, V>` | in `map`, `key`; out `value`, `found` (a missing key gives the default value) |
+| `MapHas` / `MapLength` | in `map` (and `key`); out `result` / `length` |
+| `MapKeyAt` / `MapValueAt` | in `map`, `index`; out `key` / `value`, in the order keys were first added |
+| `MapSet m`, `MapRemove m`, `MapClear m` | change the place `m`; in `key` (and `value`); `MapRemove` has out `removed` |
+| `SetHas`, `SetLength`, `SetAt` | in `set` (and `item` or `index`); out `result`, `length`, `item` |
+| `SetAdd s`, `SetRemove s`, `SetClear s` | change the place `s`; in `item`; out `added` / `removed` |
+
+- They lower to the `5D` and `5C` type entries and the `map.*` and `set.*` opcodes (`E0` to
+  `EF`). In the VM a map is an insertion-ordered dict and a set one with no values; a change
+  copies it, the eager copy that Tier 1 allows. Updating a key keeps its position.
+- Every NaN key is the same key, so a NaN can be looked up again. The draft does not say.
+- `std.flow.ForEachMap::<K, V>` loops over a map in key order with outputs `key`, `value` and
+  `index`. The palette offers map and set nodes for the map and set types the module uses.
+- `wiretc run` takes a map as `{"a": 1}` and a set as `[1, 2]`.
+- `Eq` on arrays, maps and sets (structural equality, section 4.9) is not implemented, and so
+  neither is `Eq` on a struct that holds one.
+
 ### Deviations and known gaps
 
 - **Exports.** Every `func` and `event` is exported, so the editor can run any of them. The
   spec exports only `@export` declarations.
-- **Later tiers (Tier 1 and 2) are not implemented:** classes, `set` and `map`,
+- **Later tiers (Tier 1 and 2) are not implemented:** classes,
   delegates and dispatchers, latent nodes and fibers (`Delay`, `Yield`, `Await`), and
   `Try`/`Throw`. Their node kinds are reported as `E0501` and their opcodes are rejected by
   the verifier.

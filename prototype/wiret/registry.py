@@ -91,12 +91,49 @@ def array_elem(ty: str) -> Optional[str]:
     return None
 
 
+def map_types(ty: str) -> Optional[tuple]:
+    """(K, V) of `map::<K, V>`, else None."""
+    if ty.startswith("map::<") and ty.endswith(">"):
+        depth = 0
+        inner = ty[6:-1]
+        for i, ch in enumerate(inner):
+            depth += ch == "<"
+            depth -= ch == ">"
+            if ch == "," and depth == 0:
+                return inner[:i].strip(), inner[i + 1:].strip()
+    return None
+
+
+def set_elem(ty: str) -> Optional[str]:
+    """The element type of `set::<T>`, else None."""
+    if ty.startswith("set::<") and ty.endswith(">"):
+        return ty[6:-1]
+    return None
+
+
+def is_container(ty: str) -> bool:
+    return array_elem(ty) is not None or map_types(ty) is not None or set_elem(ty) is not None
+
+
+def key_type_ok(ty: str, idx: "Optional[ModuleIndex]" = None) -> bool:
+    """A map key or set element: a primitive, an enum, or a struct of those (section 3.1)."""
+    if ty in CONSTRAINTS["eq"]:
+        return True
+    return idx is not None and (ty in idx.enums or (ty in idx.structs and comparable(ty, idx)))
+
+
 def type_ok(ty: str, idx: "Optional[ModuleIndex]" = None) -> bool:
     """A value type this prototype supports: a primitive, a struct or enum declared in the
-    module (only when `idx` is given), or an array of supported types."""
+    module (only when `idx` is given), or an array, map or set of supported types."""
     elem = array_elem(ty)
     if elem is not None:
         return type_ok(elem, idx)
+    kv = map_types(ty)
+    if kv is not None:
+        return key_type_ok(kv[0], idx) and type_ok(kv[1], idx)
+    elem = set_elem(ty)
+    if elem is not None:
+        return key_type_ok(elem, idx)
     return ty in PRIM_TYPES or (idx is not None and idx.user_type(ty) is not None)
 
 
@@ -122,8 +159,8 @@ REGISTRY_VERSION = "0.1-proto"
 
 
 def zero_lit(ty: str) -> Lit:
-    if array_elem(ty) is not None:
-        return Lit("null", None)     # the empty array: arrays are values and never null
+    if is_container(ty):
+        return Lit("null", None)     # the empty container: containers are values, never null
     if ty == "bool":
         return Lit("bool", False)
     if ty in FLOAT_TYPES:
@@ -147,7 +184,7 @@ def lit_fits(lit: Lit, ty: str) -> bool:
         return lit.kind == "bool"
     if ty == "string":
         return lit.kind == "string"
-    return array_elem(ty) is not None and lit.kind == "null"
+    return is_container(ty) and lit.kind == "null"
 
 
 def lit_in_range(lit: Lit, ty: str) -> bool:
@@ -267,6 +304,10 @@ CONTEXT_KINDS = {
     "SetVar": "Variables", "GetState": "Variables", "SetState": "Variables",
     "MakeStruct": "Structs", "BreakStruct": "Structs", "GetField": "Structs",
     "WithField": "Structs",
+    "MapFind": "Maps", "MapHas": "Maps", "MapLength": "Maps", "MapKeyAt": "Maps",
+    "MapValueAt": "Maps", "MapSet": "Maps", "MapRemove": "Maps", "MapClear": "Maps",
+    "SetHas": "Sets", "SetLength": "Sets", "SetAt": "Sets", "SetAdd": "Sets",
+    "SetRemove": "Sets", "SetClear": "Sets",
 }
 
 # Struct kinds and how their symbol is written: the struct (`MakeStruct Vec2`), or the struct
@@ -276,9 +317,8 @@ STRUCT_KINDS = {"MakeStruct": "struct", "BreakStruct": "struct", "GetField": "fi
 
 # Kinds from the specification that later tiers add (section 1.6).
 LATER_TIER_KINDS = {
-    "Try", "Throw", "Delay", "Yield", "Await", "SetField", "New", "Cast", "IsValid", "MapFind", "MapHas", "MapLength",
-    "MapKeyAt", "MapValueAt", "MapSet", "MapRemove", "MapClear", "SetHas", "SetLength", "SetAt",
-    "SetAdd", "SetRemove", "SetClear", "CreateDelegate", "Invoke", "Bind", "Unbind", "Broadcast",
+    "Try", "Throw", "Delay", "Yield", "Await", "SetField", "New", "Cast", "IsValid",
+    "CreateDelegate", "Invoke", "Bind", "Unbind", "Broadcast",
 }
 
 ALL_KINDS = sorted(set(STATIC_KINDS) | set(CONTEXT_KINDS))
@@ -291,6 +331,35 @@ ARRAY_MUTATORS = {
     "ArrayRemove": [("index", "i32")],
     "ArrayClear": [],
 }
+
+# Map and set kinds (section 3.3). Pins use K, V (maps) and T (sets). Pure kinds:
+# (inputs after the container, outputs). Mutators change a place like the array mutators:
+# (extra inputs, outputs), where the output says whether anything changed.
+MAP_PURE = {
+    "MapFind": ([("key", "K")], [("value", "V"), ("found", "bool")]),
+    "MapHas": ([("key", "K")], [("result", "bool")]),
+    "MapLength": ([], [("length", "i32")]),
+    "MapKeyAt": ([("index", "i32")], [("key", "K")]),
+    "MapValueAt": ([("index", "i32")], [("value", "V")]),
+}
+MAP_MUTATORS = {
+    "MapSet": ([("key", "K"), ("value", "V")], []),
+    "MapRemove": ([("key", "K")], [("removed", "bool")]),
+    "MapClear": ([], []),
+}
+SET_PURE = {
+    "SetHas": ([("item", "T")], [("result", "bool")]),
+    "SetLength": ([], [("length", "i32")]),
+    "SetAt": ([("index", "i32")], [("item", "T")]),
+}
+SET_MUTATORS = {
+    "SetAdd": ([("item", "T")], [("added", "bool")]),
+    "SetRemove": ([("item", "T")], [("removed", "bool")]),
+    "SetClear": ([], []),
+}
+
+# Every kind that changes a place: `ArrayAdd::<i32> acc`, `MapSet::<string, i32> scores`.
+PLACE_MUTATORS = set(ARRAY_MUTATORS) | set(MAP_MUTATORS) | set(SET_MUTATORS)
 
 
 @dataclass
@@ -551,6 +620,8 @@ def signature(node: Node, graph: Graph, idx: ModuleIndex) -> Sig:
         return _array_sig(node, graph, idx, sig)
     if k in STRUCT_KINDS:
         return _struct_sig(node, idx, sig)
+    if k in MAP_PURE or k in MAP_MUTATORS or k in SET_PURE or k in SET_MUTATORS:
+        return _container_sig(node, graph, idx, sig)
     if k == "SetField" and (node.symbol or "").split(".")[0] in idx.structs:
         sig.error = ("E0501", f"structs are immutable, so SetField cannot change one; use "
                               f"'WithField {node.symbol}', which makes a changed copy")
@@ -605,6 +676,62 @@ def _struct_sig(node: Node, idx: ModuleIndex, sig: Sig) -> Sig:
     else:
         sig.inputs = [Pin("obj", name), Pin("value", f.type)]
         sig.outputs = [Pin("result", name)]
+    return sig
+
+
+def place_type(place: Optional[str], graph: Graph, idx: ModuleIndex) -> Optional[str]:
+    """The type of a mutator's place: a local of the graph, else a module variable."""
+    if not place:
+        return None
+    loc = graph.local(place)
+    if loc:
+        return loc.type
+    return idx.vars[place].type if place in idx.vars else None
+
+
+def _container_sig(node: Node, graph: Graph, idx: ModuleIndex, sig: Sig) -> Sig:
+    """Map and set kinds (section 3.3)."""
+    k = node.kind
+    is_map = k.startswith("Map")
+    want = 2 if is_map else 1
+    example = f"{k}::<string, i32>" if is_map else f"{k}::<i32>"
+    if len(node.targs) != want:
+        sig.error = ("E0502", f"{k} needs {'the key and value types' if is_map else 'the item type'}"
+                              f", as in {example}")
+    targs = (list(node.targs) + ["i32", "i32"])[:want]
+    if is_map:
+        K, V = targs
+        container, cname = f"map::<{K}, {V}>", "map"
+        subst = {"K": K, "V": V}
+        bad_key = None if key_type_ok(K, idx) else K
+        bad_value = None if type_ok(V, idx) else V
+    else:
+        T = targs[0]
+        container, cname = f"set::<{T}>", "set"
+        subst = {"T": T}
+        bad_key, bad_value = (None if key_type_ok(T, idx) else T), None
+    if sig.error is None and bad_key is not None:
+        sig.error = ("E0501", f"type '{bad_key}' cannot be a {cname} {'key' if is_map else 'item'}"
+                              f": keys and set items are primitives, enums or structs of those")
+    elif sig.error is None and bad_value is not None:
+        sig.error = ("E0501", f"type '{bad_value}' is not supported by this prototype")
+    pure = MAP_PURE if is_map else SET_PURE
+    if k in pure:
+        ins, outs = pure[k]
+        sig.purity = "pure"
+        sig.inputs = [Pin(cname, container)] + [Pin(n, subst.get(t, t)) for n, t in ins]
+        sig.outputs = [Pin(n, subst.get(t, t)) for n, t in outs]
+        return sig
+    ins, outs = (MAP_MUTATORS if is_map else SET_MUTATORS)[k]
+    place = node.symbol
+    ty = place_type(place, graph, idx)
+    if ty is None:
+        sig.error = ("E0130", f"{k} must name the local or variable it changes, as in "
+                              f"{example} scores")
+    elif ty != container and not sig.error:
+        sig.error = ("E0110", f"'{place}' is {ty}, not {container}")
+    sig.inputs = [Pin("in", "exec")] + [Pin(n, subst.get(t, t)) for n, t in ins]
+    sig.outputs = [Pin("then", "exec")] + [Pin(n, subst.get(t, t)) for n, t in outs]
     return sig
 
 

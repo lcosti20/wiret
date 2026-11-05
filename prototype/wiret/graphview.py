@@ -46,6 +46,10 @@ def type_color(ty: str, idx=None) -> str:
         return "#a3d65c"
     if ty == "string":
         return "#e056fd"
+    if ty.startswith("map::<"):
+        return "#dc7633"        # maps: dark orange
+    if ty.startswith("set::<"):
+        return "#f8c471"        # sets: pale orange
     if ty.startswith("array::<"):
         return "#f0a830"        # arrays: orange, whatever they hold
     return "#95a5a6"

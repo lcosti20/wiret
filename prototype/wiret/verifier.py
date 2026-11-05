@@ -1,8 +1,10 @@
 """Single-pass bytecode verifier (spec section 5.5)."""
 from __future__ import annotations
 
-from .wbc import (F32, F64, FN_LATENT, FN_PURE, I32, I64, STRING, ArrayType, Ref, StructType,
-                  WbcError, WbcModule, decode_code, vt_name)
+from .wbc import (F32, F64, FN_LATENT, FN_PURE, I32, I64, STRING, ArrayType, MapType, Ref,
+                  SetType, StructType, WbcError, WbcModule, decode_code, vt_name)
+
+REF_TYPES = (ArrayType, StructType, MapType, SetType)
 
 VALTYPES = {I32, I64, F32, F64, STRING}
 _PREFIX = {"i32": I32, "i64": I64, "f32": F32, "f64": F64}
@@ -63,8 +65,18 @@ def valid_vt(m: WbcModule, vt) -> bool:
     References may point forward (`struct Tree { children: array::<Tree> }`); the check that a
     struct does not hold itself by value is `check_struct_cycles`."""
     if isinstance(vt, Ref):
-        return vt.type < len(m.types) and isinstance(m.types[vt.type], (ArrayType, StructType))
+        return vt.type < len(m.types) and isinstance(m.types[vt.type], REF_TYPES)
     return vt in VALTYPES
+
+
+def key_vt_ok(m: WbcModule, vt, depth=0) -> bool:
+    """A map key or set element: a number, a string, or a struct of those (section 3.1)."""
+    if not isinstance(vt, Ref):
+        return vt in VALTYPES
+    entry = m.types[vt.type] if vt.type < len(m.types) else None
+    if not isinstance(entry, StructType) or depth > 64:
+        return False
+    return all(key_vt_ok(m, fvt, depth + 1) for fvt, _ in entry.fields)
 
 
 def is_func_type(m: WbcModule, t: int) -> bool:
@@ -97,6 +109,8 @@ def verify(m: WbcModule) -> list:
     for i, entry in enumerate(m.types):
         if isinstance(entry, ArrayType):
             vts = [entry.elem]
+        elif isinstance(entry, (MapType, SetType)):
+            vts = [entry.key, entry.value] if isinstance(entry, MapType) else [entry.elem]
         elif isinstance(entry, StructType):
             vts = [vt for vt, _ in entry.fields]
             for vt, default in entry.fields:
@@ -108,6 +122,12 @@ def verify(m: WbcModule) -> list:
             if not valid_vt(m, vt):
                 raise VerifyError(f"type {i} uses an unsupported value type")
     check_struct_cycles(m)
+    for i, entry in enumerate(m.types):
+        if isinstance(entry, (MapType, SetType)):
+            k = entry.key if isinstance(entry, MapType) else entry.elem
+            if not key_vt_ok(m, k):
+                raise VerifyError(f"type {i}: a map key or set item must be a number, a string "
+                                  f"or a struct of those")
     for mod, fld, t, _ in m.imports:
         if not is_func_type(m, t):
             raise VerifyError(f"import {mod}.{fld} has bad type index {t}")
@@ -183,6 +203,13 @@ def verify_function(m: WbcModule, i: int):
             raise VerifyError(f"{ins.name}: struct type {t} has no field {ins.imms[1]}",
                               fidx, ins.pc)
         return Ref(t), fields
+
+    def container_type(ins, cls):
+        t = ins.imms[0]
+        if t >= len(m.types) or not isinstance(m.types[t], cls):
+            raise VerifyError(f"{ins.name}: type {t} is not a {cls.__name__[:-4].lower()} type",
+                              fidx, ins.pc)
+        return Ref(t), m.types[t]
 
     def array_type(ins):
         t = ins.imms[0]
@@ -302,6 +329,29 @@ def verify_function(m: WbcModule, i: int):
             pop(fields[ins.imms[1]], ins)
             pop(ref, ins)
             stack.append(ref)
+        elif n.startswith("map."):
+            ref, e = container_type(ins, MapType)
+            k, v = e.key, e.value
+            ops = {"map.new": ([], [ref]), "map.find": ([ref, k], [v, I32]),
+                   "map.set": ([ref, k, v], [ref]), "map.remove": ([ref, k], [ref, I32]),
+                   "map.has": ([ref, k], [I32]), "map.len": ([ref], [I32]),
+                   "map.key_at": ([ref, I32], [k]), "map.value_at": ([ref, I32], [v]),
+                   "map.clear": ([ref], [ref])}
+            ins_, outs = ops[n]
+            for t in reversed(ins_):
+                pop(t, ins)
+            stack.extend(outs)
+        elif n.startswith("set."):
+            ref, e = container_type(ins, SetType)
+            el = e.elem
+            ops = {"set.new": ([], [ref]), "set.add": ([ref, el], [ref, I32]),
+                   "set.remove": ([ref, el], [ref, I32]), "set.has": ([ref, el], [I32]),
+                   "set.len": ([ref], [I32]), "set.at": ([ref, I32], [el]),
+                   "set.clear": ([ref], [ref])}
+            ins_, outs = ops[n]
+            for t in reversed(ins_):
+                pop(t, ins)
+            stack.extend(outs)
         elif n == "string.const":
             if ins.imms[0] >= len(m.data):
                 raise VerifyError(f"data index {ins.imms[0]} out of range", fidx, ins.pc)

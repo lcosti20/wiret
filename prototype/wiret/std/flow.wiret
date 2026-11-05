@@ -113,6 +113,49 @@ macro ForEach::<T>(in: exec, array: array::<T>) -> (each: exec, done: exec, item
   }
 }
 
+#[doc("Loops over a map: runs 'each' once for every entry, in the order the keys were first added, then runs 'done'.")]
+macro ForEachMap::<K, V>(in: exec, map: map::<K, V>) -> (each: exec, done: exec, key: K, value: V, index: i32) {
+  local i: i32
+  node bump = SetLocal i
+    .value <- nxt.result
+  node cmp = Lt::<i32>
+    .a <- cur.value
+    .b <- len.length
+  node cur = GetLocal i
+  node each_out = Exit each
+    .key <- got_key.key
+    .value <- got_value.value
+    .index <- cur.value
+  node entry = Entry
+  node finish = Exit done
+  node got_key = MapKeyAt::<K, V>
+    .map <- entry.map
+    .index <- cur.value
+  node got_value = MapValueAt::<K, V>
+    .map <- entry.map
+    .index <- cur.value
+  node init = SetLocal i
+    .value <- 0
+  node len = MapLength::<K, V>
+    .map <- entry.map
+  node nxt = Add::<i32>
+    .a <- cur.value
+    .b <- 1
+  node seq = Sequence @count(2)
+  node test = Branch
+    .cond <- cmp.result
+
+  flow {
+    bump -> test
+    entry -> init
+    init -> test
+    seq.then0 -> each_out
+    seq.then1 -> bump
+    test.then -> seq
+    test.else -> finish
+  }
+}
+
 #[doc("Runs 'each' once for every number from first to last (inclusive), then runs 'done'.")]
 macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, index: i32) {
   local i: i32

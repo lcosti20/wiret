@@ -9,7 +9,7 @@ import unicodedata
 from .model import (Attr, Binding, Box, Const, Enum, ExecOut, Extern, Graph, ITEM_ORDER, Lit,
                     META_ORDER, Module, Node, PinRef, SEMANTIC_ATTRS, Struct, Use, Var,
                     item_kind)
-from .registry import ARRAY_MUTATORS, ModuleIndex, Sig, lit_equal, lit_fits, signature
+from .registry import PLACE_MUTATORS, ModuleIndex, Sig, lit_equal, lit_fits, signature
 
 IND = "  "
 
@@ -162,7 +162,7 @@ def fmt_node(node: Node, sig: Sig, indent: str, semantic=False) -> str:
     """The node line, then one `.pin <- value` line per bound input."""
     head = f"{indent}node {node.id} = {node.kind}"
     targs = fmt_targs(node.targs)
-    if node.kind in ARRAY_MUTATORS:      # `ArrayAdd::<i32> acc`, as in section 3.3
+    if node.kind in PLACE_MUTATORS:      # `ArrayAdd::<i32> acc`, as in section 3.3
         head += targs + (f" {node.symbol}" if node.symbol else "")
     else:
         head += (f" {node.symbol}" if node.symbol else "") + targs

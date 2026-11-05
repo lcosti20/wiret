@@ -6,17 +6,32 @@ from typing import Optional
 from .model import Lit, Module
 from .natives import float_to_text
 from .parser import ParseError, Parser, parse_literal
-from .registry import FLOAT_TYPES, ModuleIndex, array_elem, enum_values, lit_fits
+from .registry import (FLOAT_TYPES, ModuleIndex, array_elem, enum_values, is_container,
+                       lit_fits, map_types, set_elem)
 
 
 def lit_value(lit: Lit, ty: str, name: str, idx: Optional[ModuleIndex] = None):
-    """A Python value for a literal argument of type `ty` (arrays from `[a, b, ...]`, enum
-    members as `Mode.Chase`). Structs cannot be typed as an argument."""
+    """A Python value for a literal argument of type `ty`: arrays and sets from `[a, b, ...]`,
+    maps from `{k: v, ...}`, enum members as `Mode.Chase`. Structs cannot be typed as an
+    argument."""
     elem = array_elem(ty)
     if elem is not None:
         if lit.kind != "list":
             raise ValueError(f"argument {name}: write an array as [1, 2, 3]")
         return tuple(lit_value(x, elem, name, idx) for x in lit.value)
+    elem = set_elem(ty)
+    if elem is not None:
+        if lit.kind != "list":
+            raise ValueError(f"argument {name}: write a set as [1, 2, 3]")
+        return {lit_value(x, elem, name, idx): None for x in lit.value}
+    kv = map_types(ty)
+    if kv is not None:
+        if lit.kind == "list" and not lit.value:
+            return {}
+        if lit.kind != "map":
+            raise ValueError(f"argument {name}: write a map as {{\"a\": 1, \"b\": 2}}")
+        return {lit_value(k, kv[0], name, idx): lit_value(v, kv[1], name, idx)
+                for k, v in lit.value}
     if idx is not None and ty in idx.structs:
         raise ValueError(f"argument {name}: a {ty} struct cannot be typed as an argument; "
                          f"call a function that makes one instead")
@@ -47,7 +62,7 @@ def parse_args_for(m: Module, func: str, texts: list) -> list:
     idx = ModuleIndex(m)
     for p, t in zip(g.params, texts):
         try:
-            if array_elem(p.type) is not None:
+            if is_container(p.type):
                 parser = Parser(t)
                 lit = parser.value()
             else:
@@ -91,6 +106,17 @@ def format_value(ty: Optional[str], v, idx: Optional[ModuleIndex] = None) -> str
             if format_value(base, value) == format_value(base, v):
                 return f"{ty}.{name}"
         return f"{ty}({format_value(base, v)})"   # Convert does not check membership
+    if isinstance(v, dict):           # a map {k: v} or a set {a, b}
+        kv = map_types(ty) if ty else None
+        if kv is None and set_elem(ty or "") is None:
+            is_map = any(x is not None for x in v.values())   # untyped: set values are None
+        else:
+            is_map = kv is not None
+        if is_map:
+            k_ty, v_ty = kv or (None, None)
+            return "{" + ", ".join(f"{format_value(k_ty, k, idx)}: {format_value(v_ty, x, idx)}"
+                                   for k, x in v.items()) + "}"
+        return "{" + ", ".join(format_value(set_elem(ty or ""), x, idx) for x in v) + "}"
     elem = array_elem(ty) if ty else None
     if elem is not None or isinstance(v, tuple):
         return "[" + ", ".join(format_value(elem, x, idx) for x in v) + "]"
