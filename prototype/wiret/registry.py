@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .model import Graph, Lit, Module, Node, Extern, Const, Var
+from .model import Const, Enum, Extern, Graph, Lit, Module, Node, Struct, Var
 from .natives import STD, NativeSpec
 
 INT_TYPES = ["i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64"]
@@ -31,6 +31,12 @@ CONSTRAINTS = {
     "convertible": PRIM_TYPES,
 }
 
+# Names a struct or enum may not take: they already mean a built-in type.
+BUILTIN_TYPE_NAMES = set(PRIM_TYPES) | {"array", "set", "map", "delegate", "dispatcher", "exec"}
+
+INT_RANGES = {t: ((-(1 << (b - 1)), (1 << (b - 1)) - 1) if t[0] == "i" else (0, (1 << b) - 1))
+              for t in INT_TYPES for b in [int(t[1:])]}
+
 ZERO = object()  # pin default: the zero value of the pin's type
 
 
@@ -41,10 +47,24 @@ def array_elem(ty: str) -> Optional[str]:
     return None
 
 
-def type_ok(ty: str) -> bool:
-    """A value type this prototype supports: a primitive or an array of supported types."""
+def type_ok(ty: str, idx: "Optional[ModuleIndex]" = None) -> bool:
+    """A value type this prototype supports: a primitive, a struct or enum declared in the
+    module (only when `idx` is given), or an array of supported types."""
     elem = array_elem(ty)
-    return type_ok(elem) if elem is not None else ty in PRIM_TYPES
+    if elem is not None:
+        return type_ok(elem, idx)
+    return ty in PRIM_TYPES or (idx is not None and idx.user_type(ty) is not None)
+
+
+def enum_values(en: Enum) -> list:
+    """(member name, value) in declaration order. A member with no `= INT` is one more than
+    the member before it; the first one is 0."""
+    out, nxt = [], 0
+    for m in en.members:
+        v = m.value if m.value is not None else nxt
+        out.append((m.name, v))
+        nxt = v + 1
+    return out
 
 
 def substitute(ty: str, subst: dict) -> str:
@@ -70,6 +90,8 @@ def zero_lit(ty: str) -> Lit:
 
 
 def lit_fits(lit: Lit, ty: str) -> bool:
+    """Whether a literal can be written for a value of type `ty`. Structs and enums have no
+    literal form; arrays take only `null`, the empty array."""
     if ty in INT_TYPES:
         return lit.kind == "int"
     if ty in FLOAT_TYPES:
@@ -78,7 +100,15 @@ def lit_fits(lit: Lit, ty: str) -> bool:
         return lit.kind == "bool"
     if ty == "string":
         return lit.kind == "string"
-    return lit.kind == "null"
+    return array_elem(ty) is not None and lit.kind == "null"
+
+
+def lit_in_range(lit: Lit, ty: str) -> bool:
+    """For an integer type, whether the literal's value fits; any other type passes."""
+    if ty not in INT_RANGES or lit.kind != "int":
+        return True
+    lo, hi = INT_RANGES[ty]
+    return lo <= lit.value <= hi
 
 
 def lit_equal(a: Lit, b: Lit) -> bool:
@@ -243,7 +273,19 @@ class ModuleIndex:
         self.externs = {i.name: i for i in module.items if isinstance(i, Extern) and i.kind == "func"}
         self.vars = {i.name: i for i in module.items if isinstance(i, Var)}
         self.consts = {i.name: i for i in module.items if isinstance(i, Const)}
+        self.structs = {i.name: i for i in module.items if isinstance(i, Struct)}
+        self.enums = {i.name: i for i in module.items if isinstance(i, Enum)}
         self._instances = {}
+
+    def user_type(self, ty: str):
+        """The struct or enum a type name refers to. Types are named without the module
+        prefix (`Vec2`, not `game.demo.Vec2`)."""
+        return self.structs.get(ty) or self.enums.get(ty)
+
+    def enum_base(self, ty: str) -> Optional[str]:
+        """The underlying integer type of an enum type (default `i32`), else None."""
+        en = self.enums.get(ty)
+        return (en.base or "i32") if en is not None else None
 
     def macro(self, symbol: str, targs: list) -> Optional[Graph]:
         """A macro, instantiated for its type arguments if it is generic."""

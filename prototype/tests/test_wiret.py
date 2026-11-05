@@ -251,7 +251,7 @@ enum Mode: u8 @id("en_k3f9") {
   Idle = 0
   #[note("Moving towards the player.")]
   Chase @id("m_c")
-  Flee = -1
+  Flee = 7
 }
 
 struct Empty {}
@@ -294,7 +294,7 @@ class TypeDeclTests(unittest.TestCase):
         mode, vec = items["Mode"], items["Vec2"]
         self.assertEqual(mode.base, "u8")
         self.assertEqual([(x.name, x.value) for x in mode.members],
-                         [("Idle", 0), ("Chase", None), ("Flee", -1)])
+                         [("Idle", 0), ("Chase", None), ("Flee", 7)])
         self.assertEqual(note_text(notes(mode.member("Chase").meta)[0]),
                          "Moving towards the player.")
         self.assertEqual([f.name for f in vec.fields], ["y", "x", "name"])
@@ -384,6 +384,189 @@ struct P {
                 with self.assertRaises(ParseError) as cm:
                     parse(module("\n" + src, macros=False))
                 self.assertIn(hint, cm.exception.msg)
+
+
+class TypeCheckTests(unittest.TestCase):
+    """Step 2 of struct/enum support: resolve the types and check the declarations."""
+
+    def diags(self, body):
+        return check(parse(module(body, macros=False)))
+
+    def found(self, body):
+        return sorted(((d.code, d.pin) for d in self.diags(body)), key=lambda x: (x[0], x[1] or ""))
+
+    def test_declared_types_resolve(self):
+        body = """
+var mode: Mode
+
+enum Mode {
+  Idle
+}
+
+struct Vec2 {
+  x: f32
+}
+
+struct Path {
+  points: array::<Vec2>
+  mode: Mode
+}
+
+func Move(p: Vec2, ps: array::<Vec2>) -> (m: Mode) {
+  local last: Vec2
+  node entry = Entry
+}
+"""
+        self.assertEqual(self.found(body), [])
+        # They check, but cannot be lowered yet: compiling says so instead of crashing.
+        r = compile_module(parse(module(body, macros=False)))
+        self.assertFalse(r.ok)
+        self.assertEqual({d.graph for d in r.diags if d.code == "E0501"}, {"mode", "Move"})
+        self.assertTrue(all("cannot compile struct and enum" in d.message for d in r.diags))
+
+    def test_unknown_types(self):
+        diags = self.diags("""
+struct S {
+  a: Vector
+  b: array::<Nope>
+  c: t.S
+  d: exec
+}
+
+func F(x: Missing) {
+  node entry = Entry
+}
+""")
+        self.assertEqual(sorted((d.code, d.graph, d.pin) for d in diags),
+                         [("E0501", "F", None), ("E0501", "S", "a"), ("E0501", "S", "b"),
+                          ("E0501", "S", "c"), ("E0501", "S", "d")])
+        by_pin = {d.pin: d.message for d in diags}
+        self.assertIn("write 'S'", by_pin["c"])
+        self.assertIn("exec is only", by_pin["d"])
+
+    def test_duplicate_names(self):
+        self.assertEqual(self.found("""
+enum E {
+  A
+  A
+}
+
+struct S {
+  x: i32
+  x: f32
+}
+
+struct i32 {}
+
+struct array {}
+
+struct E {}
+"""), [("E0102", None), ("E0102", None), ("E0102", None), ("E0102", "A"), ("E0102", "x")])
+
+    def test_field_defaults(self):
+        self.assertEqual(self.found("""
+struct Vec2 {}
+
+struct S {
+  ok_int: i32 = 3
+  ok_float: f64 = 1
+  ok_list: array::<i32> = null
+  bad_text: i32 = "x"
+  bad_range: u8 = 256
+  bad_neg: u16 = -1
+  bad_struct: Vec2 = null
+  bad_bool: bool = 0
+}
+"""), [("E0110", "bad_bool"), ("E0110", "bad_neg"), ("E0110", "bad_range"),
+       ("E0110", "bad_struct"), ("E0110", "bad_text")])
+
+    def test_enum_values(self):
+        from wiret.registry import enum_values
+        m = parse(module("""
+enum E: i8 {
+  A
+  B = 5
+  C
+  D = -128
+  E
+  F = 127
+}
+""", macros=False))
+        self.assertEqual(enum_values(m.items[1]),
+                         [("A", 0), ("B", 5), ("C", 6), ("D", -128), ("E", -127), ("F", 127)])
+        self.assertEqual(codes(print_module(m)), [])
+        self.assertEqual(self.found("""
+enum Small: u8 {
+  Top = 255
+  Over
+}
+
+enum Signed: i8 {
+  Low = -129
+}
+
+enum Wide {
+  Big = 2147483648
+}
+"""), [("E0110", "Big"), ("E0110", "Low"), ("E0110", "Over")])
+
+    def test_struct_cycles(self):
+        diags = [d for d in self.diags("""
+struct Self {
+  me: Self
+}
+
+struct A {
+  b: B
+}
+
+struct B {
+  c: C
+}
+
+struct C {
+  a: A
+}
+
+struct Tree {
+  label: string
+  children: array::<Tree>
+}
+
+struct UsesA {
+  a: A
+}
+""") if d.code == "E0503"]
+        self.assertEqual(sorted(d.message for d in diags),
+                         ["struct 'A' contains itself by value: A -> B -> C -> A",
+                          "struct 'Self' contains itself by value: Self -> Self"])
+
+    def test_new_diagnostics_have_plain_explanations(self):
+        from wiret.explain import explain
+        diags = self.diags("""
+enum Small: u8 {
+  Top = 256
+  Top
+}
+
+struct i32 {}
+
+struct S {
+  me: S
+  hp: i32 = "x"
+  t: Vector
+  q: t.S
+  e: exec
+}
+""")
+        diags += compile_module(parse(module("\nstruct V {}\n\nvar v: V\n", macros=False))).diags
+        self.assertEqual(len(diags), 10)
+        for d in diags:
+            with self.subTest(d=str(d)):
+                friendly = explain(d)
+                self.assertNotEqual(friendly, d.message)
+                self.assertNotIn(d.code, friendly)
+                self.assertNotIn("None", friendly)
 
 
 class HashTests(unittest.TestCase):
