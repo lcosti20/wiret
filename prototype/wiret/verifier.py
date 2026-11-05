@@ -1,7 +1,8 @@
 """Single-pass bytecode verifier (spec section 5.5)."""
 from __future__ import annotations
 
-from .wbc import (F32, F64, FN_LATENT, FN_PURE, I32, I64, STRING, ArrayType, MapType, Ref,
+from .wbc import (ANYREF, F32, F64, FN_LATENT, FN_PURE, I32, I64, STRING, ArrayType, MapType,
+                  Ref,
                   SetType, StructType, WbcError, WbcModule, decode_code, vt_name)
 
 REF_TYPES = (ArrayType, StructType, MapType, SetType)
@@ -117,7 +118,9 @@ def verify(m: WbcModule) -> list:
                 if vt == STRING and default is not None and default >= len(m.data):
                     raise VerifyError(f"type {i} has a field default naming missing data")
         else:
-            vts = entry[0] + entry[1]
+            # a function type may also use anyref, which a native such as std.array.Equals
+            # takes so that one signature serves every container type (section 4.9)
+            vts = [vt for vt in entry[0] + entry[1] if vt != ANYREF]
         for vt in vts:
             if not valid_vt(m, vt):
                 raise VerifyError(f"type {i} uses an unsupported value type")
@@ -189,6 +192,8 @@ def verify_function(m: WbcModule, i: int):
         if not stack:
             raise VerifyError(f"{ins.name}: operand stack underflow", fidx, ins.pc)
         got = stack.pop()
+        if expected == ANYREF and isinstance(got, Ref):
+            return got                 # every reference type is a subtype of anyref (5.5)
         if expected is not None and got != expected:
             raise VerifyError(f"{ins.name}: expected {vt_name(expected, m.types)}, found "
                               f"{vt_name(got, m.types)}", fidx, ins.pc)

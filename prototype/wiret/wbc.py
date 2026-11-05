@@ -19,7 +19,8 @@ FLAG_HAS_SOURCE = 1
 # value types (section 5.3)
 I32, I64, F32, F64, STRING = 0x7F, 0x7E, 0x7D, 0x7C, 0x6E
 REF = 0x6B                      # `6B t`: reference to type index t (arrays and structs)
-VT_NAMES = {I32: "i32", I64: "i64", F32: "f32", F64: "f64", STRING: "string"}
+ANYREF = 0x6D                   # the top of the reference types; only in function types here
+VT_NAMES = {I32: "i32", I64: "i64", F32: "f32", F64: "f64", STRING: "string", ANYREF: "anyref"}
 FUNC_TYPE = 0x60
 ARRAY_TYPE = 0x5E
 STRUCT_TYPE = 0x5F

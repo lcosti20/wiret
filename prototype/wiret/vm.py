@@ -27,7 +27,8 @@ STATUS_API = "WR_ERR_API"
 STATUS_INTERRUPT = "WR_ERR_INTERRUPT"
 
 VT_OF = {"bool": I32, "i8": I32, "u8": I32, "i16": I32, "u16": I32, "i32": I32, "u32": I32,
-         "i64": I64, "u64": I64, "f32": F32, "f64": F64, "string": STRING}
+         "i64": I64, "u64": I64, "f32": F32, "f64": F64, "string": STRING,
+         "anyref": wbc.ANYREF}
 
 MAX_FRAMES = 2000
 MAX_CONT = 10000
@@ -432,6 +433,7 @@ class Func:
     flags: int
     native: Optional[Callable] = None
     native_name: str = ""
+    cost: Optional[Callable] = None                # a native's declared extra fuel
     locals: list = field(default_factory=list)
     zeros: list = field(default_factory=list)      # the starting value of each local
     code: list = field(default_factory=list)       # [(op, arg)]
@@ -628,7 +630,8 @@ class VM:
                     [VT_OF[x] for _, x in spec.results] != results:
                 raise WiretError(STATUS_LINK, f"import {q} has a different signature than the "
                                               f"registered native")
-            funcs.append(Func(i, q, params, results, flags, native=spec.fn, native_name=q))
+            funcs.append(Func(i, q, params, results, flags, native=spec.fn, native_name=q,
+                              cost=spec.cost))
         nimp = len(m.imports)
         for i, ((t, flags), body, (instrs, _)) in enumerate(zip(m.funcs, m.bodies, verified)):
             fi = nimp + i
@@ -805,6 +808,8 @@ class VM:
                     cargs = stack[len(stack) - np:] if np else []
                     del stack[len(stack) - np:]
                     if callee.native is not None:
+                        if callee.cost is not None:
+                            fuel -= callee.cost(*cargs)
                         try:
                             res = callee.native(self, *cargs)
                         except NativeFault as e:

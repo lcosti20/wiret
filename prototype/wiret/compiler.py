@@ -130,6 +130,8 @@ class Compiler:
     def vt(self, ty: str):
         """The WBC value type of a Wiret type. An enum is its underlying integer; arrays and
         structs become references to type entries."""
+        if ty == "anyref":
+            return wbc.ANYREF
         elem = array_elem(ty)
         if elem is not None:
             return wbc.Ref(self.array_type(elem))
@@ -977,7 +979,13 @@ class FuncLowerer:
         self.E("select")
 
     def emit_eq(self, ty: str):
-        """[a, b] -> [i32]. Structs compare field by field (section 3.1)."""
+        """[a, b] -> [i32]. Structs compare field by field (section 3.1); containers call
+        std.array.Equals, std.set.Equals or std.map.Equals (section 4.9)."""
+        if is_container(ty):
+            kind = ("array" if array_elem(ty) is not None else
+                    "map" if map_types(ty) is not None else "set")
+            self.E("call", self.c.import_ref(f"std.{kind}.Equals"))
+            return
         if ty in self.c.idx.structs:
             t = self.c.struct_type(ty)
             fields = self.c.idx.structs[ty].fields
@@ -1062,7 +1070,7 @@ class FuncLowerer:
             self.E(f"i32.{k.lower()}")
             return
         T = n.targs[0]
-        if T in self.c.idx.structs:   # only Eq and Ne take a struct
+        if T in self.c.idx.structs or is_container(T):   # only Eq and Ne take these
             self.emit_eq(T)
             if k == "Ne":
                 self.E("i32.eqz")

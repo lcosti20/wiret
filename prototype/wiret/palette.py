@@ -10,8 +10,8 @@ from typing import Callable, Optional
 from .model import Graph, Node, meta_value
 from .natives import STD
 from .registry import (MAP_MUTATORS, MAP_PURE, SET_MUTATORS, SET_PURE, STATIC_KINDS,
-                       ModuleIndex, array_elem, can_convert, map_types, set_elem, signature,
-                       type_choices)
+                       ModuleIndex, array_elem, can_convert, is_container, map_types, set_elem,
+                       signature, type_choices)
 
 # kind or symbol -> (description, extra search words)
 DESCRIBE = {
@@ -195,8 +195,9 @@ def _item(kind, label, cat, symbol=None, targs=None, idx=None) -> Item:
 
 def container_types(g: Graph, idx: ModuleIndex) -> tuple:
     """The map and set types the module uses (in signatures, locals, state, variables and
-    struct fields, also inside other types): ([(K, V)], [T]). The palette offers map and
-    set nodes for these rather than for every possible key and value type."""
+    struct fields, also inside other types): ([(K, V)], [T], [every container type]). The
+    palette offers map and set nodes, and Eq and Ne on containers, for these rather than for
+    every possible key and value type."""
     seen = []
     tys = [p.type for x in [g] + list(idx.graphs.values())
            for p in x.params + x.result_list + x.locals + x.states]
@@ -218,7 +219,7 @@ def container_types(g: Graph, idx: ModuleIndex) -> tuple:
             walk(ar)
     for ty in tys:
         walk(ty)
-    return sorted(set(maps)), sorted(set(sets))
+    return sorted(set(maps)), sorted(set(sets)), sorted(t for t in seen if is_container(t))
 
 
 def items(g: Graph, idx: ModuleIndex) -> list:
@@ -288,7 +289,10 @@ def items(g: Graph, idx: ModuleIndex) -> list:
             continue
         for kind in ("ArrayAdd", "ArraySet", "ArrayInsert", "ArrayRemove", "ArrayClear"):
             out.append(_item(kind, f"{kind} {name}", "Arrays", name, [elem]))
-    maps, sets = container_types(g, idx)
+    maps, sets, containers = container_types(g, idx)
+    for t in containers:
+        for kind in ("Eq", "Ne"):
+            out.append(_item(kind, f"{kind}::<{t}>", STATIC_KINDS[kind][0], targs=[t]))
     for k, v in maps:
         for kind in MAP_PURE:
             out.append(_item(kind, f"{kind}::<{k}, {v}>", "Maps", targs=[k, v]))

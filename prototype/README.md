@@ -2,8 +2,7 @@
 
 A Python prototype of the Wiret graph editor, compiler and runtime, built against
 [`docs/reference.md`](../docs/reference.md) (Draft 0.7). It implements **Tier 0** and **Tier 1**
-of the spec (section 1.6), except structural `Eq` on arrays, maps and sets (see *Deviations and
-known gaps*). It uses only the Python standard library; the editor uses Tkinter, and the Git
+of the spec (section 1.6). It uses only the Python standard library; the editor uses Tkinter, and the Git
 commands need `git`.
 
 ```
@@ -19,7 +18,7 @@ cd prototype
 python3 wiret_editor.py                         # the editor, opening Lesson 1
 python3 wiret_editor.py examples/demo.wiret     # the editor on a larger example
 python3 wiretc.py run examples/demo.wiret Main  # the same program from the command line
-python3 -m unittest discover tests              # 147 tests
+python3 -m unittest discover tests              # 154 tests
 ```
 
 ## Building a desktop app
@@ -312,8 +311,15 @@ draft leaves open, follow the array kinds:
 - `std.flow.ForEachMap::<K, V>` loops over a map in key order with outputs `key`, `value` and
   `index`. The palette offers map and set nodes for the map and set types the module uses.
 - `wiretc run` takes a map as `{"a": 1}` and a set as `[1, 2]`.
-- `Eq` on arrays, maps and sets (structural equality, section 4.9) is not implemented, and so
-  neither is `Eq` on a struct that holds one.
+- `Eq` and `Ne` take any value type (section 4.9). Arrays compare element-wise; maps and sets
+  ignore insertion order (the same keys, and for a map equal values under each). Each element
+  uses its own type's equality, so a container holding NaN is not equal to itself, but keys
+  match as they do in a lookup, so two sets that each hold NaN are equal. Structs that hold
+  containers compare field by field as before. The draft does not say how NaN keys compare.
+- Container equality calls `std.array.Equals`, `std.set.Equals` or `std.map.Equals`. Each takes
+  two `anyref` (`6D`), so one native signature serves every element type; the verifier accepts
+  any reference where `anyref` is expected, and allows `anyref` only in function types. The
+  natives declare a fuel cost of 1 per 8 elements visited (section 5.7).
 
 ### Identity and the id registry
 
@@ -392,8 +398,6 @@ pins for results, and flow wires for a macro's exec parameters and results.
   delegates and dispatchers, latent nodes and fibers (`Delay`, `Yield`, `Await`), and
   `Try`/`Throw`. Their node kinds are reported as `E0501` and their opcodes are rejected by
   the verifier.
-- **Structural equality of containers.** `Eq` and `Ne` on arrays, maps and sets (section 4.9)
-  are not implemented, and so neither is `Eq` on a struct that holds one (`E0110`).
 - **Not implemented:** the rest of the
   project manager (`wiret.lock`, `use` of other modules), the C API and deterministic-mode
   float rules.

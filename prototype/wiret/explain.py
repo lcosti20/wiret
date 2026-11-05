@@ -75,10 +75,6 @@ def explain(d: Diag) -> str:
             return (f"The starting value of field '{_quoted(m)}' isn't "
                     f"{type_words(data['dst'])}. Change it, or remove it to start at "
                     f"{zero_words(data['dst'])}.")
-        if "cannot compare arrays" in m:
-            return (f"'{m.split('type ', 1)[1].split(';')[0]}' holds a list (an array), and this prototype can't compare "
-                    f"lists yet, so it can't compare two of these either. Compare the fields "
-                    f"you care about one by one instead.")
         if m.startswith("case "):
             dst = data["dst"]
             fix = (f" Write each case as {dst}.Member." if "Member" in m else "")
