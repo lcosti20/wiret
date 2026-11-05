@@ -16,7 +16,7 @@ from typing import Optional
 
 from . import wbc
 from .checker import Diag, check, has_errors
-from .model import Graph, Lit, Module, Node, PinRef
+from .model import Const, Extern, Graph, Lit, Module, Node, PinRef, Var
 from .natives import INTERNAL, STD
 from .printer import layout_hash, print_module, semantic_hash
 from .registry import (ARRAY_MUTATORS, FLOAT_TYPES, INT_TYPES, REGISTRY_NAME, REGISTRY_VERSION,
@@ -175,6 +175,7 @@ class Compiler:
     # -- driver -------------------------------------------------------------------
     def compile(self) -> CompileResult:
         self.diags = check(self.m, comments_ok=True)
+        self.reject_user_types()
         if has_errors(self.diags):
             return CompileResult(False, self.diags)
         for v in sorted(self.idx.vars.values(), key=lambda v: v.name):
@@ -189,6 +190,29 @@ class Compiler:
             return CompileResult(False, self.diags)
         mod = self.build(lowered)
         return CompileResult(True, self.diags, wbc.encode_module(mod), mod)
+
+    def reject_user_types(self):
+        """Struct and enum types pass the checker but are not lowered yet: say so instead of
+        failing inside the code generator."""
+        def user(ty):
+            base = array_elem(ty) or ty
+            return self.idx.user_type(base) is not None
+
+        uses = []
+        for it in self.m.items:
+            if isinstance(it, Graph):
+                typed = it.params + it.result_list + it.locals + it.states
+            elif isinstance(it, Extern):
+                typed = it.params + (it.results or [])
+            elif isinstance(it, (Var, Const)):
+                typed = [it]
+            else:
+                continue
+            uses += [(it.name, p.type) for p in typed if user(p.type)]
+        for owner, ty in uses:
+            self.diags.append(Diag("E0501", f"type '{ty}' is declared, but this prototype cannot "
+                                            f"compile struct and enum values yet", self.m.name,
+                                   owner, data={"type": ty}))
 
     def func_index(self, ref) -> int:
         kind, name = ref

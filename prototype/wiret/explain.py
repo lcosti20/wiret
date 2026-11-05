@@ -54,10 +54,24 @@ def explain(d: Diag) -> str:
     if c == "E0102":
         if "Entry" in m:
             return "A function can only start in one place, so it can only have one Entry node."
+        if "built-in type" in m:
+            return (f"'{_quoted(m)}' is already the name of a built-in type, so a struct or enum "
+                    f"can't use it. Pick a different name, such as {_quoted(m).capitalize()}Info.")
+        if "duplicate field" in m or "duplicate member" in m:
+            return (f"'{_quoted(m)}' is listed twice in '{_quoted(m, 1)}'. Each field or member "
+                    f"needs its own name.")
         return f"Two things are called '{_quoted(m) or node}'. Every node needs its own name."
     if c == "E0103":
         return f"{m[0].upper()}{m[1:]}. Check the pin name (the node registry lists every pin)."
     if c == "E0110":
+        if "of enum member" in m:
+            return (f"Enum member '{_quoted(m)}' has the value {m.split()[1]}, which is too big or "
+                    f"too small for {type_words(data['dst'])}. Give it a smaller value, or give "
+                    f"the enum a wider type such as i32.")
+        if "default of field" in m:
+            return (f"The starting value of field '{_quoted(m)}' isn't "
+                    f"{type_words(data['dst'])}. Change it, or remove it to start at "
+                    f"{zero_words(data['dst'])}.")
         if data.get("literal"):
             return f"The value typed into {here} isn't {type_words(data['dst'])}."
         if "src" in data:
@@ -99,9 +113,25 @@ def explain(d: Diag) -> str:
             return f"There is no function called '{_quoted(m)}'. Check the spelling or create it."
         if "unresolved macro" in m:
             return f"There is no macro called '{_quoted(m)}'. Built-in ones start with std.flow."
+        if "module prefix" in m:
+            return (f"Inside its own module, a type is written without the module name: write "
+                    f"'{_quoted(m, 1)}' instead of '{_quoted(m)}'.")
+        if "unknown type" in m:
+            return (f"There is no type called '{_quoted(m)}'. Check the spelling, or declare it "
+                    f"with 'struct {_quoted(m)} {{ ... }}' or 'enum {_quoted(m)} {{ ... }}'.")
+        if "cannot compile struct and enum" in m:
+            return (f"'{_quoted(m)}' is declared correctly, but this prototype can't run programs "
+                    f"that use struct or enum values yet.")
+        if "cannot have type exec" in m:
+            return ("Exec wires decide the order things happen in; they aren't values, so a field "
+                    "can't hold one.")
         if "unknown node kind" in m:
             return f"Wiret doesn't know a node kind called '{_quoted(m)}'."
         return m[0].upper() + m[1:] + "."
+    if c == "E0503":
+        return (f"Struct '{_quoted(m)}' contains itself ({m.split(': ', 1)[1]}). Every value "
+                f"would need another one inside it, forever. Hold the inner one in an array "
+                f"instead, which can start empty.")
     if c == "E0502":
         kind = m.split()[0]
         return (f"{kind} needs to know what kind of value it works with. Write it like "

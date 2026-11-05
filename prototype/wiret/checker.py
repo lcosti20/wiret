@@ -5,12 +5,13 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Optional
 
-from .model import Graph, Lit, Module, Node, PinRef, SEMANTIC_ATTRS, note_detached, notes
+from .model import Enum, Graph, Lit, Module, Node, PinRef, SEMANTIC_ATTRS, Struct, note_detached, notes
 from .model import Var
 
 # Names that are metadata, not semantic attributes: `@doc` is `#[doc]` (section 2.4).
 META_NAMES = {"doc", "category", "keywords", "note"}
-from .registry import (ARRAY_MUTATORS, ModuleIndex, Sig, instantiate, lit_fits, signature,
+from .registry import (ARRAY_MUTATORS, BUILTIN_TYPE_NAMES, INT_RANGES, ModuleIndex, Sig,
+                       array_elem, enum_values, instantiate, lit_fits, lit_in_range, signature,
                        substitute, type_ok)
 
 
@@ -106,9 +107,10 @@ def check(module: Module, comments_ok=False) -> list:
             typed.append(it)
         for p in typed:
             ty = substitute(p.type, {t: "i32" for t in tparams})
-            if ty != "exec" and not type_ok(ty):
-                D("E0501", f"type '{p.type}' is not supported by this prototype",
-                  getattr(it, "name", None))
+            if ty != "exec" and not type_ok(ty, idx):
+                D("E0501", unknown_type_message(p.type, module.name),
+                  getattr(it, "name", None), type=p.type)
+    check_type_decls(module, idx, D)
     check_attr_names(module, D)
     for owner in [module] + [i for i in module.items if not isinstance(i, Graph)]:
         for nt in notes(owner.meta):
@@ -127,6 +129,81 @@ def check(module: Module, comments_ok=False) -> list:
             check_graph(g, idx, D)
     check_macro_recursion(module, idx, D)
     return diags
+
+
+def unknown_type_message(ty: str, module_name: str) -> str:
+    prefix = module_name + "."
+    base = array_elem(ty) or ty
+    if base.startswith(prefix):
+        return (f"type '{ty}' names a type of this module with its module prefix; "
+                f"write '{ty.replace(prefix, '')}'")
+    return f"unknown type '{ty}': not a built-in type, struct or enum of this module"
+
+
+def check_type_decls(module: Module, idx: ModuleIndex, D):
+    """Struct and enum declarations (sections 2.2 and 3.1)."""
+    for it in module.items:
+        if not isinstance(it, (Struct, Enum)):
+            continue
+        kind = "struct" if isinstance(it, Struct) else "enum"
+        if it.name in BUILTIN_TYPE_NAMES:
+            D("E0102", f"{kind} '{it.name}' has the name of a built-in type; choose another name",
+              it.name)
+        members = it.fields if isinstance(it, Struct) else it.members
+        seen = set()
+        for x in members:
+            if x.name in seen:
+                what = "field" if kind == "struct" else "member"
+                D("E0102", f"duplicate {what} '{x.name}' in {kind} '{it.name}'", it.name,
+                  pin=x.name)
+            seen.add(x.name)
+        if isinstance(it, Struct):
+            for f in it.fields:
+                if f.type == "exec":
+                    D("E0501", f"field '{it.name}.{f.name}' cannot have type exec: exec is only "
+                               f"for macro parameters", it.name, pin=f.name, type=f.type)
+                elif not type_ok(f.type, idx):
+                    D("E0501", unknown_type_message(f.type, module.name), it.name, pin=f.name,
+                      type=f.type)
+                elif f.default is not None and not (lit_fits(f.default, f.type)
+                                                    and lit_in_range(f.default, f.type)):
+                    D("E0110", f"default of field '{it.name}.{f.name}' does not fit type {f.type}",
+                      it.name, pin=f.name, literal=True, dst=f.type)
+        else:
+            base = it.base or "i32"
+            lo, hi = INT_RANGES[base]
+            for name, v in enum_values(it):
+                if not lo <= v <= hi:
+                    D("E0110", f"value {v} of enum member '{it.name}.{name}' does not fit its "
+                               f"type {base} ({lo} to {hi})", it.name, pin=name, literal=True,
+                      dst=base)
+    check_struct_cycles(idx, D)
+
+
+def check_struct_cycles(idx: ModuleIndex, D):
+    """E0503: a struct that holds itself by value, directly or through other structs, has no
+    finite zero value. Holding it in an array is fine: the array starts empty."""
+    def by_value(st):
+        return [f.type for f in st.fields if f.type in idx.structs]
+
+    reported = set()
+    for name in sorted(idx.structs):
+        stack = [(name, [name])]
+        visited = set()
+        while stack:
+            cur, path = stack.pop()
+            for nxt in by_value(idx.structs[cur]):
+                if nxt == name:
+                    cycle = frozenset(path)
+                    if cycle not in reported:
+                        reported.add(cycle)
+                        D("E0503", f"struct '{name}' contains itself by value: "
+                                   f"{' -> '.join(path + [nxt])}", name)
+                    stack = []
+                    break
+                if nxt not in visited:
+                    visited.add(nxt)
+                    stack.append((nxt, path + [nxt]))
 
 
 def check_macro_recursion(module, idx, D):
