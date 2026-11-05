@@ -18,7 +18,7 @@ cd prototype
 python3 wiret_editor.py                         # the editor, opening Lesson 1
 python3 wiret_editor.py examples/demo.wiret     # the editor on a larger example
 python3 wiretc.py run examples/demo.wiret Main  # the same program from the command line
-python3 -m unittest discover tests              # 154 tests
+python3 -m unittest discover tests
 ```
 
 ## Building a desktop app
@@ -40,8 +40,10 @@ Gatekeeper warning on first launch.
 ## Running it in a browser (spike)
 
 `web/` runs the same compiler and VM in the browser with [Pyodide](https://pyodide.org)
-(CPython compiled to WebAssembly). It has no graph view yet, only the source text, a Run
-button and the output. The Tkinter modules, the Git commands and file watching are left out.
+(CPython compiled to WebAssembly). It has no graph view yet: you edit the source text, run it,
+and debug it with Step (F11), Over (F10), Back (Shift+F11), Run/Continue (F5), Animate and
+breakpoints (click beside a node's line number, or F9). The Tkinter modules, the Git
+commands and file watching are left out.
 
 ```sh
 cd prototype
@@ -49,7 +51,12 @@ python3 web/build_web.py                # packs wiret/, lessons/ and examples/ i
 python3 -m http.server -d web 8000      # then open http://localhost:8000
 ```
 
-The page calls `wiret/webapi.py`, which takes plain values and returns JSON. `web/` is a static
+The page calls `wiret/webapi.py`, which takes plain values and returns JSON. A page has no
+thread to block at a breakpoint, so `debug_run` runs the program once and records every point
+where the debugger could pause (up to 5,000), with the call stack, variables and wire values.
+`web/debugger.js` then steps through that recording, forwards and back, pausing where the
+desktop editor would: both use the rules in `wiret/debugstate.py`, and a test (which needs
+Node.js) checks they agree. `web/` is a static
 site, so any static host (GitHub Pages, for example) can serve it. The first visit downloads
 about 10 MB of Pyodide from the jsDelivr CDN.
 

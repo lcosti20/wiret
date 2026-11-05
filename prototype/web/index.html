@@ -3,120 +3,521 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Wiret (web spike)</title>
+<title>Wiret</title>
+<link rel="icon" href="data:,">
 <style>
   :root {
-    --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66;
-    --border: #d9d9d4; --accent: #2f6fdb; --error: #c4342d; --warn: #a86b00;
+    --bg: #f4f4f1; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --faint: #9a9a94;
+    --border: #d9d9d4; --accent: #2f6fdb; --accent-text: #ffffff;
+    --error: #c4342d; --warn: #a86b00; --ok: #2e7d4f;
+    --cur-bg: rgba(0, 170, 200, .18); --cur-edge: #0095b3;
+    --frame-bg: rgba(220, 150, 0, .16); --bad-bg: rgba(210, 50, 40, .14);
     --mono: ui-monospace, "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace;
+    --lh: 20px;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #1b1b1d; --panel: #242427; --text: #e8e8e3; --muted: #9a9a94;
-      --border: #3a3a3e; --accent: #6b9cf0; --error: #f07067; --warn: #e0a940;
+      --bg: #18181a; --panel: #222225; --text: #e8e8e3; --muted: #a2a29b; --faint: #6d6d68;
+      --border: #38383c; --accent: #5b8ff0; --accent-text: #0e1420;
+      --error: #f07067; --warn: #e0a940; --ok: #63c38a;
+      --cur-bg: rgba(40, 200, 230, .20); --cur-edge: #3cc8e6;
+      --frame-bg: rgba(240, 170, 40, .16); --bad-bg: rgba(240, 90, 80, .18);
     }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
-           padding: 12px 16px; border-bottom: 1px solid var(--border); }
-  h1 { font-size: 17px; margin: 0; }
-  #status { color: var(--muted); font-size: 13px; margin-left: auto; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); display: flex; flex-direction: column;
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+           padding: 10px 16px; border-bottom: 1px solid var(--border); }
+  h1 { font-size: 17px; margin: 0 6px 0 0; }
+  .group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
   select, button, label { font: inherit; }
   select { padding: 4px 6px; max-width: 100%; background: var(--panel); color: var(--text);
            border: 1px solid var(--border); border-radius: 6px; }
-  button { padding: 5px 16px; border: 0; border-radius: 6px; background: var(--accent);
-           color: #fff; cursor: pointer; }
-  button:disabled { opacity: .5; cursor: default; }
-  main { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px;
-         padding: 16px; height: calc(100vh - 58px); }
-  @media (max-width: 760px) { main { grid-template-columns: minmax(0, 1fr); height: auto; } }
-  textarea, #out { width: 100%; height: 100%; min-height: 300px; margin: 0; padding: 10px;
-           background: var(--panel); color: var(--text); border: 1px solid var(--border);
-           border-radius: 8px; font: 13px/1.5 var(--mono); }
-  textarea { resize: none; tab-size: 2; white-space: pre; }
-  #out { overflow: auto; white-space: pre-wrap; }
-  .err { color: var(--error); } .warn { color: var(--warn); } .note { color: var(--muted); }
+  button { padding: 4px 11px; border: 1px solid var(--border); border-radius: 6px;
+           background: var(--panel); color: var(--text); cursor: pointer; white-space: nowrap; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  button:disabled { opacity: .45; cursor: default; }
+  label { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+  #ready { color: var(--faint); font-size: 12px; margin-left: auto; }
+  #msg { padding: 7px 16px; min-height: 34px; border-bottom: 1px solid var(--border);
+         color: var(--muted); }
+  #msg.err { color: var(--error); }
+  main { flex: 1; min-height: 0; display: grid; gap: 12px; padding: 12px 16px 16px;
+         grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr); }
+  @media (max-width: 820px) {
+    main { grid-template-columns: minmax(0, 1fr); }
+    #editor { height: 60vh; }
+  }
+
+  /* source editor: a gutter of line numbers and breakpoints, highlight strips behind the text */
+  #editor { position: relative; display: flex; min-height: 0; overflow: hidden;
+            background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+            font: 13px/var(--lh) var(--mono); }
+  #gutter-clip { flex: none; width: 74px; overflow: hidden; border-right: 1px solid var(--border);
+                 user-select: none; }
+  #gutter { padding: 10px 0; }
+  .gl { height: var(--lh); display: flex; align-items: center; gap: 4px; padding: 0 6px 0 4px;
+        color: var(--faint); font-size: 11px; }
+  .gl .dot { width: 11px; height: 11px; border-radius: 50%; flex: none; }
+  .gl.node { cursor: pointer; }
+  .gl.node:hover .dot { outline: 1px solid var(--error); outline-offset: -1px; }
+  .gl.bp .dot { background: var(--error); }
+  .gl .num { flex: 1; text-align: right; }
+  .gl .count { width: 22px; text-align: right; color: var(--ok); }
+  #code { position: relative; flex: 1; min-width: 0; }
+  #hl { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+  #hl div { position: absolute; left: 0; right: 0; height: var(--lh); }
+  #hl .cur { background: var(--cur-bg); box-shadow: inset 3px 0 var(--cur-edge); }
+  #hl .frame { background: var(--frame-bg); }
+  #hl .bad { background: var(--bad-bg); box-shadow: inset 3px 0 var(--error); }
+  textarea { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 10px;
+             border: 0; outline: 0; resize: none; background: transparent; color: var(--text);
+             font: inherit; white-space: pre; overflow: auto; tab-size: 2; }
+  textarea[readonly] { color: var(--muted); }
+
+  aside { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow: auto; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+           padding: 8px 10px; }
+  .panel h2 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+              color: var(--muted); margin: 0 0 6px; }
+  #out { font: 13px/1.5 var(--mono); white-space: pre-wrap; max-height: 30vh; overflow: auto;
+         min-height: 3em; }
+  .note { color: var(--muted); } .err { color: var(--error); } .warn { color: var(--warn); }
+  .okc { color: var(--ok); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td { padding: 2px 6px 2px 0; vertical-align: top; }
+  td.v { font-family: var(--mono); word-break: break-all; }
+  td.k { color: var(--muted); white-space: nowrap; width: 1%; padding-right: 14px; }
+  h3 { font-size: 12px; color: var(--muted); font-weight: 600; margin: 8px 0 2px; }
+  #stack { list-style: none; margin: 0; padding: 0; }
+  #stack li { padding: 2px 6px; border-radius: 4px; cursor: pointer; font-family: var(--mono);
+              font-size: 13px; }
+  #stack li.sel { background: var(--cur-bg); }
+  #problems { list-style: none; margin: 0; padding: 0; }
+  #problems li { padding: 3px 0; cursor: pointer; }
+  .empty { color: var(--faint); font-style: italic; }
+  kbd { font: 11px var(--mono); color: var(--faint); }
 </style>
 </head>
 <body>
 <header>
   <h1>Wiret</h1>
   <select id="lesson" disabled aria-label="Lesson"></select>
-  <label><input type="checkbox" id="det"> Deterministic</label>
-  <button id="run" disabled>▶ Run</button>
-  <span id="status">Loading Python…</span>
+  <div class="group" role="toolbar" aria-label="Run and debug">
+    <button id="run" class="primary" disabled title="Run, or continue to the next breakpoint (F5)">▶ Run</button>
+    <button id="step" disabled title="Run one node (F11)">⤵ Step</button>
+    <button id="over" disabled title="Run one node, running any call it makes in one go (F10)">↷ Over</button>
+    <button id="back" disabled title="Go back to the previous pause (Shift+F11)">↶ Back</button>
+    <button id="stop" disabled title="Stop and edit (Shift+F5)">■ Stop</button>
+  </div>
+  <div class="group">
+    <label><input type="checkbox" id="animate"> Animate</label>
+    <select id="speed" aria-label="Animation speed">
+      <option value="700">Slow</option><option value="300" selected>Medium</option><option value="100">Fast</option>
+    </select>
+    <label title="Run with the bundled math library, so results are the same on every machine"><input type="checkbox" id="det"> Deterministic</label>
+  </div>
+  <span id="ready">Loading Python…</span>
 </header>
+<div id="msg" role="status">Loading the Wiret compiler and VM into the page…</div>
 <main>
-  <textarea id="src" spellcheck="false" aria-label="Source"></textarea>
-  <div id="out" role="log" aria-label="Output"></div>
+  <div id="editor">
+    <div id="gutter-clip"><div id="gutter"></div></div>
+    <div id="code"><div id="hl"></div><textarea id="src" spellcheck="false" aria-label="Source"></textarea></div>
+  </div>
+  <aside>
+    <section class="panel"><h2>Output</h2><div id="out" role="log"></div></section>
+    <section class="panel" id="dbg"><h2>Debugger</h2><div id="dbg-body"></div></section>
+    <section class="panel"><h2>Problems</h2><ul id="problems"></ul></section>
+  </aside>
 </main>
 
 <script src="https://cdn.jsdelivr.net/pyodide/v0.27.8/full/pyodide.js"></script>
-<script>
-const $ = id => document.getElementById(id);
-const FUEL = 5_000_000;   // a runaway loop stops in seconds instead of freezing the tab
-let py, webRun;
+<script type="module">
+import { Session, nodeKey } from "./debugger.js";
 
-function show(lines) {
-  const out = $("out");
-  out.replaceChildren(...lines.map(([cls, text]) => {
-    const div = document.createElement("div");
-    if (cls) div.className = cls;
-    div.textContent = text;
-    return div;
-  }));
-}
+const $ = (id) => document.getElementById(id);
+const FUEL = 5_000_000;       // a runaway loop stops in seconds instead of freezing the tab
+const LH = 20, PAD = 10;      // line height and padding of the source, as in the CSS
+const el = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+};
 
+let api;                      // wiret.webapi
+let nodes = {};               // graph -> node -> {line, what}, from the last good parse
+let lineNodes = new Map();    // line -> [graph, node]
+let problems = [];
+const breakpoints = new Set();
+let counts = null;            // graph -> node -> runs, after a run
+let trace = null, session = null, frameSel = -1, timer = null;
+let fault = null;
+let busy = false;             // a run is being recorded; the controls wait for it
+
+// ---------- Python ----------
 async function boot() {
   const t0 = performance.now();
-  py = await loadPyodide();
+  const py = await loadPyodide();
   const zip = await (await fetch("wiret_bundle.zip")).arrayBuffer();
   py.unpackArchive(zip, "zip", { extractDir: "/app" });
   py.runPython(`import sys; sys.path.insert(0, "/app")`);
-  webRun = py.pyimport("wiret.webapi").run;
+  api = py.pyimport("wiret.webapi");
   const files = py.runPython(`
 import os
-[f"lessons/{n}" for n in sorted(os.listdir("/app/lessons"))] + ["examples/demo.wiret"]
+[f"lessons/{n}" for n in sorted(os.listdir("/app/lessons")) if n.endswith(".wiret")] + ["examples/demo.wiret"]
 `).toJs();
   for (const f of files) {
     const name = f.split("/").pop().replace(".wiret", "").replace(/^(\d+)_/, "$1. ").replace(/_/g, " ");
     $("lesson").add(new Option(name, f));
   }
-  $("lesson").disabled = $("run").disabled = false;
-  $("status").textContent = `Ready (Python ${py.runPython("sys.version.split()[0]")}, ` +
-                            `${Math.round(performance.now() - t0)} ms)`;
-  loadLesson();
+  $("lesson").onchange = () => {
+    stop();
+    $("src").value = py.FS.readFile("/app/" + $("lesson").value, { encoding: "utf8" });
+    $("src").scrollTop = 0;
+    breakpoints.clear();
+    counts = fault = null;
+    showOutput([]);
+    recheck();
+    say("Press Run (F5) to run the program, or Step (F11) to go through it one node at a time. Click beside a node's line number to set a breakpoint.");
+  };
+  $("lesson").disabled = false;
+  $("ready").textContent = `Python ${py.runPython("sys.version.split()[0]")} · ready in ${((performance.now() - t0) / 1000).toFixed(1)} s`;
+  $("lesson").onchange();
+  setButtons();
 }
 
-function loadLesson() {
-  $("src").value = py.FS.readFile("/app/" + $("lesson").value, { encoding: "utf8" });
-  show([["note", "Press Run (Ctrl+Enter)."]]);
+function recheck() {
+  const r = JSON.parse(api.check($("src").value));
+  if (Object.keys(r.nodes).length || !r.diags.some((d) => d.code === "parse")) nodes = r.nodes;
+  lineNodes = new Map();
+  for (const [g, ns] of Object.entries(nodes)) for (const [n, i] of Object.entries(ns)) lineNodes.set(i.line, [g, n]);
+  problems = r.diags;
+  renderProblems();
+  renderGutter();
+  renderHighlights();
 }
 
-function run() {
-  const t0 = performance.now();
-  const r = JSON.parse(webRun($("src").value, "Main", $("det").checked, FUEL));
-  const ms = Math.round(performance.now() - t0);
-  const lines = r.output.map(l => ["", l]);
-  for (const d of r.diags) {
-    const where = d.line ? `line ${d.line}:${d.col}: ` : "";   // checker messages name their node
-    lines.push([d.severity === "error" ? "err" : "warn", `${where}${d.message}`]);
+// ---------- running and stepping ----------
+async function start(mode) {
+  if (busy) return;
+  stop();
+  setBusy(true);
+  try {
+    await record(mode);
+  } finally {
+    setBusy(false);
   }
-  if (r.error) lines.push(["err", r.error]);
-  if (r.ok && r.result && r.result !== "(no results)") lines.push(["note", `→ ${r.result}`]);
-  lines.push(["note", r.ok ? `(finished in ${ms} ms)` : "(did not run)"]);
-  show(lines);
 }
 
-$("lesson").onchange = loadLesson;
-$("run").onclick = run;
-$("src").addEventListener("keydown", e => {
-  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); run(); }
-  if (e.key === "Tab") { e.preventDefault(); document.execCommand("insertText", false, "  "); }
+function setBusy(on) {
+  busy = on;
+  document.body.dataset.busy = on ? "1" : "";
+  setButtons();
+}
+
+async function record(mode) {
+  const animate = mode === "run" && $("animate").checked;
+  const debugging = mode !== "run" || animate || breakpoints.size > 0;
+  say(debugging ? "Recording the run…" : "Running…");
+  await new Promise((r) => setTimeout(r, 20));          // let the message paint
+  const t0 = performance.now();
+  const r = JSON.parse(api.debug_run($("src").value, "Main", $("det").checked, FUEL,
+                                     debugging ? 5000 : 0));
+  const ms = Math.round(performance.now() - t0);
+  problems = r.diags; renderProblems();
+  if (r.diags.some((d) => d.severity === "error")) {   // did not compile
+    showOutput([["err", "The program has problems, so it did not run. See Problems."]]);
+    say("The program has problems, so it did not run. Click a problem to find its line.", true);
+    return;
+  }
+  nodes = r.nodes;
+  trace = r; trace.ms = ms;
+  counts = null; fault = null;
+  if (!debugging) return finish();
+  $("src").readOnly = true;                            // the recording is of this text
+  session = new Session(trace, breakpoints);
+  if (animate) return animateNext();
+  move(mode);
+}
+
+function move(mode) {
+  if (!session) return;
+  clearTimeout(timer); timer = null;
+  const r = session.advance(mode);
+  if (!r) return finish();
+  frameSel = -1;
+  show(r);
+}
+
+function animateNext() {
+  const r = session.advance("animate");
+  if (!r) return finish();
+  frameSel = -1;
+  show(r);
+  if (!r.paused) timer = setTimeout(animateNext, +$("speed").value);
+}
+
+function back() {
+  if (!session) return;
+  clearTimeout(timer); timer = null;
+  if (!session.back()) return;
+  counts = fault = null;
+  $("src").readOnly = true;
+  renderGutter();
+  frameSel = -1;
+  show({ paused: true, breakpoint: false });
+}
+
+function finish() {
+  clearTimeout(timer); timer = null;
+  const r = trace;
+  counts = r.counts; fault = r.fault;
+  const lines = r.output.map((l) => ["", l]);
+  if (r.ok) {
+    if (r.result && r.result !== "(no results)") lines.push(["okc", `Finished: ${r.result}`]);
+    lines.push(["note", `(finished in ${r.ms} ms)`]);
+    say("The program finished. The green numbers beside the lines show how often each node ran." +
+        (r.truncated ? " The run was too long to record all of it, so stepping stopped early." : ""));
+  } else {
+    lines.push(["err", r.explain || r.error]);
+    if (r.explain && r.error && r.explain !== r.error) lines.push(["note", r.error]);
+    say(r.explain || r.error, true);
+  }
+  showOutput(lines);
+  $("src").readOnly = false;
+  renderDebugger();
+  renderGutter();
+  renderHighlights(fault ? lineOf(fault.graph, fault.node) : null);
+  setButtons();
+}
+
+function stop() {
+  clearTimeout(timer); timer = null;
+  session = null; trace = null; frameSel = -1;
+  $("src").readOnly = false;
+  renderDebugger();
+  renderHighlights();
+  setButtons();
+}
+
+// ---------- showing a pause ----------
+function show(r) {
+  const s = session.current;
+  showOutput(trace.output.slice(0, s.out).map((l) => ["", l]));
+  const what = nodes[s.graph]?.[s.node]?.what;
+  if (r.paused) {
+    const why = breakpoints.has(nodeKey(s)) ? " (breakpoint)" : "";
+    const inputs = s.phase === "ready" ? "Its inputs are listed under Wire values."
+                                       : "Its inputs haven't been worked out yet; Step to compute them.";
+    say(`Paused${why} just before ${s.node}${what ? ` (${what})` : ""} in ${s.graph} runs. ${inputs} ` +
+        "Step runs one node; Over runs calls in one go; Run continues.");
+  } else {
+    say(`Animating: ${s.node}${what ? ` (${what})` : ""} in ${s.graph}.`);
+  }
+  renderDebugger();
+  const line = currentLine();
+  renderHighlights(null, line);
+  if (line) scrollToLine(line);
+  setButtons();
+}
+
+const lineOf = (g, n) => nodes[g]?.[n]?.line ?? null;
+const selectedFrame = () => {
+  const s = session?.current;
+  if (!s) return null;
+  const i = frameSel < 0 ? s.frames.length - 1 : frameSel;
+  return trace.frame_table[s.frames[i]];
+};
+const currentLine = () => { const f = selectedFrame(); return f ? lineOf(f.graph, f.node) : null; };
+
+function renderDebugger() {
+  const body = $("dbg-body");
+  const s = session?.current;
+  if (!s) {
+    body.replaceChildren(el("div", "empty", "Step through a program (F11) to see its call stack, variables and wire values here."));
+    return;
+  }
+  const frames = s.frames.map((i) => trace.frame_table[i]);
+  const sel = frameSel < 0 ? frames.length - 1 : frameSel;
+  const f = frames[sel];
+  const stack = el("ul"); stack.id = "stack";
+  for (let i = frames.length - 1; i >= 0; i--) {
+    const li = el("li", i === sel ? "sel" : "", `${frames[i].graph}  ·  ${frames[i].node}`);
+    li.onclick = () => { frameSel = i; renderDebugger(); const l = currentLine(); renderHighlights(null, l); if (l) scrollToLine(l); };
+    stack.append(li);
+  }
+  const table = (rows, empty) => {
+    if (!rows.length) return el("div", "empty", empty);
+    const t = el("table");
+    for (const [k, v, title] of rows) {
+      const tr = el("tr");
+      const kc = el("td", "k", k); if (title) kc.title = title;
+      tr.append(kc, el("td", "v", v));
+      t.append(tr);
+    }
+    return t;
+  };
+  const vars = f.vars.map(([n, kind, ty, v]) => [n, v, `${kind} ${ty}`])
+    .concat(trace.globals_table[s.globals].map(([n, ty, v]) => [n, v, `variable ${ty}`]));
+  const order = (k) => lineOf(f.graph, k.split(".")[0]) ?? 1e9;
+  const pins = Object.entries(f.pins).sort((a, b) => order(a[0]) - order(b[0]) || a[0].localeCompare(b[0]));
+  body.replaceChildren(
+    el("h3", "", "Call stack"), stack,
+    el("h3", "", "Variables"), table(vars, "none"),
+    el("h3", "", "Wire values"), table(pins, "none"));
+}
+
+function showOutput(lines) {
+  if (!lines.length) { $("out").replaceChildren(el("div", "empty", "Nothing yet.")); return; }
+  $("out").replaceChildren(...lines.map(([cls, t]) => el("div", cls, t)));
+  $("out").scrollTop = $("out").scrollHeight;
+}
+
+function say(text, error = false) {
+  $("msg").textContent = text;
+  $("msg").className = error ? "err" : "";
+}
+
+function setButtons() {
+  const ready = !!api && !busy, live = !!session && !session.finished;
+  $("run").disabled = $("step").disabled = $("over").disabled = $("lesson").disabled = !ready;
+  $("run").textContent = live ? "▶ Continue" : "▶ Run";
+  $("back").disabled = busy || !session || session.history.length === 0 || session.history.at(-1)[0] < 0;
+  $("stop").disabled = busy || !trace;
+}
+
+// ---------- the source editor ----------
+function renderGutter() {
+  const n = $("src").value.split("\n").length;
+  const rows = [];
+  for (let line = 1; line <= n; line++) {
+    const row = el("div", "gl");
+    const gn = lineNodes.get(line);
+    const dot = el("span", "dot");
+    const count = el("span", "count");
+    if (gn) {
+      const key = `${gn[0]}\t${gn[1]}`;
+      row.classList.add("node");
+      if (breakpoints.has(key)) row.classList.add("bp");
+      row.title = `${gn[1]} in ${gn[0]}: click to ${breakpoints.has(key) ? "remove the" : "set a"} breakpoint`;
+      row.onclick = () => toggleBreakpoint(key);
+      const c = counts?.[gn[0]]?.[gn[1]];
+      if (c) { count.textContent = c > 999 ? "1k+" : c; count.title = `ran ${c} time${c === 1 ? "" : "s"}`; }
+    }
+    row.append(dot, el("span", "num", line), count);
+    rows.push(row);
+  }
+  $("gutter").replaceChildren(...rows);
+  syncScroll();
+}
+
+function toggleBreakpoint(key) {
+  breakpoints.has(key) ? breakpoints.delete(key) : breakpoints.add(key);
+  renderGutter();
+}
+
+function renderHighlights(faultLine = null, curLine = null) {
+  const strips = [];
+  for (const d of problems) {
+    const line = d.line ?? (d.graph && d.node ? lineOf(d.graph, d.node) : null);
+    if (line && d.severity === "error") strips.push([line, "bad"]);
+  }
+  if (faultLine) strips.push([faultLine, "bad"]);
+  if (curLine) strips.push([curLine, frameSel < 0 || frameSel === session.current.frames.length - 1 ? "cur" : "frame"]);
+  $("hl").replaceChildren(...strips.map(([line, cls]) => {
+    const d = el("div", cls);
+    d.dataset.line = line;
+    return d;
+  }));
+  syncScroll();
+}
+
+function syncScroll() {
+  const top = $("src").scrollTop;
+  $("gutter").style.transform = `translateY(${-top}px)`;
+  for (const d of $("hl").children) d.style.top = `${PAD + (d.dataset.line - 1) * LH - top}px`;
+}
+
+function scrollToLine(line) {
+  const ta = $("src"), y = PAD + (line - 1) * LH;
+  if (y < ta.scrollTop + LH || y > ta.scrollTop + ta.clientHeight - 2 * LH) {
+    ta.scrollTop = Math.max(0, y - ta.clientHeight / 3);
+  }
+}
+
+function renderProblems() {
+  const ul = $("problems");
+  if (!problems.length) { ul.replaceChildren(el("li", "empty", "No problems.")); return; }
+  ul.replaceChildren(...problems.map((d) => {
+    const line = d.line ?? (d.graph && d.node ? lineOf(d.graph, d.node) : null);
+    const li = el("li", d.severity === "error" ? "err" : "warn",
+                  `${line ? `Line ${line}: ` : ""}${d.explain || d.message}`);
+    li.title = d.message;
+    if (line) li.onclick = () => { scrollToLine(line); placeCaret(line); };
+    return li;
+  }));
+}
+
+function placeCaret(line) {
+  const ta = $("src");
+  const lines = ta.value.split("\n");
+  const pos = lines.slice(0, line - 1).reduce((a, l) => a + l.length + 1, 0);
+  ta.focus();
+  ta.setSelectionRange(pos, pos);
+}
+
+let checkJob = null;
+$("src").addEventListener("input", () => {
+  if (trace) stop();                                   // the last run was of other text
+  counts = fault = null;
+  renderGutter();
+  clearTimeout(checkJob);
+  checkJob = setTimeout(recheck, 350);
 });
-boot().catch(e => { $("status").textContent = "Failed to load"; show([["err", String(e)]]); });
+$("src").addEventListener("scroll", syncScroll);
+$("src").addEventListener("keydown", (e) => {
+  if (e.key === "Tab" && !$("src").readOnly) {
+    e.preventDefault();
+    document.execCommand("insertText", false, "  ");
+  }
+});
+
+// ---------- controls ----------
+function runOrContinue() { session && !session.finished ? move("run") : start("run"); }
+function stepMode(mode) { session && !session.finished ? move(mode) : start(mode); }
+$("run").onclick = runOrContinue;
+$("step").onclick = () => stepMode("step");
+$("over").onclick = () => stepMode("over");
+$("back").onclick = back;
+$("stop").onclick = () => { stop(); say("Stopped. You can edit the program again."); };
+
+document.addEventListener("keydown", (e) => {
+  if (!api || busy) return;
+  const k = e.key;
+  let act = null;
+  if (k === "F5" && e.shiftKey) act = () => $("stop").click();
+  else if (k === "F5" || (k === "Enter" && (e.ctrlKey || e.metaKey))) act = runOrContinue;
+  else if (k === "F10") act = () => stepMode("over");
+  else if (k === "F11" && e.shiftKey) act = back;
+  else if (k === "F11") act = () => stepMode("step");
+  else if (k === "F9") act = () => {
+    const ta = $("src");
+    const line = ta.value.slice(0, ta.selectionStart).split("\n").length;
+    const gn = lineNodes.get(line);
+    if (gn) toggleBreakpoint(`${gn[0]}\t${gn[1]}`);
+  };
+  if (act) { e.preventDefault(); act(); }
+});
+
+boot().catch((e) => {
+  $("ready").textContent = "failed to load";
+  say(`The page could not load Python: ${e}`, true);
+  console.error(e);
+});
 </script>
 </body>
 </html>
