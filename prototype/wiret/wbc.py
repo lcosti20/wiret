@@ -18,10 +18,21 @@ FLAG_HAS_SOURCE = 1
 
 # value types (section 5.3)
 I32, I64, F32, F64, STRING = 0x7F, 0x7E, 0x7D, 0x7C, 0x6E
-REF = 0x6B                      # `6B t`: reference to type index t (here: arrays)
-VT_NAMES = {I32: "i32", I64: "i64", F32: "f32", F64: "f64", STRING: "string"}
+REF = 0x6B                      # `6B t`: reference to type index t (arrays and structs)
+ANYREF = 0x6D                   # the top of the reference types; only in function types here
+FAULT = 0x6A                    # a caught fault: its message and code (section 4.6)
+SIGNAL = 0x69                   # a nullable reference to a signal that fibers await (4.5)
+VT_NAMES = {I32: "i32", I64: "i64", F32: "f32", F64: "f64", STRING: "string", ANYREF: "anyref",
+            FAULT: "fault", SIGNAL: "signal"}
 FUNC_TYPE = 0x60
 ARRAY_TYPE = 0x5E
+STRUCT_TYPE = 0x5F
+MAP_TYPE = 0x5D
+SET_TYPE = 0x5C
+CLASS_TYPE = 0x5B
+INTERFACE_TYPE = 0x5A
+DELEGATE_TYPE = 0x59
+DISPATCHER_TYPE = 0x58
 
 
 @dataclass(frozen=True)
@@ -36,10 +47,78 @@ class ArrayType:
     elem: object                # a value type
 
 
-def vt_name(vt, types=None) -> str:
+@dataclass(frozen=True)
+class StructType:
+    """Type entry `5F fields:vec(field)`, `field = valtype flags:u8 [const]` (section 5.3).
+    Each field is (value type, default or None); flag bit 0 says a default follows. A default
+    is only written for numbers and strings (a string default is a data index)."""
+    fields: tuple
+
+
+@dataclass(frozen=True)
+class MapType:
+    """Type entry `5D key:valtype value:valtype`."""
+    key: object
+    value: object
+
+
+@dataclass(frozen=True)
+class SetType:
+    """Type entry `5C elem:valtype`."""
+    elem: object
+
+
+@dataclass(frozen=True)
+class ClassType:
+    """Type entry `5B flags:u8 super:u32 interfaces:vec(...) fields:vec(field) vtable:vec(funcidx)`
+    (section 5.3). `super` is None or a type index; `fields` are the class's own, each
+    (value type, default or None), inherited ones coming first in the object; `vtable` is the
+    full slot list, overrides replacing inherited slots. `interfaces` is every interface the
+    class implements, inherited ones included, as (interface type index, (funcidx per method)).
+    No host types yet."""
+    super: object
+    fields: tuple
+    vtable: tuple
+    interfaces: tuple = ()
+
+
+@dataclass(frozen=True)
+class DelegateType:
+    """Type entry `59 functype:u32`: a function plus, optionally, a bound receiver."""
+    functype: int
+
+
+@dataclass(frozen=True)
+class DispatcherType:
+    """Type entry `58 functype:u32` (no results): an ordered list of delegates."""
+    functype: int
+
+
+@dataclass(frozen=True)
+class InterfaceType:
+    """Type entry `5A methods:vec(functype:u32)` (section 5.3): one function type per method,
+    without the receiver. A method's index is its dispatch slot."""
+    methods: tuple
+
+
+# Class names by type index, for messages and disassembly; set from a module's `name` section.
+CLASS_NAMES: dict = {}
+
+
+def vt_name(vt, types=None, depth=0) -> str:
     if isinstance(vt, Ref):
-        if types is not None and vt.type < len(types) and isinstance(types[vt.type], ArrayType):
-            return f"array<{vt_name(types[vt.type].elem, types)}>"
+        entry = types[vt.type] if types is not None and vt.type < len(types) else None
+        if isinstance(entry, ArrayType) and depth < 8:
+            return f"array::<{vt_name(entry.elem, types, depth + 1)}>"
+        if isinstance(entry, StructType):
+            return f"struct {vt.type}"
+        if isinstance(entry, (ClassType, InterfaceType)):
+            return CLASS_NAMES.get(vt.type, f"{'class' if isinstance(entry, ClassType) else 'interface'} {vt.type}")
+        if isinstance(entry, MapType) and depth < 8:
+            return (f"map::<{vt_name(entry.key, types, depth + 1)}, "
+                    f"{vt_name(entry.value, types, depth + 1)}>")
+        if isinstance(entry, SetType) and depth < 8:
+            return f"set::<{vt_name(entry.elem, types, depth + 1)}>"
         return f"ref {vt.type}"
     return VT_NAMES.get(vt, f"0x{vt:02X}")
 
@@ -56,11 +135,19 @@ class WbcError(Exception):
 
 # -- opcodes -----------------------------------------------------------------------
 # immediates: L = branch label (padded s32), u = u32, s = s32, S = s64, f = f32 bytes,
-#             d = f64 bytes, T = br_table, b = u8
+#             d = f64 bytes, T = br_table, b = u8, Lu = label then u32 (try.push)
 OPS: dict[str, tuple] = {
     "unreachable": (0x00, ""), "nop": (0x01, ""), "br": (0x02, "L"), "br_if": (0x03, "L"),
     "br_table": (0x04, "T"), "return": (0x05, ""), "call": (0x06, "u"),
-    "cont.push": (0x0A, "L"), "cont.pop": (0x0B, ""),
+    "cont.push": (0x0A, "L"), "cont.pop": (0x0B, ""), "try.push": (0x0C, "Lu"),
+    "throw": (0x0E, ""), "suspend": (0x0D, "b"), "call_virtual": (0x07, "uu"),
+    "call_interface": (0x08, "uu"), "call_delegate": (0x09, "u"),
+    "delegate.new": (0xF4, "ub"), "dispatcher.bind": (0xF5, "u"),
+    "dispatcher.unbind": (0xF6, "u"), "dispatcher.broadcast": (0xF7, "u"),
+    "ref.null": (0x25, "u"), "ref.is_null": (0x26, ""), "ref.eq": (0x27, ""),
+    "ref.cast": (0x28, "u"), "ref.test": (0x29, "u"), "ref.valid": (0x2A, ""),
+    "ref.share": (0x2B, ""),
+    "class.new": (0xD3, "u"), "class.get": (0xD4, "uu"), "class.set": (0xD5, "uu"),
     "drop": (0x10, ""), "select": (0x11, ""),
     "local.get": (0x12, "u"), "local.set": (0x13, "u"), "local.tee": (0x14, "u"),
     "global.get": (0x15, "u"), "global.set": (0x16, "u"),
@@ -71,6 +158,13 @@ OPS: dict[str, tuple] = {
     "array.new": (0xD6, "u"), "array.len": (0xD7, ""), "array.get": (0xD8, "u"),
     "array.set": (0xD9, "u"), "array.push": (0xDA, "u"), "array.insert": (0xDB, "u"),
     "array.remove": (0xDC, "u"), "array.clear": (0xDD, "u"), "array.clone": (0xDE, "u"),
+    "struct.new": (0xD0, "u"), "struct.get": (0xD1, "uu"), "struct.with": (0xD2, "uu"),
+    "map.new": (0xE0, "u"), "map.find": (0xE1, "u"), "map.set": (0xE2, "u"),
+    "map.remove": (0xE3, "u"), "map.has": (0xE4, "u"), "map.len": (0xE5, "u"),
+    "map.key_at": (0xE6, "u"), "map.value_at": (0xE7, "u"), "map.clear": (0xE8, "u"),
+    "set.new": (0xE9, "u"), "set.add": (0xEA, "u"), "set.remove": (0xEB, "u"),
+    "set.has": (0xEC, "u"), "set.len": (0xED, "u"), "set.at": (0xEE, "u"),
+    "set.clear": (0xEF, "u"),
 }
 INT_OPS = ["eqz", "eq", "ne", "lt_s", "lt_u", "gt_s", "gt_u", "le_s", "le_u", "ge_s", "ge_u",
            "add", "sub", "mul", "div_s", "div_u", "rem_s", "rem_u", "and", "or", "xor", "shl",
@@ -98,14 +192,7 @@ BY_CODE: dict[int, tuple] = {code: (name, imm) for name, (code, imm) in OPS.item
 
 # Opcodes the spec defines for later tiers (objects, containers, fibers, faults). They decode,
 # but this prototype's verifier rejects them.
-LATER_TIER_OPS = {0x07: "call_virtual", 0x08: "call_interface", 0x09: "call_delegate",
-                  0x0C: "try.push", 0x0D: "suspend", 0x0E: "throw", 0x25: "ref.null",
-                  0x26: "ref.is_null", 0x27: "ref.eq", 0x28: "ref.cast", 0x29: "ref.test",
-                  0x2A: "ref.valid", 0x2B: "ref.share"}
-for _c in list(range(0xD0, 0xD6)) + list(range(0xE0, 0xF0)):
-    LATER_TIER_OPS.setdefault(_c, f"object.0x{_c:02X}")
-for _c in (0xF4, 0xF5, 0xF6, 0xF7):
-    LATER_TIER_OPS[_c] = f"object.0x{_c:02X}"
+LATER_TIER_OPS: dict = {}     # every opcode of section 5.6 is now in the prototype
 
 
 # -- byte writer / reader ------------------------------------------------------------
@@ -281,8 +368,16 @@ def decode_code(code: bytes) -> list:
             imms = ()
         elif imm == "L":
             imms = (r.sleb(32),)
+        elif imm == "Lu":
+            imms = (r.sleb(32), r.u32())
+        elif imm == "b":
+            imms = (r.u8(),)
+        elif imm == "ub":
+            imms = (r.u32(), r.u8())
         elif imm == "u":
             imms = (r.u32(),)
+        elif imm == "uu":
+            imms = (r.u32(), r.u32())
         elif imm == "s":
             imms = (r.sleb(32),)
         elif imm == "S":
@@ -305,8 +400,19 @@ def encode_instr(w: Writer, name: str, imms: tuple):
     w.u8(code)
     if imm == "L":
         w.sleb5(imms[0])
+    elif imm == "Lu":
+        w.sleb5(imms[0])
+        w.u32(imms[1])
+    elif imm == "b":
+        w.u8(imms[0])
+    elif imm == "ub":
+        w.u32(imms[0])
+        w.u8(imms[1])
     elif imm == "u":
         w.u32(imms[0])
+    elif imm == "uu":
+        w.u32(imms[0])
+        w.u32(imms[1])
     elif imm in ("s", "S"):
         w.sleb(imms[0])
     elif imm == "f":
@@ -335,7 +441,7 @@ class Body:
 @dataclass
 class WbcModule:
     flags: int = 0
-    types: list = field(default_factory=list)      # [(params[vt], results[vt]) | ArrayType]
+    types: list = field(default_factory=list)      # [(params, results) | ArrayType | StructType | MapType | SetType]
     imports: list = field(default_factory=list)    # [(module, field, typeidx, flags)]
     funcs: list = field(default_factory=list)      # [(typeidx, flags)]
     globals: list = field(default_factory=list)    # [(vt, mut, init)]
@@ -360,8 +466,8 @@ class WbcModule:
 
 
 def _write_const(w: Writer, vt, value):
-    if isinstance(vt, Ref):
-        return                       # references start empty (an empty array)
+    if isinstance(vt, Ref) or vt == SIGNAL:
+        return                       # references start empty (an empty array), signals null
     if vt == I32:
         w.raw(struct.pack("<q", value))
     elif vt == I64:
@@ -377,7 +483,7 @@ def _write_const(w: Writer, vt, value):
 
 
 def _read_const(r: Reader, vt):
-    if isinstance(vt, Ref):
+    if isinstance(vt, Ref) or vt == SIGNAL:
         return None
     if vt in (I32, I64):
         return struct.unpack("<q", r.raw(8))[0]
@@ -406,6 +512,49 @@ def encode_module(m: WbcModule) -> bytes:
         if isinstance(entry, ArrayType):
             w.u8(ARRAY_TYPE)
             write_vt(w, entry.elem)
+            continue
+        if isinstance(entry, MapType):
+            w.u8(MAP_TYPE)
+            write_vt(w, entry.key)
+            write_vt(w, entry.value)
+            continue
+        if isinstance(entry, SetType):
+            w.u8(SET_TYPE)
+            write_vt(w, entry.elem)
+            continue
+        if isinstance(entry, (DelegateType, DispatcherType)):
+            w.u8(DELEGATE_TYPE if isinstance(entry, DelegateType) else DISPATCHER_TYPE)
+            w.u32(entry.functype)
+            continue
+        if isinstance(entry, InterfaceType):
+            w.u8(INTERFACE_TYPE)
+            w.u32(len(entry.methods))
+            for t in entry.methods:
+                w.u32(t)
+            continue
+        if isinstance(entry, (StructType, ClassType)):
+            if isinstance(entry, ClassType):
+                w.u8(CLASS_TYPE)
+                w.u8(0)                                   # flags: not a host type
+                w.u32(0 if entry.super is None else entry.super + 1)
+                w.u32(len(entry.interfaces))
+                for iface, impl in entry.interfaces:
+                    w.u32(iface)
+                    w.u32(len(impl))
+                    for f in impl:
+                        w.u32(f)
+            else:
+                w.u8(STRUCT_TYPE)
+            w.u32(len(entry.fields))
+            for vt, default in entry.fields:
+                write_vt(w, vt)
+                w.u8(0 if default is None else 1)
+                if default is not None:
+                    _write_const(w, vt, default)
+            if isinstance(entry, ClassType):
+                w.u32(len(entry.vtable))
+                for f in entry.vtable:
+                    w.u32(f)
             continue
         params, results = entry
         w.u8(FUNC_TYPE)
@@ -516,6 +665,43 @@ def decode_module(data: bytes) -> WbcModule:
                 code = s.u8()
                 if code == ARRAY_TYPE:
                     m.types.append(ArrayType(s.vt()))
+                    continue
+                if code == MAP_TYPE:
+                    m.types.append(MapType(s.vt(), s.vt()))
+                    continue
+                if code in (DELEGATE_TYPE, DISPATCHER_TYPE):
+                    cls = DelegateType if code == DELEGATE_TYPE else DispatcherType
+                    m.types.append(cls(s.u32()))
+                    continue
+                if code == INTERFACE_TYPE:
+                    m.types.append(InterfaceType(tuple(s.u32() for _ in range(s.u32()))))
+                    continue
+                if code == SET_TYPE:
+                    m.types.append(SetType(s.vt()))
+                    continue
+                if code in (STRUCT_TYPE, CLASS_TYPE):
+                    sup, ifaces = None, ()
+                    if code == CLASS_TYPE:
+                        if s.u8() != 0:
+                            raise WbcError("host class types are not supported by this VM")
+                        sup = s.u32()
+                        sup = None if sup == 0 else sup - 1
+                        ifaces = tuple((s.u32(), tuple(s.u32() for _ in range(s.u32())))
+                                       for _ in range(s.u32()))
+                    fields = []
+                    for _ in range(s.u32()):
+                        vt = s.vt()
+                        flags = s.u8()
+                        if flags & ~1:
+                            raise WbcError(f"struct field flags 0x{flags:02X} are not supported")
+                        if flags and isinstance(vt, Ref):
+                            raise WbcError("a reference field cannot have a default")
+                        fields.append((vt, _read_const(s, vt) if flags else None))
+                    if code == CLASS_TYPE:
+                        vtable = tuple(s.u32() for _ in range(s.u32()))
+                        m.types.append(ClassType(sup, tuple(fields), vtable, ifaces))
+                    else:
+                        m.types.append(StructType(tuple(fields)))
                     continue
                 if code != FUNC_TYPE:
                     raise WbcError(f"type entry 0x{code:02X} is not supported by this VM")

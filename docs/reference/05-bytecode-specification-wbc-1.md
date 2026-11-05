@@ -75,12 +75,12 @@ A `const` is 8 bytes (numeric bit pattern), or a `u32` data index for `string`, 
 | `5E` | array | `elem:storagetype` |
 | `5D` | map | `key:valtype value:valtype` |
 | `5C` | set | `elem:valtype` |
-| `5B` | class | `flags:u8 super:u32 interfaces:vec(iface:u32 impl:vec(funcidx)) fields:vec(field) vtable:vec(funcidx)`. `super` is 0 for none, else type index + 1. Flag bit 0 marks a host type: then a `name` follows and there are no fields. `fields` are the class's own; inherited fields come first in the layout. `vtable` holds the full slot list, with overrides replacing inherited slots. |
-| `5A` | interface | `methods:vec(functype:u32)`; the method index is the dispatch slot. |
+| `5B` | class | `flags:u8 super:u32 interfaces:vec(iface:u32 impl:vec(funcidx)) fields:vec(field) vtable:vec(funcidx)`. `super` is 0 for none, else type index + 1. Flag bit 0 marks a host type: then a `name` follows and there are no fields. `fields` are the class's own; inherited fields come first in the layout. `vtable` holds the full slot list: the superclass's slots, with overrides replacing inherited slots, then the class's new methods ordered by name. |
+| `5A` | interface | `methods:vec(functype:u32)`; the method index is the dispatch slot. A function type here leaves out the receiver. A class entry's `interfaces` lists every interface the class implements, including those of its superclasses, each with the function implementing each method, so `call_interface` never walks the hierarchy. The verifier requires a class to keep its superclass's interfaces, and each implementation to take the class or a superclass as its receiver, to have the method's function type after it, and not to be latent. |
 | `59` | delegate | `functype:u32` |
 | `58` | dispatcher | `functype:u32` (no results) |
 
-`field = storagetype flags:u8 [const]` where flag bit 0 says a default value follows.
+`field = storagetype flags:u8 [const]` where flag bit 0 says a default value follows. In a struct entry only number and string fields carry one. A struct's default value holds each field's default, else that field type's default (a nested struct's own default, an empty array); the VM builds struct locals and globals from it.
 
 ### 5.4 Custom sections defined by this version
 
@@ -91,7 +91,7 @@ A `const` is 8 bytes (numeric bit pattern), or a `u32` data index for `string`, 
 | `wr.pins` | For each function: a list of `(local, node, pin)` triples, naming the node output pin that each local holds (`node` and `pin` are indices into that function's `wr.debug` string table). Complete for `-Og` builds; otherwise it lists the pins that survive optimisation. Lets an editor show the value on a wire and lets the host call `wr_getpin`. |
 | `wr.graph` | The canonical `.wiret` text, deflate-compressed. Lets a debugger or editor open a `.wbc` it did not build. |
 | `wr.meta` | Module id, compiler and registry versions, **semantic hash** and **layout hash** (section 2.5), source hash. |
-| `wr.reflect` | Attribute data for the host: `@doc`, `@category`, parameter names and defaults. |
+| `wr.reflect` | Attribute data for the host: `#[doc]`, `#[category]`, parameter names and defaults. |
 | `wr.caps` | Every capability the module's imports require, so a host can inspect or refuse a module before loading it. |
 
 **Sidecar.** `wiretc build --sidecar` writes `wr.debug`, `wr.pins`, `wr.graph` and `wr.reflect` to a separate `out.wdbg` file instead of embedding them. `wr.meta` in both files carries the same module id and semantic hash, so a debugger can match them. Release builds can ship the small `.wbc` alone. A `.wdbg` file uses the container of section 5.2 with the magic `00 57 44 47` (NUL 'W' 'D' 'G'), `version` 1 and `flags` 0, and holds only custom sections.
@@ -122,7 +122,7 @@ The layouts of `name`, `wr.meta`, `wr.reflect`, `wr.caps` and `wr.graph` are not
 
 A conforming VM verifies every module before running any of it. The verifier makes one linear pass over each function and requires all of the following.
 
-1. **Structure.** Sections are in order and sizes agree; every index is in range; exports are unique; the class hierarchy is acyclic; each vtable entry and interface implementation has the required signature.
+1. **Structure.** Sections are in order and sizes agree; every index is in range; exports are unique; the class hierarchy is acyclic; no struct type holds itself by value, directly or through other struct fields (a field that is an array of it is allowed); each vtable entry and interface implementation has the required signature. A type reference may point to a later type entry.
 2. **Decoding.** Every instruction decodes; every branch target is an instruction boundary inside the same function. A first pass collects the set of labels.
 3. **Empty stack at labels.** The operand stack is empty before every label, after `br`, `br_table`, `return`, `throw`, `unreachable`, and after `cont.pop` (which falls through only when no continuation exists). A branch may only occur when its own operands are the entire stack: `br_if` with exactly one `i32` on the stack, `br_table` likewise.
 4. **Typing.** Each instruction's operands match its signature (section 5.6). References follow subtyping: a class is a subtype of its superclass chain and interfaces; every reference type is a subtype of `anyref`; null has every reference type. `local.*` and `global.*` match the declared types.
@@ -154,7 +154,7 @@ Notation: `[in] -> [out]`. `L` is a branch target, an `s32` offset relative to t
 | 0B | `cont.pop` |  | Jumps to the top continuation; discards handler markers on the way; falls through if none. |
 | 0C | `try.push` | L, local | Pushes a handler marker. On a fault the VM stores the fault in `local`, unwinds to the marker, clears the operand stack and jumps to L. |
 | 0D | `suspend` | kind: 0 yield, 1 timer, 2 signal | `[]`, `[f64]` or `[signal]` -> `[]` |
-| 0E | `throw` |  | `[fault]` -> |
+| 0E | `throw` |  | `[fault]` -> . A `fault` is made with the native `std.fault.Make` and read with `std.fault.Message` and `std.fault.Code` (section 3.4). The type `fault` appears only in locals and function types. |
 | 0F | `brk` |  | Reserved for debuggers. Never appears in a file. |
 
 **Variables and constants (10 to 2F)**
@@ -162,7 +162,7 @@ Notation: `[in] -> [out]`. `L` is a branch target, an `s32` offset relative to t
 | Op | Mnemonic | Immediates | Stack |
 | --- | --- | --- | --- |
 | 10 | `drop` |  | `[t]` -> `[]` |
-| 11 | `select` |  | `[t, t, i32]` -> `[t]`; first operand when the condition is non-zero. |
+| 11 | `select` |  | `[t, t, i32]` -> `[t]`; first operand when the condition is non-zero. With two references the result has their common type: one if the other is its subtype, else `anyref`. This is how `Cast T` lowers without a branch: `ref.test T`, then `select` between the object and `ref.null T`, then `ref.cast T`, which cannot fault on either. |
 | 12 / 13 / 14 | `local.get` / `.set` / `.tee` | index |  |
 | 15 / 16 | `global.get` / `.set` | index |  |
 | 20 / 21 | `i32.const` / `i64.const` | s32 / s64 | `[]` -> `[i32]` / `[i64]` |
@@ -226,7 +226,7 @@ All `trunc` instructions are **saturating** and map NaN to 0. They never fault.
 | F0 | `string.concat` |  | `[string, string]` -> `[string]` |
 | F1 | `string.len` |  | `[string]` -> `[i32]` (bytes) |
 | F2 / F3 | `string.eq` / `string.cmp` |  | `[string, string]` -> `[i32]`; `cmp` is -1, 0 or 1 (ordinal bytes). |
-| F4 | `delegate.new` | func, flags | `[]` or `[recv]` -> `[ref]`. Flag bit 0: bind a receiver as the first argument. |
+| F4 | `delegate.new` | func, flags | `[]` or `[recv]` -> `[ref]`. Flag bit 0: bind a receiver as the first argument. Flag bit 1 (with bit 0): bind the receiver's override of `func`, as `call_virtual` would choose. The result's type is the module's delegate type for `func`'s signature without the receiver; the verifier requires one to exist. A latent function that is not an event cannot be bound. `call_delegate` on a delegate of an event queues the event on a new fiber and returns at once. |
 | F5 / F6 | `dispatcher.bind` / `.unbind` | T | `[ref, delegate]` -> `[]` |
 | F7 | `dispatcher.broadcast` | T | `[ref, args]` -> `[]`. Runs handlers in bind order; a handler's fault is reported to the host and does not stop the others. |
 | FB | *prefix* |  | Next byte is a LEB128 sub-opcode. Reserved for future instructions. |
@@ -235,7 +235,7 @@ All other opcodes are invalid. Everything else a node needs (string formatting, 
 
 ### 5.7 Fuel
 
-Each instruction costs 1 unit; `call`, `call_virtual`, `call_interface` and `call_delegate` cost 5; allocation adds 1 per 64 bytes (rounded up). Natives cost what they declare at registration. When a fiber's fuel reaches 0 it stops with `WR_ERR_FUEL`, which is not catchable. Counting is exact and deterministic, so fuel is a valid replay and billing unit.
+Each instruction costs 1 unit; `call`, `call_virtual`, `call_interface` and `call_delegate` cost 5; allocation adds 1 per 64 bytes (rounded up). Natives cost what they declare at registration, which may depend on their arguments (the container `Equals` natives: section 4.9). When a fiber's fuel reaches 0 it stops with `WR_ERR_FUEL`, which is not catchable. Counting is exact and deterministic, so fuel is a valid replay and billing unit.
 
 ### 5.8 Disassembly
 

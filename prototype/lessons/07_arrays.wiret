@@ -3,31 +3,61 @@ module lessons.arrays
 
 extern func host.Log(message: string)
 
+#[note("Lesson 7: Arrays. An array is one variable that holds a list of values, in order. MakeArray builds a list from the items wired into it. Each item has a position (its index), and positions start at 0, not 1.")]
+#[note("Try it: (1) Step (F11) and watch scores in the Variables panel of the Debugger tab. (2) Add a fifth score with another ArrayAdd. (3) Use ArrayGet::<i32> to print only the first score (index 0). (4) Ask ArrayGet for index 10 and read the error message.")]
 func Main() {
-  local scores: array<i32>
+  local scores: array::<i32>
   local total: i32
-  node add = ArrayAdd<i32> scores (item: 25)
-  node count = ArrayLength<i32>(array: list.value)
-  node count_text = Convert<i32, string>(value: count.length)
+  #[note("ArrayAdd puts one more item on the end of the array. scores now holds 4 items.")]
+  node add = ArrayAdd::<i32> scores
+    .item <- 25
+  node count = ArrayLength::<i32>
+    .array <- list.value
+  node count_text = Convert::<i32, string>
+    .value <- count.length
   node entry = Entry
   node final = GetLocal total
-  node item_text = Convert<i32, string>(value: loop.item)
-  node keep = SetLocal total (value: plus.result)
-  node line = Call std.string.Concat(a: part2.result, b: item_text.result)
+  node item_text = Convert::<i32, string>
+    .value <- loop.item
+  node keep = SetLocal total
+    .value <- plus.result
+  node line = Call std.string.Concat
+    .a <- part2.result
+    .b <- item_text.result
   node list = GetLocal scores
-  node loop = Macro std.flow.ForEach<i32>(array: list.value)
-  node make = MakeArray<i32>(item0: 12, item1: 30, item2: 7) @count(3)
+  #[note("ForEach runs 'each' once for every item. item is the value, index is its position. After the last item it follows 'done'.")]
+  node loop = Macro std.flow.ForEach::<i32>
+    .array <- list.value
+  node make = MakeArray::<i32> @count(3)
+    .item0 <- 12
+    .item1 <- 30
+    .item2 <- 7
   node old = GetLocal total
-  node part1 = Call std.string.Concat(a: "Item ", b: pos_text.result)
-  node part2 = Call std.string.Concat(a: part1.result, b: " is ")
-  node plus = Add<i32>(a: old.value, b: loop.item)
-  node pos_text = Convert<i32, string>(value: loop.index)
-  node report = Call host.Log(message: report_line.result)
-  node report_line = Call std.string.Concat(a: report_start.result, b: total_text.result)
-  node report_start = Call std.string.Concat(a: count_text.result, b: " scores, total ")
-  node say = Call host.Log(message: line.result)
-  node start = SetLocal scores (value: make.result)
-  node total_text = Convert<i32, string>(value: final.value)
+  node part1 = Call std.string.Concat
+    .a <- "Item "
+    .b <- pos_text.result
+  node part2 = Call std.string.Concat
+    .a <- part1.result
+    .b <- " is "
+  node plus = Add::<i32>
+    .a <- old.value
+    .b <- loop.item
+  node pos_text = Convert::<i32, string>
+    .value <- loop.index
+  node report = Call host.Log
+    .message <- report_line.result
+  node report_line = Call std.string.Concat
+    .a <- report_start.result
+    .b <- total_text.result
+  node report_start = Call std.string.Concat
+    .a <- count_text.result
+    .b <- " scores, total "
+  node say = Call host.Log
+    .message <- line.result
+  node start = SetLocal scores
+    .value <- make.result
+  node total_text = Convert::<i32, string>
+    .value <- final.value
 
   flow {
     add -> loop
@@ -36,13 +66,6 @@ func Main() {
     loop.done -> report
     say -> keep
     start -> add
-  }
-
-  markup {
-    attribute add_note on add = Note(message: "ArrayAdd puts one more item on the end of the array. scores now holds 4 items.")
-    attribute intro = Note(message: "Lesson 7: Arrays. An array is one variable that holds a list of values, in order. MakeArray builds a list from the items wired into it. Each item has a position (its index), and positions start at 0, not 1.")
-    attribute loop_note on loop = Note(message: "ForEach runs 'each' once for every item. item is the value, index is its position. After the last item it follows 'done'.")
-    attribute try_it = Note(message: "Try it: (1) Step (F11) and watch scores in the Variables panel of the Debugger tab. (2) Add a fifth score with another ArrayAdd. (3) Use ArrayGet<i32> to print only the first score (index 0). (4) Ask ArrayGet for index 10 and read the error message.")
   }
 
   layout {

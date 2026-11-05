@@ -6,16 +6,13 @@ import hashlib
 import math
 import unicodedata
 
-from .model import (Attr, Attribute, Binding, Box, Const, ExecOut, Extern, Graph, ITEM_ORDER, Lit,
-                    Module, Node, PinRef, Use, Var, item_kind)
-from .registry import ARRAY_MUTATORS, ModuleIndex, Sig, lit_equal, signature
+from .model import (Attr, Binding, Box, Class, Const, Enum, Interface, ExecOut, Extern, Graph, ITEM_ORDER, Lit,
+                    META_ORDER, Module, Node, PinRef, SEMANTIC_ATTRS, Struct, Use, Var,
+                    item_kind)
+from .registry import PLACE_MUTATORS, ModuleIndex, Sig, lit_equal, lit_fits, signature
 
-WRAP = 100
 IND = "  "
 
-SEMANTIC_ATTRS = {"id", "pure", "reads", "final", "private", "export", "inline", "deprecated",
-                  "count", "cases", "disabled", "capability", "latent"}
-DOC_ATTRS = {"doc", "category", "keywords"}
 PLACE_PROP_ORDER = ["label", "color", "size", "collapsed", "hidden", "members"]
 
 
@@ -62,7 +59,7 @@ def fmt_lit(v: Lit) -> str:
         return "null"
     if k == "string":
         return fmt_string(v.value)
-    if k == "ident":
+    if k in ("ident", "enum"):
         return v.value
     if k == "tuple":
         return "(" + ", ".join(fmt_lit(x) for x in v.value) + ")"
@@ -73,22 +70,37 @@ def fmt_lit(v: Lit) -> str:
     raise ValueError(k)
 
 
-def fmt_attr(a: Attr) -> str:
+def fmt_args(a: Attr) -> str:
     if a.args is None:
-        return f"@{a.name}"
-    args = ", ".join((f"{k}: " if k else "") + fmt_lit(v) for k, v in a.args)
-    return f"@{a.name}({args})"
+        return ""
+    return "(" + ", ".join((f"{k}: " if k else "") + fmt_lit(v) for k, v in a.args) + ")"
+
+
+def fmt_attr(a: Attr) -> str:
+    return f"@{a.name}{fmt_args(a)}"
 
 
 def sorted_attrs(attrs: list) -> list:
+    """Known semantic attributes alphabetically, then unknown ones (E0104) as written."""
     sem = sorted((a for a in attrs if a.name in SEMANTIC_ATTRS), key=lambda a: a.name)
-    doc = [a for a in attrs if a.name == "doc"]
-    rest = [a for a in attrs if a.name not in SEMANTIC_ATTRS and a.name != "doc"]
-    return sem + doc + rest
+    return sem + [a for a in attrs if a.name not in SEMANTIC_ATTRS]
 
 
 def fmt_attrs(attrs: list) -> str:
     return "".join(" " + fmt_attr(a) for a in sorted_attrs(attrs))
+
+
+def sorted_meta(meta: list) -> list:
+    """`doc`, `category`, `keywords`, then notes, then anything else; stable within each."""
+    order = {k: i for i, k in enumerate(META_ORDER)}
+    return sorted(meta, key=lambda a: order.get(a.name, len(order)))
+
+
+def fmt_meta(meta: list, indent: str, semantic=False) -> list:
+    """The `#[...]` lines above a statement (section 2.4); none in the semantic text."""
+    if semantic:
+        return []
+    return [f"{indent}#[{a.name}{fmt_args(a)}]" for a in sorted_meta(meta)]
 
 
 def fmt_params(ps: list) -> str:
@@ -112,7 +124,8 @@ def _ordered_bindings(node: Node, sig: Sig) -> list:
         pin = sig.input(b.pin)
         if pin is not None and isinstance(b.value, Lit):
             d = pin.default_lit()
-            if d is not None and lit_equal(d, b.value):
+            # never drop a binding that does not fit its pin: the checker reports it
+            if d is not None and lit_fits(b.value, pin.type) and lit_equal(d, b.value):
                 continue
         out.append(b)
     return sorted(out, key=lambda b: order.get(b.pin, len(order)))
@@ -141,37 +154,32 @@ def fmt_wires(node: Node, sig: Sig) -> list:
     return out
 
 
-def fmt_node(node: Node, sig: Sig, indent: str) -> str:
+def fmt_targs(targs: list) -> str:
+    return "::<" + ", ".join(targs) + ">" if targs else ""
+
+
+def fmt_node(node: Node, sig: Sig, indent: str, semantic=False) -> str:
+    """The node line, then one `.pin <- value` line per bound input."""
     head = f"{indent}node {node.id} = {node.kind}"
-    targs = "<" + ", ".join(node.targs) + ">" if node.targs else ""
-    if node.kind in ARRAY_MUTATORS:      # `ArrayAdd<i32> acc (item: x)`, as in section 3.3
+    targs = fmt_targs(node.targs)
+    if node.kind in PLACE_MUTATORS:      # `ArrayAdd::<i32> acc`, as in section 3.3
         head += targs + (f" {node.symbol}" if node.symbol else "")
     else:
         head += (f" {node.symbol}" if node.symbol else "") + targs
-    binds = [f"{b.pin}: " + (f"{b.value.node}.{b.value.pin}" if isinstance(b.value, PinRef)
-                             else fmt_lit(b.value))
-             for b in _ordered_bindings(node, sig)]
-    sep = "" if (not node.symbol or node.kind in ("Call", "Macro")) else " "
-    attrs = fmt_attrs(node.attrs)
-    line = head + (sep + "(" + ", ".join(binds) + ")" if binds else "") + attrs
-    if len(line) <= WRAP or not binds:
-        return line
-    return (head + sep + "(\n" + ",\n".join(indent + IND + b for b in binds) + "\n" + indent + ")"
-            + attrs)
-
-
-def fmt_attribute(a: Attribute) -> str:
-    on = f" on {a.on}" if a.on else ""
-    args = ", ".join(f"{k}: {fmt_lit(v)}" for k, v in a.args)
-    return f"attribute {a.id}{on} = {a.kind}({args}){fmt_attrs(a.attrs)}"
+    lines = fmt_meta(node.meta, indent, semantic) + [head + fmt_attrs(node.attrs)]
+    for b in _ordered_bindings(node, sig):
+        val = (f"{b.value.node}.{b.value.pin}" if isinstance(b.value, PinRef)
+               else fmt_lit(b.value))
+        lines.append(f"{indent}{IND}.{b.pin} <- {val}")
+    return "\n".join(lines)
 
 
 # -- graphs and module -----------------------------------------------------------
-def fmt_local(kw, l, indent) -> str:
+def fmt_local(kw, l, indent, semantic=False) -> list:
     s = f"{indent}{kw} {l.name}: {l.type}"
     if l.default is not None:
         s += f" = {fmt_lit(l.default)}"
-    return s + fmt_attrs(l.attrs)
+    return fmt_meta(l.meta, indent, semantic) + [s + fmt_attrs(l.attrs)]
 
 
 def fmt_props(props: list, sort_members=True) -> str:
@@ -188,41 +196,33 @@ def fmt_props(props: list, sort_members=True) -> str:
 
 
 def fmt_graph(g: Graph, idx: ModuleIndex, indent: str = "", semantic=False) -> list:
-    head = f"{indent}{g.kind} {g.name}"
+    head = f"{indent}{g.kind} {g.short_name}"
     if g.tparams:
-        head += "<" + ", ".join(g.tparams) + ">"
+        head += fmt_targs(g.tparams)
     head += fmt_params(g.params)
     if g.results is not None:
         head += " -> " + fmt_params(g.results)
-    attrs = [a for a in g.attrs if not (semantic and a.name in DOC_ATTRS)]
-    lines = [head + fmt_attrs(attrs) + " {"]
+    lines = fmt_meta(g.meta, indent, semantic) + [head + fmt_attrs(g.attrs) + " {"]
     inner = indent + IND
     for l in sorted(g.locals, key=lambda l: l.name):
-        lines.append(fmt_local("local", l, inner))
+        lines.extend(fmt_local("local", l, inner, semantic))
     for l in sorted(g.states, key=lambda l: l.name):
-        lines.append(fmt_local("state", l, inner))
+        lines.extend(fmt_local("state", l, inner, semantic))
     wires = []
     for n in sorted(g.nodes, key=lambda n: n.id):
         sig = signature(n, g, idx)
         wires.extend(fmt_wires(n, sig))
-        if semantic:
-            n = copy.copy(n)
-            n.attrs = [a for a in n.attrs if a.name not in DOC_ATTRS]
-        lines.append(fmt_node(n, sig, inner))
+        lines.append(fmt_node(n, sig, inner, semantic))
     if wires:
         lines.extend(["", f"{inner}flow {{"])
         lines.extend(f"{inner}{IND}{w}" for w in wires)
-        lines.append(f"{inner}}}")
-    if not semantic and g.markup:
-        lines.extend(["", f"{inner}markup {{"])
-        for a in sorted(g.markup, key=lambda a: a.id):
-            lines.append(f"{inner}{IND}{fmt_attribute(a)}")
         lines.append(f"{inner}}}")
     if not semantic and (g.places or g.boxes):
         lines.extend(["", f"{inner}layout {{"])
         for p in sorted(g.places, key=lambda p: p.id):
             lines.append(f"{inner}{IND}{p.id} at ({p.x}, {p.y}){fmt_props(p.props)}")
         for b in sorted(g.boxes, key=lambda b: b.id):
+            lines.extend(fmt_meta(b.meta, inner + IND))
             lines.append(f"{inner}{IND}box {b.id} {fmt_string(b.title)} at ({b.x}, {b.y}) "
                          f"size ({b.w}, {b.h}){fmt_props(b.props)}")
         lines.append(f"{inner}}}")
@@ -230,7 +230,85 @@ def fmt_graph(g: Graph, idx: ModuleIndex, indent: str = "", semantic=False) -> l
     return lines
 
 
-def fmt_item(it, idx: ModuleIndex, semantic=False) -> list:
+def fmt_type_decl(it, semantic=False) -> list:
+    """A struct or enum. Members keep the order written: field order and enum order are
+    semantic (layout and implicit values), so the canonical form never sorts them."""
+    if isinstance(it, Struct):
+        head = f"struct {it.name}"
+        members = []
+        for f in it.fields:
+            line = f"{IND}{f.name}: {f.type}"
+            if f.default is not None:
+                line += f" = {fmt_lit(f.default)}"
+            members.append((f.meta, line + fmt_attrs(f.attrs)))
+    else:
+        head = f"enum {it.name}" + (f": {it.base}" if it.base else "")
+        members = []
+        for m in it.members:
+            line = f"{IND}{m.name}" + (f" = {m.value}" if m.value is not None else "")
+            members.append((m.meta, line + fmt_attrs(m.attrs)))
+    head += fmt_attrs(it.attrs)
+    if not members:
+        return [head + " {}"]
+    lines = [head + " {"]
+    for meta, line in members:
+        lines.extend(fmt_meta(meta, IND, semantic))
+        lines.append(line)
+    return lines + ["}"]
+
+
+def fmt_class(c: Class, methods: list, idx: ModuleIndex, semantic=False) -> list:
+    """A class: fields in the order written (their layout), then its methods, funcs before
+    events, each by name, with a blank line before each method."""
+    head = (f"class {c.name}" + (f" : {c.base}" if c.base else "")
+            + (f" impl {', '.join(c.impls)}" if c.impls else "") + fmt_attrs(c.attrs))
+    if not c.fields and not c.dispatchers and not methods:
+        return [head + " {}"]
+    lines = [head + " {"]
+    for f in c.fields:
+        line = f"{IND}{f.name}: {f.type}"
+        if f.default is not None:
+            line += f" = {fmt_lit(f.default)}"
+        lines.extend(fmt_meta(f.meta, IND, semantic))
+        lines.append(line + fmt_attrs(f.attrs))
+    for d in c.dispatchers:
+        lines.extend(fmt_meta(d.meta, IND, semantic))
+        lines.append(f"{IND}dispatcher {d.name}{fmt_params(d.params)}{fmt_attrs(d.attrs)}")
+    for g in sorted(methods, key=lambda g: (g.kind != "func", g.name)):
+        if len(lines) > 1:
+            lines.append("")
+        lines.extend(fmt_graph(g, idx, IND, semantic))     # its #[...] lines included
+    return lines + ["}"]
+
+
+def fmt_interface(it: Interface, semantic=False) -> list:
+    """An interface: its method signatures in the order written (their dispatch slots)."""
+    head = f"interface {it.name}{fmt_attrs(it.attrs)}"
+    if not it.methods:
+        return [head + " {}"]
+    lines = [head + " {"]
+    for m in it.methods:
+        s = f"{IND}func {m.name}{fmt_params(m.params)}"
+        if m.results is not None:
+            s += " -> " + fmt_params(m.results)
+        lines.extend(fmt_meta(m.meta, IND, semantic))
+        lines.append(s + fmt_attrs(m.attrs))
+    return lines + ["}"]
+
+
+def fmt_item(it, idx: ModuleIndex, semantic=False, methods=None) -> list:
+    if isinstance(it, Interface):
+        return fmt_meta(it.meta, "", semantic) + fmt_interface(it, semantic)
+    if isinstance(it, Class):
+        return fmt_meta(it.meta, "", semantic) + fmt_class(it, methods or [], idx, semantic)
+    if isinstance(it, Graph):
+        return fmt_graph(it, idx, "", semantic)
+    if isinstance(it, (Struct, Enum)):
+        return fmt_meta(it.meta, "", semantic) + fmt_type_decl(it, semantic)
+    return fmt_meta(it.meta, "", semantic) + _fmt_decl(it)
+
+
+def _fmt_decl(it) -> list:
     if isinstance(it, Use):
         return [f"use {it.name}" + (f" as {it.alias}" if it.alias else "") + fmt_attrs(it.attrs)]
     if isinstance(it, Extern):
@@ -239,28 +317,32 @@ def fmt_item(it, idx: ModuleIndex, semantic=False) -> list:
         s = f"extern func {it.name}{fmt_params(it.params)}"
         if it.results is not None:
             s += " -> " + fmt_params(it.results)
-        return [s + fmt_attrs([a for a in it.attrs if not (semantic and a.name in DOC_ATTRS)])]
+        return [s + fmt_attrs(it.attrs)]
     if isinstance(it, Const):
         return [f"const {it.name}: {it.type} = {fmt_lit(it.value)}{fmt_attrs(it.attrs)}"]
     if isinstance(it, Var):
         d = f" = {fmt_lit(it.default)}" if it.default is not None else ""
         return [f"var {it.name}: {it.type}{d}{fmt_attrs(it.attrs)}"]
-    if isinstance(it, Graph):
-        return fmt_graph(it, idx, "", semantic)
     raise TypeError(it)
 
 
 def print_module(m: Module, semantic=False) -> str:
     idx = ModuleIndex(m)
-    lines = [f"wiret {m.version}", f"module {m.name}{fmt_attrs(m.attrs)}"]
-    items = sorted(m.items, key=lambda it: (ITEM_ORDER.index(item_kind(it)), it.name))
+    lines = ([f"wiret {m.version}"] + fmt_meta(m.meta, "", semantic)
+             + [f"module {m.name}{fmt_attrs(m.attrs)}"])
+    owned = {}
+    for it in m.items:
+        if isinstance(it, Graph) and it.owner:
+            owned.setdefault(it.owner, []).append(it)
+    items = sorted((it for it in m.items if not (isinstance(it, Graph) and it.owner)),
+                   key=lambda it: (ITEM_ORDER.index(item_kind(it)), it.name))
     prev_kind = None
     for it in items:
         k = item_kind(it)
-        block = isinstance(it, Graph)
+        block = isinstance(it, (Graph, Struct, Enum, Class, Interface))
         if block or k != prev_kind:
             lines.append("")
-        lines.extend(fmt_item(it, idx, semantic))
+        lines.extend(fmt_item(it, idx, semantic, owned.get(it.name)))
         prev_kind = k if not block else None
     text = "\n".join(lines) + "\n"
     return unicodedata.normalize("NFC", text)

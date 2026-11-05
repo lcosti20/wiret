@@ -16,18 +16,28 @@ from typing import Optional
 
 from . import wbc
 from .checker import Diag, check, has_errors
-from .model import Graph, Lit, Module, Node, PinRef
+from .model import Const, Extern, Graph, Lit, Module, Node, PinRef, Var
 from .natives import INTERNAL, STD
 from .printer import layout_hash, print_module, semantic_hash
-from .registry import (ARRAY_MUTATORS, FLOAT_TYPES, INT_TYPES, REGISTRY_NAME, REGISTRY_VERSION,
-                       SIGNED_TYPES, ModuleIndex, Pin, Sig, array_elem, attr_int, signature,
-                       zero_lit)
-from .wbc import F32, F64, I32, I64, STRING
+from .registry import (class_field_target, field_place, parent_method, delegate_sig, dispatcher_params, dispatcher_target,
+                       ARRAY_MUTATORS, FLOAT_TYPES, INT_TYPES, MAP_PURE, PLACE_MUTATORS,
+                       REGISTRY_NAME, REGISTRY_VERSION, SET_PURE,
+                       SIGNED_TYPES, ModuleIndex, Pin, Sig, array_elem, attr_int, enum_values,
+                       is_container, map_types, set_elem, signature, zero_lit)
+
+# map and set kinds -> their instruction (section 5.6)
+CONTAINER_OPS = {"MapFind": "map.find", "MapHas": "map.has", "MapLength": "map.len",
+                 "MapKeyAt": "map.key_at", "MapValueAt": "map.value_at", "MapSet": "map.set",
+                 "MapRemove": "map.remove", "MapClear": "map.clear", "SetHas": "set.has",
+                 "SetLength": "set.len", "SetAt": "set.at", "SetAdd": "set.add",
+                 "SetRemove": "set.remove", "SetClear": "set.clear"}
+from .wbc import F32, F64, FAULT, I32, I64, SIGNAL, STRING
 
 COMPILER_VERSION = "wiretc-proto 0.1"
 
 VT = {"bool": I32, "i8": I32, "u8": I32, "i16": I32, "u16": I32, "i32": I32, "u32": I32,
-      "i64": I64, "u64": I64, "f32": F32, "f64": F64, "string": STRING}
+      "i64": I64, "u64": I64, "f32": F32, "f64": F64, "string": STRING, "fault": FAULT,
+      "std.Signal": SIGNAL}
 PFX = {I32: "i32", I64: "i64", F32: "f32", F64: "f64"}
 
 
@@ -99,8 +109,9 @@ class EvalPoint:
 
 class Compiler:
     def __init__(self, module: Module, source: Optional[str] = None, embed_source=True,
-                 debug=False):
+                 debug=False, project=None):
         self.m = module
+        self.project = project     # for the [capabilities] allow check (E0160)
         self.debug = debug   # -Og: keep every pin's value in a local for the debugger
         self.idx = ModuleIndex(module)
         self.source = source
@@ -120,11 +131,138 @@ class Compiler:
 
     # -- tables -------------------------------------------------------------------
     def vt(self, ty: str):
-        """The WBC value type of a Wiret type; arrays become references to type entries."""
+        """The WBC value type of a Wiret type. An enum is its underlying integer; arrays and
+        structs become references to type entries."""
+        if ty == "anyref":
+            return wbc.ANYREF
         elem = array_elem(ty)
-        if elem is None:
-            return VT[ty]
-        return wbc.Ref(self.array_type(elem))
+        if elem is not None:
+            return wbc.Ref(self.array_type(elem))
+        kv = map_types(ty)
+        if kv is not None:
+            return wbc.Ref(self.map_type(*kv))
+        elem = set_elem(ty)
+        if elem is not None:
+            return wbc.Ref(self.set_type(elem))
+        if ty in self.idx.structs:
+            return wbc.Ref(self.struct_type(ty))
+        if ty in self.idx.classes:
+            return wbc.Ref(self.class_type(ty))
+        if ty in self.idx.interfaces:
+            return wbc.Ref(self.interface_type(ty))
+        sig = delegate_sig(ty)
+        if sig is not None:
+            return wbc.Ref(self.callable_type("delegate", sig[0], sig[1]))
+        params = dispatcher_params(ty)
+        if params is not None:
+            return wbc.Ref(self.callable_type("dispatcher", params, []))
+        return VT[self.base(ty)]
+
+    def base(self, ty: str) -> str:
+        """The underlying integer type of an enum; any other type unchanged."""
+        return self.idx.enum_base(ty) or ty
+
+    def struct_type(self, name: str) -> int:
+        """Index of the struct's `5F` type entry. The index is reserved before the fields are
+        lowered, so `children: array::<Tree>` inside `Tree` can refer to it."""
+        key = ("struct", name)
+        if key not in self.type_keys:
+            self.type_keys[key] = len(self.types)
+            self.types.append(None)
+            fields = []
+            for f in self.idx.structs[name].fields:
+                vt = self.vt(f.type)
+                default = None
+                if f.default is not None and not isinstance(vt, wbc.Ref):
+                    default = self.const_value(f.default, f.type)
+                fields.append((vt, default))
+            self.types[self.type_keys[key]] = wbc.StructType(tuple(fields))
+        return self.type_keys[key]
+
+    def class_type(self, name: str) -> int:
+        """Index of a class's `5B` type entry. The vtable is filled in by `build`, once every
+        function index is known."""
+        key = ("class", name)
+        if key not in self.type_keys:
+            self.type_keys[key] = len(self.types)
+            self.types.append(None)
+            c = self.idx.classes[name]
+            sup = self.class_type(c.base) if c.base else None
+            fields = []
+            for f in c.fields:
+                vt = self.vt(f.type)
+                default = None
+                if f.default is not None and not isinstance(vt, wbc.Ref) and \
+                        f.default.kind != "null":
+                    default = self.const_value(f.default, f.type)
+                fields.append((vt, default))
+            for d in c.dispatchers:             # after the fields: one dispatcher per object
+                fields.append((self.vt(f"dispatcher::<({', '.join(p.type for p in d.params)})>"),
+                               None))
+            for _, ty, default in self.idx.class_state(name):   # then the methods' state
+                vt = self.vt(ty)
+                fields.append((vt, self.const_value(default, ty)
+                               if default is not None and not isinstance(vt, wbc.Ref) else None))
+            self.types[self.type_keys[key]] = wbc.ClassType(sup, tuple(fields), ())
+        return self.type_keys[key]
+
+    def callable_type(self, kind: str, params: list, results: list) -> int:
+        """Index of a `59` delegate or `58` dispatcher entry for a signature."""
+        key = (kind, tuple(params), tuple(results))
+        if key not in self.type_keys:
+            ft = self.func_type([self.vt(t) for t in params], [self.vt(t) for t in results])
+            self.type_keys[key] = len(self.types)
+            self.types.append(wbc.DelegateType(ft) if kind == "delegate"
+                              else wbc.DispatcherType(ft))
+        return self.type_keys[key]
+
+    def interface_type(self, name: str) -> int:
+        """Index of an interface's `5A` entry: one function type per method, no receiver."""
+        key = ("interface", name)
+        if key not in self.type_keys:
+            self.type_keys[key] = len(self.types)
+            self.types.append(None)
+            it = self.idx.interfaces[name]
+            self.types[self.type_keys[key]] = wbc.InterfaceType(tuple(
+                self.func_type([self.vt(p.type) for p in m.params],
+                               [self.vt(r.type) for r in m.result_list]) for m in it.methods))
+        return self.type_keys[key]
+
+    def slots(self, cls: str) -> list:
+        """The vtable of a class as [(method name, implementing graph)]: the superclass's slots,
+        with overrides in place, then the class's new methods by name (section 5.3)."""
+        c = self.idx.classes[cls]
+        out = list(self.slots(c.base)) if c.base else []
+        names = [s for s, _ in out]
+        for g in self.idx.methods(cls):
+            if g.short_name in names:
+                out[names.index(g.short_name)] = (g.short_name, g.name)
+            else:
+                out.append((g.short_name, g.name))
+                names.append(g.short_name)
+        return out
+
+    def class_field_index(self, cls: str, fname: str) -> int:
+        return [name for name, _ in self.idx.class_layout(cls)].index(fname)
+
+    def field_index(self, struct: str, field_name: str) -> int:
+        return [f.name for f in self.idx.structs[struct].fields].index(field_name)
+
+    def enum_value(self, lit: Lit) -> int:
+        """The integer of `Mode.Chase`."""
+        name, member = lit.value.split(".")
+        return dict(enum_values(self.idx.enums[name]))[member]
+
+    def const_value(self, lit: Lit, ty: str):
+        """A literal as the number or data index stored for a global or field default."""
+        if ty == "string":
+            return self.string_index(lit.value)
+        if ty == "bool":
+            return 1 if lit.value else 0
+        if ty in FLOAT_TYPES:
+            return float(lit.value)
+        v = self.enum_value(lit) if lit.kind == "enum" else int(lit.value)
+        return wrap_int(self.base(ty), v)
 
     def array_type(self, elem: str) -> int:
         """Index of the `array<elem>` type entry."""
@@ -134,6 +272,28 @@ class Compiler:
             self.type_keys[key] = len(self.types)
             self.types.append(entry)
         return self.type_keys[key]
+
+    def map_type(self, k: str, v: str) -> int:
+        """Index of the `map<k, v>` type entry."""
+        key = ("map", k, v)
+        if key not in self.type_keys:
+            entry = wbc.MapType(self.vt(k), self.vt(v))
+            self.type_keys[key] = len(self.types)
+            self.types.append(entry)
+        return self.type_keys[key]
+
+    def set_type(self, elem: str) -> int:
+        """Index of the `set<elem>` type entry."""
+        key = ("set", elem)
+        if key not in self.type_keys:
+            entry = wbc.SetType(self.vt(elem))
+            self.type_keys[key] = len(self.types)
+            self.types.append(entry)
+        return self.type_keys[key]
+
+    def container_type(self, kind: str, targs: list) -> int:
+        """The type entry a map or set node works on."""
+        return self.map_type(*targs) if kind.startswith("Map") else self.set_type(targs[0])
 
     def func_type(self, params: list, results: list) -> int:
         key = ("func", tuple(params), tuple(results))
@@ -152,16 +312,11 @@ class Compiler:
         if name in self.global_index:
             return self.global_index[name]
         lit = init if init is not None else zero_lit(ty)
-        if array_elem(ty) is not None:
-            value = None
-        elif ty == "string":
-            value = self.string_index(lit.value)
-        elif ty == "bool":
-            value = 1 if lit.value else 0
-        elif ty in FLOAT_TYPES:
-            value = float(lit.value)
+        if is_container(ty) or ty in self.idx.structs or ty in self.idx.classes or \
+                ty in self.idx.interfaces or ty == "std.Signal":
+            value = None                 # the VM builds the default array or struct
         else:
-            value = wrap_int(ty, int(lit.value))
+            value = self.const_value(lit, ty)
         self.global_index[name] = len(self.globals)
         self.globals.append((name, ty, value))
         return self.global_index[name]
@@ -174,7 +329,7 @@ class Compiler:
 
     # -- driver -------------------------------------------------------------------
     def compile(self) -> CompileResult:
-        self.diags = check(self.m, comments_ok=True)
+        self.diags = check(self.m, comments_ok=True, project=self.project)
         if has_errors(self.diags):
             return CompileResult(False, self.diags)
         for v in sorted(self.idx.vars.values(), key=lambda v: v.name):
@@ -221,8 +376,10 @@ class Compiler:
         for fl in lowered:
             g = fl.g
             flags = (wbc.FN_PURE if g.has_attr("pure") else 0) | \
-                    (wbc.FN_EVENT | wbc.FN_LATENT if g.kind == "event" else 0)
-            t = type_index([self.vt(p.type) for p in g.params],
+                    (wbc.FN_EVENT | wbc.FN_LATENT if g.kind == "event" else 0) | \
+                    (wbc.FN_LATENT if g.has_attr("latent") else 0)
+            t = type_index(([self.vt(g.owner)] if g.owner else [])
+                           + [self.vt(p.type) for p in g.params],
                            [self.vt(r.type) for r in g.result_list])
             mod.funcs.append((t, flags))
         for name, ty, value in self.globals:
@@ -230,12 +387,23 @@ class Compiler:
         for i, fl in enumerate(lowered):
             g = fl.g
             eflags = (wbc.EX_EVENT | wbc.EX_LATENT if g.kind == "event" else 0) | \
+                     (wbc.EX_LATENT if g.has_attr("latent") else 0) | \
                      (wbc.EX_PURE if g.has_attr("pure") else 0)
             mod.exports.append((g.name, 0, len(self.imports) + i, eflags))
         for v in sorted(self.idx.vars.values(), key=lambda v: v.name):
             if v.attrs and any(a.name == "export" for a in v.attrs):
                 mod.exports.append((v.name, 1, self.global_index[v.name], 0))
         mod.data = list(self.data)
+        for key, ti in list(self.type_keys.items()):
+            if key[0] == "class":               # fill each vtable with function indices
+                e = self.types[ti]
+                ifaces = tuple(
+                    (self.interface_type(i), tuple(
+                        self.func_index(("func", self.idx.find_method(key[1], m.name).name))
+                        for m in self.idx.interfaces[i].methods))
+                    for i in self.idx.class_interfaces(key[1]))
+                self.types[ti] = wbc.ClassType(e.super, e.fields, tuple(
+                    self.func_index(("func", impl)) for _, impl in self.slots(key[1])), ifaces)
         mod.types = self.types
         assembled = [fl.assemble() for fl in lowered]
         mod.bodies = [wbc.Body([self.vt(t) for t in fl.local_types[fl.nparams:]], 0xFFFF, 0, code)
@@ -271,6 +439,16 @@ class Compiler:
         for gi, (name, _, _) in enumerate(self.globals):
             w.u32(gi)
             w.name(name)
+        classes = sorted((ti, key[1]) for key, ti in self.type_keys.items()
+                         if key[0] in ("class", "interface"))
+        w.u32(len(classes))
+        for ti, name in classes:
+            w.u32(ti)
+            w.name(name)
+            fields = self.idx.class_layout(name) if name in self.idx.classes else []
+            w.u32(len(fields))
+            for fname, _ in fields:
+                w.name(fname)
         out.append(("name", bytes(w.b)))
 
         w = wbc.Writer()
@@ -355,10 +533,11 @@ class FuncLowerer:
         self.local_defaults: list = []    # [(local name, Lit)]
         self.pin_map: dict[int, tuple] = {}
         entry_id = next((n.id for n in g.nodes if n.kind == "Entry"), "entry")
-        for p in g.params:
-            self.add_local(p.name, p.type)
-            self.pin_map[self.local_index[p.name]] = (entry_id, p.name)
-        self.nparams = len(g.params)
+        params = ([("self", g.owner)] if g.owner else []) + [(p.name, p.type) for p in g.params]
+        for name, ty in params:
+            self.add_local(name, ty)
+            self.pin_map[self.local_index[name]] = (entry_id, name)
+        self.nparams = len(params)
         self.ir: dict[str, IRNode] = {}
         self.entry: Optional[str] = None
         self.code: list = []
@@ -389,12 +568,25 @@ class FuncLowerer:
         g = self.g
         ctx = Ctx(g, "", None, self.sigs_for(g))
         ctx.params = {p.name: p.name for p in g.params}
+        if g.owner:
+            ctx.params["self"] = "self"
         for l in sorted(g.locals, key=lambda l: l.name):
             ctx.locals[l.name] = l.name
             self.add_local(l.name, l.type, l.default)
         for s in sorted(g.states, key=lambda s: s.name):
-            ctx.states[s.name] = self.c.add_global(f"{g.name}.{s.name}", s.type, s.default)
+            ctx.states[s.name] = self.state_slot(None, s)
         self.expand(ctx)
+
+    def state_slot(self, mpath, s):
+        """Where a `state` slot lives (section 2.3): a module global in a free function, a
+        hidden field of the object in a method (ClassType layout, see ModuleIndex.class_state)."""
+        g = self.g
+        if not g.owner:
+            name = f"{g.name}.{s.name}" if mpath is None else f"{g.name}/{mpath}.{s.name}"
+            return self.c.add_global(name, s.type, s.default)
+        where = g.short_name if mpath is None else f"{g.short_name}/{mpath}"
+        return ("field", self.c.class_type(g.owner),
+                self.c.class_field_index(g.owner, f"{where}.{s.name}"))
 
     def out_target(self, ctx: Ctx, n: Node, pin: str):
         sig = ctx.sigs[n.id]
@@ -484,18 +676,59 @@ class FuncLowerer:
                     ir.extra["const"] = self.c.idx.consts[n.symbol].value
                 else:
                     ir.extra["global"] = self.c.global_index[n.symbol]
-            elif n.kind in ARRAY_MUTATORS:
+            elif n.kind in PLACE_MUTATORS:
+                fp = None if n.symbol in ctx.locals else field_place(n.symbol, ctx.graph,
+                                                                       self.c.idx)
                 if n.symbol in ctx.locals:
                     ir.extra["place"] = ("local", ctx.locals[n.symbol])
+                elif fp is not None:
+                    ir.extra["place"] = ("field", (self.c.class_type(fp[0]),
+                                                   self.c.class_field_index(fp[0], fp[1])))
                 else:
                     ir.extra["place"] = ("global", self.c.global_index[n.symbol])
+            elif n.kind == "CallParent":
+                ir.extra["func"] = ("func", parent_method(n, ctx.graph, self.c.idx).name)
             elif n.kind == "Call":
                 callee = self.c.idx.callee(n.symbol)
                 if callee.kind in ("func", "event"):
                     ir.extra["func"] = ("func", callee.name)
-                else:
+                elif callee.kind != "interface":
                     ir.extra["func"] = self.c.import_ref(callee.name)
                 ir.extra["nresults"] = len(callee.results)
+                if callee.kind == "interface":
+                    it = self.c.idx.interfaces[callee.method_of]
+                    short = callee.name.rpartition(".")[2]
+                    ir.extra["interface"] = (self.c.interface_type(callee.method_of),
+                                             [m.name for m in it.methods].index(short))
+                elif callee.method_of and not callee.final:
+                    short = callee.name.rpartition(".")[2]
+                    names = [s for s, _ in self.c.slots(callee.method_of)]
+                    ir.extra["virtual"] = (self.c.class_type(callee.method_of),
+                                           names.index(short))
+            elif n.kind == "CreateDelegate":
+                callee = self.c.idx.callee(n.symbol)
+                virtual = bool(callee.method_of) and not callee.final
+                ir.extra["delegate"] = (("func", callee.name),
+                                        (1 if callee.method_of else 0) | (2 if virtual else 0))
+                self.c.vt(sig.outputs[0].type)     # the delegate type entry delegate.new needs
+            elif n.kind == "Invoke":
+                ds = delegate_sig(n.targs[0])
+                ir.extra["functype"] = self.c.func_type([self.c.vt(t) for t in ds[0]],
+                                                        [self.c.vt(t) for t in ds[1]])
+                self.c.vt(n.targs[0])
+            elif n.kind in ("Bind", "Unbind", "Broadcast"):
+                cls, name = dispatcher_target(n, ctx.graph, self.c.idx)
+                d = self.c.idx.class_dispatcher(cls, name)[1]
+                dtype = f"dispatcher::<({', '.join(p.type for p in d.params)})>"
+                ir.extra["dispatcher"] = (self.c.class_type(cls),
+                                          self.c.class_field_index(cls, name),
+                                          self.c.vt(dtype).type)
+                if n.kind != "Broadcast":
+                    self.c.vt(sig.inputs[2].type)  # the handler's delegate type
+            elif n.kind in ("GetField", "SetField") and sig.category == "Classes":
+                cls, fname = class_field_target(n, ctx.graph, self.c.idx)
+                ir.extra["class_field"] = (self.c.class_type(cls),
+                                           self.c.class_field_index(cls, fname))
             self.ir[nid] = ir
 
     def expand_macro(self, ctx: Ctx, n: Node, sig: Sig):
@@ -516,8 +749,7 @@ class FuncLowerer:
             sub.locals[l.name] = f"{mpath}.{l.name}"
             self.add_local(sub.locals[l.name], l.type, l.default)
         for s in sorted(mg.states, key=lambda s: s.name):
-            sub.states[s.name] = self.c.add_global(f"{self.g.name}/{mpath}.{s.name}", s.type,
-                                                   s.default)
+            sub.states[s.name] = self.state_slot(mpath, s)
         entry = next((m for m in mg.nodes if m.kind == "Entry"), None)
         data_params = [p for p in sig.data_ins]
         for p in mg.params:
@@ -537,6 +769,8 @@ class FuncLowerer:
         ts = [t for _, t in n.execs]
         if n.kind in ("Branch",):
             ts = list(reversed(ts))
+        elif n.kind == "Try":          # body, fault, then: the handler code falls into fault
+            ts = [ts[1], ts[0], ts[2]]
         elif n.kind == "Switch":
             ts = ts[-1:] + ts[:-1]
         return ts
@@ -581,7 +815,18 @@ class FuncLowerer:
                 continue
             states.add((nid, S))
             n = self.ir[nid]
-            if n.kind == "Return":
+            if n.kind in ("Return", "Throw"):
+                continue
+            if n.kind == "Try":
+                # then is pending under the handler marker (None: skipped by a chain end)
+                t = dict(n.execs)
+                base = S + ((t["then"],) if t.get("then") else ())
+                nexts = [(t.get("body"), base + (None,)), (t.get("fault"), base)]
+                for tgt, s in nexts:
+                    if tgt is None:
+                        chain_end(nid, s)
+                    else:
+                        work.append((tgt, s))
                 continue
             if n.kind == "Sequence":
                 outs = [t for _, t in n.execs]
@@ -609,12 +854,18 @@ class FuncLowerer:
                 if s.kind == "node" and s.a in self.ir and not self.ir[s.a].pure:
                     key = (s.a, s.b)
                     if key not in self.slots:
-                        self.slots[key] = self.add_local(f"{s.a}.{s.b}", ty)
+                        # typed by the producer's output: consumers may take a supertype
+                        # (a class into an interface pin), and each one reads the same slot
+                        sig = self.ir[s.a].sig
+                        out = sig.output(s.b) if sig is not None else None
+                        self.slots[key] = self.add_local(f"{s.a}.{s.b}",
+                                                         out.type if out else ty)
                         self.pin_map[self.slots[key]] = key
         if self.c.debug:   # every impure output gets a slot, read or not
             for nid in sorted(self.ir):
                 n = self.ir[nid]
-                if not n.pure and n.kind == "Call":
+                if not n.pure and (n.kind in ("Call", "CallParent", "Try", "New", "Invoke")
+                                   or n.kind in PLACE_MUTATORS):
                     for p in n.data_outs:
                         key = (nid, p.name)
                         if key not in self.slots:
@@ -695,13 +946,30 @@ class FuncLowerer:
             self.emit_inputs(n)
             self.E("local.set", self.local_index[n.extra["local"]])
             self.transfer(then, nxt)
+        elif k in ("SetVar", "SetState") and isinstance(n.extra["global"], tuple):
+            _, t, f = n.extra["global"]           # state on the object
+            self.E("local.get", self.local_index["self"])
+            self.emit_inputs(n)
+            self.E("class.set", t, f)
+            self.transfer(then, nxt)
         elif k in ("SetVar", "SetState"):
             self.emit_inputs(n)
             self.E("global.set", n.extra["global"])
             self.transfer(then, nxt)
-        elif k == "Call":
+        elif k == "CallParent":
+            self.E("local.get", self.local_index["self"])
             self.emit_inputs(n)
             self.E("call", n.extra["func"])
+            for p in reversed(n.sig.data_outs):
+                slot = self.slots.get((n.id, p.name))
+                if slot is None:
+                    self.E("drop")
+                else:
+                    self.E("local.set", slot)
+            self.transfer(then, nxt)
+        elif k == "Call":
+            self.emit_inputs(n)
+            self.emit_call(n)
             for p in reversed(n.sig.data_outs):
                 slot = self.slots.get((n.id, p.name))
                 if slot is None:
@@ -717,6 +985,77 @@ class FuncLowerer:
             targets = dict(n.execs)
             self.E("br_if", self.L(targets.get("then")))
             self.transfer(targets.get("else"), nxt)
+        elif k == "Try":
+            # Section 4.6: push `then` as a continuation, then a handler marker above it, and
+            # run `body`. A chain end in the body discards the marker and resumes `then`; a
+            # fault unwinds to the marker, stores the fault and lands on the handler below,
+            # which runs `fault` with `then` still pending.
+            self.ready(n)
+            t = dict(n.execs)
+            if t.get("then") is not None:
+                self.E("cont.push", t["then"])
+            fault_local = self.add_local(f"{n.id}.$fault", "fault")
+            handler = f"{n.id}!fault"
+            self.E("try.push", handler, fault_local)
+            if t.get("body") is None:
+                self.emit_chain_end()
+            else:
+                self.E("br", t["body"])
+            self.code.append(("label", handler))
+            for pin, native in (("message", "std.fault.Message"), ("code", "std.fault.Code")):
+                slot = self.slots.get((n.id, pin))
+                if slot is not None:
+                    self.E("local.get", fault_local)
+                    self.E("call", self.c.import_ref(native))
+                    self.E("local.set", slot)
+            self.transfer(t.get("fault"), nxt)
+        elif k in ("Delay", "Yield", "Await"):
+            # suspend parks the fiber, every frame included; it resumes at the next
+            # instruction with its continuation stack intact (section 4.5)
+            self.emit_inputs(n)
+            self.E("suspend", {"Yield": 0, "Delay": 1, "Await": 2}[k])
+            self.transfer(then, nxt)
+        elif k == "Invoke":
+            self.emit_inputs(n)                    # the delegate, then its arguments
+            self.E("call_delegate", n.extra["functype"])
+            for p in reversed(n.sig.data_outs):
+                slot = self.slots.get((n.id, p.name))
+                if slot is None:
+                    self.E("drop")
+                else:
+                    self.E("local.set", slot)
+            self.transfer(then, nxt)
+        elif k in ("Bind", "Unbind", "Broadcast"):
+            # obj, then its dispatcher (a hidden slot), then the handler or the arguments
+            cls_t, slot, disp_t = n.extra["dispatcher"]
+            ep = EvalPoint()
+            for _, _, s in n.inputs:
+                self.count(s, ep)
+            self.eval(n.inputs[0][2], ep)
+            self.E("class.get", cls_t, slot)
+            for _, _, s in n.inputs[1:]:
+                self.eval(s, ep)
+            self.ready(n)
+            self.E({"Bind": "dispatcher.bind", "Unbind": "dispatcher.unbind",
+                    "Broadcast": "dispatcher.broadcast"}[k], disp_t)
+            self.transfer(then, nxt)
+        elif k == "New":
+            self.ready(n)
+            self.E("class.new", self.c.class_type(n.symbol))
+            slot = self.slots.get((n.id, "result"))
+            if slot is None:
+                self.E("drop")
+            else:
+                self.E("local.set", slot)
+            self.transfer(then, nxt)
+        elif k == "SetField":
+            self.emit_inputs(n)                   # obj, then value
+            self.E("class.set", *n.extra["class_field"])
+            self.transfer(then, nxt)
+        elif k == "Throw":
+            self.emit_inputs(n)
+            self.E("call", self.c.import_ref("std.fault.Make"))
+            self.E("throw")
         elif k == "Sequence":
             self.ready(n)
             outs = [t for _, t in n.execs]
@@ -736,16 +1075,45 @@ class FuncLowerer:
                 self.emit_eq(ty)
                 self.E("br_if", self.L(targets.get(f"case{i}")))
             self.transfer(targets.get("default"), nxt)
-        elif k in ARRAY_MUTATORS:
-            # read the place, apply the mutator (which yields the changed array), store it back
+        elif k in PLACE_MUTATORS:
+            # read the place, apply the mutator (which yields the changed container), store it
+            # back; MapRemove, SetAdd and SetRemove also yield whether anything changed
             kind, where = n.extra["place"]
             idx = self.local_index[where] if kind == "local" else where
-            self.E(f"{kind}.get", idx)
-            self.emit_inputs(n)
-            op = {"ArraySet": "array.set", "ArrayAdd": "array.push", "ArrayInsert": "array.insert",
-                  "ArrayRemove": "array.remove", "ArrayClear": "array.clear"}[k]
-            self.E(op, self.c.array_type(n.targs[0]))
-            self.E(f"{kind}.set", idx)
+            if kind == "field":
+                # obj, then the field read without sharing it (it is the place this node
+                # changes); the changed container goes back with class.set on the same obj
+                ep = EvalPoint()
+                for _, _, s in n.inputs:
+                    self.count(s, ep)
+                self.eval(n.inputs[0][2], ep, keep=False)
+                obj = self.temp(n.inputs[0][1])
+                self.E("local.tee", obj)
+                self.E("local.get", obj)
+                self.E("class.get", *idx)
+                for _, _, s in n.inputs[1:]:
+                    self.eval(s, ep)
+                self.ready(n)
+            else:
+                self.E(f"{kind}.get", idx)
+                self.emit_inputs(n)
+            if k in ARRAY_MUTATORS:
+                op = {"ArraySet": "array.set", "ArrayAdd": "array.push",
+                      "ArrayInsert": "array.insert", "ArrayRemove": "array.remove",
+                      "ArrayClear": "array.clear"}[k]
+                self.E(op, self.c.array_type(n.targs[0]))
+            else:
+                self.E(CONTAINER_OPS[k], self.c.container_type(k, n.targs))
+            for p in reversed(n.sig.data_outs):
+                slot = self.slots.get((n.id, p.name))
+                if slot is None:
+                    self.E("drop")
+                else:
+                    self.E("local.set", slot)
+            if kind == "field":
+                self.E("class.set", *idx)
+            else:
+                self.E(f"{kind}.set", idx)
             self.transfer(then, nxt)
         else:
             raise AssertionError(f"cannot lower impure node kind {k}")
@@ -772,7 +1140,17 @@ class FuncLowerer:
             self.code.append(("step", n.id))
             self.E("nop")
 
-    def eval(self, s: Src, ep: EvalPoint):
+    def eval(self, s: Src, ep: EvalPoint, keep: bool = True):
+        """Push the value of an input. With `keep` (the consumer can retain the value: a
+        variable, field, argument, result, struct or macro input), a container gets
+        `ref.share`, so its next change copies it (section 4.9). Read-only consumers
+        (ArrayGet, ArrayLength, the map and set queries, Eq and Ne) pass keep=False, and a
+        mutation node reads its own place without this path."""
+        self._eval(s, ep)
+        if keep and s.kind != "lit" and is_container(s.type):
+            self.E("ref.share")
+
+    def _eval(self, s: Src, ep: EvalPoint):
         if s.kind == "lit":
             self.emit_const(s.a, s.type)
         elif s.kind == "local":
@@ -816,12 +1194,46 @@ class FuncLowerer:
                             self.E("local.set", self.debug_local(s.a, o.name, o.type))
                     self.E("local.get", ep.temps[(s.a, s.b)])
 
+    def emit_call(self, n: IRNode):
+        """A direct call, or call_virtual for a method that is not @final (section 3.3)."""
+        if "interface" in n.extra:
+            self.E("call_interface", *n.extra["interface"])
+        elif "virtual" in n.extra:
+            self.E("call_virtual", *n.extra["virtual"])
+        else:
+            self.E("call", n.extra["func"])
+
     def emit_const(self, lit: Lit, ty: str):
+        if ty == "std.Signal":        # no literal: the null signal, a local never assigned
+            self.E("local.get", self.add_local("$null.signal", ty))
+            return
+        if ty == "anyref" or delegate_sig(ty) is not None:   # null: a local never assigned
+            self.E("local.get", self.add_local(f"$null.{ty}", ty))
+            return
+        if ty in self.c.idx.classes or ty in self.c.idx.interfaces:   # the only literal is null
+            self.E("ref.null", self.c.vt(ty).type)
+            return
         elem = array_elem(ty)
         if elem is not None:          # the only array constant is the empty array
             self.E("i32.const", 0)
             self.E("array.new", self.c.array_type(elem))
             return
+        kv = map_types(ty)
+        if kv is not None:            # likewise the empty map and the empty set
+            self.E("map.new", self.c.map_type(*kv))
+            return
+        elem = set_elem(ty)
+        if elem is not None:
+            self.E("set.new", self.c.set_type(elem))
+            return
+        if ty in self.c.idx.structs:  # structs have no literal: this is the default struct
+            for f in self.c.idx.structs[ty].fields:
+                self.emit_const(f.default if f.default is not None else zero_lit(f.type), f.type)
+            self.E("struct.new", self.c.struct_type(ty))
+            return
+        if lit.kind == "enum":
+            lit = Lit("int", self.c.enum_value(lit))
+        ty = self.c.base(ty)
         vt = VT[ty]
         if ty == "bool":
             self.E("i32.const", 1 if lit.value else 0)
@@ -848,7 +1260,61 @@ class FuncLowerer:
             self.E("i32.const", 0xFFFF)
             self.E("i32.and")
 
+    NARROW_RANGES = {"i8": (-128, 127), "u8": (0, 255), "i16": (-32768, 32767),
+                     "u16": (0, 65535)}
+
+    def clamp_narrow(self, ty: str):
+        """Saturate an i32 from a float conversion to a narrow type's range (section 3.2).
+        `trunc` already saturates to i32 (or u32), and maps NaN to 0."""
+        rng = self.NARROW_RANGES.get(ty)
+        if rng is None:
+            return
+        lo, hi = rng
+        signed = ty in SIGNED_TYPES
+        t = self.temp("i32")
+        self.E("local.set", t)
+        if signed:                       # max(v, lo); the unsigned trunc never goes below 0
+            self.E("local.get", t)
+            self.E("i32.const", lo)
+            self.E("local.get", t)
+            self.E("i32.const", lo)
+            self.E("i32.gt_s")
+            self.E("select")
+            self.E("local.set", t)
+        self.E("local.get", t)           # min(v, hi)
+        self.E("i32.const", hi)
+        self.E("local.get", t)
+        self.E("i32.const", hi)
+        self.E("i32.lt_s" if signed else "i32.lt_u")
+        self.E("select")
+
     def emit_eq(self, ty: str):
+        """[a, b] -> [i32]. Structs compare field by field (section 3.1); containers call
+        std.array.Equals, std.set.Equals or std.map.Equals (section 4.9)."""
+        if is_container(ty):
+            kind = ("array" if array_elem(ty) is not None else
+                    "map" if map_types(ty) is not None else "set")
+            self.E("call", self.c.import_ref(f"std.{kind}.Equals"))
+            return
+        if ty in self.c.idx.classes or ty in self.c.idx.interfaces:   # identity (3.1)
+            self.E("ref.eq")
+            return
+        if ty in self.c.idx.structs:
+            t = self.c.struct_type(ty)
+            fields = self.c.idx.structs[ty].fields
+            tb, ta = self.temp(ty), self.temp(ty)
+            self.E("local.set", tb)
+            self.E("local.set", ta)
+            self.E("i32.const", 1)
+            for i, f in enumerate(fields):
+                self.E("local.get", ta)
+                self.E("struct.get", t, i)
+                self.E("local.get", tb)
+                self.E("struct.get", t, i)
+                self.emit_eq(f.type)
+                self.E("i32.and")
+            return
+        ty = self.c.base(ty)
         if ty == "string":
             self.E("string.eq")
         else:
@@ -862,8 +1328,17 @@ class FuncLowerer:
         if k in ("GetVar", "GetState"):
             if "const" in n.extra:
                 self.emit_const(n.extra["const"], n.sig.outputs[0].type)
+            elif isinstance(n.extra["global"], tuple):     # state on the object
+                _, t, f = n.extra["global"]
+                self.E("local.get", self.local_index["self"])
+                self.E("class.get", t, f)
             else:
                 self.E("global.get", n.extra["global"])
+            return
+        if k in MAP_PURE or k in SET_PURE:
+            for _, _, src in n.inputs:     # the container, then the key, item or index
+                self.eval(src, ep, keep=False)
+            self.E(CONTAINER_OPS[k], self.c.container_type(k, n.targs))
             return
         if k == "MakeArray":
             t = self.c.array_type(n.targs[0])
@@ -875,13 +1350,45 @@ class FuncLowerer:
                 self.E("array.set", t)
             return
         if k == "ArrayGet":
-            self.eval(n.inputs[0][2], ep)
+            self.eval(n.inputs[0][2], ep, keep=False)
             self.eval(n.inputs[1][2], ep)
             self.E("array.get", self.c.array_type(n.targs[0]))
             return
         if k == "ArrayLength":
-            self.eval(n.inputs[0][2], ep)
+            self.eval(n.inputs[0][2], ep, keep=False)
             self.E("array.len")
+            return
+        if k == "GetField" and "class_field" in n.extra:
+            self.eval(n.inputs[0][2], ep)
+            self.E("class.get", *n.extra["class_field"])
+            return
+        if k in ("MakeStruct", "BreakStruct", "GetField", "WithField"):
+            self.emit_struct_node(n, ep)
+            return
+        if k == "IsValid":
+            self.eval(n.inputs[0][2], ep)
+            self.E("ref.valid")
+            return
+        if k == "CreateDelegate":
+            for _, _, s in n.inputs:               # the target, for a method
+                self.eval(s, ep)
+            self.E("delegate.new", *n.extra["delegate"])
+            return
+        if k == "Cast":
+            # result is obj when it is an instance of the class, else null; ok says which.
+            # ref.cast cannot fault here: it sees either an instance or null.
+            t = self.c.vt(n.symbol).type           # a class or an interface
+            self.eval(n.inputs[0][2], ep)
+            obj, ok = self.temp("anyref"), self.temp("bool")
+            self.E("local.tee", obj)
+            self.E("ref.test", t)
+            self.E("local.set", ok)
+            self.E("local.get", obj)
+            self.E("ref.null", t)
+            self.E("local.get", ok)
+            self.E("select")
+            self.E("ref.cast", t)
+            self.E("local.get", ok)
             return
         if k == "Select":
             ty = n.targs[0]
@@ -894,9 +1401,14 @@ class FuncLowerer:
             self.E("local.get", tc)
             self.E("select")
             return
-        for _, _, s in n.inputs:
-            self.eval(s, ep)
+        if k == "CallParent":
+            self.E("local.get", self.local_index["self"])
+        for _, _, s in n.inputs:          # Eq and Ne only compare, so they do not share
+            self.eval(s, ep, keep=k not in ("Eq", "Ne"))
         if k == "Call":
+            self.emit_call(n)
+            return
+        if k == "CallParent":                       # a @pure parent: self went first
             self.E("call", n.extra["func"])
             return
         if k == "Convert":
@@ -909,6 +1421,14 @@ class FuncLowerer:
             self.E(f"i32.{k.lower()}")
             return
         T = n.targs[0]
+        if T in self.c.idx.structs or T in self.c.idx.classes or T in self.c.idx.interfaces \
+                or is_container(T):
+            # only Eq and Ne take these
+            self.emit_eq(T)
+            if k == "Ne":
+                self.E("i32.eqz")
+            return
+        T = self.c.base(T)
         vt = VT[T]
         p = PFX.get(vt)
         signed = T in SIGNED_TYPES
@@ -986,7 +1506,30 @@ class FuncLowerer:
         else:
             raise AssertionError(f"cannot lower pure node kind {k}")
 
+    def emit_struct_node(self, n: IRNode, ep: EvalPoint):
+        """MakeStruct, BreakStruct, GetField, WithField. All are pure."""
+        k = n.kind
+        name, _, fname = (n.symbol or "").partition(".")
+        t = self.c.struct_type(name)
+        for _, _, src in n.inputs:            # fields in order, or obj (and value)
+            self.eval(src, ep)
+        if k == "MakeStruct":
+            self.E("struct.new", t)
+        elif k == "GetField":
+            self.E("struct.get", t, self.c.field_index(name, fname))
+        elif k == "WithField":
+            self.E("struct.with", t, self.c.field_index(name, fname))
+        else:                                 # BreakStruct: push every field, in order
+            tmp = self.temp(name)
+            self.E("local.set", tmp)
+            for i in range(len(self.c.idx.structs[name].fields)):
+                self.E("local.get", tmp)
+                self.E("struct.get", t, i)
+
     def emit_convert(self, f: str, t: str):
+        f, t = self.c.base(f), self.c.base(t)    # an enum converts to its integer as-is
+        if f == t:
+            return
         vf, vt = VT[f], VT[t]
         if t == "string":
             name = {"bool": "FromBool", "u32": "FromU32", "i64": "FromI64", "u64": "FromU64",
@@ -1008,8 +1551,8 @@ class FuncLowerer:
             self.E(f"{PFX[vt]}.convert_{PFX[vf]}_{fs}")
         elif f in FLOAT_TYPES and t in INT_TYPES:
             ts = "s" if t in SIGNED_TYPES else "u"
-            self.E(f"{PFX[vt]}.trunc_{PFX[vf]}_{ts}")
-            self.narrow(t)
+            self.E(f"{PFX[vt]}.trunc_{PFX[vf]}_{ts}")   # saturates to the 32/64-bit range
+            self.clamp_narrow(t)
         elif f == "f32" and t == "f64":
             self.E("f64.promote_f32")
         elif f == "f64" and t == "f32":
@@ -1046,11 +1589,15 @@ class FuncLowerer:
         kind = wbc.OPS[op][1]
         if kind == "L":
             return (pcs[imms[0]] - end,) if final else (0,)
+        if kind == "Lu":
+            return (pcs[imms[0]] - end, imms[1]) if final else (0, imms[1])
         if op == "call":
             return (self.c.func_index(imms[0]),)
+        if op == "delegate.new":
+            return (self.c.func_index(imms[0]), imms[1])
         return imms
 
 
 def compile_module(module: Module, source: Optional[str] = None, embed_source=True,
-                   debug=False) -> CompileResult:
-    return Compiler(module, source, embed_source, debug).compile()
+                   debug=False, project=None) -> CompileResult:
+    return Compiler(module, source, embed_source, debug, project).compile()

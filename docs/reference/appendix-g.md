@@ -1,0 +1,18 @@
+## Appendix G. Changes in Draft 0.8
+
+Draft 0.8 records decisions made while adding maps, sets, container equality, ids and merging to the prototype, where the draft was silent or could not be implemented as written. The table lists each change and where it is.
+
+| Change | Detail | Section |
+| --- | --- | --- |
+| Map and set pins | The map and set kinds have fixed pins, following the array kinds: `MapFind` has `map`, `key`, `value` and `found`; `MapSet` has `key` and `value`; `SetAdd` has `item`; and so on. `MapRemove` and `SetRemove` have the output `removed`, and `SetAdd` the output `added`, false when nothing changed, because their instructions return that flag anyway. `ForEachMap::<K,V>` has `each`, `done`, `key`, `value` and `index`. | 3.3, 3.4 |
+| NaN keys | Every NaN is the same map key or set item, also inside a struct key. Otherwise a NaN key could be added any number of times and never found again. | 3.1 |
+| Container equality | `Eq` and `Ne` on containers use each element's own equality, so a container holding NaN is not equal to itself, while keys match as in a lookup, so two sets that each hold NaN are equal. `std.array.Equals`, `std.set.Equals` and `std.map.Equals` take two `anyref`: one fixed signature serves every element type, which resolves the 0.7 objection that a native has one signature. A struct that holds a container is comparable; it still cannot be a key. | 3.4, 4.9, 5.5 |
+| Native fuel | A native's declared cost may depend on its arguments. The container `Equals` natives cost 1 unit per 8 elements, entries and fields of the smaller operand, nested ones included, and nothing when the lengths differ, so comparing two large containers is not a fixed 5 units. | 4.9, 5.7 |
+| Ids only in a project | `@id`s are required, and `W0202` reported, only in a project. A file outside one (a tutorial, a snippet) may leave them out and editors do not add them there: with no `wiret.ids`, non-reuse cannot be checked, so the ids would only add noise. Draft 0.7 reported `W0202` on every file outside a project, which would flag every such file. | 2.4, 4.7 |
+| `wiret.ids` lines | One retired id per line, `module graph kind id`: `game.demo TakeDamage node set_new` for a node or box, `game.demo - id fn_k3f9` for an `@id`. | 7.3 |
+| Matching ids added on one side | An element without an `@id` matches the element of the same kind and name that has one on the other side, so assigning ids on one branch does not turn every element into a deletion plus an addition. | 7.1 |
+| Renames cross a merge | A rename by `@id` on one side rewrites the references the other side added under the old name. | 7.1 |
+| Layout disagreements | The incoming side (theirs) wins, with a notice. Draft 0.7 said "the later commit wins", but a merge driver sees three files and no commit dates. | 7.1 |
+| Conflict markers | Markers surround the lines concerned: one line per side for a binding, attribute or wire, and the node's whole block when a node was deleted on one side and modified on the other. Draft 0.7's "one line for each side" predates nodes that span several lines. | 7.1 |
+
+**Considered and not adopted.** Comparing NaN keys with NaN's own equality, so that `{NaN}` is not equal to itself: it would contradict lookup, which does find the NaN. One equality native per element type (`std.array.Equals::<f64>`): it multiplies imports and gains nothing, since the native can read the values. "The later commit wins" through commit dates: a Git merge driver is given only the three files, and dates are not a sound order anyway. Reporting `W0202` outside a project too: every tutorial and snippet would carry a warning that nothing can act on.

@@ -100,7 +100,7 @@ Section 7.4 requires each of these as a trace test (expected `S` after every ste
 
 Rules:
 
-- **Reads of mutable state.** `GetField`, `GetVar`, `GetState` and dereferencing a class reference or host handle are `reads` operations. They are fine in a `@reads` function and forbidden in a `@pure` one (`E0304`). A struct, enum, string or container passed as an argument is a value and may be read freely, since the caller's copy cannot change under the callee. A class reference may be passed, compared with `Eq` or tested with `IsValid`'s null check, but not dereferenced.
+- **Reads of mutable state.** `GetField`, `GetVar`, `GetState` and dereferencing a class reference or host handle are `reads` operations. They are fine in a `@reads` function and forbidden in a `@pure` one (`E0304`). A struct, enum, string or container passed as an argument is a value and may be read freely, since the caller's copy cannot change under the callee; `GetField` and `BreakStruct` on a struct are therefore `pure`, also in a `@pure` function. A class reference may be passed, compared with `Eq` or tested with `IsValid`'s null check, but not dereferenced.
 - **Calls.** A `@pure` function may call only `@pure` functions and natives flagged cacheable; a `@reads` function may also call `@reads` functions and natives flagged effect-free. Anything else is `E0304` (reads) or `E0302` (writes or latent).
 - **Cacheability is what the optimiser may use.** Common-subexpression elimination across a state change, hoisting out of loops and memoisation apply only to `@pure` calls and `pure`-purity kinds. A `reads` node is never moved across a write to anything it could read.
 - **Faults are results, not effects.** A fault is part of what a deterministic function returns: the same arguments fault the same way. So a pure call that may fault is kept when its result is unused (removing it would remove the fault), and it is never reordered past another node that could fault or write when that would change which fault is observed. Fuel exhaustion and an interrupt are not faults of the function; they are the VM's limits (section 5.7) and are exempt.
@@ -125,25 +125,41 @@ Every call runs on a **fiber**: its own value stack and call frames, heap-alloca
 - **Latency is declared and checked.** Latent nodes (`Delay`, `Yield`, `Await`) and calls to latent functions or events are allowed only inside latent functions and events (`E0201` otherwise). The verifier enforces the same rule on bytecode: `suspend` and calls to a callee flagged latent appear only in functions flagged latent. A call to a non-latent function therefore can never suspend. A host can call a non-latent export with `wr_call` and rely on getting `WR_OK` or an error, never `WR_YIELD`.
 - Latent nodes are rejected inside `@pure` functions (`E0302`) and inside natives (natives cannot suspend in version 1; see section 6.6).
 - A fiber can only suspend if every frame between it and its base is a Wiret frame. A native that calls back into Wiret and then yields would have to unwind a C frame, which the VM refuses (`WR_ERR_API`), as Lua does for yielding across a C call.
-- Time is virtual. `Delay` waits for virtual seconds that advance only when the host calls `wr_advance`. Wake order is by wake time, then by fiber creation order, so scheduling is deterministic. The full list of conditions for replay is in section 4.10.
+- Time is virtual. `Delay` waits for virtual seconds that advance only when the host calls `wr_advance`; a negative or NaN duration waits 0 seconds. `Yield` waits for the next `wr_advance`. `Await` waits until the signal is fired; a fire wakes the fibers waiting at that moment, in the order they began waiting, and is not remembered for later waiters. `Await` on a null signal is a fault (code -3).
+- Scheduling is deterministic. `wr_advance` first moves the clock, then runs every fiber runnable at the new time, ordered by the time it became runnable (its wake time for a `Delay`, otherwise the time it was started, yielded or woken), then by creation order. A fiber made runnable while an advance is running, by a fire, a `Yield` or a zero `Delay`, runs on the next advance, so a single advance always ends. The full list of conditions for replay is in section 4.10.
+- A macro that contains a latent node, or calls a latent function or event, makes every function that expands it latent too, so `E0201` is reported at the expansion site.
 
 ### 4.6 Faults
 
 A **fault** is a runtime error: null dereference, array index out of range, integer divide by zero, failed `ref.cast`, stack overflow, `Throw`, or an error returned by a native. Faults are catchable with `Try`. `Try` lowers to a *handler marker* pushed on the continuation stack. On a fault, the VM pops the stack down to the nearest marker, stores the fault in a local, clears the operand stack, and jumps to the handler. Normal chain ends discard markers while looking for the next continuation.
 
-A `Try` body must be properly nested: the nodes reachable from `body` must not also be reachable from outside it (`E0412`). Without that rule a stale marker could survive past the end of the region.
+`Try` pushes the continuation for `then` (when it is wired) and then the handler marker, and jumps to `body`. A chain end in the body pops the marker, discards it and resumes `then`. A fault unwinds to the marker, so the fault chain runs with `then` still pending and `then` follows either chain. Unwinding crosses frames: when the faulting frame has no marker, it is discarded and the search goes on in its caller, so a fault in a called function reaches the caller's `Try`. A `Throw` in the fault chain goes to the next marker out.
+
+A `Try` body must be properly nested: the nodes reachable from `body` must not also be reachable from outside it (`E0412`). Without that rule a stale marker could survive past the end of the region. The same code covers a body that leads back to its own `Try` (each pass would push another marker), and, in a macro, a body that reaches an `Exit`: the caller's chain would then run with the macro's marker still active, which the macro cannot see.
+
+Faults have a message and an `i32` code. `Throw` supplies both; programs should use non-negative codes. The built-in faults use negative codes:
+
+| Code | Fault |
+| --- | --- |
+| -1 | Integer divide or remainder by zero |
+| -2 | Index out of range (arrays, `MapKeyAt` and the like), or a negative array length |
+| -3 | Null reference |
+| -4 | Failed `ref.cast` |
+| -5 | Stack overflow: call depth or continuation stack |
+| -6 | An error returned by a native |
+| -7 | `unreachable` executed |
 
 Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber killed by the host. These end the fiber and are reported to the host.
 
-**Provisional.** Catchable faults are the least proven part of this design. If prototyping shows that the nesting rule `E0412` rejects graphs that users find natural, `Try` and `Throw` move to a later version. Every fault would then end its fiber and be reported to the host with a node-level traceback (section 6.9), which is a complete and simpler model on its own.
+**Provisional.** Catchable faults are the least proven part of this design. The prototype implements them, with the required macro test 5 of section 4.2. If prototyping shows that the nesting rule `E0412` rejects graphs that users find natural, `Try` and `Throw` move to a later version. Every fault would then end its fiber and be reported to the host with a node-level traceback (section 6.9), which is a complete and simpler model on its own.
 
 ### 4.7 Diagnostics
 
 | Code | Meaning |
 | --- | --- |
-| `E0101` / `E0102` | Binding or exec target names an unknown node / duplicate node id. |
+| `E0101` / `E0102` | Binding or exec target names an unknown node / a duplicate: node id, declaration, struct field or enum member; also a struct or enum named like a built-in type, and a node id that is also an enum's name (section 2.3). |
 | `E0103` | Unknown pin on a node. |
-| `E0110` | Wire type mismatch (and no supertype relation). |
+| `E0110` | Wire type mismatch (and no supertype relation); also a literal, field default, enum member value or `@cases` value that does not fit its type. |
 | `E0111` | The same input pin is bound twice. |
 | `E0120` | Exec output wired to a data pin, or a data wire to an exec pin. |
 | `E0121` | An exec output has more than one wire in the `flow` block. |
@@ -153,21 +169,27 @@ Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber
 | `E0401` | Macro expands itself. |
 | `E0412` | `Try` body is not properly nested. |
 | `E0501` / `E0502` | Unresolved symbol / missing type argument. |
+| `E0503` | A struct holds itself by value, directly or through other structs (section 2.2). |
+| `E0150` | A method overrides a `@final` method, or its parameters, results or latency differ from the method it overrides (section 2.2). |
+| `E0151` | A class extends something that is not a class of the module, or its base classes form a cycle; or `impl` names something that is not an interface. |
+| `E0160` | An `extern` needs a capability that the project's `wiret.toml` `[capabilities] allow` list does not permit (section 7.3). |
+| `E0152` | A class does not implement a method of an interface it names, or implements it with another signature, as an `event`, or as a `@latent` func. |
 | `W0201` | Input left unbound and no declared default. |
 | `W0301` | Node unreachable from any entry. |
 | `W0302` | Chain can end in a function that declares results. |
 | `W0310` | Read of an impure output not dominated by its producer. |
 | E0130 | Container mutation node does not target a place (local, variable or field). |
+| E0104 | Unknown `@` attribute. For a metadata name such as `@doc`, the message shows the `#[...]` form (section 2.4). |
 | E0900 | Edit rejected: the document changed since the hash the edit was based on (section 7.2). |
 | E0201 | A function that is not latent contains a latent node or calls a latent function or event. |
 | E0303 | A path provably ends, with no pending continuation, in a function that declares results and has not returned. |
-| E0140 | A node, box, markup attribute or `@id` reuses an id recorded as retired in `wiret.ids` (section 7.3). |
-| W0202 | Element has no `@id`, or the file is not in a project and non-reuse cannot be checked (section 2.4). |
+| E0140 | A node, box or `@id` reuses an id recorded as retired in `wiret.ids` (section 7.3). |
+| W0202 | Element in a project has no `@id` (section 2.4). A file outside a project gets no `W0202`. |
 | W0320 | A `reads` node feeds more than one impure consumer (section 4.3). |
 | W0601 | A box lists a member id that names no node or box. |
 | W0602 | A node or box is listed as a member of more than one box. |
 | W0603 | `wiretc fmt` would drop a `//` comment (section 2.1). |
-| W0604 | A markup attribute's `on` target no longer exists. |
+| W0604 | A `#[note]` is detached: its target was deleted and the note was moved to the enclosing graph (section 2.4). |
 
 Diagnostics are structured records, not only text: `code`, `severity`, `message`, `module`, `graph`, `node` and `pin`. `wiretc check --json` prints one record per line. An editor uses `node` and `pin` to highlight the exact place on the graph, and an LLM agent feeds the records back to itself until the check is clean (section 7.2). Diagnostics that arise inside an expanded macro carry the path-style node id (section 4.4).
 
@@ -183,13 +205,13 @@ Diagnostics are structured records, not only text: `code`, `severity`, `message`
 
 ### 4.9 Containers have value semantics
 
-`array<T>`, `set<T>` and `map<K,V>` are value types, as arrays are in Blueprints. Assigning one, passing it to a function, storing it in a field or returning it gives the receiver its own logical copy, and changing one never changes another. Two variables never alias one array.
+`array::<T>`, `set::<T>` and `map::<K,V>` are value types, as arrays are in Blueprints. Assigning one, passing it to a function, storing it in a field or returning it gives the receiver its own logical copy, and changing one never changes another. Two variables never alias one array.
 
 Copying eagerly would make a loop that appends to an array quadratic, so the VM implements the rule as **copy-on-write** with a single `shared` flag per container object:
 
 - **Fresh containers are unshared.** `array.new`, `array.clone` and the result of any mutating instruction start unshared.
-- **Letting a reference escape marks sharing.** When the value of a container variable, field, parameter or element is bound to anything that can retain it (another variable or field, a call argument, a return value, a macro input), the compiler emits `ref.share` after the read. `ref.share` sets the flag and returns the same reference. Read-only nodes (`ArrayGet`, `ArrayLength`, `MapFind`, ...) do not need it.
-- **Mutating instructions return the container.** `array.push` and the other mutators take the container and return one. If it is unshared they change it in place and return the same reference. If it is shared they change a fresh copy and return that. The compiler stores the result back into the place being changed, which is how `ArrayAdd<i32> acc (item: x)` works.
+- **Letting a reference escape marks sharing.** When the value of a container variable, field, parameter or element is bound to anything that can retain it (another variable or field, a call argument, a return value, a macro input), the compiler emits `ref.share` after the read. `ref.share` sets the flag and returns the same reference. Read-only nodes (`ArrayGet`, `ArrayLength`, `MapFind` and the other map and set queries, and `Eq`/`Ne`) do not need it. Without the optimiser this is decided per consumer pin: every container input whose consumer can keep the value is shared, and the rest are not.
+- **Mutating instructions return the container.** `array.push` and the other mutators take the container and return one. If it is unshared they change it in place and return the same reference. If it is shared they change a fresh copy and return that. The compiler stores the result back into the place being changed, which is how `ArrayAdd::<i32> acc` (with `.item <- x`) works.
 - **A mutation node reads its own place without marking it.** A loop that keeps adding to a local array therefore changes it in place, at constant cost per iteration, as long as nothing else has read it.
 - **The flag is never cleared.** A holder that still points at a shared object copies it once on its next mutation and then owns an unshared copy. That costs at most one extra copy per sharing event and needs no reference counts, so the tracing collector is unchanged and every run behaves identically.
 
@@ -198,9 +220,12 @@ Consequences:
 - `ForEach` iterates the array as it was when the loop started, because a macro input is captured (and so marked shared) at entry. Changing the variable inside the body does not disturb the iteration.
 - A struct that contains a container holds it by shared reference. Because every read marks it shared, nothing can change a struct through its array.
 - Containers of containers follow the same rule at each level: reading an element that is itself a container marks it shared.
-- Classes, delegates and host handles stay reference types. An `array<Player>` copies the references, not the players.
+- Classes, delegates and host handles stay reference types. An `array::<Player>` copies the references, not the players.
 - The optimiser removes a `ref.share` when liveness analysis shows the source holder is dead after the read, which is the common case when a function builds a local array and returns it.
-- `Eq` and `Ne` on containers are structural (element-wise for arrays; set and map equality ignores insertion order) and compile to calls to `std.array.Equals`, `std.set.Equals` and `std.map.Equals`.
+- A default container that many holders start from (a local's or field's starting value, the value `MapFind` gives for a missing key) is created shared, so the first change to it makes a copy.
+- `Eq` and `Ne` on containers are structural: element-wise for arrays; the same items for sets, and the same keys with equal values for maps, ignoring insertion order. Each element, value and field uses its own type's equality, so a container holding NaN is not equal to itself. Keys, however, match as they do in a lookup, where every NaN is one key (section 3.1), so two sets that each hold NaN are equal. A struct that holds a container is compared field by field as below, and that field with these rules.
+- Container equality compiles to calls to `std.array.Equals`, `std.set.Equals` and `std.map.Equals`, each `(a: anyref, b: anyref) -> bool`. One fixed signature serves every element type, because the native reads the values it is given. Each declares a fuel cost (section 5.7) of 1 unit per 8 elements, entries and fields of the smaller operand, nested containers included, and nothing when the two have different lengths.
+- `Eq` and `Ne` on structs compare field by field, in declaration order, each with its own field type's equality, so a struct holding NaN is not equal to itself. They compile inline to `struct.get` and the field comparisons; there is no struct native, since a native has one fixed signature.
 
 ### 4.10 Deterministic mode
 
@@ -213,8 +238,9 @@ The mode requires all of the following.
    - `f32` and `f64` use IEEE-754 binary32 and binary64 with round-to-nearest-even for `+ - * /`, `Sqrt`, `Floor`, `Ceil` and conversions. No fused multiply-add contraction, no extended-precision intermediates, no flush-to-zero; subnormals are kept.
    - Every operation that produces a NaN produces the canonical quiet NaN (`0x7FC00000`, `0x7FF8000000000000`), so NaN payloads and signs are never observable. `Eq` with a NaN is false, `Ne` is true, and `Lt Le Gt Ge` are false. `Min` and `Max` return NaN if either input is NaN (not IEEE minNum), and order `-0` before `+0`.
    - `Round` rounds half away from zero. Float to string uses the shortest round-trip text (section 3.2).
-   - `std.math` functions that are not exactly rounded by IEEE (`Sin`, `Cos`, `Pow`, `Atan2`, `Exp`, `Log`, ...) use the VM's bundled implementation with a fixed algorithm and evaluation order, not the platform's `libm`. Outside the mode they may call `libm`, and their last bits may differ between platforms.
-3. **Defined iteration and scheduling order.** Maps and sets iterate in insertion order. Fibers wake by wake time, then fiber creation order (section 4.5). Fibers made runnable at the same `wr_advance` run in that order, each until it suspends, finishes or runs out of fuel; there is no time-sliced preemption. Waiters on a signal resume in the order they began waiting. Dispatcher handlers run in bind order.
+   - `std.math` functions that are not exactly rounded by IEEE (`Sin`, `Cos`, `Pow`, `Atan2`, `Exp`, `Log`, ...) use the VM's bundled implementation with a fixed algorithm and evaluation order, not the platform's `libm`. Outside the mode they may call `libm`, and their last bits may differ between platforms. Special values (signed zeros, infinities, NaN) follow C99 Annex F. The prototype's reference implementation computes each function in decimal arithmetic to 60 significant digits, with exact reduction modulo 2π, and rounds once to binary64; its results are the golden vectors for these functions.
+   - Since a NaN's payload and sign can only be seen by reinterpreting its bits, an implementation meets the canonical-NaN rule by giving the canonical bits whenever `i32.reinterpret_f32` or `i64.reinterpret_f64` sees a NaN.
+3. **Defined iteration and scheduling order.** Maps and sets iterate in insertion order. Fibers wake by wake time, then fiber creation order (section 4.5). Fibers runnable at the same `wr_advance` run in that order, each until it suspends, finishes or runs out of fuel; there is no time-sliced preemption. A fiber made runnable during an advance runs on the next one (section 4.5). Waiters on a signal resume in the order they began waiting. Dispatcher handlers run in bind order.
 4. **Host events enter only at API boundaries.** The host affects a VM only through API calls (`wr_call`, `wr_advance`, firing a signal, `wr_grant`, ...), and the sequence of those calls is the input log. A native may call back into Wiret only with a call that is itself part of the log.
 5. **Limits are logical.** Fuel counts instructions (section 5.7). `max_heap_bytes` is charged by the VM's own accounting of object sizes, not by what the allocator returns, so a memory-limit fault happens at the same instruction on every platform (**Provisional**).
 
@@ -226,3 +252,5 @@ Excluded from the guarantee:
 - **Differences in the host environment** that the VM does not control: a different allocator that fails earlier than the logical limit, a different build of the same natives.
 
 The claim of identical results on every platform is a **target** until the conformance suite (section 7.4) passes the same golden traces on at least two CPU architectures and two compilers.
+
+**Recording and replay.** In the prototype, the input log is a list of JSON entries, one per host API call: the call, its arguments (floats as exact hex, objects, signals, fibers and modules as handles numbered in order of first appearance), and what it gave (the result or fault, the instructions executed, the fuel left and the lines printed). A replay runs the entries on a new deterministic VM and stops at the first entry that differs. Recording the outcomes as well as the inputs makes a log its own test: `wiretc replay` checks a recorded run without the original host.

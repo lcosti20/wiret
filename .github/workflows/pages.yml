@@ -1,0 +1,57 @@
+# Publishes the browser version of the prototype (prototype/web) to GitHub Pages.
+#
+# Every push to main runs the prototype's tests, builds the static site
+# (prototype/web/build_web.py --site) and deploys it. Pull requests into main run the
+# same tests and build, without deploying, so a broken site is caught before it is merged.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deployment at a time; a newer push replaces a queued one, but a running one finishes.
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"   # the version Pyodide 0.27 runs in the browser
+
+      - name: Run the prototype's tests
+        working-directory: prototype
+        run: python -m unittest discover tests
+
+      - name: Build the site
+        working-directory: prototype
+        run: python web/build_web.py --site ../_site
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

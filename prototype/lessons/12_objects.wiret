@@ -1,0 +1,144 @@
+wiret 1
+module lessons.objects
+
+extern func host.Log(message: string)
+
+#[doc("Any animal: it has a name and can speak.")]
+class Animal {
+  name: string = "An animal"
+
+  #[note("What any animal says, unless its own class says otherwise. GetField reads this animal's name: self is the animal Speak was called on.")]
+  func Speak() -> (line: string) {
+    node entry = Entry
+    node line = Call std.string.Concat
+      .a <- name.value
+      .b <- " makes a sound."
+    node name = GetField name
+      .obj <- entry.self
+    node ret = Return
+      .line <- line.result
+
+    flow {
+      entry -> ret
+    }
+
+    layout {
+      entry at (0, 0)
+      line at (50, 110)
+      name at (-150, 220)
+      ret at (250, 0)
+    }
+  }
+}
+
+#[doc("A cat: an Animal that speaks its own way.")]
+class Cat : Animal {
+  #[note("Cat replaces Speak completely: an override. A Cat still has a name, inherited from Animal.")]
+  func Speak() -> (line: string) {
+    node entry = Entry
+    node line = Call std.string.Concat
+      .a <- name.value
+      .b <- " says Meow."
+    node name = GetField name
+      .obj <- entry.self
+    node ret = Return
+      .line <- line.result
+
+    flow {
+      entry -> ret
+    }
+
+    layout {
+      entry at (0, 0)
+      line at (50, 110)
+      name at (-150, 220)
+      ret at (250, 0)
+    }
+  }
+}
+
+#[doc("A dog: an Animal that adds to what any animal says.")]
+class Dog : Animal {
+  #[note("Dog keeps what Animal says and adds to it: CallParent runs Animal's Speak on this same dog.")]
+  func Speak() -> (line: string) {
+    node entry = Entry
+    node line = Call std.string.Concat
+      .a <- parent.line
+      .b <- " Woof!"
+    node parent = CallParent Speak
+    node ret = Return
+      .line <- line.result
+
+    flow {
+      entry -> parent
+      parent -> ret
+    }
+
+    layout {
+      entry at (0, 0)
+      line at (300, 110)
+      parent at (250, 0)
+      ret at (500, 0)
+    }
+  }
+}
+
+#[note("Lesson 12: Objects. A class describes a kind of thing: its fields (what each one knows) and its methods (what each one can do). New makes an object of a class. Dog and Cat extend Animal, so they are Animals too, and can each speak in their own way.")]
+#[note("Try it: (1) Step (F11) into Speak and look at self in the Variables panel. (2) Give Animal a second field, 'legs: i32 = 4', and use it in Speak. (3) Delete Cat's Speak: Tom now speaks like any animal.")]
+func Main() {
+  local pets: array::<Animal>
+  node add_cat = ArrayAdd::<Animal> pets
+    .item <- cat.result
+  node add_dog = ArrayAdd::<Animal> pets
+    .item <- dog.result
+  node add_other = ArrayAdd::<Animal> pets
+    .item <- other.result
+  node all = GetLocal pets
+  node cat = New Cat
+  node dog = New Dog
+  node entry = Entry
+  node loop = Macro std.flow.ForEach::<Animal>
+    .array <- all.value
+  node name_cat = SetField Animal.name
+    .obj <- cat.result
+    .value <- "Tom"
+  node name_dog = SetField Animal.name
+    .obj <- dog.result
+    .value <- "Rex"
+  node other = New Animal
+  node say = Call host.Log
+    .message <- speak.line
+  #[note("Each pet runs its own class's Speak, though the array only knows they are Animals.")]
+  node speak = Call Animal.Speak
+    .self <- loop.item
+
+  flow {
+    add_cat -> other
+    add_dog -> cat
+    add_other -> loop
+    cat -> name_cat
+    dog -> name_dog
+    entry -> dog
+    loop.each -> speak
+    name_cat -> add_cat
+    name_dog -> add_dog
+    other -> add_other
+    speak -> say
+  }
+
+  layout {
+    add_cat at (1500, 0)
+    add_dog at (750, 0)
+    add_other at (2000, 0)
+    all at (2050, 110)
+    cat at (1000, 0)
+    dog at (250, 0)
+    entry at (0, 0)
+    loop at (2250, 0)
+    name_cat at (1250, 0)
+    name_dog at (500, 0)
+    other at (1750, 0)
+    say at (2750, 0)
+    speak at (2500, 0)
+  }
+}

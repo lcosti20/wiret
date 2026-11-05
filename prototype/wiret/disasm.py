@@ -9,6 +9,9 @@ from .wbc import ArrayType, decode_code, vt_name
 def disassemble(data: bytes) -> str:
     m = wbc.decode_module(data)
     names, local_names, debug, meta = parse_customs(m)
+    classes = {k[1]: v for k, v in meta.items() if isinstance(k, tuple) and k[0] == "class"}
+    wbc.CLASS_NAMES.clear()
+    wbc.CLASS_NAMES.update({ti: name for ti, (name, _) in classes.items()})
     out = []
     if meta:
         out.append(f"; module {meta.get('module', '')}  compiler {meta.get('compiler', '')}")
@@ -18,6 +21,9 @@ def disassemble(data: bytes) -> str:
         params, results = m.types[t]
         out.append(f"import {i} {mod}.{fld} ({', '.join(vt_name(p, m.types) for p in params)}) -> "
                    f"({', '.join(vt_name(r, m.types) for r in results)})" + (" pure" if flags & 1 else ""))
+    from .vm import parse_caps
+    for cap in parse_caps(m):
+        out.append(f"capability {cap}")
     for gi, (vt, mut, init) in enumerate(m.globals):
         out.append(f"global {gi} {vt_name(vt, m.types)} {names.get(gi, '')}")
     nimp = len(m.imports)
@@ -38,7 +44,8 @@ def disassemble(data: bytes) -> str:
         fi = nimp + i
         params, results = m.types[t]
         lnames = local_names.get(fi, {})
-        tags = [s for b, s in ((wbc.FN_PURE, "pure"), (wbc.FN_EVENT, "event")) if flags & b]
+        tags = [s for b, s in ((wbc.FN_PURE, "pure"), (wbc.FN_EVENT, "event"),
+                               (wbc.FN_LATENT, "latent")) if flags & b]
         out.append("")
         out.append(f"func {names.get(fi, f'func{fi}')} ({', '.join(vt_name(p, m.types) for p in params)})"
                    f" -> ({', '.join(vt_name(r, m.types) for r in results)})"
@@ -50,7 +57,7 @@ def disassemble(data: bytes) -> str:
         out.append(f"  max_stack: {body.max_stack}")
         instrs = decode_code(body.code)
         labels = {pc: node for pc, node in debug.get(fi, (None, [], []))[1]}
-        targets = {ins.target() for ins in instrs if ins.name in ("br", "br_if", "cont.push")}
+        targets = {ins.target() for ins in instrs if ins.name in ("br", "br_if", "cont.push", "try.push")}
         for ins in instrs:
             if ins.pc in labels:
                 out.append(f".{labels[ins.pc]}:")
@@ -58,11 +65,37 @@ def disassemble(data: bytes) -> str:
                 out.append(f".pc{ins.pc}:")
             text = ins.name
             comment = ""
-            if ins.name in ("br", "br_if", "cont.push"):
+            if ins.name in ("br", "br_if", "cont.push", "try.push"):
                 t = ins.target()
                 text += " ." + labels.get(t, f"pc{t}")
+                if ins.name == "try.push":
+                    text += f" {ins.imms[1]}"
+                    comment = lnames.get(ins.imms[1], "")
             elif ins.name == "call":
                 text += f" {names.get(ins.imms[0], ins.imms[0])}"
+            elif ins.name == "call_virtual" and ins.imms[0] < len(m.types):
+                t, slot = ins.imms
+                text += f" {t} {slot}"
+                vt = getattr(m.types[t], "vtable", ())
+                if slot < len(vt):
+                    comment = f"{classes.get(t, ('class ' + str(t),))[0]} slot {slot}: " \
+                              f"{names.get(vt[slot], vt[slot])}"
+            elif ins.name == "delegate.new":
+                f, fl = ins.imms
+                text += f" {f} {fl}"
+                comment = str(names.get(f, f)) + (" + receiver" if fl & 1 else "") + \
+                    (", its override" if fl & 2 else "")
+            elif ins.name == "call_interface":
+                t, k = ins.imms
+                text += f" {t} {k}"
+                comment = f"{classes.get(t, ('interface ' + str(t),))[0]} method {k}"
+            elif ins.name.startswith(("class.", "ref.")) and ins.imms:
+                t = ins.imms[0]
+                text += " " + " ".join(str(x) for x in ins.imms)
+                cname, fnames = classes.get(t, (f"class {t}", []))
+                comment = cname
+                if ins.name in ("class.get", "class.set") and ins.imms[1] < len(fnames):
+                    comment = f"{cname}.{fnames[ins.imms[1]]}"
             elif ins.name.startswith("local."):
                 text += f" {ins.imms[0]}"
                 comment = lnames.get(ins.imms[0], "")
@@ -77,7 +110,7 @@ def disassemble(data: bytes) -> str:
                 t = ins.imms[0]
                 text += f" {t}"
                 if t < len(m.types) and isinstance(m.types[t], ArrayType):
-                    comment = f"array<{vt_name(m.types[t].elem, m.types)}>"
+                    comment = f"array::<{vt_name(m.types[t].elem, m.types)}>"
             elif ins.imms:
                 text += " " + " ".join(str(x) for x in ins.imms)
             line = f"  {text}"

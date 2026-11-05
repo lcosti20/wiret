@@ -1,0 +1,161 @@
+wiret 1
+module lessons.events
+
+extern func host.Log(message: string)
+
+#[doc("A button that tells whoever is listening when it is clicked.")]
+class Button {
+  dispatcher OnClick(times: i32)
+
+  #[note("Click counts its clicks in a state slot, which every button keeps for itself, then tells every listener with Broadcast.")]
+  func Click() {
+    state clicks: i32
+    node count = GetState clicks
+    node entry = Entry
+    node inc = Add::<i32>
+      .a <- count.value
+      .b <- 1
+    node now = GetState clicks
+    node save = SetState clicks
+      .value <- inc.result
+    node tell = Broadcast OnClick
+      .obj <- entry.self
+      .times <- now.value
+
+    flow {
+      entry -> save
+      save -> tell
+    }
+
+    layout {
+      count at (-150, 220)
+      entry at (0, 0)
+      inc at (50, 110)
+      now at (300, 110)
+      save at (250, 0)
+      tell at (500, 0)
+    }
+  }
+}
+
+#[doc("Counts the clicks it hears.")]
+class Counter {
+  heard: i32
+
+  #[note("Heard is a handler: its inputs match OnClick, so it can listen to a button.")]
+  func Heard(times: i32) {
+    node cur = GetField heard
+      .obj <- entry.self
+    node entry = Entry
+    node inc = Add::<i32>
+      .a <- cur.value
+      .b <- 1
+    node save = SetField heard
+      .obj <- entry.self
+      .value <- inc.result
+
+    flow {
+      entry -> save
+    }
+
+    layout {
+      cur at (-150, 220)
+      entry at (0, 0)
+      inc at (50, 110)
+      save at (250, 0)
+    }
+  }
+}
+
+#[note("Announce is another handler, a plain function this time.")]
+func Announce(times: i32) {
+  node entry = Entry
+  node line = Call std.string.Concat
+    .a <- "Click number "
+    .b <- number.result
+  node number = Convert::<i32, string>
+    .value <- entry.times
+  node say = Call host.Log
+    .message <- line.result
+
+  flow {
+    entry -> say
+  }
+
+  layout {
+    entry at (0, 0)
+    line at (50, 110)
+    number at (-150, 220)
+    say at (250, 0)
+  }
+}
+
+#[note("Lesson 14: Events. A dispatcher is a list of listeners on an object: Bind adds one, Unbind removes one, and Broadcast calls them all. A listener is a delegate, made with CreateDelegate from a function, or from a method plus the object to call it on.")]
+#[note("Try it: (1) Move the Unbind to the end: Announce hears all three clicks. (2) Make a second Counter and bind it too. (3) Change Heard to an event with a Delay: a delegate starts an event on its own, so Click does not wait.")]
+func Main() {
+  node announce = CreateDelegate Announce
+  node b = New Button
+  node bind_a = Bind Button.OnClick
+    .obj <- b.result
+    .handler <- announce.result
+  node bind_c = Bind Button.OnClick
+    .obj <- b.result
+    .handler <- heard.result
+  node c = New Counter
+  node click1 = Call Button.Click
+    .self <- b.result
+  node click2 = Call Button.Click
+    .self <- b.result
+  node click3 = Call Button.Click
+    .self <- b.result
+  node entry = Entry
+  node heard = CreateDelegate Counter.Heard
+    .target <- c.result
+  node how_many = GetField Counter.heard
+    .obj <- c.result
+  node line = Call std.string.Concat
+    .a <- "The counter heard "
+    .b <- tail.result
+  node number = Convert::<i32, string>
+    .value <- how_many.value
+  node say = Call host.Log
+    .message <- line.result
+  node tail = Call std.string.Concat
+    .a <- number.result
+    .b <- " clicks"
+  #[note("After this, Announce stops listening, but the counter goes on.")]
+  node unbind_a = Unbind Button.OnClick
+    .obj <- b.result
+    .handler <- announce.result
+
+  flow {
+    b -> c
+    bind_a -> bind_c
+    bind_c -> click1
+    c -> bind_a
+    click1 -> click2
+    click2 -> unbind_a
+    click3 -> say
+    entry -> b
+    unbind_a -> click3
+  }
+
+  layout {
+    announce at (550, 110)
+    b at (250, 0)
+    bind_a at (750, 0)
+    bind_c at (1000, 0)
+    c at (500, 0)
+    click1 at (1250, 0)
+    click2 at (1500, 0)
+    click3 at (2000, 0)
+    entry at (0, 0)
+    heard at (800, 110)
+    how_many at (1450, 440)
+    line at (2050, 110)
+    number at (1650, 330)
+    say at (2250, 0)
+    tail at (1850, 220)
+    unbind_a at (1750, 0)
+  }
+}
