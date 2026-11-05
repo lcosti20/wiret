@@ -18,7 +18,7 @@ cd prototype
 python3 wiret_editor.py                         # the editor, opening Lesson 1
 python3 wiret_editor.py examples/demo.wiret     # the editor on a larger example
 python3 wiretc.py run examples/demo.wiret Main  # the same program from the command line
-python3 -m unittest discover tests              # 94 tests
+python3 -m unittest discover tests              # 95 tests
 ```
 
 ## Building a desktop app
@@ -297,8 +297,6 @@ Struct and enum declarations are edited in the Source pane; there is no dialog f
   but not generated automatically.
 - **Optimisation.** There is no `-O1`, so the `cont.push`/`cont.pop` pairs are never replaced
   by direct branches.
-- **Saturation for narrow types.** Converting a float to a narrow integer type truncates
-  toward zero and then wraps. It does not saturate to the narrow type's range.
 - **Example layout.** The spec's examples align the `=` signs; the canonical writer does not.
   If it did, adding one longer node id would change every line of the graph, which breaks the
   one-line-diff rule.

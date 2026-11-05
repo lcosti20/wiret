@@ -1604,6 +1604,40 @@ func Conv(x: f64) -> (i: i32, b: u8, s: string, back: f32) {
         self.assertEqual(run(text, "Conv", float("nan"))[0][0], 0)
 
 
+class SaturationTests(unittest.TestCase):
+    """Float to integer conversion saturates to the target type's range (section 3.2)."""
+
+    def test_narrow_types_saturate(self):
+        types = ["i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64"]
+        results = ", ".join(f"{t}_: {t}" for t in types)
+        nodes = "".join(f"  node {t}_ = Convert::<f64, {t}>\n    .value <- entry.x\n" for t in types)
+        binds = "".join(f"    .{t}_ <- {t}_.result\n" for t in types)
+        text = module(f"""
+func Sat(x: f64) -> ({results}) @pure {{
+  node entry = Entry
+{nodes}  node r = Return
+{binds}
+  flow {{
+    entry -> r
+  }}
+}}
+""", macros=False)
+        from wiret.runner import format_value
+        cases = {
+            300.7: [127, 255, 300, 300, 300, 300, 300, 300],
+            -300.7: [-128, 0, -300, 0, -300, 0, -300, 0],
+            1e10: [127, 255, 32767, 65535, 2**31 - 1, 2**32 - 1, 10**10, 10**10],
+            -1e10: [-128, 0, -32768, 0, -2**31, 0, -10**10, 0],
+            float("nan"): [0] * 8,
+            float("inf"): [127, 255, 32767, 65535, 2**31 - 1, 2**32 - 1, 2**63 - 1, 2**64 - 1],
+            -0.9: [0] * 8,
+        }
+        for x, want in cases.items():
+            with self.subTest(x=x):
+                got = run(text, "Sat", x)[0]
+                self.assertEqual([int(format_value(t, v)) for t, v in zip(types, got)], want)
+
+
 class ArithmeticEdgeCases(unittest.TestCase):
     TEXT = module("""
 func Div(a: i32, b: i32) -> (q: i32, r: i32) {
