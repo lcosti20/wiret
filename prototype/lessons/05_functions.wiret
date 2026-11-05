@@ -33,11 +33,11 @@ func Main() {
   layout {
     entry at (0, 0)
     loop at (200, 0)
-    n_text at (380, 160)
-    part1 at (620, 120)
-    part2 at (860, 200)
-    say at (980, 0)
-    sq_text at (580, 300)
+    n_text at (498, 99)
+    part1 at (753, 99)
+    part2 at (1056, 99)
+    say at (1247, 0)
+    sq_text at (733, 260)
     squared at (380, 260)
   }
 }

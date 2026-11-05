@@ -21,8 +21,8 @@ func CheckAge(age: i32) {
   }
 
   layout {
-    bad at (50, 110)
-    chk at (250, 0)
+    bad at (162, 60)
+    chk at (333, 0)
     entry at (0, 0)
     stop at (500, 0)
   }
@@ -82,22 +82,22 @@ func Main() {
   }
 
   layout {
-    age at (750, 0)
-    ages_ok at (1000, 0)
-    each at (550, 310)
+    age at (853, 316)
+    ages_ok at (1214, 316)
+    each at (1009, 67)
     entry at (0, 0)
-    good at (500, 0)
-    log_share at (750, 200)
-    never at (1250, 0)
-    oops at (300, 310)
-    oops2 at (550, 510)
+    good at (567, 3)
+    log_share at (1288, 2)
+    never at (1638, 2)
+    oops at (542, 252)
+    oops2 at (886, 483)
     safe at (250, 0)
-    say_oops at (500, 200)
-    say_oops2 at (750, 400)
-    share_text at (350, 420)
+    say_oops at (764, 208)
+    say_oops2 at (1110, 420)
+    share_text at (787, 87)
     sorted at (500, 400)
-    still at (750, 600)
-    zero at (1000, 200)
+    still at (843, 606)
+    zero at (1447, 2)
   }
 }
 
@@ -115,8 +115,8 @@ func Share(total: i32, people: i32) -> (each: i32) {
   }
 
   layout {
-    div at (50, 110)
+    div at (198, 65)
     entry at (0, 0)
-    ret at (250, 0)
+    ret at (375, 0)
   }
 }
