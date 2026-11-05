@@ -46,11 +46,11 @@ def allows(constraint: str, ty: str, idx: "Optional[ModuleIndex]" = None) -> boo
     """Whether a type argument meets a constraint of a registry kind."""
     if ty in CONSTRAINTS[constraint]:
         return True
+    if constraint == "eq":
+        return type_ok(ty, idx)        # every value type has an equality (section 4.9)
     if idx is None:
         return False
     kinds = USER_CONSTRAINTS.get(constraint, ())
-    if constraint == "eq" and ty in idx.structs:
-        return comparable(ty, idx)
     return ("struct" in kinds and ty in idx.structs) or ("enum" in kinds and ty in idx.enums)
 
 
@@ -63,10 +63,10 @@ def type_choices(constraint: str, idx: "Optional[ModuleIndex]" = None) -> list:
     return out
 
 
-def comparable(ty: str, idx: "ModuleIndex") -> bool:
-    """Whether `Eq` can compare two values of a type field by field. Arrays cannot be
-    compared in this prototype, so neither can a struct that holds one. Structs never hold
-    themselves by value (E0503), so the recursion ends; a cycle check guards it anyway."""
+def plain_struct(ty: str, idx: "ModuleIndex") -> bool:
+    """Whether a struct holds only primitives, enums and structs of those, as a map key or
+    set item must (section 3.1). Structs never hold themselves by value (E0503), so the
+    recursion ends; a cycle check guards it anyway."""
     path = set()
 
     def ok(t):
@@ -119,7 +119,7 @@ def key_type_ok(ty: str, idx: "Optional[ModuleIndex]" = None) -> bool:
     """A map key or set element: a primitive, an enum, or a struct of those (section 3.1)."""
     if ty in CONSTRAINTS["eq"]:
         return True
-    return idx is not None and (ty in idx.enums or (ty in idx.structs and comparable(ty, idx)))
+    return idx is not None and (ty in idx.enums or (ty in idx.structs and plain_struct(ty, idx)))
 
 
 def type_ok(ty: str, idx: "Optional[ModuleIndex]" = None) -> bool:
@@ -479,10 +479,7 @@ def _static_sig(node: Node, idx: "Optional[ModuleIndex]" = None) -> Sig:
     else:
         for t, c in zip(targs, tps):
             if not allows(c, t, idx):
-                why = ""
-                if c == "eq" and idx is not None and t in idx.structs:
-                    why = "; it holds an array, and this prototype cannot compare arrays"
-                sig.error = ("E0110", f"{node.kind} does not accept type {t}{why}")
+                sig.error = ("E0110", f"{node.kind} does not accept type {t}")
     if node.kind == "Convert" and not sig.error and not can_convert(targs[0], targs[1], idx) \
             and targs[0] != targs[1]:
         sig.error = ("E0110", f"no conversion from {targs[0]} to {targs[1]}")

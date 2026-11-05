@@ -1089,26 +1089,6 @@ class StructRunTests(unittest.TestCase):
             parse_args_for(m, "Equal", ["1", "2"])
         self.assertIn("cannot be typed", str(cm.exception))
 
-    def test_struct_holding_an_array_cannot_be_compared(self):
-        from wiret.explain import explain
-        diags = check(parse(module(STRUCT_DATA + """
-func Same(a: Path) -> (same: bool) {
-  node entry = Entry
-  node eq = Eq::<Path>
-    .a <- entry.a
-    .b <- entry.a
-  node r = Return
-    .same <- eq.result
-
-  flow {
-    entry -> r
-  }
-}
-""")))
-        d = next(d for d in diags if d.code == "E0110")
-        self.assertIn("cannot compare arrays", d.message)
-        self.assertIn("'Path' holds a list", explain(d))
-
     def test_verifier_rejects_bad_struct_code(self):
         good = wbc.decode_module(self.r.wbc)
         st = next(i for i, t in enumerate(good.types) if isinstance(t, wbc.StructType)
@@ -1184,13 +1164,14 @@ class StructEditorTests(unittest.TestCase):
         return {it.label: it for it in palette.items(self.g, self.idx)}
 
     def test_type_choices(self):
-        from wiret.registry import type_choices
+        from wiret.registry import key_type_ok, type_choices
         self.assertEqual(type_choices("switch", self.idx)[-2:], ["Mode", "Wide"])
         eq = type_choices("eq", self.idx)
         self.assertIn("Enemy", eq)
         self.assertIn("Tree", type_choices("any", self.idx))
-        self.assertNotIn("Path", eq)          # holds an array
-        self.assertNotIn("Tree", eq)
+        self.assertIn("Path", eq)             # holds an array, compared element-wise
+        self.assertIn("Tree", eq)
+        self.assertNotIn("Path", [t for t in eq if key_type_ok(t, self.idx)])
         self.assertNotIn("Enemy", type_choices("ord", self.idx))
         self.assertEqual(type_choices("number", self.idx), type_choices("number"))
 
@@ -1199,10 +1180,10 @@ class StructEditorTests(unittest.TestCase):
         for label in ("Make Vec2", "Break Enemy", "Get Enemy.mode", "With Vec2.y (changed copy)",
                       "Switch::<Mode>", "Eq::<Enemy>", "Lt::<Mode>", "Select::<Tree>",
                       "MakeArray::<Vec2>", "Convert::<Mode, u8> (to whole number)",
-                      "Convert::<u8, Mode> (to a Mode)"):
+                      "Convert::<u8, Mode> (to a Mode)", "Eq::<Path>", "Ne::<array::<Vec2>>"):
             with self.subTest(label):
                 self.assertIn(label, labels)
-        for label in ("Eq::<Path>", "Lt::<Vec2>", "Add::<Mode>", "Convert::<Mode, i32> (to whole number)"):
+        for label in ("Lt::<Vec2>", "Add::<Mode>", "Convert::<Mode, i32> (to whole number)"):
             with self.subTest(label):
                 self.assertNotIn(label, labels)
         self.assertEqual(labels["Make Vec2"].category, "Structs")
@@ -1624,6 +1605,108 @@ def make_project(root, text=IDS_SRC, ids=""):
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
     return path
+
+
+EQUALITY = """
+struct Vec2 {
+  x: f64
+  y: f64
+}
+
+struct Path {
+  name: string
+  points: array::<Vec2>
+}
+""" + "".join(['\nfunc Arrays(a: array::<f64>, b: array::<f64>) -> (eq: bool, ne: bool) {\n  node entry = Entry\n  node eq = Eq::<array::<f64>>\n    .a <- entry.a\n    .b <- entry.b\n  node ne = Ne::<array::<f64>>\n    .a <- entry.a\n    .b <- entry.b\n  node r = Return\n    .eq <- eq.result\n    .ne <- ne.result\n\n  flow {\n    entry -> r\n  }\n}\n', '\nfunc Nested(a: array::<array::<i32>>, b: array::<array::<i32>>) -> (eq: bool, ne: bool) {\n  node entry = Entry\n  node eq = Eq::<array::<array::<i32>>>\n    .a <- entry.a\n    .b <- entry.b\n  node ne = Ne::<array::<array::<i32>>>\n    .a <- entry.a\n    .b <- entry.b\n  node r = Return\n    .eq <- eq.result\n    .ne <- ne.result\n\n  flow {\n    entry -> r\n  }\n}\n', '\nfunc Maps(a: map::<string, i32>, b: map::<string, i32>) -> (eq: bool, ne: bool) {\n  node entry = Entry\n  node eq = Eq::<map::<string, i32>>\n    .a <- entry.a\n    .b <- entry.b\n  node ne = Ne::<map::<string, i32>>\n    .a <- entry.a\n    .b <- entry.b\n  node r = Return\n    .eq <- eq.result\n    .ne <- ne.result\n\n  flow {\n    entry -> r\n  }\n}\n', '\nfunc Sets(a: set::<i32>, b: set::<i32>) -> (eq: bool, ne: bool) {\n  node entry = Entry\n  node eq = Eq::<set::<i32>>\n    .a <- entry.a\n    .b <- entry.b\n  node ne = Ne::<set::<i32>>\n    .a <- entry.a\n    .b <- entry.b\n  node r = Return\n    .eq <- eq.result\n    .ne <- ne.result\n\n  flow {\n    entry -> r\n  }\n}\n', '\nfunc FloatSets(a: set::<f64>, b: set::<f64>) -> (eq: bool, ne: bool) {\n  node entry = Entry\n  node eq = Eq::<set::<f64>>\n    .a <- entry.a\n    .b <- entry.b\n  node ne = Ne::<set::<f64>>\n    .a <- entry.a\n    .b <- entry.b\n  node r = Return\n    .eq <- eq.result\n    .ne <- ne.result\n\n  flow {\n    entry -> r\n  }\n}\n', '\nfunc FloatMaps(a: map::<f64, f64>, b: map::<f64, f64>) -> (eq: bool, ne: bool) {\n  node entry = Entry\n  node eq = Eq::<map::<f64, f64>>\n    .a <- entry.a\n    .b <- entry.b\n  node ne = Ne::<map::<f64, f64>>\n    .a <- entry.a\n    .b <- entry.b\n  node r = Return\n    .eq <- eq.result\n    .ne <- ne.result\n\n  flow {\n    entry -> r\n  }\n}\n', '\nfunc Paths(a: Path, b: Path) -> (eq: bool, ne: bool) {\n  node entry = Entry\n  node eq = Eq::<Path>\n    .a <- entry.a\n    .b <- entry.b\n  node ne = Ne::<Path>\n    .a <- entry.a\n    .b <- entry.b\n  node r = Return\n    .eq <- eq.result\n    .ne <- ne.result\n\n  flow {\n    entry -> r\n  }\n}\n', '\nfunc PathMaps(a: map::<string, Path>, b: map::<string, Path>) -> (eq: bool, ne: bool) {\n  node entry = Entry\n  node eq = Eq::<map::<string, Path>>\n    .a <- entry.a\n    .b <- entry.b\n  node ne = Ne::<map::<string, Path>>\n    .a <- entry.a\n    .b <- entry.b\n  node r = Return\n    .eq <- eq.result\n    .ne <- ne.result\n\n  flow {\n    entry -> r\n  }\n}\n'])
+
+
+class ContainerEqualityTests(unittest.TestCase):
+    """Eq and Ne on arrays, maps, sets and structs holding them (section 4.9)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = print_module(parse(module(EQUALITY)))
+        _, cls.r = build(cls.text)
+
+    def setUp(self):
+        self.vm = VM()
+        self.mod = self.vm.load(self.r.wbc)
+
+    def same(self, func, a, b):
+        eq, ne = self.vm.call(self.mod, func, [a, b])
+        self.assertEqual(eq, 1 - ne)
+        return bool(eq)
+
+    def test_clean_and_lowered_to_the_natives(self):
+        self.assertEqual(codes(self.text), [])
+        m = wbc.decode_module(self.r.wbc)
+        self.assertEqual(sorted(f"{a}.{b}" for a, b, _, _ in m.imports),
+                         ["std.array.Equals", "std.map.Equals", "std.set.Equals"])
+        for _, _, t, _ in m.imports:
+            self.assertEqual(m.types[t], ([wbc.ANYREF, wbc.ANYREF], [wbc.I32]))
+        self.assertIn("call std.array.Equals", disassemble(self.r.wbc))
+
+    def test_arrays_compare_element_wise(self):
+        self.assertTrue(self.same("Arrays", (1.0, 2.0), (1.0, 2.0)))
+        self.assertTrue(self.same("Arrays", (), ()))
+        self.assertTrue(self.same("Arrays", (0.0,), (-0.0,)))
+        self.assertFalse(self.same("Arrays", (1.0, 2.0), (2.0, 1.0)))
+        self.assertFalse(self.same("Arrays", (1.0,), (1.0, 1.0)))
+        nan = float("nan")
+        row = (nan,)
+        self.assertFalse(self.same("Arrays", row, row))      # NaN is never equal
+        self.assertTrue(self.same("Nested", ((1, 2), ()), ((1, 2), ())))
+        self.assertFalse(self.same("Nested", ((1, 2), ()), ((1,), (2,))))
+
+    def test_maps_and_sets_ignore_order(self):
+        self.assertTrue(self.same("Maps", {"a": 1, "b": 2}, {"b": 2, "a": 1}))
+        self.assertFalse(self.same("Maps", {"a": 1, "b": 2}, {"a": 1, "b": 3}))
+        self.assertFalse(self.same("Maps", {"a": 1}, {"b": 1}))
+        self.assertFalse(self.same("Maps", {"a": 1}, {"a": 1, "b": 2}))
+        self.assertTrue(self.same("Sets", {3: None, 1: None}, {1: None, 3: None}))
+        self.assertFalse(self.same("Sets", {1: None}, {1: None, 2: None}))
+        self.assertFalse(self.same("Sets", {1: None, 2: None}, {1: None, 3: None}))
+
+    def test_nan_keys_match_but_nan_values_do_not(self):
+        from wiret.vm import NAN_KEY
+        self.assertTrue(self.same("FloatSets", {NAN_KEY: None}, {NAN_KEY: None}))
+        self.assertFalse(self.same("FloatMaps", {1.0: float("nan")}, {1.0: float("nan")}))
+
+    def test_structs_holding_containers(self):
+        a = ("route", ((0.0, 0.0), (1.0, 2.0)))
+        self.assertTrue(self.same("Paths", a, ("route", ((0.0, 0.0), (1.0, 2.0)))))
+        self.assertFalse(self.same("Paths", a, ("route", ((0.0, 0.0),))))
+        self.assertFalse(self.same("Paths", a, ("other", a[1])))
+        self.assertTrue(self.same("PathMaps", {"r": a}, {"r": a}))
+
+    def test_fuel_grows_with_the_compared_length(self):
+        def used(n):
+            vm = VM(fuel=10_000)
+            mod = vm.load(self.r.wbc)
+            vm.call(mod, "Arrays", [(1.0,) * n, (1.0,) * n])
+            return 10_000 - vm.fuel
+        self.assertEqual(used(800) - used(0), 200)       # 1 per 8 elements, in Eq and in Ne
+        with self.assertRaises(WiretError) as cm:
+            vm = VM(fuel=1_000)
+            vm.call(vm.load(self.r.wbc), "Arrays", [(1.0,) * 10_000, (1.0,) * 10_000])
+        self.assertEqual(cm.exception.status, "WR_ERR_FUEL")
+
+    def test_anyref_only_in_function_types(self):
+        m = wbc.decode_module(self.r.wbc)
+        st = next(i for i, t in enumerate(m.types) if isinstance(t, wbc.StructType))
+        m.types[st] = wbc.StructType(((wbc.ANYREF, None),) + m.types[st].fields[1:])
+        with self.assertRaises(WiretError) as cm:
+            VM().load(wbc.encode_module(m))
+        self.assertEqual(cm.exception.status, "WR_ERR_VERIFY")
+
+    def test_a_number_is_not_an_anyref(self):
+        m = wbc.decode_module(self.r.wbc)
+        imp = next(i for i, (a, b, _, _) in enumerate(m.imports) if b == "Equals")
+        fn = next(i for i, b in enumerate(m.bodies) if b.code)
+        m.bodies[fn].code = bytes([0x20, 1, 0x20, 1, 0x06, imp, 0x10, 0x05])
+        with self.assertRaises(WiretError) as cm:
+            VM().load(wbc.encode_module(m))
+        self.assertEqual(cm.exception.status, "WR_ERR_VERIFY")
 
 
 class IdTests(unittest.TestCase):

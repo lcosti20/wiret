@@ -22,6 +22,7 @@ class NativeSpec:
     purity: str             # pure | reads | impure
     fn: Optional[Callable]  # fn(vm, *args) -> tuple of results
     doc: str = ""
+    cost: Optional[Callable] = None  # cost(*args) -> fuel beyond the call's own (section 5.7)
 
 
 def _f32(x: float) -> float:
@@ -79,6 +80,37 @@ def _pow(_vm, a, b):
         return (float(math.pow(a, b)),)
     except (ValueError, OverflowError):
         return (math.inf if a > 0 else math.nan,)
+
+
+def values_equal(a, b) -> bool:
+    """`Eq` on two values of one type, as the VM stores them (section 4.9). An array or a
+    struct is a tuple and compares element-wise, each element with its own equality, so NaN
+    is never equal and a container holding NaN is not equal to itself. A map or a set is a
+    dict and ignores insertion order: the same keys (keys match as in a lookup, so the one NaN
+    key matches itself), and for a map equal values under each key."""
+    if isinstance(a, tuple):
+        return len(a) == len(b) and all(values_equal(x, y) for x, y in zip(a, b))
+    if isinstance(a, dict):
+        return len(a) == len(b) and all(k in b and values_equal(v, b[k]) for k, v in a.items())
+    return a == b
+
+
+def value_size(v) -> int:
+    """How many elements, entries and fields `values_equal` may visit."""
+    if isinstance(v, tuple):
+        return len(v) + sum(value_size(x) for x in v if isinstance(x, (tuple, dict)))
+    if isinstance(v, dict):
+        return len(v) + sum(value_size(x) for x in v.values() if isinstance(x, (tuple, dict)))
+    return 0
+
+
+def _equals(_vm, a, b):
+    return (int(values_equal(a, b)),)
+
+
+def _equals_cost(a, b) -> int:
+    """1 fuel per 8 elements visited, like allocation; nothing when the lengths differ."""
+    return 0 if len(a) != len(b) else min(value_size(a), value_size(b)) >> 3
 
 
 def _log(vm, message):
@@ -141,6 +173,13 @@ INTERNAL: dict[str, NativeSpec] = {
     "std.math.FRem64": NativeSpec([("a", "f64"), ("b", "f64")], [("r", "f64")], "pure",
                                   lambda _vm, a, b: (math.fmod(a, b) if b else math.nan,)),
 }
+
+# `Eq` and `Ne` on containers (section 4.9). One native per container kind, taking anyref so
+# that one signature serves every element type; the native reads the values it is given.
+for _kind in ("array", "set", "map"):
+    INTERNAL[f"std.{_kind}.Equals"] = NativeSpec(
+        [("a", "anyref"), ("b", "anyref")], [("r", "bool")], "pure", _equals,
+        f"True when two {_kind}s are equal.", cost=_equals_cost)
 
 # Host natives the reference runtime registers. A module reaches them only through
 # `extern func` declarations, whose signatures must match.
