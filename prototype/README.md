@@ -18,7 +18,7 @@ cd prototype
 python3 wiret_editor.py                         # the editor, opening Lesson 1
 python3 wiret_editor.py examples/demo.wiret     # the editor on a larger example
 python3 wiretc.py run examples/demo.wiret Main  # the same program from the command line
-python3 -m unittest discover tests              # 126 tests
+python3 -m unittest discover tests              # 142 tests
 ```
 
 ## Building a desktop app
@@ -177,6 +177,8 @@ The editor also follows the graph-editor contract in section 7.5:
 | `hash FILE` | Semantic and layout hashes |
 | `view --flow FILE` | Reading view with nodes and `flow` wires in flow order |
 | `schema --json` | The node registry |
+| `merge BASE OURS THEIRS [-o OUT]` | Keyed three-way merge (section 7.1); the Git merge driver. Writes OURS unless `-o` is given; exits 1 on a conflict |
+| `init-git` | Configure the merge driver and the flow-order `textconv` for `*.wiret`, and a union merge for `wiret.ids` |
 | `edit FILE REQUEST.json\|- [--dry-run]` | Apply JSON edit operations (section 7.2); see *Editing protocol* below |
 | `ids --check BASE[..HEAD] [--record]` | Every id deleted between two revisions is retired in `wiret.ids`, and none is reused |
 
@@ -355,6 +357,31 @@ every reference: calls and macro uses, type names, struct and field symbols, enu
 `@cases`, `Entry` pins and call-site bindings for parameters, `Return` bindings and call-site
 pins for results, and flow wires for a macro's exec parameters and results.
 
+### Merging
+
+`wiretc merge` parses the three versions and merges them by key (section 7.1):
+
+- Declarations are matched by `@id`, else by kind and name; parameters, results, fields,
+  members, locals and state slots by `@id`, else by name, within their owner; nodes by id.
+  An element without an `@id` is matched to one that has gained an id on the other side, so
+  `wiretc fmt --assign-ids` on one branch does not look like a rename.
+- Each element merges per field: a node's kind, symbol, each type argument, each attribute,
+  each binding and each exec output; a declaration's name, type, default and attributes. A
+  field changed on one side takes that change; changed differently on both sides, it is a
+  conflict. Deleted on one side and changed on the other is a conflict; deleted and unchanged,
+  it is deleted.
+- A rename by `@id` is carried into the other side: references it added under the old name are
+  rewritten, so a function renamed on one branch and called on another merges cleanly.
+- Layout never blocks: positions and properties merge one by one, box `members` as a set, and
+  when both sides changed the same property, theirs is kept and a notice is printed. (The draft
+  says "the later commit wins", which a merge driver cannot know.)
+- `doc`, `category` and `keywords` are one field each; notes merge as a list keyed by text, and
+  both sides replacing the same note differently is a conflict.
+- Conflicts are written as markers around the lines where the two sides differ: one line each
+  for a binding, attribute or wire, and the whole node for a node deleted on one side. Then the
+  result is checked, and errors that neither side had are reported as semantic conflicts.
+- If a side does not parse, it falls back to `git merge-file` and says so.
+
 ### Deviations and known gaps
 
 - **Exports.** Every `func` and `event` is exported, so the editor can run any of them. The
@@ -363,7 +390,7 @@ pins for results, and flow wires for a macro's exec parameters and results.
   delegates and dispatchers, latent nodes and fibers (`Delay`, `Yield`, `Await`), and
   `Try`/`Throw`. Their node kinds are reported as `E0501` and their opcodes are rejected by
   the verifier.
-- **Not implemented:** `wiretc merge`, `wiretc diff`, the rest of the
+- **Not implemented:** `wiretc diff`, the rest of the
   project manager (`wiret.lock`, `use` of other modules), the C API and deterministic-mode
   float rules.
 - **Optimisation.** There is no `-O1`, so the `cont.push`/`cont.pop` pairs are never replaced
