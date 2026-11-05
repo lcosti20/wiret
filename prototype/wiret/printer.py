@@ -6,7 +6,7 @@ import hashlib
 import math
 import unicodedata
 
-from .model import (Attr, Binding, Box, Const, Enum, ExecOut, Extern, Graph, ITEM_ORDER, Lit,
+from .model import (Attr, Binding, Box, Class, Const, Enum, ExecOut, Extern, Graph, ITEM_ORDER, Lit,
                     META_ORDER, Module, Node, PinRef, SEMANTIC_ATTRS, Struct, Use, Var,
                     item_kind)
 from .registry import PLACE_MUTATORS, ModuleIndex, Sig, lit_equal, lit_fits, signature
@@ -196,7 +196,7 @@ def fmt_props(props: list, sort_members=True) -> str:
 
 
 def fmt_graph(g: Graph, idx: ModuleIndex, indent: str = "", semantic=False) -> list:
-    head = f"{indent}{g.kind} {g.name}"
+    head = f"{indent}{g.kind} {g.short_name}"
     if g.tparams:
         head += fmt_targs(g.tparams)
     head += fmt_params(g.params)
@@ -257,7 +257,30 @@ def fmt_type_decl(it, semantic=False) -> list:
     return lines + ["}"]
 
 
-def fmt_item(it, idx: ModuleIndex, semantic=False) -> list:
+def fmt_class(c: Class, methods: list, idx: ModuleIndex, semantic=False) -> list:
+    """A class: fields in the order written (their layout), then its methods, funcs before
+    events, each by name, with a blank line before each method."""
+    head = f"class {c.name}" + (f" : {c.base}" if c.base else "") + fmt_attrs(c.attrs)
+    if not c.fields and not methods:
+        return [head + " {}"]
+    lines = [head + " {"]
+    for f in c.fields:
+        line = f"{IND}{f.name}: {f.type}"
+        if f.default is not None:
+            line += f" = {fmt_lit(f.default)}"
+        lines.extend(fmt_meta(f.meta, IND, semantic))
+        lines.append(line + fmt_attrs(f.attrs))
+    for g in sorted(methods, key=lambda g: (g.kind != "func", g.name)):
+        if len(lines) > 1:
+            lines.append("")
+        lines.extend(fmt_meta(g.meta, IND, semantic))
+        lines.extend(fmt_graph(g, idx, IND, semantic))
+    return lines + ["}"]
+
+
+def fmt_item(it, idx: ModuleIndex, semantic=False, methods=None) -> list:
+    if isinstance(it, Class):
+        return fmt_meta(it.meta, "", semantic) + fmt_class(it, methods or [], idx, semantic)
     if isinstance(it, Graph):
         return fmt_graph(it, idx, "", semantic)
     if isinstance(it, (Struct, Enum)):
@@ -287,14 +310,19 @@ def print_module(m: Module, semantic=False) -> str:
     idx = ModuleIndex(m)
     lines = ([f"wiret {m.version}"] + fmt_meta(m.meta, "", semantic)
              + [f"module {m.name}{fmt_attrs(m.attrs)}"])
-    items = sorted(m.items, key=lambda it: (ITEM_ORDER.index(item_kind(it)), it.name))
+    owned = {}
+    for it in m.items:
+        if isinstance(it, Graph) and it.owner:
+            owned.setdefault(it.owner, []).append(it)
+    items = sorted((it for it in m.items if not (isinstance(it, Graph) and it.owner)),
+                   key=lambda it: (ITEM_ORDER.index(item_kind(it)), it.name))
     prev_kind = None
     for it in items:
         k = item_kind(it)
-        block = isinstance(it, (Graph, Struct, Enum))
+        block = isinstance(it, (Graph, Struct, Enum, Class))
         if block or k != prev_kind:
             lines.append("")
-        lines.extend(fmt_item(it, idx, semantic))
+        lines.extend(fmt_item(it, idx, semantic, owned.get(it.name)))
         prev_kind = k if not block else None
     text = "\n".join(lines) + "\n"
     return unicodedata.normalize("NFC", text)

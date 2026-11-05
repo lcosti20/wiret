@@ -96,6 +96,17 @@ def split_args(text: str) -> list:
 def format_value(ty: Optional[str], v, idx: Optional[ModuleIndex] = None) -> str:
     """A value as text: `Vec2 { x: 1.0, y: 1.5 }` for a struct and `Mode.Chase` for an enum
     when `idx` knows the type; without it, a struct shows as a list of its field values."""
+    if v is None and (ty is None or idx is None or ty in idx.classes):
+        return "null"
+    if hasattr(v, "cls") and hasattr(v, "fields"):          # a class instance (vm.Obj)
+        names = v.cls.field_names
+        if idx is not None and v.cls.name in idx.classes:
+            types = [f.type for _, f in idx.class_fields(v.cls.name)]
+        else:
+            types = [None] * len(names)
+        inner = ", ".join(f"{n}: {format_value(t, x, idx) if not hasattr(x, 'cls') else '<' + x.cls.name + '>'}"
+                          for n, t, x in zip(names, types, v.fields))
+        return f"{v.cls.name} {{ {inner} }}" if inner else f"{v.cls.name} {{}}"
     if idx is not None and ty in idx.structs and isinstance(v, tuple):
         fields = idx.structs[ty].fields
         inner = ", ".join(f"{f.name}: {format_value(f.type, x, idx)}" for f, x in zip(fields, v))
@@ -156,6 +167,9 @@ def run_function(vm, lm, func: str, args: list) -> list:
                      WiretError)
     from .wbc import FN_LATENT
     f = lm.funcs[lm.exports[func]] if func in lm.exports else None
+    owner = func.rpartition(".")[0]
+    if f is not None and owner in lm.classes and len(args) == len(f.params) - 1:
+        args = [vm.new(lm, owner)] + list(args)    # a method runs on a new object
     if f is None or not f.flags & FN_LATENT:
         return vm.call(lm, func, args)
     fb = vm.start(lm, func, args, now=True)

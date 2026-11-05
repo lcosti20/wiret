@@ -75,7 +75,7 @@ A `const` is 8 bytes (numeric bit pattern), or a `u32` data index for `string`, 
 | `5E` | array | `elem:storagetype` |
 | `5D` | map | `key:valtype value:valtype` |
 | `5C` | set | `elem:valtype` |
-| `5B` | class | `flags:u8 super:u32 interfaces:vec(iface:u32 impl:vec(funcidx)) fields:vec(field) vtable:vec(funcidx)`. `super` is 0 for none, else type index + 1. Flag bit 0 marks a host type: then a `name` follows and there are no fields. `fields` are the class's own; inherited fields come first in the layout. `vtable` holds the full slot list, with overrides replacing inherited slots. |
+| `5B` | class | `flags:u8 super:u32 interfaces:vec(iface:u32 impl:vec(funcidx)) fields:vec(field) vtable:vec(funcidx)`. `super` is 0 for none, else type index + 1. Flag bit 0 marks a host type: then a `name` follows and there are no fields. `fields` are the class's own; inherited fields come first in the layout. `vtable` holds the full slot list: the superclass's slots, with overrides replacing inherited slots, then the class's new methods ordered by name. |
 | `5A` | interface | `methods:vec(functype:u32)`; the method index is the dispatch slot. |
 | `59` | delegate | `functype:u32` |
 | `58` | dispatcher | `functype:u32` (no results) |
@@ -162,7 +162,7 @@ Notation: `[in] -> [out]`. `L` is a branch target, an `s32` offset relative to t
 | Op | Mnemonic | Immediates | Stack |
 | --- | --- | --- | --- |
 | 10 | `drop` |  | `[t]` -> `[]` |
-| 11 | `select` |  | `[t, t, i32]` -> `[t]`; first operand when the condition is non-zero. |
+| 11 | `select` |  | `[t, t, i32]` -> `[t]`; first operand when the condition is non-zero. With two references the result has their common type: one if the other is its subtype, else `anyref`. This is how `Cast T` lowers without a branch: `ref.test T`, then `select` between the object and `ref.null T`, then `ref.cast T`, which cannot fault on either. |
 | 12 / 13 / 14 | `local.get` / `.set` / `.tee` | index |  |
 | 15 / 16 | `global.get` / `.set` | index |  |
 | 20 / 21 | `i32.const` / `i64.const` | s32 / s64 | `[]` -> `[i32]` / `[i64]` |

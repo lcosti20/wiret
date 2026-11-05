@@ -72,8 +72,8 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 | `MakeStruct` | pure; symbol: the struct; in: one pin per field, in declaration order; out `result` | An unbound input takes the field's declared default, else its type's default, so it never warns `W0201`. |
 | `BreakStruct` | pure; symbol: the struct; in `obj`; out: one pin per field | |
 | `New` | out `result`; exec out `then` | Allocates a class instance with declared defaults. Impure because it creates identity. |
-| `Cast` | pure; in `obj`; out `result`, `ok: bool` | `result` is null when the cast fails. |
-| `IsValid` | pure; in `obj`; out `result: bool` | Non-null and, for host handles, still alive. |
+| `Cast` | pure; symbol: the class to cast to (`Cast Boss`); in `obj: anyref` (any object); out `result` of that class, `ok: bool` | `result` is null when the cast fails. |
+| `IsValid` | pure; in `obj: anyref`; out `result: bool` | Non-null and, for host handles, still alive. |
 | `Convert::<From, To>` | pure; in `value`; out `result` | See section 3.2. |
 | GetState / SetState | value | Persistent slots declared with state (section 2.3). SetState is impure. |
 

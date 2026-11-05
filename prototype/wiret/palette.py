@@ -31,6 +31,9 @@ DESCRIBE = {
             "catch error fault exception handle recover"),
     "Throw": ("Stops with an error that a Try around it can catch, with your message and code.",
               "raise error fault exception fail"),
+    "New": ("Makes a new object of a class.", "create object instance make class"),
+    "IsValid": ("True when an object reference is not null.", "null check exists valid none"),
+    "Cast": ("Checks whether an object is of a given class.", "is type check downcast as"),
     "Delay": ("Waits for some seconds of game time, then carries on. Only in an event or a "
               "@latent function.", "wait sleep pause timer seconds later"),
     "Yield": ("Waits until the next frame (the next time step), then carries on.",
@@ -147,7 +150,7 @@ DESCRIBE = {
     "std.flow.FlipFlop": (None, "toggle alternate switch"),
 }
 
-CATEGORY_ORDER = ["Flow", "Time", "Call", "Variables", "Structs", "Arrays", "Maps", "Sets", "Macro",
+CATEGORY_ORDER = ["Flow", "Time", "Call", "Variables", "Classes", "Structs", "Arrays", "Maps", "Sets", "Macro",
                   "Math", "Compare", "Logic", "Bits"]
 
 
@@ -165,7 +168,8 @@ class Item:
         return f"{self.label} {self.category} {self.description} {self.keywords}".lower()
 
 
-def describe(kind: str, symbol: Optional[str] = None, idx: Optional[ModuleIndex] = None) -> str:
+def describe(kind: str, symbol: Optional[str] = None, idx: Optional[ModuleIndex] = None,
+             targs: Optional[list] = None) -> str:
     """A one-sentence, beginner-level description of a node kind or call."""
     if symbol and idx is not None:
         g = idx.graphs.get(symbol) or idx.macros.get(symbol)
@@ -175,6 +179,17 @@ def describe(kind: str, symbol: Optional[str] = None, idx: Optional[ModuleIndex]
                 return doc
             if kind == "Call":
                 return f"Runs the function {symbol}."
+    if kind in ("New", "GetField", "SetField", "Cast") and idx is not None:
+        cls, _, fname = (symbol or (targs[0] if targs else "")).rpartition(".")
+        cls = cls or symbol or (targs[0] if targs else "")
+        if cls in idx.classes:
+            a = "an" if cls[:1].lower() in "aeiou" else "a"
+            return {"New": f"Makes a new {cls} object, with every field at its starting value.",
+                    "GetField": f"Reads the field '{fname}' of {a} {cls} object.",
+                    "SetField": f"Changes the field '{fname}' of {a} {cls} object. Everything "
+                                f"that refers to the object sees the change.",
+                    "Cast": f"Checks whether an object is {a} {cls}: 'ok' says if it is, and "
+                            f"'result' is the object as {a} {cls} (null when it is not)."}[kind]
     if kind in ("MakeStruct", "BreakStruct", "GetField", "WithField") and symbol:
         return describe_struct_node(kind, symbol, idx)
     if symbol and symbol in DESCRIBE and DESCRIBE[symbol][0]:
@@ -201,9 +216,10 @@ def describe_struct_node(kind: str, symbol: str, idx: Optional[ModuleIndex]) -> 
 
 
 def _item(kind, label, cat, symbol=None, targs=None, idx=None) -> Item:
-    key =symbol if symbol in DESCRIBE else kind
+    key = symbol if symbol in DESCRIBE else kind
     words = DESCRIBE.get(key, ("", ""))[1]
-    return Item(label, kind, symbol, list(targs or []), cat, describe(kind, symbol, idx), words)
+    return Item(label, kind, symbol, list(targs or []), cat, describe(kind, symbol, idx, targs),
+                words)
 
 
 def container_types(g: Graph, idx: ModuleIndex) -> tuple:
@@ -284,6 +300,15 @@ def items(g: Graph, idx: ModuleIndex) -> list:
         out.append(_item("Call", f"Call {q}", "Call", q, idx=idx))
     for q in sorted(STD):
         out.append(_item("Call", f"Call {q}", "Call", q, idx=idx))
+    for name in sorted(idx.classes):
+        out.append(_item("New", f"New {name}", "Classes", name, idx=idx))
+        out.append(_item("Cast", f"Cast to {name}", "Classes", name, idx=idx))
+        for _, f in idx.class_fields(name):
+            sym = f"{name}.{f.name}"
+            out.append(_item("GetField", f"Get {sym}", "Classes", sym, idx=idx))
+            out.append(_item("SetField", f"Set {sym}", "Classes", sym, idx=idx))
+    if idx.classes:
+        out.append(_item("IsValid", "IsValid (not null)", "Classes", idx=idx))
     for name in sorted(idx.structs):
         out.append(_item("MakeStruct", f"Make {name}", "Structs", name, idx=idx))
         out.append(_item("BreakStruct", f"Break {name}", "Structs", name, idx=idx))

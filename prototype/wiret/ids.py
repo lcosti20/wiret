@@ -13,7 +13,7 @@ import random
 from dataclasses import dataclass, field
 from typing import Iterator, Optional
 
-from .model import (Attr, Const, Enum, Extern, Graph, Lit, Module, Struct, Use, Var)
+from .model import (Attr, Class, Const, Enum, Extern, Graph, Lit, Module, Struct, Use, Var)
 
 ID_CHARS = "abcdefghijkmnpqrstuvwxyz23456789"     # no 0/o, 1/l: ids are read aloud
 
@@ -48,7 +48,7 @@ def decl_kind(it) -> str:
     if isinstance(it, Graph):
         return it.kind
     return {Use: "use", Extern: "extern", Const: "const", Var: "var", Enum: "enum",
-            Struct: "struct"}[type(it)]
+            Struct: "struct", Class: "class"}[type(it)]
 
 
 def elements(m: Module) -> Iterator[Element]:
@@ -67,7 +67,7 @@ def elements(m: Module) -> Iterator[Element]:
                 yield Element("local", l.name, it.name, l)
             for st in it.states:
                 yield Element("state", st.name, it.name, st)
-        if isinstance(it, Struct):
+        if isinstance(it, (Struct, Class)):
             for f in it.fields:
                 yield Element("field", f.name, it.name, f)
         if isinstance(it, Enum):

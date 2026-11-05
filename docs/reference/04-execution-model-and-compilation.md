@@ -170,6 +170,8 @@ Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber
 | `E0412` | `Try` body is not properly nested. |
 | `E0501` / `E0502` | Unresolved symbol / missing type argument. |
 | `E0503` | A struct holds itself by value, directly or through other structs (section 2.2). |
+| `E0150` | A method overrides a `@final` method, or its parameters, results or latency differ from the method it overrides (section 2.2). |
+| `E0151` | A class extends something that is not a class of the module, or its base classes form a cycle. |
 | `W0201` | Input left unbound and no declared default. |
 | `W0301` | Node unreachable from any entry. |
 | `W0302` | Chain can end in a function that declares results. |

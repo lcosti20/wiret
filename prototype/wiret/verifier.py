@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 from .wbc import (ANYREF, F32, F64, FAULT, FN_LATENT, SIGNAL, FN_PURE, I32, I64, STRING, ArrayType, MapType,
-                  Ref,
+                  ClassType, Ref,
                   SetType, StructType, WbcError, WbcModule, decode_code, vt_name)
 
-REF_TYPES = (ArrayType, StructType, MapType, SetType)
+REF_TYPES = (ArrayType, StructType, MapType, SetType, ClassType)
 
 VALTYPES = {I32, I64, F32, F64, STRING}
 # Types allowed in locals, globals and function types but not in struct fields or containers:
@@ -83,6 +83,85 @@ def key_vt_ok(m: WbcModule, vt, depth=0) -> bool:
     return all(key_vt_ok(m, fvt, depth + 1) for fvt, _ in entry.fields)
 
 
+def class_chain(m: WbcModule, t: int) -> list:
+    """A class type index and its superclasses, nearest first (the hierarchy is acyclic once
+    `check_classes` has passed)."""
+    out = []
+    while t is not None and t not in out:
+        out.append(t)
+        t = m.types[t].super
+    return out
+
+
+def is_sub(m: WbcModule, got, expected) -> bool:
+    """Reference subtyping (section 5.5): a class is a subtype of its superclass chain, and
+    every reference is a subtype of anyref."""
+    if got == expected:
+        return True
+    if expected == ANYREF:
+        return isinstance(got, Ref)
+    return (isinstance(got, Ref) and isinstance(expected, Ref)
+            and isinstance(m.types[got.type], ClassType)
+            and isinstance(m.types[expected.type], ClassType)
+            and expected.type in class_chain(m, got.type))
+
+
+def common_ref(m: WbcModule, a, b):
+    """The type of `select` over two references: one if the other is its subtype, else anyref."""
+    if is_sub(m, a, b):
+        return b
+    if is_sub(m, b, a):
+        return a
+    return ANYREF
+
+
+def check_classes(m: WbcModule, nfuncs: int):
+    """Superclasses exist and form no cycle; each vtable keeps its superclass's slots, and every
+    entry takes a receiver of this class or a superclass, and the parameters and results of
+    the slot it fills."""
+    for t, entry in enumerate(m.types):
+        if not isinstance(entry, ClassType):
+            continue
+        if entry.super is not None and (entry.super >= len(m.types)
+                                        or not isinstance(m.types[entry.super], ClassType)):
+            raise VerifyError(f"class type {t} has a superclass that is not a class type")
+    for t, entry in enumerate(m.types):
+        if isinstance(entry, ClassType):
+            seen, cur = set(), t
+            while cur is not None:
+                if cur in seen:
+                    raise VerifyError(f"class type {t} inherits from itself")
+                seen.add(cur)
+                cur = m.types[cur].super
+    for t, entry in enumerate(m.types):
+        if not isinstance(entry, ClassType):
+            continue
+        chain = class_chain(m, t)
+        sup = m.types[entry.super] if entry.super is not None else None
+        if sup is not None and len(entry.vtable) < len(sup.vtable):
+            raise VerifyError(f"class type {t} drops slots of its superclass's vtable")
+        for slot, fi in enumerate(entry.vtable):
+            if fi >= nfuncs:
+                raise VerifyError(f"class type {t} slot {slot} names function {fi}, out of range")
+            params, results, _ = m.func_type(fi)
+            if not params or not isinstance(params[0], Ref) or params[0].type not in chain:
+                raise VerifyError(f"class type {t} slot {slot}: the function does not take this "
+                                  f"class or a superclass as its receiver")
+            if sup is not None and slot < len(sup.vtable):
+                bp, br, _ = m.func_type(sup.vtable[slot])
+                if list(bp[1:]) != list(params[1:]) or list(br) != list(results):
+                    raise VerifyError(f"class type {t} slot {slot} does not have the signature "
+                                      f"of the slot it overrides")
+
+
+def class_fields(m: WbcModule, t: int) -> list:
+    """Every field's value type, inherited ones first: the layout `class.get` indexes."""
+    out = []
+    for c in reversed(class_chain(m, t)):
+        out += [vt for vt, _ in m.types[c].fields]
+    return out
+
+
 def is_func_type(m: WbcModule, t: int) -> bool:
     return t < len(m.types) and isinstance(m.types[t], tuple)
 
@@ -115,7 +194,7 @@ def verify(m: WbcModule) -> list:
             vts = [entry.elem]
         elif isinstance(entry, (MapType, SetType)):
             vts = [entry.key, entry.value] if isinstance(entry, MapType) else [entry.elem]
-        elif isinstance(entry, StructType):
+        elif isinstance(entry, (StructType, ClassType)):
             vts = [vt for vt, _ in entry.fields]
             for vt, default in entry.fields:
                 if vt == STRING and default is not None and default >= len(m.data):
@@ -145,6 +224,7 @@ def verify(m: WbcModule) -> list:
             raise VerifyError("a pure function is never latent", i)
     if len(m.bodies) != len(m.funcs):
         raise VerifyError("function and code section counts differ")
+    check_classes(m, len(m.imports) + len(m.funcs))
     nfuncs = len(m.imports) + len(m.funcs)
     names = set()
     for name, kind, index, _ in m.exports:
@@ -170,7 +250,7 @@ def verify_function(m: WbcModule, i: int):
     params, results, flags = m.func_type(fidx)
     body = m.bodies[i]
     for vt in body.locals:
-        if vt not in HANDLE_TYPES and not valid_vt(m, vt):
+        if vt not in HANDLE_TYPES and vt != ANYREF and not valid_vt(m, vt):
             raise VerifyError("local of unsupported type", fidx)
     local_types = list(params) + list(body.locals)
     try:
@@ -196,8 +276,8 @@ def verify_function(m: WbcModule, i: int):
         if not stack:
             raise VerifyError(f"{ins.name}: operand stack underflow", fidx, ins.pc)
         got = stack.pop()
-        if expected == ANYREF and isinstance(got, Ref):
-            return got                 # every reference type is a subtype of anyref (5.5)
+        if expected is not None and is_sub(m, got, expected):
+            return got                 # a subclass, or any reference for anyref (5.5)
         if expected is not None and got != expected:
             raise VerifyError(f"{ins.name}: expected {vt_name(expected, m.types)}, found "
                               f"{vt_name(got, m.types)}", fidx, ins.pc)
@@ -274,16 +354,28 @@ def verify_function(m: WbcModule, i: int):
             if stack:
                 raise VerifyError("cont.pop with a non-empty operand stack", fidx, ins.pc)
         elif n == "return":
-            if stack != list(results):
+            if len(stack) != len(results) or not all(is_sub(m, g, r)
+                                                      for g, r in zip(stack, results)):
                 raise VerifyError("stack does not match the function's results at return",
                                   fidx, ins.pc)
             stack.clear()
             reachable = False
-        elif n == "call":
-            callee = ins.imms[0]
-            if callee >= len(m.imports) + len(m.funcs):
-                raise VerifyError(f"call to unknown function {callee}", fidx, ins.pc)
+        elif n in ("call", "call_virtual"):
+            if n == "call":
+                callee = ins.imms[0]
+                if callee >= len(m.imports) + len(m.funcs):
+                    raise VerifyError(f"call to unknown function {callee}", fidx, ins.pc)
+            else:
+                t, slot = ins.imms
+                if t >= len(m.types) or not isinstance(m.types[t], ClassType):
+                    raise VerifyError(f"call_virtual: type {t} is not a class type", fidx, ins.pc)
+                if slot >= len(m.types[t].vtable):
+                    raise VerifyError(f"call_virtual: class type {t} has no slot {slot}",
+                                      fidx, ins.pc)
+                callee = m.types[t].vtable[slot]
             cp, cr, cflags = m.func_type(callee)
+            if n == "call_virtual":
+                cp = [Ref(t)] + list(cp[1:])      # the receiver is typed by the class named
             if cflags & FN_LATENT and not flags & FN_LATENT and callee >= len(m.imports):
                 raise VerifyError("non-latent function calls a latent function", fidx, ins.pc)
             for t in reversed(cp):
@@ -294,8 +386,14 @@ def verify_function(m: WbcModule, i: int):
         elif n == "select":
             pop(I32, ins)
             b = pop(None, ins)
-            pop(b, ins)
-            stack.append(b)
+            if isinstance(b, Ref) or b == ANYREF:      # two references: their common type
+                a = pop(None, ins)
+                if not (isinstance(a, Ref) or a == ANYREF):
+                    raise VerifyError("select: a reference and a non-reference", fidx, ins.pc)
+                stack.append(common_ref(m, a, b))
+            else:
+                pop(b, ins)
+                stack.append(b)
         elif n in ("local.get", "local.set", "local.tee"):
             li = ins.imms[0]
             if li >= len(local_types):
@@ -379,6 +477,34 @@ def verify_function(m: WbcModule, i: int):
             for t in reversed(ins_):
                 pop(t, ins)
             stack.extend(outs)
+        elif n.startswith("class.") or n in ("ref.null", "ref.cast", "ref.test"):
+            t = ins.imms[0]
+            if t >= len(m.types) or not isinstance(m.types[t], ClassType):
+                raise VerifyError(f"{n}: type {t} is not a class type", fidx, ins.pc)
+            if n == "class.new":
+                stack.append(Ref(t))
+            elif n == "ref.null":
+                stack.append(Ref(t))
+            elif n in ("class.get", "class.set"):
+                fields = class_fields(m, t)
+                if ins.imms[1] >= len(fields):
+                    raise VerifyError(f"{n}: class type {t} has no field {ins.imms[1]}",
+                                      fidx, ins.pc)
+                if n == "class.set":
+                    pop(fields[ins.imms[1]], ins)
+                pop(Ref(t), ins)
+                if n == "class.get":
+                    stack.append(fields[ins.imms[1]])
+            else:                                  # ref.cast, ref.test
+                pop(ANYREF, ins)
+                stack.append(Ref(t) if n == "ref.cast" else I32)
+        elif n in ("ref.is_null", "ref.valid"):
+            pop(ANYREF, ins)
+            stack.append(I32)
+        elif n == "ref.eq":
+            pop(ANYREF, ins)
+            pop(ANYREF, ins)
+            stack.append(I32)
         elif n == "string.const":
             if ins.imms[0] >= len(m.data):
                 raise VerifyError(f"data index {ins.imms[0]} out of range", fidx, ins.pc)

@@ -10,7 +10,7 @@ from .model import Const, Var
 
 # Names that are metadata, not semantic attributes: `@doc` is `#[doc]` (section 2.4).
 META_NAMES = {"doc", "category", "keywords", "note"}
-from .registry import (HANDLE_TYPES, handle_ok, BUILTIN_TYPE_NAMES, PLACE_MUTATORS, INT_RANGES, ModuleIndex, Sig,
+from .registry import (HANDLE_TYPES, assignable, handle_ok, BUILTIN_TYPE_NAMES, PLACE_MUTATORS, INT_RANGES, ModuleIndex, Sig,
                        array_elem, enum_values, instantiate, lit_fits, lit_in_range, signature,
                        substitute, type_ok)
 
@@ -197,6 +197,54 @@ def check_type_decls(module: Module, idx: ModuleIndex, D):
                                f"type {base} ({lo} to {hi})", it.name, pin=name, literal=True,
                       dst=base)
     check_struct_cycles(idx, D)
+    check_classes(module, idx, D)
+
+
+def check_classes(module: Module, idx: ModuleIndex, D):
+    """Class declarations and their methods (section 2.2): E0151 for a base that is not a class
+    or an inheritance cycle, E0102 for a field declared twice along the chain, and E0150 for an
+    override that changes the signature or overrides a @final method."""
+    for c in idx.classes.values():
+        if c.name in BUILTIN_TYPE_NAMES:
+            D("E0102", f"class '{c.name}' has the name of a built-in type; choose another name",
+              c.name)
+        if c.base is not None and c.base not in idx.classes:
+            D("E0151", f"class '{c.name}' extends '{c.base}', which is not a class of this module",
+              c.name)
+        chain = idx.class_chain(c.name)
+        last = idx.classes[chain[-1]]
+        if last.base is not None and last.base in chain:
+            D("E0151", f"class '{c.name}' inherits from itself: {' -> '.join(chain + [last.base])}",
+              c.name)
+            continue
+        inherited = {f.name: owner for owner, f in idx.class_fields(c.base)} if c.base else {}
+        seen = set()
+        for f in c.fields:
+            if f.name in seen:
+                D("E0102", f"duplicate field '{f.name}' in class '{c.name}'", c.name, pin=f.name)
+            elif f.name in inherited:
+                D("E0102", f"field '{f.name}' of class '{c.name}' is already declared by "
+                           f"'{inherited[f.name]}'", c.name, pin=f.name)
+            seen.add(f.name)
+            if f.type == "exec" or not type_ok(f.type, idx):
+                D("E0501", unknown_type_message(f.type, module.name), c.name, pin=f.name,
+                  type=f.type)
+            elif f.default is not None and not (lit_fits(f.default, f.type, idx)
+                                                and lit_in_range(f.default, f.type)):
+                D("E0110", f"default of field '{c.name}.{f.name}' does not fit type {f.type}",
+                  c.name, pin=f.name, literal=True, dst=f.type)
+        for g in idx.methods(c.name):
+            base_m = idx.find_method(c.base, g.short_name) if c.base else None
+            if base_m is None:
+                continue
+            if base_m.has_attr("final"):
+                D("E0150", f"'{g.name}' overrides '{base_m.name}', which is @final", g.name)
+            elif (base_m.kind != g.kind
+                  or [p.type for p in base_m.params] != [p.type for p in g.params]
+                  or [r.type for r in base_m.result_list] != [r.type for r in g.result_list]
+                  or base_m.has_attr("latent") != g.has_attr("latent")):
+                D("E0150", f"'{g.name}' overrides '{base_m.name}' but its signature differs; an "
+                           f"override takes the same parameters and results", g.name)
 
 
 def check_enum_value(lit: Lit, idx: ModuleIndex, D, graph=None, node=None, pin=None) -> bool:
@@ -341,7 +389,7 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
                     continue
                 if spin.is_exec:
                     D("E0120", f"'{src.id}.{spin.name}' is an exec output", G, n.id, b.pin)
-                elif spin.type != pin.type:
+                elif not assignable(spin.type, pin.type, idx):
                     D("E0110", f"wire type mismatch: {spin.type} -> {pin.type}; insert "
                                f"Convert::<{spin.type}, {pin.type}>", G, n.id, b.pin,
                       src=spin.type, dst=pin.type)
@@ -349,7 +397,7 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
                 if b.value.kind == "enum" and not check_enum_value(b.value, idx, D, G, n.id,
                                                                    b.pin):
                     continue
-                if not lit_fits(b.value, pin.type):
+                if not lit_fits(b.value, pin.type, idx):
                     D("E0110", f"literal does not fit pin type {pin.type}", G, n.id, b.pin,
                       dst=pin.type, literal=True)
         if not sig.error and n.kind != "Exit":
@@ -392,6 +440,12 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
             if n.kind in ("SetVar", "SetState"):
                 D("E0302", f"{attr} function writes {'a variable' if n.kind == 'SetVar' else 'state'}",
                   G, n.id)
+            if n.kind == "SetField" and not sig.error:
+                D("E0302", f"{attr} function writes the field '{n.symbol}'", G, n.id)
+            if n.kind == "New":
+                D("E0302", f"{attr} function creates an object, which is an effect", G, n.id)
+            if pure_attr and n.kind == "GetField" and sig.purity == "reads":
+                D("E0304", f"@pure function reads the field '{n.symbol}' of an object", G, n.id)
             if pure_attr and n.kind == "GetState":
                 D("E0304", "@pure function reads state", G, n.id)
             if pure_attr and n.kind == "GetVar" and n.symbol not in idx.consts:
@@ -409,6 +463,7 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
     check_flow(info, G, D)
     check_try_nesting(info, G, D)
     check_latency(g, info, idx, G, D)
+    check_method_state(g, idx, G, D)
     check_layout(g, ids, G, D)
 
 
@@ -437,6 +492,30 @@ def macro_latent(name: str, idx: ModuleIndex, seen=None) -> bool:
         if n.kind == "Macro" and macro_latent(n.symbol or "", idx, seen):
             return True
     return False
+
+
+def macro_has_state(name: str, idx: ModuleIndex, seen=None) -> bool:
+    seen = set() if seen is None else seen
+    m = idx.macros.get(name)
+    if m is None or name in seen:
+        return False
+    seen.add(name)
+    return bool(m.states) or any(n.kind == "Macro" and macro_has_state(n.symbol or "", idx, seen)
+                                 for n in m.nodes)
+
+
+def check_method_state(g: Graph, idx: ModuleIndex, G, D):
+    """`state` in a method lives on the object (section 2.3), which this prototype does not
+    lay out yet: E0501 for a method that declares state or expands a macro that keeps it."""
+    if not g.owner:
+        return
+    if g.states:
+        D("E0501", f"state in a method is not supported by this prototype yet; use a field of "
+                   f"'{g.owner}'", G)
+    for n in g.nodes:
+        if n.kind == "Macro" and macro_has_state(n.symbol or "", idx):
+            D("E0501", f"macro '{n.symbol}' keeps state, which in a method would live on the "
+                       f"object; this prototype does not support that yet", G, n.id)
 
 
 def check_latency(g: Graph, info: GraphInfo, idx: ModuleIndex, G, D):

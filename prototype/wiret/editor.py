@@ -1465,6 +1465,24 @@ class EditorApp:
             var.add_command(label="(no locals or variables: Graph > Add local…)", state="disabled")
         menu.add_cascade(label="Variables", menu=var)
 
+        classes = tk.Menu(menu, tearoff=0)
+        for name in sorted(idx.classes):
+            sub = tk.Menu(classes, tearoff=0)
+            add(sub, f"New {name}", "New", name)
+            add(sub, f"Cast to {name}", "Cast", name)
+            fields = idx.class_fields(name)
+            if fields:
+                sub.add_separator()
+            for _, f in fields:
+                add(sub, f"Get {f.name}", "GetField", f"{name}.{f.name}")
+            for _, f in fields:
+                add(sub, f"Set {f.name}", "SetField", f"{name}.{f.name}")
+            classes.add_cascade(label=name, menu=sub)
+        if idx.classes:
+            classes.add_separator()
+            add(classes, "IsValid (not null)", "IsValid")
+            menu.add_cascade(label="Classes", menu=classes)
+
         structs = tk.Menu(menu, tearoff=0)
         for name in sorted(idx.structs):
             sub = tk.Menu(structs, tearoff=0)

@@ -19,7 +19,7 @@ from .checker import Diag, check, has_errors
 from .model import Const, Extern, Graph, Lit, Module, Node, PinRef, Var
 from .natives import INTERNAL, STD
 from .printer import layout_hash, print_module, semantic_hash
-from .registry import (ARRAY_MUTATORS, FLOAT_TYPES, INT_TYPES, MAP_PURE, PLACE_MUTATORS,
+from .registry import (class_field_target, ARRAY_MUTATORS, FLOAT_TYPES, INT_TYPES, MAP_PURE, PLACE_MUTATORS,
                        REGISTRY_NAME, REGISTRY_VERSION, SET_PURE,
                        SIGNED_TYPES, ModuleIndex, Pin, Sig, array_elem, attr_int, enum_values,
                        is_container, map_types, set_elem, signature, zero_lit)
@@ -144,6 +144,8 @@ class Compiler:
             return wbc.Ref(self.set_type(elem))
         if ty in self.idx.structs:
             return wbc.Ref(self.struct_type(ty))
+        if ty in self.idx.classes:
+            return wbc.Ref(self.class_type(ty))
         return VT[self.base(ty)]
 
     def base(self, ty: str) -> str:
@@ -166,6 +168,43 @@ class Compiler:
                 fields.append((vt, default))
             self.types[self.type_keys[key]] = wbc.StructType(tuple(fields))
         return self.type_keys[key]
+
+    def class_type(self, name: str) -> int:
+        """Index of a class's `5B` type entry. The vtable is filled in by `build`, once every
+        function index is known."""
+        key = ("class", name)
+        if key not in self.type_keys:
+            self.type_keys[key] = len(self.types)
+            self.types.append(None)
+            c = self.idx.classes[name]
+            sup = self.class_type(c.base) if c.base else None
+            fields = []
+            for f in c.fields:
+                vt = self.vt(f.type)
+                default = None
+                if f.default is not None and not isinstance(vt, wbc.Ref) and \
+                        f.default.kind != "null":
+                    default = self.const_value(f.default, f.type)
+                fields.append((vt, default))
+            self.types[self.type_keys[key]] = wbc.ClassType(sup, tuple(fields), ())
+        return self.type_keys[key]
+
+    def slots(self, cls: str) -> list:
+        """The vtable of a class as [(method name, implementing graph)]: the superclass's slots,
+        with overrides in place, then the class's new methods by name (section 5.3)."""
+        c = self.idx.classes[cls]
+        out = list(self.slots(c.base)) if c.base else []
+        names = [s for s, _ in out]
+        for g in self.idx.methods(cls):
+            if g.short_name in names:
+                out[names.index(g.short_name)] = (g.short_name, g.name)
+            else:
+                out.append((g.short_name, g.name))
+                names.append(g.short_name)
+        return out
+
+    def class_field_index(self, cls: str, fname: str) -> int:
+        return [f.name for _, f in self.idx.class_fields(cls)].index(fname)
 
     def field_index(self, struct: str, field_name: str) -> int:
         return [f.name for f in self.idx.structs[struct].fields].index(field_name)
@@ -234,7 +273,8 @@ class Compiler:
         if name in self.global_index:
             return self.global_index[name]
         lit = init if init is not None else zero_lit(ty)
-        if is_container(ty) or ty in self.idx.structs or ty == "std.Signal":
+        if is_container(ty) or ty in self.idx.structs or ty in self.idx.classes or \
+                ty == "std.Signal":
             value = None                 # the VM builds the default array or struct
         else:
             value = self.const_value(lit, ty)
@@ -299,7 +339,8 @@ class Compiler:
             flags = (wbc.FN_PURE if g.has_attr("pure") else 0) | \
                     (wbc.FN_EVENT | wbc.FN_LATENT if g.kind == "event" else 0) | \
                     (wbc.FN_LATENT if g.has_attr("latent") else 0)
-            t = type_index([self.vt(p.type) for p in g.params],
+            t = type_index(([self.vt(g.owner)] if g.owner else [])
+                           + [self.vt(p.type) for p in g.params],
                            [self.vt(r.type) for r in g.result_list])
             mod.funcs.append((t, flags))
         for name, ty, value in self.globals:
@@ -314,6 +355,11 @@ class Compiler:
             if v.attrs and any(a.name == "export" for a in v.attrs):
                 mod.exports.append((v.name, 1, self.global_index[v.name], 0))
         mod.data = list(self.data)
+        for key, ti in list(self.type_keys.items()):
+            if key[0] == "class":               # fill each vtable with function indices
+                e = self.types[ti]
+                self.types[ti] = wbc.ClassType(e.super, e.fields, tuple(
+                    self.func_index(("func", impl)) for _, impl in self.slots(key[1])))
         mod.types = self.types
         assembled = [fl.assemble() for fl in lowered]
         mod.bodies = [wbc.Body([self.vt(t) for t in fl.local_types[fl.nparams:]], 0xFFFF, 0, code)
@@ -349,6 +395,16 @@ class Compiler:
         for gi, (name, _, _) in enumerate(self.globals):
             w.u32(gi)
             w.name(name)
+        classes = sorted((ti, key[1]) for key, ti in self.type_keys.items()
+                         if key[0] == "class")
+        w.u32(len(classes))
+        for ti, name in classes:
+            w.u32(ti)
+            w.name(name)
+            fields = self.idx.class_fields(name)
+            w.u32(len(fields))
+            for _, f in fields:
+                w.name(f.name)
         out.append(("name", bytes(w.b)))
 
         w = wbc.Writer()
@@ -433,10 +489,11 @@ class FuncLowerer:
         self.local_defaults: list = []    # [(local name, Lit)]
         self.pin_map: dict[int, tuple] = {}
         entry_id = next((n.id for n in g.nodes if n.kind == "Entry"), "entry")
-        for p in g.params:
-            self.add_local(p.name, p.type)
-            self.pin_map[self.local_index[p.name]] = (entry_id, p.name)
-        self.nparams = len(g.params)
+        params = ([("self", g.owner)] if g.owner else []) + [(p.name, p.type) for p in g.params]
+        for name, ty in params:
+            self.add_local(name, ty)
+            self.pin_map[self.local_index[name]] = (entry_id, name)
+        self.nparams = len(params)
         self.ir: dict[str, IRNode] = {}
         self.entry: Optional[str] = None
         self.code: list = []
@@ -467,6 +524,8 @@ class FuncLowerer:
         g = self.g
         ctx = Ctx(g, "", None, self.sigs_for(g))
         ctx.params = {p.name: p.name for p in g.params}
+        if g.owner:
+            ctx.params["self"] = "self"
         for l in sorted(g.locals, key=lambda l: l.name):
             ctx.locals[l.name] = l.name
             self.add_local(l.name, l.type, l.default)
@@ -574,6 +633,15 @@ class FuncLowerer:
                 else:
                     ir.extra["func"] = self.c.import_ref(callee.name)
                 ir.extra["nresults"] = len(callee.results)
+                if callee.method_of and not callee.final:
+                    short = callee.name.rpartition(".")[2]
+                    names = [s for s, _ in self.c.slots(callee.method_of)]
+                    ir.extra["virtual"] = (self.c.class_type(callee.method_of),
+                                           names.index(short))
+            elif n.kind in ("GetField", "SetField") and sig.category == "Classes":
+                cls, fname = class_field_target(n, ctx.graph, self.c.idx)
+                ir.extra["class_field"] = (self.c.class_type(cls),
+                                           self.c.class_field_index(cls, fname))
             self.ir[nid] = ir
 
     def expand_macro(self, ctx: Ctx, n: Node, sig: Sig):
@@ -705,7 +773,7 @@ class FuncLowerer:
         if self.c.debug:   # every impure output gets a slot, read or not
             for nid in sorted(self.ir):
                 n = self.ir[nid]
-                if not n.pure and (n.kind in ("Call", "Try") or n.kind in PLACE_MUTATORS):
+                if not n.pure and (n.kind in ("Call", "Try", "New") or n.kind in PLACE_MUTATORS):
                     for p in n.data_outs:
                         key = (nid, p.name)
                         if key not in self.slots:
@@ -792,7 +860,7 @@ class FuncLowerer:
             self.transfer(then, nxt)
         elif k == "Call":
             self.emit_inputs(n)
-            self.E("call", n.extra["func"])
+            self.emit_call(n)
             for p in reversed(n.sig.data_outs):
                 slot = self.slots.get((n.id, p.name))
                 if slot is None:
@@ -837,6 +905,19 @@ class FuncLowerer:
             # instruction with its continuation stack intact (section 4.5)
             self.emit_inputs(n)
             self.E("suspend", {"Yield": 0, "Delay": 1, "Await": 2}[k])
+            self.transfer(then, nxt)
+        elif k == "New":
+            self.ready(n)
+            self.E("class.new", self.c.class_type(n.symbol))
+            slot = self.slots.get((n.id, "result"))
+            if slot is None:
+                self.E("drop")
+            else:
+                self.E("local.set", slot)
+            self.transfer(then, nxt)
+        elif k == "SetField":
+            self.emit_inputs(n)                   # obj, then value
+            self.E("class.set", *n.extra["class_field"])
             self.transfer(then, nxt)
         elif k == "Throw":
             self.emit_inputs(n)
@@ -952,9 +1033,22 @@ class FuncLowerer:
                             self.E("local.set", self.debug_local(s.a, o.name, o.type))
                     self.E("local.get", ep.temps[(s.a, s.b)])
 
+    def emit_call(self, n: IRNode):
+        """A direct call, or call_virtual for a method that is not @final (section 3.3)."""
+        if "virtual" in n.extra:
+            self.E("call_virtual", *n.extra["virtual"])
+        else:
+            self.E("call", n.extra["func"])
+
     def emit_const(self, lit: Lit, ty: str):
         if ty == "std.Signal":        # no literal: the null signal, a local never assigned
             self.E("local.get", self.add_local("$null.signal", ty))
+            return
+        if ty == "anyref":
+            self.E("local.get", self.add_local("$null.anyref", ty))
+            return
+        if ty in self.c.idx.classes:  # the only class literal is null
+            self.E("ref.null", self.c.class_type(ty))
             return
         elem = array_elem(ty)
         if elem is not None:          # the only array constant is the empty array
@@ -1039,6 +1133,9 @@ class FuncLowerer:
                     "map" if map_types(ty) is not None else "set")
             self.E("call", self.c.import_ref(f"std.{kind}.Equals"))
             return
+        if ty in self.c.idx.classes:   # identity (section 3.1)
+            self.E("ref.eq")
+            return
         if ty in self.c.idx.structs:
             t = self.c.struct_type(ty)
             fields = self.c.idx.structs[ty].fields
@@ -1094,8 +1191,32 @@ class FuncLowerer:
             self.eval(n.inputs[0][2], ep)
             self.E("array.len")
             return
+        if k == "GetField" and "class_field" in n.extra:
+            self.eval(n.inputs[0][2], ep)
+            self.E("class.get", *n.extra["class_field"])
+            return
         if k in ("MakeStruct", "BreakStruct", "GetField", "WithField"):
             self.emit_struct_node(n, ep)
+            return
+        if k == "IsValid":
+            self.eval(n.inputs[0][2], ep)
+            self.E("ref.valid")
+            return
+        if k == "Cast":
+            # result is obj when it is an instance of the class, else null; ok says which.
+            # ref.cast cannot fault here: it sees either an instance or null.
+            t = self.c.class_type(n.symbol)
+            self.eval(n.inputs[0][2], ep)
+            obj, ok = self.temp("anyref"), self.temp("bool")
+            self.E("local.tee", obj)
+            self.E("ref.test", t)
+            self.E("local.set", ok)
+            self.E("local.get", obj)
+            self.E("ref.null", t)
+            self.E("local.get", ok)
+            self.E("select")
+            self.E("ref.cast", t)
+            self.E("local.get", ok)
             return
         if k == "Select":
             ty = n.targs[0]
@@ -1111,7 +1232,7 @@ class FuncLowerer:
         for _, _, s in n.inputs:
             self.eval(s, ep)
         if k == "Call":
-            self.E("call", n.extra["func"])
+            self.emit_call(n)
             return
         if k == "Convert":
             self.emit_convert(n.targs[0], n.targs[1])
@@ -1123,7 +1244,8 @@ class FuncLowerer:
             self.E(f"i32.{k.lower()}")
             return
         T = n.targs[0]
-        if T in self.c.idx.structs or is_container(T):   # only Eq and Ne take these
+        if T in self.c.idx.structs or T in self.c.idx.classes or is_container(T):
+            # only Eq and Ne take these
             self.emit_eq(T)
             if k == "Ne":
                 self.E("i32.eqz")

@@ -47,20 +47,23 @@ def view_flow(m: Module) -> str:
     out = []
     for g in m.graphs():
         info = GraphInfo(g, idx)
-        lines = fmt_graph(g, idx)
+        outer = IND if g.owner else ""      # a method is printed inside its class
+        ind = outer + IND
+        lines = fmt_graph(g, idx, outer)
         order = flow_order(g, info)
-        flowed = [fmt_node(info.nodes[nid], info.sigs[nid], IND) for nid in order]
+        flowed = [fmt_node(info.nodes[nid], info.sigs[nid], ind) for nid in order]
         # a node entry is its node line, any `#[...]` lines above it and its bindings
         node_lines = [l for l in lines
-                      if any(x.startswith(IND + "node ") for x in l.splitlines())]
+                      if any(x.startswith(ind + "node ") for x in l.splitlines())]
         if node_lines:
             start = lines.index(node_lines[0])
             lines[start:start + len(node_lines)] = flowed
-        if IND + "flow {" in lines:
-            start = lines.index(IND + "flow {") + 1
-            wires = [IND * 2 + w for nid in order for w in fmt_wires(info.nodes[nid], info.sigs[nid])]
+        if ind + "flow {" in lines:
+            start = lines.index(ind + "flow {") + 1
+            wires = [ind + IND + w for nid in order
+                     for w in fmt_wires(info.nodes[nid], info.sigs[nid])]
             lines[start:start + len(wires)] = wires
-        out.append((("\n".join(fmt_graph(g, idx))), "\n".join(lines)))
+        out.append(("\n".join(fmt_graph(g, idx, outer)), "\n".join(lines)))
     for before, after in out:
         canonical = canonical.replace(before, after, 1)
     return canonical
