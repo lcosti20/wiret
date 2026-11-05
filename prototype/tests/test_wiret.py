@@ -5893,6 +5893,35 @@ class LessonTests(unittest.TestCase):
         "14_events.wiret": ["Click number 1", "Click number 2", "The counter heard 3 clicks"],
     }
 
+    def test_reset_all_removes_only_lesson_copies(self):
+        from wiret.editor import remove_lesson_copies
+        d = tempfile.mkdtemp()
+        try:
+            for name in ("01_hello.wiret", "12_objects.wiret", "mine.wiret"):
+                with open(os.path.join(d, name), "w", encoding="utf-8") as f:
+                    f.write("x")
+            names = sorted(f for f in os.listdir(LESSONS) if f.endswith(".wiret"))
+            self.assertEqual(remove_lesson_copies(names, d), 2)
+            self.assertEqual(os.listdir(d), ["mine.wiret"])
+        finally:
+            shutil.rmtree(d)
+
+    def test_code_font_is_monospace(self):
+        import tkinter as tk
+        from tkinter import font as tkfont
+        from wiret.editor import pick_mono
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            self.skipTest("no display for Tk")
+        try:
+            root.withdraw()
+            family, size = pick_mono(root)
+            f = tkfont.Font(root=root, family=family, size=size)
+            self.assertEqual(f.measure("iiii"), f.measure("WWWW"))
+        finally:
+            root.destroy()
+
     def test_lessons(self):
         names = sorted(f for f in os.listdir(LESSONS) if f.endswith(".wiret"))
         self.assertEqual(names, sorted(self.EXPECTED))

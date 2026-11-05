@@ -81,11 +81,42 @@ WORK_DIR = (os.path.join(user_dir(), "my_lessons") if FROZEN or os.environ.get("
             else os.path.join(HERE, "my_lessons"))
 
 COMMON_TYPES = ["i32", "i64", "u8", "u32", "f32", "f64", "bool", "string"]
-MONO = ("Menlo", 12)
+MONO = ("Menlo", 12)            # replaced by pick_mono once Tk is running
+
+# Monospace families to try, in order: macOS, Windows, then Linux. Tk quietly falls back to a
+# proportional font for a family that is not installed, so the editor picks one that is.
+MONO_FAMILIES = ("Menlo", "SF Mono", "Cascadia Mono", "Consolas", "DejaVu Sans Mono",
+                 "Liberation Mono", "Ubuntu Mono", "Noto Sans Mono", "Courier New")
+
+
+def pick_mono(root) -> tuple:
+    """The code font: the first installed monospace family, else Tk's own fixed font. Tk
+    sizes are points, which Windows draws larger than macOS, so Windows gets a smaller size."""
+    from tkinter import font as tkfont
+    size = 10 if sys.platform == "win32" else 12
+    installed = {f.lower() for f in tkfont.families(root)}
+    for family in MONO_FAMILIES:
+        if family.lower() in installed:
+            return (family, size)
+    return (tkfont.nametofont("TkFixedFont", root=root).actual("family"), size)
+
+
+def remove_lesson_copies(names, work_dir: Optional[str] = None) -> int:
+    """Delete the working copies of the named lessons from my_lessons. Returns how many."""
+    work_dir = work_dir or WORK_DIR
+    removed = 0
+    for name in names:
+        path = os.path.join(work_dir, name)
+        if os.path.exists(path):
+            os.remove(path)
+            removed += 1
+    return removed
 
 
 class EditorApp:
     def __init__(self, root: tk.Tk, path: Optional[str]):
+        global MONO
+        MONO = pick_mono(root)
         self.root = root
         self.path: Optional[str] = None
         self.module: Optional[Module] = None
@@ -158,6 +189,7 @@ class EditorApp:
             lm.add_command(label=self.lesson_title(name), command=lambda n=name: self.open_lesson(n))
         lm.add_separator()
         lm.add_command(label="Start this lesson over", command=self.reset_lesson)
+        lm.add_command(label="Start all lessons over…", command=self.reset_all_lessons)
         menubar.add_cascade(label="Lessons", menu=lm)
         r.config(menu=menubar)
         for seq, fn in (("<Command-n>", self.new_file), ("<Command-o>", self.open_dialog),
@@ -401,6 +433,28 @@ class EditorApp:
                                              f"{self.lesson_title(name)} and start again?"):
             os.remove(self.path)
             self.open_lesson(name, ask=False)
+
+    def reset_all_lessons(self):
+        """Throw away every lesson's working copy, for instance after updating the prototype
+        when the copies still hold the old lessons. Only copies of bundled lessons are
+        removed; anything else in my_lessons stays."""
+        copies = [n for n in self.lesson_files() if os.path.exists(os.path.join(WORK_DIR, n))]
+        if not copies:
+            self.status("No lesson has been started yet, so there is nothing to reset.")
+            return
+        if not messagebox.askyesno(
+                "Start all lessons over",
+                f"Throw away your changes to all {len(copies)} lessons you have opened and "
+                f"start them again from the originals?\n\nThis cannot be undone."):
+            return
+        open_name = None
+        if self.path and os.path.normcase(os.path.dirname(os.path.abspath(self.path))) == \
+                os.path.normcase(WORK_DIR):
+            open_name = os.path.basename(self.path)
+        removed = remove_lesson_copies(copies)
+        if open_name in copies:
+            self.open_lesson(open_name, ask=False)
+        self.status(f"Started {removed} lesson{'s' if removed != 1 else ''} over.")
 
     def write_file(self, text):
         if not self.path:
