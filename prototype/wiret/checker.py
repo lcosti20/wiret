@@ -410,6 +410,8 @@ def check_attr_names(module: Module, D):
         walk(name, it.attrs, name if isinstance(it, Graph) else None)
         for p in list(getattr(it, "params", []) or []) + list(getattr(it, "results", []) or []):
             walk(f"parameter '{p.name}'", p.attrs, name)
+        for f in list(getattr(it, "fields", []) or []) + list(getattr(it, "members", []) or []):
+            walk(f"'{name}.{f.name}'", f.attrs)
         if isinstance(it, Graph):
             for l in it.locals + it.states:
                 walk(f"'{l.name}'", l.attrs, name)

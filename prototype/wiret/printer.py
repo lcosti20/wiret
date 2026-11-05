@@ -6,8 +6,9 @@ import hashlib
 import math
 import unicodedata
 
-from .model import (Attr, Binding, Box, Const, ExecOut, Extern, Graph, ITEM_ORDER, Lit,
-                    META_ORDER, Module, Node, PinRef, SEMANTIC_ATTRS, Use, Var, item_kind)
+from .model import (Attr, Binding, Box, Const, Enum, ExecOut, Extern, Graph, ITEM_ORDER, Lit,
+                    META_ORDER, Module, Node, PinRef, SEMANTIC_ATTRS, Struct, Use, Var,
+                    item_kind)
 from .registry import ARRAY_MUTATORS, ModuleIndex, Sig, lit_equal, signature
 
 IND = "  "
@@ -228,9 +229,38 @@ def fmt_graph(g: Graph, idx: ModuleIndex, indent: str = "", semantic=False) -> l
     return lines
 
 
+def fmt_type_decl(it, semantic=False) -> list:
+    """A struct or enum. Members keep the order written: field order and enum order are
+    semantic (layout and implicit values), so the canonical form never sorts them."""
+    if isinstance(it, Struct):
+        head = f"struct {it.name}"
+        members = []
+        for f in it.fields:
+            line = f"{IND}{f.name}: {f.type}"
+            if f.default is not None:
+                line += f" = {fmt_lit(f.default)}"
+            members.append((f.meta, line + fmt_attrs(f.attrs)))
+    else:
+        head = f"enum {it.name}" + (f": {it.base}" if it.base else "")
+        members = []
+        for m in it.members:
+            line = f"{IND}{m.name}" + (f" = {m.value}" if m.value is not None else "")
+            members.append((m.meta, line + fmt_attrs(m.attrs)))
+    head += fmt_attrs(it.attrs)
+    if not members:
+        return [head + " {}"]
+    lines = [head + " {"]
+    for meta, line in members:
+        lines.extend(fmt_meta(meta, IND, semantic))
+        lines.append(line)
+    return lines + ["}"]
+
+
 def fmt_item(it, idx: ModuleIndex, semantic=False) -> list:
     if isinstance(it, Graph):
         return fmt_graph(it, idx, "", semantic)
+    if isinstance(it, (Struct, Enum)):
+        return fmt_meta(it.meta, "", semantic) + fmt_type_decl(it, semantic)
     return fmt_meta(it.meta, "", semantic) + _fmt_decl(it)
 
 
@@ -260,7 +290,7 @@ def print_module(m: Module, semantic=False) -> str:
     prev_kind = None
     for it in items:
         k = item_kind(it)
-        block = isinstance(it, Graph)
+        block = isinstance(it, (Graph, Struct, Enum))
         if block or k != prev_kind:
             lines.append("")
         lines.extend(fmt_item(it, idx, semantic))
