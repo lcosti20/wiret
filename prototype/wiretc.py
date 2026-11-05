@@ -10,6 +10,9 @@
   wiretc hash FILE                     semantic and layout hashes
   wiretc view --flow FILE              reading view in flow order
   wiretc schema --json                 the node registry
+  wiretc merge BASE OURS THEIRS [-o OUT]
+                                       keyed three-way merge (section 7.1); the Git driver
+  wiretc init-git                      set up the merge driver, textconv and wiret.ids union
   wiretc edit FILE REQUEST.json|- [--dry-run]
                                        apply JSON edit operations (section 7.2)
   wiretc ids --check BASE[..HEAD] [--record] [--project DIR]
@@ -59,6 +62,37 @@ def build(path, out=None, embed=True):
     return m, out, r.wbc
 
 
+def init_git() -> int:
+    """Write the Git setup of section 7: the merge driver, the flow-order textconv, and a
+    union merge for wiret.ids (section 7.3)."""
+    import subprocess
+    try:
+        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True,
+                             text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        print("not inside a Git repository", file=sys.stderr)
+        return 2
+    me = f'"{sys.executable}" "{os.path.abspath(__file__)}"'.replace("\\", "/")
+    for key, value in (("merge.wiret.name", "Wiret keyed merge (wiretc merge)"),
+                       ("merge.wiret.driver", f"{me} merge %O %A %B"),
+                       ("diff.wiret.textconv", f"{me} view --flow")):
+        subprocess.run(["git", "config", key, value], cwd=top, check=True)
+    path = os.path.join(top, ".gitattributes")
+    have = ""
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            have = f.read()
+    want = ["*.wiret merge=wiret diff=wiret", "wiret.ids merge=union"]
+    add = [w for w in want if w not in have.splitlines()]
+    if add:
+        with open(path, "a", encoding="utf-8", newline="\n") as f:
+            f.write(("" if not have or have.endswith("\n") else "\n") + "\n".join(add) + "\n")
+    print(f"configured the wiret merge driver and diff textconv in {top}")
+    for w in add:
+        print(f"  .gitattributes: {w}")
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="wiretc", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -94,6 +128,13 @@ def main(argv=None):
     p.add_argument("file")
     p = sub.add_parser("schema")
     p.add_argument("--json", action="store_true", required=True)
+    p = sub.add_parser("merge")
+    p.add_argument("base")
+    p.add_argument("ours")
+    p.add_argument("theirs")
+    p.add_argument("-o", "--output", help="where to write the result (default: OURS, as Git "
+                                          "expects of a merge driver)")
+    sub.add_parser("init-git")
     p = sub.add_parser("edit")
     p.add_argument("file")
     p.add_argument("request", help="a JSON request file, or - for standard input")
@@ -140,6 +181,26 @@ def main(argv=None):
             with open(a.file, "w", encoding="utf-8", newline="\n") as f:
                 f.write(out)
         return 0
+    if a.cmd == "merge":
+        from wiret.merge import merge_texts
+        texts = []
+        for path in (a.base, a.ours, a.theirs):
+            with open(path, encoding="utf-8") as f:
+                texts.append(f.read())
+        r = merge_texts(*texts)
+        with open(a.output or a.ours, "w", encoding="utf-8", newline="\n") as f:
+            f.write(r.text)
+        if r.fallback:
+            print("wiretc merge: a side does not parse; used a plain line merge", file=sys.stderr)
+        for n in r.notices:
+            print(f"notice: layout {n}", file=sys.stderr)
+        for c in r.conflicts:
+            print(f"conflict: {c.where}: {c.what}", file=sys.stderr)
+        for d in r.semantic:
+            print(f"semantic conflict: {d}", file=sys.stderr)
+        return 0 if r.clean else 1
+    if a.cmd == "init-git":
+        return init_git()
     if a.cmd == "edit":
         from wiret.edit import apply_request
         if a.request == "-":

@@ -2043,6 +2043,256 @@ func Main() {
         self.assertIn("  Go @id(", r.text)
 
 
+MERGE_BASE = """wiret 1
+module t
+
+extern func host.Log(message: string)
+
+func Double(v: i32) -> (r: i32) {
+  node entry = Entry
+  node ret = Return
+    .r <- twice.result
+  node twice = Add::<i32>
+    .a <- entry.v
+    .b <- entry.v
+
+  flow {
+    entry -> ret
+  }
+}
+
+func Main() {
+  #[note("Says hello.")]
+  node a = Call host.Log
+    .message <- "a"
+  node b = Call host.Log
+    .message <- "b"
+  node entry = Entry
+
+  flow {
+    a -> b
+    entry -> a
+  }
+
+  layout {
+    a at (100, 0)
+    b at (200, 0)
+    entry at (0, 0)
+    box grp "Group" at (0, 0) size (300, 100) [members = [a]]
+  }
+}
+"""
+
+
+def sub(text, old, new):
+    assert old in text, old
+    return text.replace(old, new)
+
+
+class MergeTests(unittest.TestCase):
+    """wiretc merge (section 7.1) and the identity tests of section 7.4."""
+
+    def merge(self, ours, theirs, base=MERGE_BASE):
+        from wiret.merge import merge_texts
+        return merge_texts(base, ours, theirs)
+
+    def test_base_is_canonical(self):
+        self.assertEqual(print_module(parse(MERGE_BASE)), MERGE_BASE)
+
+    def test_edits_to_different_nodes_merge(self):
+        r = self.merge(sub(MERGE_BASE, '.message <- "a"', '.message <- "A"'),
+                       sub(MERGE_BASE, '.message <- "b"', '.message <- "B"'))
+        self.assertTrue(r.clean)
+        self.assertEqual(r.text, MERGE_BASE.replace('"a"', '"A"').replace('"b"', '"B"'))
+        self.assertEqual(run(r.text, "Main")[1], ["A", "B"])
+
+    def test_same_change_on_both_sides(self):
+        ours = sub(MERGE_BASE, '.message <- "a"', '.message <- "A"')
+        r = self.merge(ours, ours)
+        self.assertTrue(r.clean)
+        self.assertEqual(r.text, ours)
+
+    def test_per_field_merge_inside_one_node(self):
+        ours = sub(MERGE_BASE, "    .b <- entry.v\n", "    .b <- 3\n")
+        theirs = sub(MERGE_BASE, "node twice = Add::<i32>", "node twice = Mul::<i32>")
+        r = self.merge(ours, theirs)
+        self.assertTrue(r.clean)
+        self.assertIn("  node twice = Mul::<i32>\n    .a <- entry.v\n    .b <- 3\n", r.text)
+
+    def test_conflicting_binding_is_one_line_each(self):
+        r = self.merge(sub(MERGE_BASE, '.message <- "a"', '.message <- "ours"'),
+                       sub(MERGE_BASE, '.message <- "a"', '.message <- "theirs"'))
+        self.assertFalse(r.clean)
+        self.assertEqual([c.where for c in r.conflicts], ["Main.a.message"])
+        self.assertIn('<<<<<<< ours (Main.a.message)\n    .message <- "ours"\n=======\n'
+                      '    .message <- "theirs"\n>>>>>>> theirs\n', r.text)
+
+    def test_delete_against_change_is_a_conflict(self):
+        ours = (MERGE_BASE.replace('  node b = Call host.Log\n    .message <- "b"\n', "")
+                .replace("    a -> b\n", "").replace("    b at (200, 0)\n", ""))
+        r = self.merge(ours, sub(MERGE_BASE, '.message <- "b"', '.message <- "B"'))
+        self.assertEqual([c.what for c in r.conflicts],
+                         ["node deleted in ours, changed in the other"])
+        self.assertIn('<<<<<<< ours (Main.b)\n=======\n  node b = Call host.Log\n'
+                      '    .message <- "B"\n>>>>>>> theirs\n', r.text)
+        # deleted on one side and unchanged on the other: deleted
+        r = self.merge(ours, MERGE_BASE)
+        self.assertTrue(r.clean)
+        self.assertNotIn("node b ", r.text)
+
+    def test_rename_with_an_id_merges_as_a_rename(self):
+        from wiret.ids import assign_ids
+        m = parse(MERGE_BASE)
+        assign_ids(m, random.Random(1))
+        base = print_module(m)
+        ours = base.replace("func Double(", "func Twice(")
+        theirs = sub(base, "  node entry = Entry\n\n  flow {\n    a -> b",
+                     "  node d = Call Double\n    .v <- 2\n  node entry = Entry\n\n  flow {\n"
+                     "    a -> b")
+        r = self.merge(ours, theirs, base)
+        self.assertTrue(r.clean, [c.what for c in r.conflicts])
+        self.assertIn("func Twice(", r.text)
+        self.assertIn("node d = Call Twice\n", r.text)
+        self.assertEqual([d.code for d in check(parse(r.text)) if d.severity == "error"], [])
+        # without @ids the rename is a deletion plus an addition, and theirs' call breaks
+        r = self.merge(MERGE_BASE.replace("func Double(", "func Twice("),
+                       sub(MERGE_BASE, "  node entry = Entry\n\n  flow {\n    a -> b",
+                           "  node d = Call Double\n    .v <- 2\n  node entry = Entry\n\n"
+                           "  flow {\n    a -> b"))
+        self.assertTrue(r.semantic or r.conflicts)
+
+    def test_renamed_parameter_reaches_new_call_sites(self):
+        from wiret.ids import assign_ids
+        m = parse(MERGE_BASE)
+        assign_ids(m, random.Random(2))
+        base = print_module(m)
+        ours = sub(base, "func Double(v: i32", "func Double(n: i32").replace("entry.v", "entry.n")
+        theirs = sub(base, "  node entry = Entry\n\n  flow {\n    a -> b",
+                     "  node d = Call Double\n    .v <- 2\n  node entry = Entry\n\n  flow {\n"
+                     "    a -> b")
+        r = self.merge(ours, theirs, base)
+        self.assertTrue(r.clean)
+        self.assertIn("  node d = Call Double\n    .n <- 2\n", r.text)
+
+    def test_ids_assigned_on_one_side_are_not_a_rename(self):
+        from wiret.ids import assign_ids
+        m = parse(MERGE_BASE)
+        assign_ids(m, random.Random(3))
+        r = self.merge(print_module(m), sub(MERGE_BASE, '.message <- "a"', '.message <- "A"'))
+        self.assertTrue(r.clean)
+        self.assertIn('.message <- "A"', r.text)
+        self.assertEqual(r.text.count("@id("), print_module(m).count("@id("))
+
+    def test_layout_never_blocks(self):
+        r = self.merge(sub(MERGE_BASE, "a at (100, 0)", "a at (111, 0)"),
+                       sub(MERGE_BASE, "a at (100, 0)", "a at (122, 0)"))
+        self.assertTrue(r.clean)
+        self.assertIn("a at (122, 0)", r.text)
+        self.assertEqual(len(r.notices), 1)
+        r = self.merge(sub(MERGE_BASE, "a at (100, 0)", "a at (111, 0)"),
+                       sub(MERGE_BASE, '.message <- "a"', '.message <- "A"'))
+        self.assertTrue(r.clean)
+        self.assertIn("a at (111, 0)", r.text)
+        self.assertIn('"A"', r.text)
+
+    def test_box_members_merge_as_a_set(self):
+        r = self.merge(sub(MERGE_BASE, "members = [a]", "members = [a, b]"),
+                       sub(MERGE_BASE, "members = [a]", "members = [a, entry]"))
+        self.assertTrue(r.clean)
+        self.assertIn("members = [a, b, entry]", r.text)
+        r = self.merge(sub(MERGE_BASE, "members = [a]", "members = []"),
+                       sub(MERGE_BASE, "members = [a]", "members = [a, b]"))
+        self.assertIn("members = [b]", r.text)
+
+    def test_notes(self):
+        r = self.merge(sub(MERGE_BASE, "  node b = Call", '  #[note("ours")]\n  node b = Call'),
+                       sub(MERGE_BASE, "  node b = Call", '  #[note("theirs")]\n  node b = Call'))
+        self.assertTrue(r.clean)
+        self.assertIn('#[note("ours")]\n  #[note("theirs")]\n  node b', r.text)
+        r = self.merge(sub(MERGE_BASE, "Says hello.", "Ours."),
+                       sub(MERGE_BASE, "Says hello.", "Theirs."))
+        self.assertEqual([c.what for c in r.conflicts],
+                         ["a note was replaced differently on both sides"])
+        self.assertIn('<<<<<<< ours (Main.a note)\n  #[note("Ours.")]\n=======\n'
+                      '  #[note("Theirs.")]\n>>>>>>> theirs\n', r.text)
+        r = self.merge(sub(MERGE_BASE, '  #[note("Says hello.")]\n', ""),
+                       sub(MERGE_BASE, '.message <- "b"', '.message <- "B"'))
+        self.assertTrue(r.clean)
+        self.assertNotIn("Says hello.", r.text)
+
+    def test_semantic_conflicts_are_reported(self):
+        ours = (MERGE_BASE.replace("  node twice = Add::<i32>\n    .a <- entry.v\n"
+                                   "    .b <- entry.v\n", "")
+                .replace("    .r <- twice.result\n", "    .r <- 0\n"))
+        theirs = sub(MERGE_BASE, "  node ret = Return",
+                     "  node half = Div::<i32>\n    .a <- twice.result\n    .b <- 2\n"
+                     "  node ret = Return")
+        r = self.merge(ours, theirs)
+        self.assertFalse(r.conflicts)
+        self.assertEqual([(d.code, d.node) for d in r.semantic], [("E0101", "half")])
+        self.assertFalse(r.clean)
+
+    def test_unparseable_side_falls_back_to_a_line_merge(self):
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed")
+        r = self.merge(MERGE_BASE + "garbage(\n", sub(MERGE_BASE, "Says hello.", "Hi."))
+        self.assertTrue(r.fallback)
+        self.assertTrue(r.clean)
+        self.assertIn("garbage(", r.text)
+        self.assertIn("Hi.", r.text)
+
+    def test_declarations_merge_per_field(self):
+        base = print_module(parse(MERGE_BASE.replace(
+            "extern func host.Log", "var n: i32 = 1\n\nextern func host.Log")))
+        r = self.merge(sub(base, "var n: i32 = 1", "var n: i32 = 2"),
+                       sub(base, "var n: i32 = 1", "var n: i32 = 3"), base)
+        self.assertIn("<<<<<<< ours (n.value)\nvar n: i32 = 2\n=======\nvar n: i32 = 3\n", r.text)
+        r = self.merge(sub(base, "var n: i32 = 1", "var n: i32 = 2"),
+                       sub(base, "var n: i32 = 1", "var n: i64 = 1"), base)
+        self.assertTrue(r.clean)
+        self.assertIn("var n: i64 = 2", r.text)
+
+    @unittest.skipUnless(shutil.which("git"), "git is not installed")
+    def test_git_merge_driver(self):
+        import wiretc
+        with tempfile.TemporaryDirectory() as d:
+            def sh(*args, ok=(0,)):
+                r = subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t"] +
+                                   list(args), cwd=d, capture_output=True, text=True)
+                self.assertIn(r.returncode, ok, r.stderr + r.stdout)
+                return r
+            sh("init", "-q", "-b", "main")
+            path = os.path.join(d, "g.wiret")
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(MERGE_BASE)
+            cwd = os.getcwd()
+            os.chdir(d)
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(wiretc.init_git(), 0)
+            finally:
+                os.chdir(cwd)
+            self.assertIn("*.wiret merge=wiret diff=wiret", read(os.path.join(d, ".gitattributes")))
+            sh("add", ".")
+            sh("commit", "-q", "-m", "base")
+            sh("checkout", "-q", "-b", "other")
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(sub(MERGE_BASE, "    .b <- entry.v\n", "    .b <- 3\n"))
+            sh("commit", "-q", "-am", "theirs")
+            sh("checkout", "-q", "main")
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(sub(MERGE_BASE, "node twice = Add::<i32>", "node twice = Mul::<i32>"))
+            sh("commit", "-q", "-am", "ours")
+            sh("merge", "-q", "--no-edit", "other")
+            merged = read(path)
+            self.assertIn("  node twice = Mul::<i32>\n    .a <- entry.v\n    .b <- 3\n", merged)
+            # the textconv changes what git diff shows (flow order), not what is stored
+            shown = sh("diff", "HEAD~1", "HEAD", "--", "g.wiret").stdout
+            raw = sh("diff", "--no-textconv", "HEAD~1", "HEAD", "--", "g.wiret").stdout
+            self.assertIn(".b <- 3", shown)
+            self.assertNotEqual(shown, raw)
+
+
 class HashTests(unittest.TestCase):
     def test_reorder_and_layout_removal_do_not_change_semantics(self):
         text = demo()
