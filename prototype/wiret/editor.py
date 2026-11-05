@@ -19,7 +19,7 @@ from collections import Counter, deque
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Optional
 
-from . import canvasedit, ops, palette, palettepopup, viewmodel
+from . import canvasedit, ops, palette, palettepopup, syntax, viewmodel
 from .checker import GraphInfo, check
 from .compiler import compile_module
 from .debugstate import DebugState
@@ -27,7 +27,7 @@ from .disasm import disassemble
 from .graphview import BG, DIM, TEXT, GraphView
 from .model import Box, Graph, Lit, Local, Module, Param, PinRef, note_text, set_note_text
 from .natives import STD
-from .parser import KEYWORDS, ParseError, parse, parse_literal
+from .parser import ParseError, parse, parse_literal
 from .printer import layout_hash, print_module, semantic_hash
 from .ids import assign_ids, find_project, retired_between
 from .registry import (ModuleIndex, STATIC_KINDS, can_convert, enum_values,
@@ -252,8 +252,7 @@ class EditorApp:
         xs.pack(side="bottom", fill="x")
         self.src.pack(fill="both", expand=True)
         self.src.bind("<<Modified>>", self.on_text_modified)
-        for tag, color in (("kw", "#c678dd"), ("str", "#98c379"), ("attr", "#e5c07b"),
-                           ("comment", "#7f848e"), ("num", "#d19a66"), ("kind", "#61afef")):
+        for tag, color in syntax.COLORS.items():
             self.src.tag_configure(tag, foreground=color)
         self.src.tag_configure("err", background="#5c1f1f")
         self.src.tag_configure("hl", background="#3a3f4b")
@@ -584,30 +583,11 @@ class EditorApp:
 
     def highlight_source(self):
         t = self.src
-        for tag in ("kw", "str", "attr", "comment", "num", "kind"):
+        for tag in syntax.TAGS:
             t.tag_remove(tag, "1.0", "end")
         for i, line in enumerate(self.text.split("\n"), start=1):
-            for m in re.finditer(r'"(?:[^"\\]|\\.)*"|//.*$|@[A-Za-z_.]+|#\[[A-Za-z_.]+|\]$|'
-                                 r'\b[A-Za-z_]\w*\b|-?\b\d[\w.]*', line):
-                s = m.group(0)
-                tag = None
-                if s.startswith('"'):
-                    tag = "str"
-                elif s.startswith("//"):
-                    tag = "comment"
-                elif s.startswith(("@", "#[")) or s == "]":
-                    tag = "attr"
-                elif s[0].isdigit() or s[0] == "-":
-                    tag = "num"
-                elif s in KEYWORDS:
-                    tag = "kw"
-                elif s in STATIC_KINDS or s in ("Entry", "Return", "Call", "Macro", "Exit",
-                                                "Sequence", "Switch", "Reroute", "GetLocal",
-                                                "SetLocal", "GetVar", "SetVar", "GetState",
-                                                "SetState"):
-                    tag = "kind"
-                if tag:
-                    t.tag_add(tag, f"{i}.{m.start()}", f"{i}.{m.end()}")
+            for start, end, tag in syntax.spans(line):
+                t.tag_add(tag, f"{i}.{start}", f"{i}.{end}")
 
     def push_undo(self, text):
         self.undo_stack.append(text)
