@@ -18,7 +18,7 @@ cd prototype
 python3 wiret_editor.py                         # the editor, opening Lesson 1
 python3 wiret_editor.py examples/demo.wiret     # the editor on a larger example
 python3 wiretc.py run examples/demo.wiret Main  # the same program from the command line
-python3 -m unittest discover tests              # 114 tests
+python3 -m unittest discover tests              # 126 tests
 ```
 
 ## Building a desktop app
@@ -177,6 +177,8 @@ The editor also follows the graph-editor contract in section 7.5:
 | `hash FILE` | Semantic and layout hashes |
 | `view --flow FILE` | Reading view with nodes and `flow` wires in flow order |
 | `schema --json` | The node registry |
+| `edit FILE REQUEST.json\|- [--dry-run]` | Apply JSON edit operations (section 7.2); see *Editing protocol* below |
+| `ids --check BASE[..HEAD] [--record]` | Every id deleted between two revisions is retired in `wiret.ids`, and none is reused |
 
 ## What is implemented
 
@@ -328,6 +330,31 @@ retired id, one `module graph kind id` line each (`game.demo TakeDamage node set
   (or BASE and the working tree) and fails if an id disappeared without being retired, or a
   retired id is used again. `--record` appends the missing ones instead.
 
+### Editing protocol
+
+`wiretc edit` takes `{"if_hash": "<layout hash>", "ops": [...]}` (`wiretc hash` prints the
+layout hash) and prints a JSON reply: `ok`, the new `hash`, every diagnostic, a unified `diff`,
+the wires a cascading delete removed, and the ids it retired in `wiret.ids`. A stale `if_hash` is
+`E0900`, and a failing op rejects the whole request with the op's index; nothing is written.
+
+| Op | Fields |
+| --- | --- |
+| `create_node` | `graph`, `kind`, optional `id`, `symbol`, `targs`, `attrs`, `bindings` ({pin: value}), `execs` ({pin: "target[.pin]"}), `x`, `y` |
+| `bind` / `unbind` | `graph`, `node`, `pin`, and for `bind` a `value` |
+| `wire_exec` / `unwire_exec` | `graph`, `from` ("node[.pin]"), and for `wire_exec` a `to` |
+| `set_attr` / `remove_attr` | a target, and `attr` ("@count(3)") or `name` |
+| `set_meta` / `remove_meta` | a target, and `meta` ('#[doc("...")]') or `name` (and `text`, for one note) |
+| `place` | `graph`, `node` (a node or box), optional `x`, `y`, `props` ({key: value}), `members` |
+| `delete_node` | `graph`, `node`, optional `cascade`; refused while wired, unless `cascade` |
+| `rename` | `id` (an `@id`) and `to`; or `graph`, `node` and `to` for a node id |
+
+A value is written as on the right of `<-`: `"plus.result"`, `"5"`, `"\"hi\""`, `"Mode.Chase"`.
+A target is `graph` and `node` (a node or box), `graph` alone, or `decl` (any declaration).
+`set_meta` with a note adds one; with any other name it replaces it. Renaming by `@id` rewrites
+every reference: calls and macro uses, type names, struct and field symbols, enum values and
+`@cases`, `Entry` pins and call-site bindings for parameters, `Return` bindings and call-site
+pins for results, and flow wires for a macro's exec parameters and results.
+
 ### Deviations and known gaps
 
 - **Exports.** Every `func` and `event` is exported, so the editor can run any of them. The
@@ -336,7 +363,7 @@ retired id, one `module graph kind id` line each (`game.demo TakeDamage node set
   delegates and dispatchers, latent nodes and fibers (`Delay`, `Yield`, `Await`), and
   `Try`/`Throw`. Their node kinds are reported as `E0501` and their opcodes are rejected by
   the verifier.
-- **Not implemented:** `wiretc merge`, `wiretc edit`, `wiretc diff`, the rest of the
+- **Not implemented:** `wiretc merge`, `wiretc diff`, the rest of the
   project manager (`wiret.lock`, `use` of other modules), the C API and deterministic-mode
   float rules.
 - **Optimisation.** There is no `-O1`, so the `cont.push`/`cont.pop` pairs are never replaced

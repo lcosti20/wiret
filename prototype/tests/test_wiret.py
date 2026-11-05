@@ -5,6 +5,7 @@ Run from `prototype/`:  python3 -m unittest discover tests
 import contextlib
 import copy
 import io
+import json
 import math
 import os
 import random
@@ -1761,6 +1762,285 @@ class IdTests(unittest.TestCase):
             with contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(wiretc.main(["fmt", "--assign-ids", path]), 0)
             self.assertEqual(read(path), text)
+
+
+RENAME_SRC = """
+enum Mode {
+  Idle
+  Run
+}
+
+struct Vec2 {
+  x: f32
+  y: f32
+}
+
+func Double(v: i32) -> (r: i32) @pure {
+  node entry = Entry
+  node ret = Return
+    .r <- twice.result
+  node twice = Add::<i32>
+    .a <- entry.v
+    .b <- entry.v
+
+  flow {
+    entry -> ret
+  }
+}
+
+func Main(m: Mode) -> (out: i32, len: f32, word: string) {
+  local acc: i32
+  node call = Call Double
+    .v <- 21
+  node entry = Entry
+  node get = GetLocal acc
+  node len = GetField Vec2.x
+    .obj <- make.result
+  node make = MakeStruct Vec2
+    .x <- 3.5
+  node parts = BreakStruct Vec2
+    .obj <- make.result
+  node r_idle = Return
+    .out <- get.value
+    .len <- parts.x
+    .word <- "idle"
+  node r_run = Return
+    .out <- get.value
+    .len <- len.value
+    .word <- "run"
+  node save = SetLocal acc
+    .value <- call.r
+  node sw = Switch::<Mode> @cases(Mode.Idle)
+    .value <- entry.m
+
+  flow {
+    entry -> save
+    save -> sw
+    sw.case0 -> r_idle
+    sw.default -> r_run
+  }
+}
+"""
+
+
+def hash_of(text):
+    return layout_hash(parse(text))
+
+
+class EditTests(unittest.TestCase):
+    """wiretc edit (section 7.2)."""
+
+    def setUp(self):
+        self.text = print_module(parse(module(RENAME_SRC, macros=False)))
+
+    def edit(self, ops, text=None, project=None):
+        from wiret.edit import apply_request
+        text = text or self.text
+        return apply_request(text, {"if_hash": hash_of(text), "ops": ops}, project)
+
+    def test_stale_hash_is_e0900(self):
+        from wiret.edit import apply_request
+        r = apply_request(self.text, {"if_hash": "old", "ops": []})
+        self.assertFalse(r.ok)
+        self.assertEqual(r.error["code"], "E0900")
+        self.assertEqual(r.text, self.text)
+
+    def test_build_a_graph(self):
+        r = self.edit([
+            {"op": "create_node", "graph": "Main", "id": "log", "kind": "Call",
+             "symbol": "host.Log", "bindings": {"message": '"hello"'}, "x": 100, "y": 50},
+            {"op": "unwire_exec", "graph": "Main", "from": "entry"},
+            {"op": "wire_exec", "graph": "Main", "from": "entry", "to": "log"},
+            {"op": "wire_exec", "graph": "Main", "from": "log", "to": "save"},
+            {"op": "set_meta", "graph": "Main", "node": "log", "meta": '#[note("Says hi.")]'},
+            {"op": "set_attr", "graph": "Main", "node": "sw", "attr": "@cases(Mode.Idle, Mode.Run)"},
+            {"op": "wire_exec", "graph": "Main", "from": "sw.case1", "to": "r_run"},
+            {"op": "place", "graph": "Main", "node": "log", "props": {"label": '"Greet"'}},
+        ])
+        self.assertTrue(r.ok, r.error)
+        self.assertEqual([d.code for d in r.diagnostics], [])
+        self.assertEqual(print_module(parse(r.text)), r.text)
+        self.assertIn('  #[note("Says hi.")]\n  node log = Call host.Log\n    .message <- "hello"\n',
+                      r.text)
+        self.assertIn("    entry -> log\n    log -> save\n", r.text)
+        self.assertIn('log at (100, 50) [label = "Greet"]', r.text)
+        self.assertIn("+  node log = Call host.Log", r.diff)
+        self.assertEqual(r.hash, hash_of(r.text))
+        self.assertEqual(run(r.text, "Main", 0)[1], ["hello"])
+        self.assertEqual(run(r.text, "Main", 1)[0][2], "run")
+
+    def test_a_bad_op_changes_nothing(self):
+        r = self.edit([{"op": "bind", "graph": "Main", "node": "save", "pin": "value", "value": "5"},
+                       {"op": "bind", "graph": "Main", "node": "nope", "pin": "x", "value": "1"}])
+        self.assertFalse(r.ok)
+        self.assertEqual((r.error["op"], r.error["code"]), (1, "E0101"))
+        self.assertEqual(r.text, self.text)
+        for bad in ({"op": "frobnicate"}, {"op": "bind", "graph": "Main"},
+                    {"op": "set_attr", "graph": "Main", "node": "sw", "attr": "cases(1)"},
+                    {"op": "bind", "graph": "Main", "node": "save", "pin": "value", "value": "a b"},
+                    {"op": "wire_exec", "graph": "Main", "from": "sw", "to": "save"}):
+            with self.subTest(bad):
+                self.assertFalse(self.edit([bad]).ok)
+
+    def test_delete_node(self):
+        r = self.edit([{"op": "delete_node", "graph": "Main", "node": "make"}])
+        self.assertFalse(r.ok)
+        self.assertIn("cascade", r.error["message"])
+        r = self.edit([{"op": "set_meta", "graph": "Main", "node": "make", "meta": '#[note("n")]'},
+                       {"op": "delete_node", "graph": "Main", "node": "make", "cascade": True}])
+        self.assertTrue(r.ok)
+        self.assertEqual(sorted(r.removed), ["make.result -> len.obj", "make.result -> parts.obj"])
+        self.assertIn('#[note("n", detached: "make")]', r.text)
+        self.assertEqual(sorted({d.code for d in r.diagnostics}), ["W0201", "W0604"])
+
+    def test_edits_retire_ids_in_a_project(self):
+        from wiret.ids import find_project
+        with tempfile.TemporaryDirectory() as d:
+            make_project(d, self.text)
+            proj = find_project(os.path.join(d, "game.wiret"))
+            r = self.edit([{"op": "rename", "graph": "Main", "node": "get", "to": "read"}],
+                          project=proj)
+            self.assertTrue(r.ok)
+            self.assertEqual([x.line() for x in r.retired], ["t Main node get"])
+            self.assertIn("t Main node get", read(os.path.join(d, "wiret.ids")))
+
+    def test_cli(self):
+        import wiretc
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "x.wiret")
+            req = os.path.join(d, "req.json")
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(self.text)
+            with open(req, "w", encoding="utf-8") as f:
+                json.dump({"if_hash": hash_of(self.text), "ops": [
+                    {"op": "bind", "graph": "Double", "node": "twice", "pin": "b", "value": "1"}]}, f)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(wiretc.main(["edit", path, req, "--dry-run"]), 0)
+            self.assertEqual(read(path), self.text)
+            self.assertTrue(json.loads(out.getvalue())["ok"])
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(wiretc.main(["edit", path, req]), 0)
+            self.assertIn(".b <- 1", read(path))
+            with contextlib.redirect_stdout(io.StringIO()):          # the hash is now stale
+                self.assertEqual(wiretc.main(["edit", path, req]), 1)
+
+
+class RenameTests(unittest.TestCase):
+    """rename by @id rewrites every reference (sections 2.4 and 7.2)."""
+
+    def setUp(self):
+        from wiret.ids import assign_ids
+        m = parse(module(RENAME_SRC, macros=False))
+        assign_ids(m, random.Random(7))
+        self.m = m
+        self.before = [run(print_module(m), "Main", x)[0] for x in (0, 1)]
+
+    def id_of(self, kind, name):
+        from wiret.ids import elements
+        return next(e.id for e in elements(self.m) if e.kind == kind and e.name == name)
+
+    def renamed(self, kind, name, new):
+        from wiret.rename import rename
+        rename(self.m, self.id_of(kind, name), new)
+        text = print_module(self.m)
+        self.assertEqual([d.code for d in check(parse(text)) if d.severity == "error"], [])
+        self.assertEqual([run(text, "Main", x)[0] for x in (0, 1)], self.before)
+        return text
+
+    def test_function_param_result_and_local(self):
+        text = self.renamed("func", "Double", "Twice")
+        self.assertIn("node call = Call Twice\n", text)
+        text = self.renamed("param", "v", "n")
+        self.assertIn("    .a <- entry.n\n", text)
+        self.assertIn("    .n <- 21\n", text)
+        text = self.renamed("result", "r", "doubled")
+        self.assertIn("    .doubled <- twice.result\n", text)
+        self.assertIn("    .value <- call.doubled\n", text)
+        text = self.renamed("local", "acc", "total")
+        self.assertIn("node get = GetLocal total\n", text)
+        self.assertIn("node save = SetLocal total\n", text)
+
+    def test_struct_and_field(self):
+        text = self.renamed("field", "x", "across")
+        self.assertIn("node len = GetField Vec2.across\n", text)
+        self.assertIn("    .across <- 3.5\n", text)
+        self.assertIn("    .len <- parts.across\n", text)
+        text = self.renamed("struct", "Vec2", "Point")
+        self.assertIn("node make = MakeStruct Point\n", text)
+        self.assertIn("node len = GetField Point.across\n", text)
+        self.assertIn("struct Point", text)
+
+    def test_enum_and_member(self):
+        text = self.renamed("member", "Idle", "Resting")
+        self.assertIn("@cases(Mode.Resting)", text)
+        text = self.renamed("enum", "Mode", "State")
+        self.assertIn("func Main(m: State", text)
+        self.assertIn("Switch::<State> @cases(State.Resting)", text)
+
+    def test_macro_exec_pins(self):
+        from wiret.ids import assign_ids, elements
+        from wiret.rename import rename
+        src = module("""
+macro Twice(go: exec, skip: exec) -> (out: exec) {
+  node entry = Entry
+  node leave = Exit out
+  node log = Call host.Log
+    .message <- "tick"
+  node seq = Sequence @count(2)
+
+  flow {
+    entry.go -> seq
+    entry.skip -> leave
+    log -> leave
+    seq.then0 -> log
+    seq.then1 -> log
+  }
+}
+
+func Main() {
+  node after = Call host.Log
+    .message <- "done"
+  node entry = Entry
+  node t = Macro Twice
+
+  flow {
+    entry -> t.go
+    t.out -> after
+  }
+}
+""", macros=False)
+        m = parse(src)
+        assign_ids(m, random.Random(8))
+        before = run(print_module(m), "Main")[1]
+        ids = {(e.kind, e.name): e.id for e in elements(m)}
+        rename(m, ids[("param", "go")], "start")
+        rename(m, ids[("result", "out")], "finished")
+        text = print_module(m)
+        self.assertEqual(codes(text), [])
+        self.assertEqual(run(text, "Main")[1], before)
+        # two exec parameters make Entry's pins named; one exec result keeps `t -> after`
+        for line in ("entry.start -> seq", "entry -> t.start", "t -> after",
+                     "node leave = Exit finished", "-> (finished: exec"):
+            self.assertIn(line, text)
+
+    def test_refusals(self):
+        from wiret.rename import RenameError, rename
+        for kind, name, new in (("func", "Main", "Double"), ("param", "v", "r"),
+                                ("local", "acc", "node"), ("func", "Main", "2x"),
+                                ("module", "t", "u")):
+            with self.subTest(name=name, new=new), self.assertRaises(RenameError):
+                rename(self.m, self.id_of(kind, name), new)
+        with self.assertRaises(RenameError):
+            rename(self.m, "no_such_id", "x")
+
+    def test_rename_through_edit(self):
+        from wiret.edit import apply_request
+        text = print_module(self.m)
+        r = apply_request(text, {"if_hash": hash_of(text), "ops": [
+            {"op": "rename", "id": self.id_of("member", "Run"), "to": "Go"}]})
+        self.assertTrue(r.ok, r.error)
+        self.assertIn("  Go @id(", r.text)
 
 
 class HashTests(unittest.TestCase):
