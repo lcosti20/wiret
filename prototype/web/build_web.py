@@ -14,6 +14,7 @@ the bundle, and nothing else from web/. The GitHub Pages workflow publishes that
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import shutil
 import zipfile
@@ -38,21 +39,57 @@ def files():
                     yield path, os.path.relpath(path, ROOT).replace(os.sep, "/")
 
 
-def write_bundle(out: str) -> None:
+def write_bundle(out: str, build: str = "dev") -> None:
     count = 0
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         for path, arc in files():
             z.write(path, arc)
             count += 1
+        z.writestr("BUILD", build + "\n")       # the page checks it got the bundle of its build
     print(f"wrote {os.path.relpath(out)}: {count} files, {os.path.getsize(out) // 1024} KB")
+
+
+def build_id() -> str:
+    """A short id that changes whenever anything the site serves changes."""
+    h = hashlib.sha256()
+    for path, arc in sorted(files(), key=lambda x: x[1]):
+        h.update(arc.encode() + b"\0")
+        with open(path, "rb") as f:
+            h.update(f.read() + b"\0")
+    for name in SITE_FILES:
+        with open(os.path.join(HERE, name), "rb") as f:
+            h.update(name.encode() + b"\0" + f.read() + b"\0")
+    return h.hexdigest()[:12]
+
+
+def stamp(page: str, build: str) -> str:
+    """The page with its build id, and that id in the URLs of its scripts and bundle. GitHub
+    Pages lets browsers cache every file for 10 minutes, and a reload fetches the page again
+    but not its scripts; versioned URLs keep a new page from running with old ones."""
+    swaps = [('const BUILD = "dev";', f'const BUILD = "{build}";'),
+             (f'fetch("{BUNDLE}")', f'fetch("{BUNDLE}?v={build}")')]
+    swaps += [(f'from "./{name}"', f'from "./{name}?v={build}"')
+              for name in SITE_FILES if name.endswith(".js")]
+    for old, new in swaps:
+        if page.count(old) != 1:
+            raise SystemExit(f"index.html: expected exactly one {old!r} to stamp")
+        page = page.replace(old, new)
+    return page
 
 
 def write_site(site: str) -> None:
     os.makedirs(site, exist_ok=True)
+    build = build_id()
     for name in SITE_FILES:
-        shutil.copyfile(os.path.join(HERE, name), os.path.join(site, name))
-    write_bundle(os.path.join(site, BUNDLE))
-    print(f"site in {os.path.relpath(site)}: {', '.join(sorted(os.listdir(site)))}")
+        if name == "index.html":
+            with open(os.path.join(HERE, name), encoding="utf-8") as f:
+                page = stamp(f.read(), build)
+            with open(os.path.join(site, name), "w", encoding="utf-8", newline="\n") as f:
+                f.write(page)
+        else:
+            shutil.copyfile(os.path.join(HERE, name), os.path.join(site, name))
+    write_bundle(os.path.join(site, BUNDLE), build)
+    print(f"site in {os.path.relpath(site)} (build {build}): {', '.join(sorted(os.listdir(site)))}")
 
 
 def main(argv=None):

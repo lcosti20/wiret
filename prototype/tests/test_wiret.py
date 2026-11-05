@@ -6352,6 +6352,36 @@ class WebApiTests(unittest.TestCase):
         for name in re.findall(r'from "\./([^"]+)"|fetch\("([^"]+)"\)', page):
             self.assertIn(next(n for n in name if n), build_web.SITE_FILES + [build_web.BUNDLE])
 
+    def test_site_is_stamped_with_one_build_id(self):
+        """The published page, its script URLs and its bundle all carry the same build id, so a
+        browser cannot pair a new page with a script or bundle cached from an older deploy."""
+        sys.path.insert(0, os.path.join(os.path.dirname(HERE), "web"))
+        try:
+            import build_web
+        finally:
+            sys.path.pop(0)
+        with tempfile.TemporaryDirectory() as tmp:
+            with contextlib.redirect_stdout(io.StringIO()):
+                build_web.main(["--site", tmp])
+            with open(os.path.join(tmp, "index.html"), encoding="utf-8") as f:
+                page = f.read()
+            with zipfile.ZipFile(os.path.join(tmp, "wiret_bundle.zip")) as z:
+                bundle_build = z.read("BUILD").decode().strip()
+        build = re.search(r'const BUILD = "([0-9a-f]{12})";', page).group(1)
+        self.assertEqual(bundle_build, build)
+        self.assertEqual(build, build_web.build_id())
+        refs = re.findall(r'from "\./([^"?]+)\?v=(\w+)"|fetch\("([^"?]+)\?v=(\w+)"\)', page)
+        self.assertEqual(sorted(a or c for a, _, c, _ in refs),
+                         sorted([n for n in build_web.SITE_FILES if n.endswith(".js")] + [build_web.BUNDLE]))
+        self.assertEqual({b or d for _, b, _, d in refs}, {build})
+        self.assertNotRegex(page, r'from "\./[^"?]+"|fetch\("[^"?]+"\)')    # nothing left unversioned
+        # the page in web/ itself stays "dev", which skips the check
+        with open(os.path.join(os.path.dirname(HERE), "web", "index.html"), encoding="utf-8") as f:
+            self.assertIn('const BUILD = "dev";', f.read())
+        # a page that changed shape is refused, rather than published half-stamped
+        with self.assertRaises(SystemExit):
+            build_web.stamp(page.replace('const BUILD = "', 'const BUILD_ID = "'), build)
+
     def test_check_maps_nodes_to_lines(self):
         from wiret import webapi
         text = lesson("05_functions.wiret")
