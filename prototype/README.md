@@ -140,7 +140,7 @@ available to every module as `Macro std.flow.ForRange` and so on.
 | --- | --- |
 | Add a node | Tab or double-click (search), or right-click empty canvas → category menus |
 | Wire | Drag from a pin to a pin, or onto a node to use its first compatible pin |
-| Wire with a type mismatch | A visible `Convert<From, To>` node is inserted for you (section 7.5) |
+| Wire with a type mismatch | A visible `Convert::<From, To>` node is inserted for you (section 7.5) |
 | Set a literal | Double-click an input pin (bool pins toggle). An empty value unbinds the pin |
 | Delete | Select a node or wire and press Delete/Backspace, or use the right-click menu |
 | Open a called function/macro | Double-click a `Call` or `Macro` node |
@@ -183,7 +183,7 @@ The editor also follows the graph-editor contract in section 7.5:
 | --- | --- |
 | Text syntax (2.1–2.4) | Full lexer and parser for `use`, `extern`, `const`, `var`, `func`, `event`, `macro`, `local`, `state`, nodes, bindings, attributes, the `flow` block (exec wires), the `markup` block (`attribute ... = Note(...)`) and `layout` (places and boxes). `enum`/`struct`/`interface`/`class` are rejected with a clear error. |
 | Canonical form and hashes (2.5) | Sorted items, nodes, `flow` wires (by source node id, then exec pin order), markup attributes and layout lines; registry pin order; default-valued bindings omitted; 100-column wrapping; attribute ordering. Semantic hash (ignores layout, markup, docs and `Reroute`) and layout hash. |
-| Node kinds (3.3) | `Entry`, `Return`, `Branch`, `Sequence`, `Switch`, `Select`, `Macro`, `Exit`, `Reroute`, `Get/SetLocal`, `Get/SetVar` (and `const`s), `Get/SetState`, `Call`, `Convert`, all arithmetic, comparison, logic and bit kinds, and the array kinds `MakeArray`, `ArrayGet`, `ArrayLength`, `ArraySet`, `ArrayAdd`, `ArrayInsert`, `ArrayRemove`, `ArrayClear`. Types: `bool`, all integer widths, `f32`, `f64`, `string`, `array<T>`. |
+| Node kinds (3.3) | `Entry`, `Return`, `Branch`, `Sequence`, `Switch`, `Select`, `Macro`, `Exit`, `Reroute`, `Get/SetLocal`, `Get/SetVar` (and `const`s), `Get/SetState`, `Call`, `Convert`, all arithmetic, comparison, logic and bit kinds, and the array kinds `MakeArray`, `ArrayGet`, `ArrayLength`, `ArraySet`, `ArrayAdd`, `ArrayInsert`, `ArrayRemove`, `ArrayClear`. Types: `bool`, all integer widths, `f32`, `f64`, `string`, `array::<T>`. |
 | Execution model (4.2–4.3) | Continuation stack, `Sequence` push/pop, macro inlining with path-style ids (`loop/test`, `loop!in`), `Exit` as a jump, joins, evaluation points with per-point sharing, impure output slots, `@pure` and `@reads` calls as pure nodes, per-expansion `state`. The §4.2 `SumTo(2)` trace is reproduced exactly (see tests). |
 | Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0201, E0301, E0302, E0304, E0401, E0501, E0502, W0201, W0301, W0302, W0310, W0320, W0601, W0602, W0603, W0604. |
 | Lowering (4.8) | `-O0`: one labelled block per impure node, `local.tee` for shared values, `cont.push`/`cont.pop` kept. Output closely matches the §5.8 listings. |
@@ -210,7 +210,7 @@ The editor also follows the graph-editor contract in section 7.5:
     source hash.
   - `wr.caps`: `vec(name)`.
   - `wr.graph`: zlib-deflated canonical text.
-- `Convert<X, string>` and float `Rem` lower to calls to internal `std.convert.*` and
+- `Convert::<X, string>` and float `Rem` lower to calls to internal `std.convert.*` and
   `std.math.FRem*` natives, since the instruction set has no opcodes for them.
 
 ### Deviations and known gaps

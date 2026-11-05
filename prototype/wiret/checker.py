@@ -195,7 +195,7 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
                     D("E0120", f"'{src.id}.{spin.name}' is an exec output", G, n.id, b.pin)
                 elif spin.type != pin.type:
                     D("E0110", f"wire type mismatch: {spin.type} -> {pin.type}; insert "
-                               f"Convert<{spin.type}, {pin.type}>", G, n.id, b.pin,
+                               f"Convert::<{spin.type}, {pin.type}>", G, n.id, b.pin,
                       src=spin.type, dst=pin.type)
             else:
                 if not lit_fits(b.value, pin.type):

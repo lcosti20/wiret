@@ -4,22 +4,44 @@ module lessons.fizzbuzz
 extern func host.Log(message: string)
 
 func Main() {
-  node buzz = Call host.Log(message: "Buzz")
-  node check15 = Branch(cond: is15.result)
-  node check3 = Branch(cond: is3.result)
-  node check5 = Branch(cond: is5.result)
+  node buzz = Call host.Log
+    .message <- "Buzz"
+  node check15 = Branch
+    .cond <- is15.result
+  node check3 = Branch
+    .cond <- is3.result
+  node check5 = Branch
+    .cond <- is5.result
   node entry = Entry
-  node fizz = Call host.Log(message: "Fizz")
-  node fizzbuzz = Call host.Log(message: "FizzBuzz")
-  node is15 = Eq<i32>(a: r15.result, b: 0)
-  node is3 = Eq<i32>(a: r3.result, b: 0)
-  node is5 = Eq<i32>(a: r5.result, b: 0)
-  node loop = Macro std.flow.ForRange(first: 1, last: 15)
-  node num_text = Convert<i32, string>(value: loop.index)
-  node number = Call host.Log(message: num_text.result)
-  node r15 = Rem<i32>(a: loop.index, b: 15)
-  node r3 = Rem<i32>(a: loop.index, b: 3)
-  node r5 = Rem<i32>(a: loop.index, b: 5)
+  node fizz = Call host.Log
+    .message <- "Fizz"
+  node fizzbuzz = Call host.Log
+    .message <- "FizzBuzz"
+  node is15 = Eq::<i32>
+    .a <- r15.result
+    .b <- 0
+  node is3 = Eq::<i32>
+    .a <- r3.result
+    .b <- 0
+  node is5 = Eq::<i32>
+    .a <- r5.result
+    .b <- 0
+  node loop = Macro std.flow.ForRange
+    .first <- 1
+    .last <- 15
+  node num_text = Convert::<i32, string>
+    .value <- loop.index
+  node number = Call host.Log
+    .message <- num_text.result
+  node r15 = Rem::<i32>
+    .a <- loop.index
+    .b <- 15
+  node r3 = Rem::<i32>
+    .a <- loop.index
+    .b <- 3
+  node r5 = Rem::<i32>
+    .a <- loop.index
+    .b <- 5
 
   flow {
     check15.then -> fizzbuzz

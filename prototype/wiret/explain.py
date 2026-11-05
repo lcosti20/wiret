@@ -18,8 +18,8 @@ TYPE_WORDS = {
 
 
 def type_words(ty: str) -> str:
-    if ty.startswith("array<") and ty.endswith(">"):
-        inner = ty[6:-1]
+    if ty.startswith("array::<") and ty.endswith(">"):
+        inner = ty[8:-1]
         words = type_words(inner).split(" (")[0]
         for article in ("a ", "an "):
             if words.startswith(article):
@@ -105,7 +105,7 @@ def explain(d: Diag) -> str:
     if c == "E0502":
         kind = m.split()[0]
         return (f"{kind} needs to know what kind of value it works with. Write it like "
-                f"{kind}<i32> for whole numbers or {kind}<f64> for decimals.")
+                f"{kind}::<i32> for whole numbers or {kind}::<f64> for decimals.")
     if c == "W0201":
         ty = data.get("type", "")
         return (f"Input {here} isn't connected and has no default, so it will be "
@@ -127,7 +127,7 @@ def explain(d: Diag) -> str:
     if c == "E0130":
         return ("Array nodes that change an array need to know which array to change: the name "
                 "of a local variable or module variable that holds it, written after the type, "
-                "as in ArrayAdd<i32> scores.")
+                "as in ArrayAdd::<i32> scores.")
     if c == "W0601":
         return f"This box lists '{_quoted(m, 1)}' as a member, but nothing has that name."
     if c == "W0602":

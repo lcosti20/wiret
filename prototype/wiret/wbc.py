@@ -39,7 +39,7 @@ class ArrayType:
 def vt_name(vt, types=None) -> str:
     if isinstance(vt, Ref):
         if types is not None and vt.type < len(types) and isinstance(types[vt.type], ArrayType):
-            return f"array<{vt_name(types[vt.type].elem, types)}>"
+            return f"array::<{vt_name(types[vt.type].elem, types)}>"
         return f"ref {vt.type}"
     return VT_NAMES.get(vt, f"0x{vt:02X}")
 

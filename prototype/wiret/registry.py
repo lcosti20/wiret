@@ -35,9 +35,9 @@ ZERO = object()  # pin default: the zero value of the pin's type
 
 
 def array_elem(ty: str) -> Optional[str]:
-    """The element type of `array<T>`, else None."""
-    if ty.startswith("array<") and ty.endswith(">"):
-        return ty[6:-1]
+    """The element type of `array::<T>`, else None."""
+    if ty.startswith("array::<") and ty.endswith(">"):
+        return ty[8:-1]
     return None
 
 
@@ -458,11 +458,11 @@ def signature(node: Node, graph: Graph, idx: ModuleIndex) -> Sig:
 def _array_sig(node: Node, graph: Graph, idx: ModuleIndex, sig: Sig) -> Sig:
     k = node.kind
     if len(node.targs) != 1:
-        sig.error = ("E0502", f"{k} needs one type argument: the element type, as in {k}<i32>")
+        sig.error = ("E0502", f"{k} needs one type argument: the element type, as in {k}::<i32>")
     t = node.targs[0] if node.targs else "i32"
     if not type_ok(t):
         sig.error = ("E0501", f"type '{t}' is not supported by this prototype")
-    arr = f"array<{t}>"
+    arr = f"array::<{t}>"
     if k == "MakeArray":
         sig.purity = "pure"
         sig.inputs = [Pin(f"item{i}", t) for i in range(attr_int(node, "count", 2))]
@@ -476,13 +476,13 @@ def _array_sig(node: Node, graph: Graph, idx: ModuleIndex, sig: Sig) -> Sig:
         sig.inputs = [Pin("array", arr)]
         sig.outputs = [Pin("length", "i32")]
     else:
-        # A mutator changes a place: a local or a module variable of type array<T>.
+        # A mutator changes a place: a local or a module variable of type array::<T>.
         place = node.symbol
         loc = graph.local(place) if place else None
         ty = loc.type if loc else (idx.vars[place].type if place in idx.vars else None)
         if not place or ty is None:
             sig.error = ("E0130", f"{k} must name the local or variable it changes, as in "
-                                  f"{k}<{t}> scores")
+                                  f"{k}::<{t}> scores")
         elif ty != arr and not sig.error:
             sig.error = ("E0110", f"'{place}' is {ty}, not {arr}")
         sig.inputs = [Pin("in", "exec")] + [Pin(n, t if pt == "T" else pt)

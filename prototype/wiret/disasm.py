@@ -77,7 +77,7 @@ def disassemble(data: bytes) -> str:
                 t = ins.imms[0]
                 text += f" {t}"
                 if t < len(m.types) and isinstance(m.types[t], ArrayType):
-                    comment = f"array<{vt_name(m.types[t].elem, m.types)}>"
+                    comment = f"array::<{vt_name(m.types[t].elem, m.types)}>"
             elif ins.imms:
                 text += " " + " ".join(str(x) for x in ins.imms)
             line = f"  {text}"

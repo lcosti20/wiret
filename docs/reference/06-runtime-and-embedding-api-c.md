@@ -172,7 +172,7 @@ void wr_replace(wr_Fiber *f, int idx);
 int  wr_checkstack(wr_Fiber *f, int extra);          /* 0 if it cannot grow */
 
 wr_Type     wr_type(wr_Fiber *f, int idx);
-const char *wr_typename(wr_Fiber *f, int idx);       /* "i32", "game.demo.Player", "array<i32>" */
+const char *wr_typename(wr_Fiber *f, int idx);       /* "i32", "game.demo.Player", "array::<i32>" */
 
 void wr_push_bool(wr_Fiber *f, int b);    void wr_push_i32(wr_Fiber *f, int32_t v);
 void wr_push_i64(wr_Fiber *f, int64_t v); void wr_push_f32(wr_Fiber *f, float v);
@@ -192,7 +192,7 @@ The `wr_to_*` functions return 0 or NULL when the slot has another type; use `wr
 **Objects and containers.** All look-ups are by name and return `wr_Status`.
 
 ```c
-wr_Status wr_push_new(wr_Fiber *f, wr_Module *m, const char *type);  /* class, struct or "array<i32>" ... */
+wr_Status wr_push_new(wr_Fiber *f, wr_Module *m, const char *type);  /* class, struct or "array::<i32>" ... */
 wr_Status wr_getfield(wr_Fiber *f, int idx, const char *field);      /* pushes the field */
 wr_Status wr_setfield(wr_Fiber *f, int idx, const char *field);      /* pops a value; a struct slot is replaced by the updated copy */
 

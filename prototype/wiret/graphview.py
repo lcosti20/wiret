@@ -65,7 +65,7 @@ def node_title(n) -> str:
         t += " " + n.symbol.split(".")[-1] if n.kind == "Call" and n.symbol.startswith("std.") \
             else " " + n.symbol
     if n.targs:
-        t += "<" + ", ".join(n.targs) + ">"
+        t += "::<" + ", ".join(n.targs) + ">"
     return t
 
 

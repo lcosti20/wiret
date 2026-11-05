@@ -39,8 +39,14 @@ module untitled
 extern func host.Log(message: string)
 
 func Main() {
-  node entry = Entry -> hello
-  node hello = Call host.Log(message: "Hello, Wiret!")
+  node entry = Entry
+  node hello = Call host.Log
+    .message <- "Hello, Wiret!"
+
+  flow {
+    entry -> hello
+  }
+
   layout {
     entry at (0, 0)
     hello at (200, 0)
@@ -813,7 +819,7 @@ class EditorApp:
                                    (ga.x + ga.w + gb.x) / 2 - 60, (ga.y + gb.y) / 2 + 40)
             ops.bind(g, conv.id, "value", PinRef(na, pa))
             ops.bind(g, nb, pb, PinRef(conv.id, "result"))
-            self.commit(f"Inserted {conv.id} = Convert<{out.type}, {inp.type}>")
+            self.commit(f"Inserted {conv.id} = Convert::<{out.type}, {inp.type}>")
         else:
             self.status(f"Cannot connect {out.type} to {inp.type}: no conversion exists (E0110).")
 
@@ -1162,14 +1168,14 @@ class EditorApp:
         if g is None or not self.can_edit():
             return
         text = simpledialog.askstring(f"Add {kw}", "name: type   (e.g.  count: i32  or  "
-                                                   "scores: array<i32>)",
+                                                   "scores: array::<i32>)",
                                       parent=self.root)
         if not text or ":" not in text:
             return
         name, ty = (s.strip() for s in text.split(":", 1))
         if not re.fullmatch(r"[A-Za-z_]\w*", name) or not type_ok(ty):
             messagebox.showerror(f"Add {kw}", "Use a valid name and a type such as i32, string "
-                                              "or array<i32>.")
+                                              "or array::<i32>.")
             return
         (g.locals if kw == "local" else g.states).append(Local(name, ty))
         self.commit(f"Added {kw} {name}")

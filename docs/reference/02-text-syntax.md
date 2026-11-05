@@ -2,7 +2,7 @@
 
 ### 2.1 Files and lexical structure
 
-A `.wiret` file is UTF-8 (no BOM) with LF line endings and holds exactly one module. Statements end at a newline. Newlines are ignored inside `( )`, so long nodes can wrap.
+A `.wiret` file is UTF-8 (no BOM) with LF line endings and holds exactly one module. Statements end at a newline. Newlines are ignored inside `( )`, so long signatures can wrap. A node's inputs are not written in parentheses: each one is its own line below the node line (section 2.3).
 
 `//` starts a line comment. Line comments are *trivia* and are not part of the model, so the canonical writer cannot keep them. It never drops one silently: `wiretc fmt` reports `W0603` for each comment it would lose and exits non-zero, unless told what to do with them: `--convert-comments` turns each comment into a `Note` attribute attached to the next node or declaration (section 2.3), and `--drop-comments` discards them. An editor that opens a file containing comments offers the same choice. Anything that must survive a round trip is written as a `Note` attribute in the `markup` block (graph, node or box explanations), a `@doc` attribute (the short tooltip text of a declaration), or a `box` (visual grouping).
 
@@ -11,6 +11,8 @@ A `.wiret` file is UTF-8 (no BOM) with LF line endings and holds exactly one mod
 | Identifier | `[A-Za-z_][A-Za-z0-9_]*` |
 | Qualified name | `std.math.Sqrt` |
 | Pin reference | `node_id.pin_name` |
+| Type arguments | `::<i32>`, `::<i32, string>`; always introduced by `::` |
+| Arrows | `->` (exec wire, results), `<-` (input binding) |
 | Integer | `42`, `-7`, `0xFF`, `1_000`; optional suffix `i8 u8 i16 u16 i32 u32 i64 u64` |
 | Float | `1.5`, `2e-3`; optional suffix `f32` or `f64` |
 | Other literals | `true`, `false`, `null` |
@@ -51,10 +53,11 @@ macro      = "macro" IDENT [ tparams ] params [ results ] attrs "{" body "}" ;
 params     = "(" [ param { "," param } ] ")" ;
 results    = "->" params ;                     (* results are always named *)
 param      = IDENT ":" type [ "=" literal ] ;
-tparams    = "<" IDENT { "," IDENT } ">" ;
+tparams    = "::" "<" IDENT { "," IDENT } ">" ;
 type       = prim | qname | "exec"
-           | "array" "<" type ">" | "set" "<" type ">" | "map" "<" type "," type ">"
-           | "delegate" "<" tlist [ "->" tlist ] ">" | "dispatcher" "<" tlist ">" ;
+           | "array" "::" "<" type ">" | "set" "::" "<" type ">"
+           | "map" "::" "<" type "," type ">"
+           | "delegate" "::" "<" tlist [ "->" tlist ] ">" | "dispatcher" "::" "<" tlist ">" ;
 tlist      = "(" [ type { "," type } ] ")" ;
 prim       = "bool" | "i8" | "u8" | "i16" | "u16" | "i32" | "u32"
            | "i64" | "u64" | "f32" | "f64" | "string" ;
@@ -77,9 +80,9 @@ The body of a `func`, `event` or `macro` is a list of `local` and `state` declar
 body      = { local | state | node } [ flow ] [ markup ] [ layout ] ;
 local     = "local" IDENT ":" type [ "=" literal ] NL ;
 state     = "state" IDENT ":" type [ "=" literal ] NL ;
-node      = "node" IDENT "=" KIND [ symbol ] [ "<" types ">" ]
-            [ "(" [ binding { "," binding } ] ")" ] attrs NL ;
-binding   = IDENT ":" ( pinref | literal ) ;
+node      = "node" IDENT "=" KIND [ symbol ] [ targs ] attrs NL { binding } ;
+targs     = "::" "<" type { "," type } ">" ;
+binding   = "." IDENT "<-" ( pinref | literal ) NL ;   (* one input per line *)
 pinref    = IDENT "." IDENT ;
 flow      = "flow" "{" { wire } "}" NL ;
 wire      = source "->" target NL ;
@@ -100,14 +103,14 @@ Rules:
 1. **Node ids** are identifiers, unique within the graph. They are the identity of a node for diffs and merges. Display names are not ids; they live in the layout (`label`). Editors generate a readable slug plus a short random suffix, such as `branch_k3m9`; humans and LLMs may choose descriptive ones such as `check_energy`. **Non-reuse is a project-level guarantee, not a file-level one.** A single file can only prove that its present ids are unique; it cannot know which ids were deleted earlier. Non-reuse is therefore enforced by the project's id registry `wiret.ids` (section 7.3), which records every retired node id: an editor save or `wiretc edit` that deletes a node appends its id, and a node that reuses a retired id is `E0140`. Without a project (a lone file) editors still generate fresh random suffixes, which makes accidental reuse improbable but not impossible, and `wiretc check` says so (`W0202`).
 2. **Kind** is a PascalCase built-in (`Add`, `Branch`, `SetLocal`, ...; section 3.3). Calling a declared function is always `Call`, so the closed set of built-in kinds never collides with user names.
 3. **Symbol** (optional) names the thing the node acts on: `Call std.math.Sqrt`, `GetField health`, `SetLocal acc`, `GetState done`, `New Player`, `Cast Player`, `Macro ForRange`, `Exit done`.
-4. **Type arguments** follow the symbol: `Add<i32>`, `Convert<i32, string>`, `Call std.array.Get<f32>`. They are always written out, never inferred.
-5. **Bindings** connect input pins. The right-hand side is either a pin reference (`other_node.pin`, a data wire) or a literal. An input that is not listed takes the pin's default value (the declared default, otherwise the zero value of its type); the compiler warns (`W0201`) about unlisted inputs that have no declared default.
+4. **Type arguments** follow the symbol: `Add::<i32>`, `Convert::<i32, string>`, `Call std.array.Get::<f32>`. They are always written out, never inferred. Every generic argument list in Wiret, on a node, a declaration (`macro ForEach::<T>`) or a type (`array::<i32>`), is introduced by `::`. A node line binds an id to a kind (`node plus = Add::<i32>`), and with a bare `<` a node such as `NodeType<a, b> variable` would read like a comparison; the `::` removes that ambiguity.
+5. **Bindings** connect input pins. Each binding is its own line below the node line, written `.pin <- value` and indented one level further than the node. `<-` mirrors the `->` of exec wires: data flows *into* the pin. The right-hand side is either a pin reference (`other_node.pin`, a data wire) or a literal. Blank lines may separate a node line from its bindings; the next line that does not start with `.` ends the node. An input that is not listed takes the pin's default value (the declared default, otherwise the zero value of its type); the compiler warns (`W0201`) about unlisted inputs that have no declared default.
 6. **Exec wiring** is written in the graph's `flow` block, one wire per line, never on node lines (see *The flow block* below). `source -> target` is shorthand for a source node with exactly one exec output; otherwise the output is named, `source.pin -> target`. An exec output with no wire is unconnected, which means "this chain ends here" (section 4.2).
 7. **Targets** are exec inputs. The default exec input is `in`; write `node.pin` to target another one. Any number of producers may target the same exec input (merging flow).
 8. **Data wires** may fan out freely: any number of nodes may reference the same output pin.
 9. A pin reference must name an output pin of a node in the same graph. Function and event parameters appear as output pins of the `Entry` node (`entry.amount`, and `entry.self` for methods).
 10. **`state`** declares a slot that keeps its value between executions of the graph. In a macro there is one slot per expansion site, which is what `DoOnce` and `FlipFlop` need. In a method it lives on the object, in a free function on the module instance. The compiler allocates hidden fields or globals for it, named after the expansion path. Read and write it with `GetState` and `SetState`.
-11. `Reroute<T>` is a visual-only node that passes a wire through a bend point. It is erased by the compiler. `Reroute<exec>` reroutes control flow.
+11. `Reroute::<T>` is a visual-only node that passes a wire through a bend point. It is erased by the compiler. `Reroute::<exec>` reroutes control flow.
 
 #### The flow block
 
@@ -163,7 +166,7 @@ markup {
 }
 ```
 
-- `attribute <id> on <target> = Kind(...)` attaches to the node or box named `<target>`. `attribute <id> = Kind(...)` attaches to the graph as a whole. The arguments are named, as in a node's bindings, and are literals.
+- `attribute <id> on <target> = Kind(...)` attaches to the node or box named `<target>`. `attribute <id> = Kind(...)` attaches to the graph as a whole. The arguments are named (`message: "..."`) and are literals.
 - The kind says what the attribute is. **`Note`** is the only kind defined today: `Note(message: "text")` is a piece of explanatory prose. `message` is required and is a string; it may contain `\n`; long notes are written as one long line, since line diffs of prose are no worse than for any other node. Further kinds (for example colour or grouping) may be added by later versions; an unknown kind or argument is currently a syntax error.
 - Attribute ids follow the node-id rules (unique in the graph, readable slug plus suffix). Attributes are keyed by id for merging (section 7.1) and sorted by id in canonical form.
 - Markup has no effect on compiled output, so it is outside the semantic hash and inside the layout hash. Unknown trailing `@` attributes on an attribute line are preserved.
@@ -230,9 +233,9 @@ The canonical form is a function of the model alone, so two tools always write i
 2. Items ordered by kind (`use`, `extern`, `const`, `var`, `enum`, `struct`, `interface`, `class`, `macro`, `func`, `event`), then by name.
 3. Inside a body: `local` statements by name, then `state` statements by name, then `node` statements sorted by **node id** (ASCII order), then the `flow` block, then the `markup` block, then the `layout` block last. Each block is preceded by one blank line, and an empty block is omitted. Wiring never reorders node statements; it only adds or removes `flow` lines.
 4. Inside the layout block: `place` lines sorted by node id, then `box` lines sorted by box id. Inside a box, `members` are sorted by id. Moving a node changes only its own `place` line; moving a box changes only its own `box` line. Inside the flow block, wires are sorted by source node id, then by the source's exec-output order from the registry; the bare `source -> target` form is used exactly when the source has one exec output. Inside the markup block, `attribute` lines are sorted by attribute id.
-5. Bindings are written in the node kind's pin order (from the registry); bindings equal to the pin default are omitted.
-6. Attributes: semantic ones alphabetically, then `@doc`. They follow the bindings.
-7. A node longer than 100 columns wraps inside its parentheses, one binding per line. Flow wires never wrap.
+5. Bindings are written one per line below their node line, indented two spaces further, as `.pin <- value`, in the node kind's pin order (from the registry); bindings equal to the pin default are omitted.
+6. Attributes: semantic ones alphabetically, then `@doc`. They end the node line, before the bindings.
+7. Nothing wraps: a node line and each binding line are always single lines, and so are flow wires.
 8. Numbers and strings are written in their shortest unambiguous form.
 9. Line comments are not representable. The formatter refuses to lose one silently (`W0603`, section 2.1); durable annotations are `Note` attributes.
 10. **No alignment padding.** A node statement is written `node <id> = <Kind> ...` with exactly one space on each side of `=`, and a `place` line is `<id> at (x, y)` with one space before `at`. Nothing is padded to line up with its neighbours. Aligning would put the `=` of every node at the column of the longest id, so adding one long id would change every line of the graph and break the one-line-diff rule (section 1.2, principle 1); the same holds for `at` in the layout block. The reader accepts extra spaces and the formatter removes them. An editor may align in its own display, but never in the saved text.
@@ -242,7 +245,7 @@ Two hashes are defined over the canonical form, both SHA-256:
 - **Semantic hash**: computed after removing the `layout` block, the `markup` block, `@doc`, `@category`, `@keywords`, and `Reroute` nodes, and after sorting declarations by name and nodes by id. It is embedded in the `.wbc`, so CI can prove that a commit changed behaviour or did not. Two properties must hold and should be tested: reversing the order of the nodes in a graph, or deleting its layout block and all documentation attributes, changes neither the semantic hash nor a single byte of the instruction stream.
 - **Layout hash**: computed over the entire canonical file. If two collaborators have the same layout hash, they see the identical graph.
 
-Because each node is one line, lines are sorted by id, and layout lives in its own block, plain line-based Git merges succeed whenever two people touch different nodes, and a move never collides with a rewire. Two people adding nodes also rarely collide, because ids are random slugs and sort into different places. The full merge algorithm, which works on the parsed model rather than on text, is in section 7.1. The examples in this document are shown in *flow order* for readability (both node statements and `flow` wires), which `wiretc view --flow` produces; the compiler accepts any order. They follow rule 10 (no alignment), so apart from their order they are in canonical form.
+Because each node is one node line plus one line per input, lines are sorted by id, and layout lives in its own block, plain line-based Git merges succeed whenever two people touch different nodes, and a move never collides with a rewire. Two people adding nodes also rarely collide, because ids are random slugs and sort into different places. The full merge algorithm, which works on the parsed model rather than on text, is in section 7.1. The examples in this document are shown in *flow order* for readability (both node statements and `flow` wires), which `wiretc view --flow` produces; the compiler accepts any order. They follow rule 10 (no alignment), so apart from their order they are in canonical form.
 
 **Storage order is not review order.** Sorting by id gives the best merges but scatters a function's execution order across the file. So the id-sorted file is the storage format, and reviewers are not expected to read it raw. The Git setup in section 7 attaches a `textconv` filter that runs `wiretc view --flow` before Git computes a diff, so `git diff`, `git log -p` and hosting-site pull requests that honour the attribute show nodes in flow order. `wiretc diff` goes further and prints a node-aware semantic diff (added, removed and rewired nodes, with layout-only changes separate). Flow order is defined in section 7 so that it is itself deterministic. Whether id-sorted storage should stay the default is decided by the review trial in section 9.1, not assumed here.
 
@@ -264,16 +267,28 @@ class Player {
   func TakeDamage(amount: i32) -> (died: bool) {
     local new_hp: i32
     node entry = Entry
-    node cur = GetField health (obj: entry.self)
-    node sub = Sub<i32>(a: cur.value, b: entry.amount)
-    node set_new = SetLocal new_hp (value: sub.result)
+    node cur = GetField health
+      .obj <- entry.self
+    node sub = Sub::<i32>
+      .a <- cur.value
+      .b <- entry.amount
+    node set_new = SetLocal new_hp
+      .value <- sub.result
     node hp = GetLocal new_hp
-    node store = SetField health (obj: entry.self, value: hp.value)
-    node is_dead = Le<i32>(a: hp.value, b: 0)
-    node chk = Branch(cond: is_dead.result)
-    node log_dead = Call host.Log(message: "Player died")
-    node ret_dead = Return(died: true)
-    node ret_alive = Return(died: false)
+    node store = SetField health
+      .obj <- entry.self
+      .value <- hp.value
+    node is_dead = Le::<i32>
+      .a <- hp.value
+      .b <- 0
+    node chk = Branch
+      .cond <- is_dead.result
+    node log_dead = Call host.Log
+      .message <- "Player died"
+    node ret_dead = Return
+      .died <- true
+    node ret_alive = Return
+      .died <- false
 
     flow {
       entry -> set_new
@@ -306,8 +321,11 @@ class Player {
 
   event Respawn() {
     node entry = Entry
-    node wait = Delay(seconds: 2.0)
-    node reset = SetField health (obj: entry.self, value: 100)
+    node wait = Delay
+      .seconds <- 2.0
+    node reset = SetField health
+      .obj <- entry.self
+      .value <- 100
 
     flow {
       entry -> wait
@@ -318,9 +336,14 @@ class Player {
 
 func Clamp01(v: f32) -> (result: f32) @pure {
   node entry = Entry
-  node lo = Max<f32>(a: entry.v, b: 0.0)
-  node hi = Min<f32>(a: lo.result, b: 1.0)
-  node ret = Return(result: hi.result)
+  node lo = Max::<f32>
+    .a <- entry.v
+    .b <- 0.0
+  node hi = Min::<f32>
+    .a <- lo.result
+    .b <- 1.0
+  node ret = Return
+    .result <- hi.result
 
   flow {
     entry -> ret
@@ -329,15 +352,28 @@ func Clamp01(v: f32) -> (result: f32) @pure {
 
 func Fib(n: i32) -> (result: i32) @pure {
   node entry = Entry
-  node lt = Lt<i32>(a: entry.n, b: 2)
-  node is_base = Branch(cond: lt.result)
-  node ret_n = Return(result: entry.n)
-  node n1 = Sub<i32>(a: entry.n, b: 1)
-  node n2 = Sub<i32>(a: entry.n, b: 2)
-  node f1 = Call Fib(n: n1.result)
-  node f2 = Call Fib(n: n2.result)
-  node sum = Add<i32>(a: f1.result, b: f2.result)
-  node ret_sum = Return(result: sum.result)
+  node lt = Lt::<i32>
+    .a <- entry.n
+    .b <- 2
+  node is_base = Branch
+    .cond <- lt.result
+  node ret_n = Return
+    .result <- entry.n
+  node n1 = Sub::<i32>
+    .a <- entry.n
+    .b <- 1
+  node n2 = Sub::<i32>
+    .a <- entry.n
+    .b <- 2
+  node f1 = Call Fib
+    .n <- n1.result
+  node f2 = Call Fib
+    .n <- n2.result
+  node sum = Add::<i32>
+    .a <- f1.result
+    .b <- f2.result
+  node ret_sum = Return
+    .result <- sum.result
 
   flow {
     entry -> is_base
@@ -349,14 +385,22 @@ func Fib(n: i32) -> (result: i32) @pure {
 macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, index: i32) {
   local i: i32
   node entry = Entry
-  node init = SetLocal i (value: entry.first)
+  node init = SetLocal i
+    .value <- entry.first
   node cur = GetLocal i
-  node cmp = Le<i32>(a: cur.value, b: entry.last)
-  node test = Branch(cond: cmp.result)
+  node cmp = Le::<i32>
+    .a <- cur.value
+    .b <- entry.last
+  node test = Branch
+    .cond <- cmp.result
   node seq = Sequence @count(2)
-  node each_out = Exit each (index: cur.value)
-  node nxt = Add<i32>(a: cur.value, b: 1)
-  node bump = SetLocal i (value: nxt.result)
+  node each_out = Exit each
+    .index <- cur.value
+  node nxt = Add::<i32>
+    .a <- cur.value
+    .b <- 1
+  node bump = SetLocal i
+    .value <- nxt.result
   node finish = Exit done
 
   flow {
@@ -374,10 +418,13 @@ macro DoOnce(in: exec, reset: exec) -> (out: exec) {
   state fired: bool
   node entry = Entry
   node flag = GetState fired
-  node check = Branch(cond: flag.value)
-  node mark = SetState fired (value: true)
+  node check = Branch
+    .cond <- flag.value
+  node mark = SetState fired
+    .value <- true
   node fire = Exit out
-  node clear = SetState fired (value: false)
+  node clear = SetState fired
+    .value <- false
 
   flow {
     entry.in -> check
@@ -390,12 +437,18 @@ macro DoOnce(in: exec, reset: exec) -> (out: exec) {
 func SumTo(n: i32) -> (total: i32) {
   local acc: i32
   node entry = Entry
-  node loop = Macro ForRange(first: 1, last: entry.n)
+  node loop = Macro ForRange
+    .first <- 1
+    .last <- entry.n
   node cur = GetLocal acc
-  node sum = Add<i32>(a: cur.value, b: loop.index)
-  node add = SetLocal acc (value: sum.result)
+  node sum = Add::<i32>
+    .a <- cur.value
+    .b <- loop.index
+  node add = SetLocal acc
+    .value <- sum.result
   node total = GetLocal acc
-  node ret = Return(total: total.value)
+  node ret = Return
+    .total <- total.value
 
   flow {
     entry -> loop
@@ -408,7 +461,7 @@ func SumTo(n: i32) -> (total: i32) {
 Things to notice:
 
 - `TakeDamage` stores the new health in a local before using it twice. `cur` is pure, so it would be re-evaluated by every impure consumer; reading `health` again after `store` would subtract the damage a second time (section 4.3).
-- Node lines carry no positions and no exec wires. Moving `chk` edits one line of the `layout` block, and rewiring it edits lines of the `flow` block, so neither can conflict with someone changing `chk`'s bindings.
+- Node lines carry no positions and no exec wires. Moving `chk` edits one line of the `layout` block, and rewiring it edits lines of the `flow` block, so neither can conflict with someone changing `chk`'s bindings. Each input is its own line, so rewiring one input of a node changes exactly one line.
 - Nodes with several exec outputs name the one each wire leaves from: `chk.then`, `loop.each`, `seq.then0`. `DoOnce`'s macro `Entry` has two exec parameters, so its wires start at `entry.in` and `entry.reset`.
 - `Respawn` is an `event`, which is implicitly latent, so it may contain `Delay`. `TakeDamage` has no latent nodes and is not latent, so a host can call it with `wr_call` and rely on getting a result (section 4.5).
 - `add` has no wire in the flow block. A chain that ends returns control to whatever pushed it, here the macro (section 4.2), which is what makes the loop continue.

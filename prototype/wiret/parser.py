@@ -80,8 +80,8 @@ def lex(text: str):
             m = _IDENT.match(text, i)
             toks.append(Tok("id", m.group(0), line, col))
             i = m.end()
-        elif text.startswith("->", i):
-            toks.append(Tok("punct", "->", line, col))
+        elif text.startswith(("->", "<-", "::"), i):
+            toks.append(Tok("punct", text[i:i + 2], line, col))
             i += 2
         elif c in "(){}[]<>,:=.@":
             toks.append(Tok("punct", c, line, col))
@@ -273,13 +273,10 @@ class Parser:
         if kw in ("func", "event", "macro"):
             g = Graph(kw, self.ident())
             self.anchors.append((start, ("graph", g.name)))
-            if self.at_p("<"):
-                self.next()
-                g.tparams.append(self.ident())
-                while self.at_p(","):
-                    self.next()
-                    g.tparams.append(self.ident())
-                self.expect_p(">")
+            if self.at_p("::"):
+                g.tparams = self.generic_args(self.ident)
+            elif self.at_p("<"):
+                self.generics_hint()
             g.params = self.params()
             if self.at_p("->"):
                 self.next()
@@ -315,28 +312,49 @@ class Parser:
         if self.at_p("("):
             return self.tlist()
         name = self.qname()
-        if name in ("array", "set") and self.at_p("<"):
+        if self.at_p("<"):
+            self.generics_hint()
+        if not self.at_p("::"):
+            return name
+        if name in ("array", "set"):
             self.next()
+            self.expect_p("<")
             inner = self.type()
             self.expect_p(">")
-            return f"{name}<{inner}>"
-        if name == "map" and self.at_p("<"):
+            return f"{name}::<{inner}>"
+        if name == "map":
             self.next()
+            self.expect_p("<")
             k = self.type()
             self.expect_p(",")
             v = self.type()
             self.expect_p(">")
-            return f"map<{k}, {v}>"
-        if name in ("delegate", "dispatcher") and self.at_p("<"):
+            return f"map::<{k}, {v}>"
+        if name in ("delegate", "dispatcher"):
             self.next()
+            self.expect_p("<")
             a = self.tlist()
             r = ""
             if self.at_p("->"):
                 self.next()
                 r = " -> " + self.tlist()
             self.expect_p(">")
-            return f"{name}<{a}{r}>"
-        return name
+            return f"{name}::<{a}{r}>"
+        self.error(f"'{name}' takes no type arguments")
+
+    def generic_args(self, item) -> list:
+        """`::<a, b>`: the type arguments of a node, or the type parameters of a declaration."""
+        self.expect_p("::")
+        self.expect_p("<")
+        out = [item()]
+        while self.at_p(","):
+            self.next()
+            out.append(item())
+        self.expect_p(">")
+        return out
+
+    def generics_hint(self):
+        self.error("type arguments are written with '::<', as in Add::<i32> or array::<i32>")
 
     def tlist(self) -> str:
         self.expect_p("(")
@@ -475,6 +493,7 @@ class Parser:
             nodes[src].execs.append(ExecOut(pin, *e))
 
     def node(self) -> Node:
+        """`node id = Kind[::<targs>] [symbol] @attrs`, then one `.pin <- value` line per input."""
         nid = self.ident("node id")
         self.expect_p("=")
         kind = self.ident("node kind")
@@ -482,39 +501,35 @@ class Parser:
         if self.at("id"):
             n.symbol = self.qname()
         if self.at_p("<"):
-            self.next()
-            n.targs.append(self.type())
-            while self.at_p(","):
-                self.next()
-                n.targs.append(self.type())
-            self.expect_p(">")
-            # `ArrayAdd<i32> acc (...)` (section 3.3) writes the symbol after the type arguments
+            self.generics_hint()
+        if self.at_p("::"):
+            n.targs = self.generic_args(self.type)
+            # `ArrayAdd::<i32> acc` (section 3.3) writes the symbol after the type arguments
             if n.symbol is None and self.at("id"):
                 n.symbol = self.qname()
         if self.at_p("("):
-            self.next()
-            self.skip_nl()
-            while not self.at_p(")"):
-                pin = self.ident("pin name")
-                self.expect_p(":")
-                if self.at("id") and self.at_p(".", 1):
-                    node = self.ident()
-                    self.next()
-                    val = PinRef(node, self.ident("pin name"))
-                else:
-                    val = self.literal()
-                n.bindings.append(Binding(pin, val))
-                self.skip_nl()
-                if self.at_p(","):
-                    self.next()
-                    self.skip_nl()
-                elif not self.at_p(")"):
-                    self.error("expected ',' or ')'")
-            self.next()
+            self.error("node inputs go on their own lines below the node, one per line, "
+                       "as in '.pin <- value'")
         n.attrs.extend(self.attrs())
         if self.at_p("->") or self.at_p("{"):
             self.error("exec wires go in the graph's 'flow' block, not on the node line "
                        f"(write '{nid} -> target' there)")
+        while self.at("nl"):
+            j = self.i
+            while self.toks[j].kind == "nl":
+                j += 1
+            if not (self.toks[j].kind == "punct" and self.toks[j].value == "."):
+                break
+            self.i = j + 1
+            pin = self.ident("pin name")
+            self.expect_p("<-")
+            if self.at("id") and self.at_p(".", 1):
+                node = self.ident()
+                self.next()
+                val = PinRef(node, self.ident("pin name"))
+            else:
+                val = self.literal()
+            n.bindings.append(Binding(pin, val))
         return n
 
     def endpoint(self, what):

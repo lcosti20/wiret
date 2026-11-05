@@ -16,15 +16,23 @@ extern func host.Log(message: string)
 
 func Main() {
   local score: i32
-  node as_text = Convert<i32, string>(value: now.value)
-  node bonus = SetLocal score (value: plus.result)
+  node as_text = Convert::<i32, string>
+    .value <- now.value
+  node bonus = SetLocal score
+    .value <- plus.result
   node entry = Entry
-  node line = Call std.string.Concat(a: "Your score is ", b: as_text.result)
+  node line = Call std.string.Concat
+    .a <- "Your score is "
+    .b <- as_text.result
   node now = GetLocal score
   node old = GetLocal score
-  node plus = Add<i32>(a: old.value, b: 5)
-  node show = Call host.Log(message: line.result)
-  node start = SetLocal score (value: 10)
+  node plus = Add::<i32>
+    .a <- old.value
+    .b <- 5
+  node show = Call host.Log
+    .message <- line.result
+  node start = SetLocal score
+    .value <- 10
 
   flow {
     bonus -> show

@@ -29,16 +29,24 @@ def demo() -> str:
 FOR_RANGE = """
 macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, index: i32) {
   local i: i32
-  node bump = SetLocal i (value: nxt.result)
-  node cmp = Le<i32>(a: cur.value, b: entry.last)
+  node bump = SetLocal i
+    .value <- nxt.result
+  node cmp = Le::<i32>
+    .a <- cur.value
+    .b <- entry.last
   node cur = GetLocal i
-  node each_out = Exit each (index: cur.value)
+  node each_out = Exit each
+    .index <- cur.value
   node entry = Entry
   node finish = Exit done
-  node init = SetLocal i (value: entry.first)
-  node nxt = Add<i32>(a: cur.value, b: 1)
+  node init = SetLocal i
+    .value <- entry.first
+  node nxt = Add::<i32>
+    .a <- cur.value
+    .b <- 1
   node seq = Sequence @count(2)
-  node test = Branch(cond: cmp.result)
+  node test = Branch
+    .cond <- cmp.result
 
   flow {
     bump -> test
@@ -96,12 +104,13 @@ class FormatTests(unittest.TestCase):
     def test_non_canonical_input_is_normalised(self):
         text = module("""
 func F(x: i32) -> (y: i32) {
-  node ret   = Return(y: s.result)
+  node ret   = Return
+      .y   <-   s.result
   node entry = Entry
-  node s     = Add<i32>(
-     a: entry.x,
-     b: 0x10,
-  )
+  node s     = Add::<i32>
+
+    .b <- 0x10
+  .a <- entry.x
 
   flow {
     entry.then -> ret
@@ -111,7 +120,7 @@ func F(x: i32) -> (y: i32) {
         out = print_module(parse(text))
         self.assertIn("node entry = Entry\n", out)
         self.assertIn("  flow {\n    entry -> ret\n  }\n", out)
-        self.assertIn("node s = Add<i32>(a: entry.x, b: 16)\n", out)
+        self.assertIn("  node s = Add::<i32>\n    .a <- entry.x\n    .b <- 16\n", out)
         self.assertEqual(print_module(parse(out)), out)
 
     def test_unknown_attributes_and_layout_props_survive(self):
@@ -128,11 +137,12 @@ func F() @x.acme.review("ok", level: 2) {
         self.assertIn("@Hash(1)", out)
         self.assertIn('x.acme.pin = [a, b]', out)
 
-    def test_long_nodes_wrap(self):
+    def test_inputs_go_on_their_own_lines(self):
         text = module("""
 func F() {
   node entry = Entry
-  node log = Call host.Log(message: "a very long message that pushes this node line well past the hundred column limit")
+  node log = Call host.Log
+    .message <- "hi"
 
   flow {
     entry -> log
@@ -140,8 +150,21 @@ func F() {
 }
 """, macros=False)
         out = print_module(parse(text))
-        self.assertIn("node log = Call host.Log(\n    message: ", out)
-        self.assertEqual(print_module(parse(out)), out)
+        self.assertIn('  node log = Call host.Log\n    .message <- "hi"\n', out)
+        self.assertEqual(out, text)
+
+    def test_old_syntax_is_rejected_with_a_hint(self):
+        for body, hint in (('node log = Call host.Log(message: "hi")', ".pin <- value"),
+                           ("node a = Add<i32>", "Add::<i32>"),
+                           ("local xs: array<i32>", "array::<i32>"),
+                           ('node log = Call host.Log .message <- "hi"', "end of line")):
+            with self.subTest(body):
+                with self.assertRaises(ParseError) as cm:
+                    parse(module(f"\nfunc F() {{\n  {body}\n}}\n", macros=False))
+                self.assertIn(hint, cm.exception.msg)
+        with self.assertRaises(ParseError) as cm:
+            parse(module("\nmacro M<T>(in: exec) {\n}\n", macros=False))
+        self.assertIn("::<", cm.exception.msg)
 
     def test_comments_are_reported_and_convertible(self):
         text = module("""
@@ -192,7 +215,8 @@ class HashTests(unittest.TestCase):
         plain = module("""
 func F(x: i32) -> (y: i32) {
   node entry = Entry
-  node ret = Return(y: entry.x)
+  node ret = Return
+    .y <- entry.x
 
   flow {
     entry -> ret
@@ -201,10 +225,12 @@ func F(x: i32) -> (y: i32) {
 """, macros=False)
         rerouted = module("""
 func F(x: i32) -> (y: i32) {
-  node bend = Reroute<i32>(in: entry.x)
+  node bend = Reroute::<i32>
+    .in <- entry.x
   node entry = Entry
-  node hop = Reroute<exec>
-  node ret = Return(y: bend.out)
+  node hop = Reroute::<exec>
+  node ret = Return
+    .y <- bend.out
 
   flow {
     entry -> hop
@@ -245,13 +271,21 @@ class ExecutionTests(unittest.TestCase):
 func Grid(n: i32) -> (count: i32) {
   local c: i32
   node entry = Entry
-  node outer = Macro ForRange(first: 1, last: entry.n)
-  node inner = Macro ForRange(first: 1, last: outer.index)
+  node outer = Macro ForRange
+    .first <- 1
+    .last <- entry.n
+  node inner = Macro ForRange
+    .first <- 1
+    .last <- outer.index
   node cur = GetLocal c
-  node inc = Add<i32>(a: cur.value, b: 1)
-  node bump = SetLocal c (value: inc.result)
+  node inc = Add::<i32>
+    .a <- cur.value
+    .b <- 1
+  node bump = SetLocal c
+    .value <- inc.result
   node total = GetLocal c
-  node ret = Return(count: total.value)
+  node ret = Return
+    .count <- total.value
 
   flow {
     entry -> outer
@@ -285,9 +319,12 @@ macro Twice(in: exec) -> (first: exec, second: exec) {
 func F() {
   node entry = Entry
   node tw = Macro Twice
-  node log1 = Call host.Log(message: "one")
-  node log1b = Call host.Log(message: "one-b")
-  node log2 = Call host.Log(message: "two")
+  node log1 = Call host.Log
+    .message <- "one"
+  node log1b = Call host.Log
+    .message <- "one-b"
+  node log2 = Call host.Log
+    .message <- "two"
 
   flow {
     entry -> tw
@@ -303,12 +340,21 @@ func F() {
         text = module("""
 func FirstOver(limit: i32) -> (found: i32) {
   node entry = Entry
-  node loop = Macro ForRange(first: 1, last: 100)
-  node sq = Mul<i32>(a: loop.index, b: loop.index)
-  node over = Gt<i32>(a: sq.result, b: entry.limit)
-  node chk = Branch(cond: over.result)
-  node hit = Return(found: loop.index)
-  node none = Return(found: -1)
+  node loop = Macro ForRange
+    .first <- 1
+    .last <- 100
+  node sq = Mul::<i32>
+    .a <- loop.index
+    .b <- loop.index
+  node over = Gt::<i32>
+    .a <- sq.result
+    .b <- entry.limit
+  node chk = Branch
+    .cond <- over.result
+  node hit = Return
+    .found <- loop.index
+  node none = Return
+    .found <- -1
 
   flow {
     entry -> loop
@@ -326,9 +372,13 @@ func FirstOver(limit: i32) -> (found: i32) {
 func F() {
   node entry = Entry
   node seq = Sequence
-  node loop = Macro ForRange(first: 1, last: 2)
-  node log = Call host.Log(message: "body")
-  node after = Call host.Log(message: "after")
+  node loop = Macro ForRange
+    .first <- 1
+    .last <- 2
+  node log = Call host.Log
+    .message <- "body"
+  node after = Call host.Log
+    .message <- "after"
 
   flow {
     entry -> seq
@@ -344,9 +394,11 @@ func F() {
         text = module("""
 func F(c: bool) -> (r: string) {
   node entry = Entry
-  node br = Branch(cond: entry.c)
+  node br = Branch
+    .cond <- entry.c
   node make = Call Make
-  node join = Return(r: make.s)
+  node join = Return
+    .r <- make.s
 
   flow {
     entry -> br
@@ -358,7 +410,8 @@ func F(c: bool) -> (r: string) {
 
 func Make() -> (s: string) {
   node entry = Entry
-  node ret = Return(s: "made")
+  node ret = Return
+    .s <- "made"
 
   flow {
     entry -> ret
@@ -377,11 +430,17 @@ func F() -> (a: i32, b: i32) {
   local first: i32
   node entry = Entry
   node cur = GetVar hp
-  node save = SetLocal first (value: cur.value)
-  node dmg = Sub<i32>(a: cur.value, b: 3)
-  node hit = SetVar hp (value: dmg.result)
+  node save = SetLocal first
+    .value <- cur.value
+  node dmg = Sub::<i32>
+    .a <- cur.value
+    .b <- 3
+  node hit = SetVar hp
+    .value <- dmg.result
   node got = GetLocal first
-  node ret = Return(a: got.value, b: cur.value)
+  node ret = Return
+    .a <- got.value
+    .b <- cur.value
 
   flow {
     entry -> save
@@ -399,10 +458,13 @@ macro DoOnce(in: exec, reset: exec) -> (out: exec) {
   state fired: bool
   node entry = Entry
   node flag = GetState fired
-  node check = Branch(cond: flag.value)
-  node mark = SetState fired (value: true)
+  node check = Branch
+    .cond <- flag.value
+  node mark = SetState fired
+    .value <- true
   node fire = Exit out
-  node clear = SetState fired (value: false)
+  node clear = SetState fired
+    .value <- false
 
   flow {
     entry.in -> check
@@ -414,12 +476,16 @@ macro DoOnce(in: exec, reset: exec) -> (out: exec) {
 
 func F() {
   node entry = Entry
-  node loop = Macro ForRange(first: 1, last: 3)
+  node loop = Macro ForRange
+    .first <- 1
+    .last <- 3
   node seq = Sequence
   node once_a = Macro DoOnce
   node once_b = Macro DoOnce
-  node log_a = Call host.Log(message: "a")
-  node log_b = Call host.Log(message: "b")
+  node log_a = Call host.Log
+    .message <- "a"
+  node log_b = Call host.Log
+    .message <- "b"
 
   flow {
     entry -> loop
@@ -437,12 +503,21 @@ func F() {
         text = module("""
 func Name(v: i32) -> (s: string) {
   node entry = Entry
-  node sw = Switch<i32>(value: entry.v) @cases(1, 2)
-  node one = Return(s: "one")
-  node two = Return(s: "two")
-  node neg = Lt<i32>(a: entry.v, b: 0)
-  node pick = Select<string>(cond: neg.result, a: "negative", b: "many")
-  node other = Return(s: pick.result)
+  node sw = Switch::<i32> @cases(1, 2)
+    .value <- entry.v
+  node one = Return
+    .s <- "one"
+  node two = Return
+    .s <- "two"
+  node neg = Lt::<i32>
+    .a <- entry.v
+    .b <- 0
+  node pick = Select::<string>
+    .cond <- neg.result
+    .a <- "negative"
+    .b <- "many"
+  node other = Return
+    .s <- pick.result
 
   flow {
     entry -> sw
@@ -454,11 +529,19 @@ func Name(v: i32) -> (s: string) {
 
 func Conv(x: f64) -> (i: i32, b: u8, s: string, back: f32) {
   node entry = Entry
-  node i = Convert<f64, i32>(value: entry.x)
-  node b = Convert<i32, u8>(value: i.result)
-  node s = Convert<f64, string>(value: entry.x)
-  node f = Convert<f64, f32>(value: entry.x)
-  node ret = Return(i: i.result, b: b.result, s: s.result, back: f.result)
+  node i = Convert::<f64, i32>
+    .value <- entry.x
+  node b = Convert::<i32, u8>
+    .value <- i.result
+  node s = Convert::<f64, string>
+    .value <- entry.x
+  node f = Convert::<f64, f32>
+    .value <- entry.x
+  node ret = Return
+    .i <- i.result
+    .b <- b.result
+    .s <- s.result
+    .back <- f.result
 
   flow {
     entry -> ret
@@ -478,9 +561,15 @@ class ArithmeticEdgeCases(unittest.TestCase):
     TEXT = module("""
 func Div(a: i32, b: i32) -> (q: i32, r: i32) {
   node entry = Entry
-  node q = Div<i32>(a: entry.a, b: entry.b)
-  node r = Rem<i32>(a: entry.a, b: entry.b)
-  node ret = Return(q: q.result, r: r.result)
+  node q = Div::<i32>
+    .a <- entry.a
+    .b <- entry.b
+  node r = Rem::<i32>
+    .a <- entry.a
+    .b <- entry.b
+  node ret = Return
+    .q <- q.result
+    .r <- r.result
 
   flow {
     entry -> ret
@@ -489,8 +578,11 @@ func Div(a: i32, b: i32) -> (q: i32, r: i32) {
 
 func Shift(a: i32, n: i32) -> (r: i32) {
   node entry = Entry
-  node s = Shl<i32>(a: entry.a, b: entry.n)
-  node ret = Return(r: s.result)
+  node s = Shl::<i32>
+    .a <- entry.a
+    .b <- entry.n
+  node ret = Return
+    .r <- s.result
 
   flow {
     entry -> ret
@@ -499,8 +591,11 @@ func Shift(a: i32, n: i32) -> (r: i32) {
 
 func AddU8(a: u8, b: u8) -> (r: u8) {
   node entry = Entry
-  node s = Add<u8>(a: entry.a, b: entry.b)
-  node ret = Return(r: s.result)
+  node s = Add::<u8>
+    .a <- entry.a
+    .b <- entry.b
+  node ret = Return
+    .r <- s.result
 
   flow {
     entry -> ret
@@ -509,10 +604,18 @@ func AddU8(a: u8, b: u8) -> (r: u8) {
 
 func MinMax(a: i32, b: i32) -> (lo: i32, hi: i32, abs: i32) {
   node entry = Entry
-  node lo = Min<i32>(a: entry.a, b: entry.b)
-  node hi = Max<i32>(a: entry.a, b: entry.b)
-  node ab = Abs<i32>(value: entry.a)
-  node ret = Return(lo: lo.result, hi: hi.result, abs: ab.result)
+  node lo = Min::<i32>
+    .a <- entry.a
+    .b <- entry.b
+  node hi = Max::<i32>
+    .a <- entry.a
+    .b <- entry.b
+  node ab = Abs::<i32>
+    .value <- entry.a
+  node ret = Return
+    .lo <- lo.result
+    .hi <- hi.result
+    .abs <- ab.result
 
   flow {
     entry -> ret
@@ -555,27 +658,43 @@ func Spin() {
 
 class ArrayTests(unittest.TestCase):
     BODY = """
-var names: array<string>
+var names: array::<string>
 
 func Main(at: i32) -> (r: i32) {
-  local nums: array<i32>
+  local nums: array::<i32>
   local total: i32
-  node add = ArrayAdd<i32> nums (item: 30)
+  node add = ArrayAdd::<i32> nums
+    .item <- 30
   node cur = GetLocal nums
   node entry = Entry
   node fin = GetLocal total
-  node init = SetLocal nums (value: mk.result)
-  node keep = SetLocal total (value: plus.result)
-  node loop = Macro std.flow.ForEach<i32>(array: cur.value)
-  node mk = MakeArray<i32>(item0: 10, item1: 20, item2: 5) @count(3)
-  node name = ArrayAdd<string> names (item: "Ada")
+  node init = SetLocal nums
+    .value <- mk.result
+  node keep = SetLocal total
+    .value <- plus.result
+  node loop = Macro std.flow.ForEach::<i32>
+    .array <- cur.value
+  node mk = MakeArray::<i32> @count(3)
+    .item0 <- 10
+    .item1 <- 20
+    .item2 <- 5
+  node name = ArrayAdd::<string> names
+    .item <- "Ada"
   node names_now = GetVar names
   node old = GetLocal total
-  node plus = Add<i32>(a: old.value, b: loop.item)
-  node r = Return(r: fin.value)
-  node say = Call host.Log(message: who.item)
-  node set = ArraySet<i32> nums (index: entry.at, item: 7)
-  node who = ArrayGet<string>(array: names_now.value, index: 0)
+  node plus = Add::<i32>
+    .a <- old.value
+    .b <- loop.item
+  node r = Return
+    .r <- fin.value
+  node say = Call host.Log
+    .message <- who.item
+  node set = ArraySet::<i32> nums
+    .index <- entry.at
+    .item <- 7
+  node who = ArrayGet::<string>
+    .array <- names_now.value
+    .index <- 0
 
   flow {
     add -> set
@@ -604,7 +723,7 @@ func Main(at: i32) -> (r: i32) {
         self.assertEqual(cm.exception.traceback[-1], ("t.Main", "set"))
 
     def test_fault_in_pure_node_names_that_node(self):
-        text = module(self.BODY.replace("index: 0)", "index: 5)"), macros=False)
+        text = module(self.BODY.replace(".index <- 0", ".index <- 5"), macros=False)
         for debug in (False, True):
             with self.subTest(debug=debug):
                 vm = VM(output=lambda s: None)
@@ -613,7 +732,7 @@ func Main(at: i32) -> (r: i32) {
                 self.assertEqual(cm.exception.traceback[-1], ("t.Main", "who"))   # not `say`
 
     def test_mutator_type_must_match_place(self):
-        text = module(self.BODY.replace("ArrayAdd<i32> nums", "ArrayAdd<f64> nums"),
+        text = module(self.BODY.replace("ArrayAdd::<i32> nums", "ArrayAdd::<f64> nums"),
                       macros=False)
         self.assertIn("E0110", codes(text))
 
@@ -624,24 +743,30 @@ class DiagnosticTests(unittest.TestCase):
     CASES = {
         "E0101": "node entry = Entry\n  flow {\n    entry -> nowhere\n  }",
         "E0102": "node entry = Entry\n  node entry = Return",
-        "E0103": "node entry = Entry\n  node r = Return(bogus: 1)\n  flow {\n    entry -> r\n  }",
-        "E0110": "node entry = Entry\n  node r = Return(y: \"text\")\n  flow {\n    entry -> r\n  }",
-        "E0111": "node entry = Entry\n  node r = Return(y: 1, y: 2)\n  flow {\n    entry -> r\n  }",
-        "E0120": "node entry = Entry\n  node r = Return(in: 1, y: 2)\n  flow {\n    entry -> r\n  }",
-        "E0121": "node entry = Entry\n  node r = Return(y: 1)\n"
+        "E0103": "node entry = Entry\n  node r = Return\n    .bogus <- 1\n"
+                 "  flow {\n    entry -> r\n  }",
+        "E0110": "node entry = Entry\n  node r = Return\n    .y <- \"text\"\n"
+                 "  flow {\n    entry -> r\n  }",
+        "E0111": "node entry = Entry\n  node r = Return\n    .y <- 1\n    .y <- 2\n"
+                 "  flow {\n    entry -> r\n  }",
+        "E0120": "node entry = Entry\n  node r = Return\n    .in <- 1\n    .y <- 2\n"
+                 "  flow {\n    entry -> r\n  }",
+        "E0121": "node entry = Entry\n  node r = Return\n    .y <- 1\n"
                  "  flow {\n    entry.then -> r\n    entry.then -> r\n  }",
-        "E0130": "node entry = Entry\n  node c = ArrayClear<i32>\n  node r = Return(y: 1)\n"
+        "E0130": "node entry = Entry\n  node c = ArrayClear::<i32>\n  node r = Return\n    .y <- 1\n"
                  "  flow {\n    entry -> c\n    c -> r\n  }",
-        "E0301": "node entry = Entry\n  node a = Add<i32>(a: b.result, b: 1)\n"
-                 "  node b = Add<i32>(a: a.result, b: 1)\n  node r = Return(y: a.result)\n"
+        "E0301": "node entry = Entry\n  node a = Add::<i32>\n    .a <- b.result\n    .b <- 1\n"
+                 "  node b = Add::<i32>\n    .a <- a.result\n    .b <- 1\n"
+                 "  node r = Return\n    .y <- a.result\n"
                  "  flow {\n    entry -> r\n  }",
-        "E0501": "node entry = Entry\n  node w = Frobnicate\n  node r = Return(y: 1)\n"
+        "E0501": "node entry = Entry\n  node w = Frobnicate\n  node r = Return\n    .y <- 1\n"
                  "  flow {\n    entry -> r\n  }",
-        "E0502": "node entry = Entry\n  node a = Add(a: 1, b: 2)\n  node r = Return(y: 1)\n"
+        "E0502": "node entry = Entry\n  node a = Add\n    .a <- 1\n    .b <- 2\n"
+                 "  node r = Return\n    .y <- 1\n"
                  "  flow {\n    entry -> r\n  }",
         "W0201": "node entry = Entry\n  node r = Return\n  flow {\n    entry -> r\n  }",
-        "W0301": "node entry = Entry\n  node r = Return(y: 1)\n  node lost = Return(y: 2)\n"
-                 "  flow {\n    entry -> r\n  }",
+        "W0301": "node entry = Entry\n  node r = Return\n    .y <- 1\n  node lost = Return\n"
+                 "    .y <- 2\n  flow {\n    entry -> r\n  }",
         "W0302": "node entry = Entry",
     }
 
@@ -668,8 +793,10 @@ func Impure() {
         e0302 = base + """
 func P() -> (y: i32) @pure {
   node entry = Entry
-  node w = SetVar g (value: 1)
-  node r = Return(y: 1)
+  node w = SetVar g
+    .value <- 1
+  node r = Return
+    .y <- 1
 
   flow {
     entry -> w
@@ -681,7 +808,8 @@ func P() -> (y: i32) @pure {
 func P() -> (y: i32) @pure {
   node entry = Entry
   node v = GetVar g
-  node r = Return(y: v.value)
+  node r = Return
+    .y <- v.value
 
   flow {
     entry -> r
@@ -796,7 +924,8 @@ extern func host.Missing(x: i32)
 
 func F() {
   node entry = Entry
-  node c = Call host.Missing(x: 1)
+  node c = Call host.Missing
+    .x <- 1
 
   flow {
     entry -> c
@@ -829,14 +958,22 @@ class StdFlowTests(unittest.TestCase):
         text = module("""
 func Main() {
   node entry = Entry
-  node rep = Macro std.flow.Repeat(times: 3)
+  node rep = Macro std.flow.Repeat
+    .times <- 3
   node flip = Macro std.flow.FlipFlop
-  node log_a = Call host.Log(message: "A")
-  node log_b = Call host.Log(message: "B")
-  node five = Macro std.flow.ForRange(first: 1, last: 5)
-  node limited = Macro std.flow.DoN(n: 2)
-  node n_text = Convert<i32, string>(value: limited.counter)
-  node log_n = Call host.Log(message: n_text.result)
+  node log_a = Call host.Log
+    .message <- "A"
+  node log_b = Call host.Log
+    .message <- "B"
+  node five = Macro std.flow.ForRange
+    .first <- 1
+    .last <- 5
+  node limited = Macro std.flow.DoN
+    .n <- 2
+  node n_text = Convert::<i32, string>
+    .value <- limited.counter
+  node log_n = Call host.Log
+    .message <- n_text.result
 
   flow {
     entry -> rep
@@ -938,8 +1075,11 @@ class ExplainTests(unittest.TestCase):
         text = module("""
 func F() {
   node entry = Entry
-  node n = Add<i32>(a: 1, b: 2)
-  node log = Call host.Log(message: n.result)
+  node n = Add::<i32>
+    .a <- 1
+    .b <- 2
+  node log = Call host.Log
+    .message <- n.result
 
   flow {
     entry -> log
@@ -974,7 +1114,7 @@ class PaletteTests(unittest.TestCase):
         self.assertEqual(top("if").kind, "Branch")
         self.assertEqual(top("print").symbol, "host.Log")
         self.assertEqual(top("loop").symbol, "std.flow.ForRange")
-        self.assertEqual(top("add").label, "Add<i32>")
+        self.assertEqual(top("add").label, "Add::<i32>")
 
     def test_wire_drop_filters_and_ranks(self):
         from wiret import palette
@@ -982,7 +1122,7 @@ class PaletteTests(unittest.TestCase):
         fits = [i for i in items if palette.compatible(i, self.g, self.idx, "out", "i32")]
         self.assertTrue(all(palette.compatible(i, self.g, self.idx, "out", "i32") for i in fits))
         self.assertNotIn("Call host.Log", [i.label for i in fits])
-        self.assertEqual(palette.rank(fits, "text")[0].label, "Convert<i32, string> (to text)")
+        self.assertEqual(palette.rank(fits, "text")[0].label, "Convert::<i32, string> (to text)")
         execs = [i for i in items if palette.compatible(i, self.g, self.idx, "out", "exec")]
         self.assertIn("Branch", [i.kind for i in execs])
         self.assertNotIn("Add", [i.kind for i in execs])

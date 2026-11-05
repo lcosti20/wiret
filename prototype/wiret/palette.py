@@ -154,17 +154,17 @@ def items(g: Graph, idx: ModuleIndex) -> list:
     if not any(n.kind == "Entry" for n in g.nodes):
         out.append(_item("Entry", "Entry", "Flow"))
     for t in CONSTRAINTS["any"]:
-        out.append(_item("Select", f"Select<{t}>", "Flow", targs=[t]))
+        out.append(_item("Select", f"Select::<{t}>", "Flow", targs=[t]))
     for t in CONSTRAINTS["switch"]:
-        out.append(_item("Switch", f"Switch<{t}>", "Flow", targs=[t]))
+        out.append(_item("Switch", f"Switch::<{t}>", "Flow", targs=[t]))
     for t in ["exec"] + CONSTRAINTS["any"]:
-        out.append(_item("Reroute", f"Reroute<{t}>", "Flow", targs=[t]))
+        out.append(_item("Reroute", f"Reroute::<{t}>", "Flow", targs=[t]))
     for k, (cat, _, tps, _) in sorted(STATIC_KINDS.items()):
         if k in ("Convert", "Select", "Branch"):
             continue
         if tps:
             for t in CONSTRAINTS[tps[0]]:
-                out.append(_item(k, f"{k}<{t}>", cat, targs=[t]))
+                out.append(_item(k, f"{k}::<{t}>", cat, targs=[t]))
         else:
             out.append(_item(k, k, cat))
     for f in CONSTRAINTS["any"]:
@@ -172,7 +172,7 @@ def items(g: Graph, idx: ModuleIndex) -> list:
             if can_convert(f, t):
                 to = ("text" if t == "string" else "decimal" if t in ("f32", "f64")
                       else "true/false" if t == "bool" else "whole number")
-                out.append(_item("Convert", f"Convert<{f}, {t}> (to {to})", "Math", targs=[f, t]))
+                out.append(_item("Convert", f"Convert::<{f}, {t}> (to {to})", "Math", targs=[f, t]))
     for l in sorted(g.locals, key=lambda l: l.name):
         out.append(_item("GetLocal", f"Get {l.name}", "Variables", l.name))
         out.append(_item("SetLocal", f"Set {l.name}", "Variables", l.name))
@@ -192,9 +192,9 @@ def items(g: Graph, idx: ModuleIndex) -> list:
     for q in sorted(STD):
         out.append(_item("Call", f"Call {q}", "Call", q, idx=idx))
     for t in CONSTRAINTS["any"]:
-        out.append(_item("MakeArray", f"MakeArray<{t}>", "Arrays", targs=[t]))
-        out.append(_item("ArrayGet", f"ArrayGet<{t}>", "Arrays", targs=[t]))
-        out.append(_item("ArrayLength", f"ArrayLength<{t}>", "Arrays", targs=[t]))
+        out.append(_item("MakeArray", f"MakeArray::<{t}>", "Arrays", targs=[t]))
+        out.append(_item("ArrayGet", f"ArrayGet::<{t}>", "Arrays", targs=[t]))
+        out.append(_item("ArrayLength", f"ArrayLength::<{t}>", "Arrays", targs=[t]))
     places = [(l.name, l.type) for l in g.locals] + [(v.name, v.type) for v in idx.vars.values()]
     for name, ty in sorted(places):
         elem = array_elem(ty)
@@ -208,7 +208,7 @@ def items(g: Graph, idx: ModuleIndex) -> list:
         tps = idx.macros[name].tparams
         if tps:
             for t in CONSTRAINTS["any"]:
-                out.append(_item("Macro", f"Macro {name}<{t}>", "Macro", name, [t] * len(tps),
+                out.append(_item("Macro", f"Macro {name}::<{t}>", "Macro", name, [t] * len(tps),
                                  idx=idx))
         else:
             out.append(_item("Macro", f"Macro {name}", "Macro", name, idx=idx))
