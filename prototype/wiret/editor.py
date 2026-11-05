@@ -22,6 +22,7 @@ from typing import Optional
 from . import ops, palette
 from .checker import GraphInfo, check
 from .compiler import compile_module
+from .debugstate import DebugState
 from .disasm import disassemble
 from .graphview import BG, DIM, TEXT, GraphView
 from .model import Box, Graph, Lit, Local, Module, Param, PinRef, note_text, set_note_text
@@ -1703,28 +1704,14 @@ class EditorApp:
         def hook(fname, node, _pending, depth, snapshot, phase):
             g = fname[len(mod_prefix):] if fname.startswith(mod_prefix) else fname
             top = node.split("/")[0].split("!")[0]
-            if phase == "enter":
-                if "/" not in node:      # a macro counts once per entry, not per inner node
-                    counts[(g, top)] += 1
-                # A breakpoint stops on arrival too, so a node whose inputs fault still pauses.
-                if (g, top) in breakpoints and "/" not in node and dbg.armed != (g, top, depth):
-                    dbg.armed = (g, top, depth)
-                    pause(g, top, snapshot, depth, inputs_ready=False)
-                return
-            if dbg.stop:
+            if phase == "enter" and "/" not in node:  # a macro counts once per entry
+                counts[(g, top)] += 1
+            if phase == "ready" and dbg.stop:
                 raise WiretError(STATUS_INTERRUPT, "stopped by the user")
-            # A macro call site is stepped once, at its entry stub (`loop!in`); nodes inside
-            # macros and library code are not stepped into.
-            if "/" in node or g not in graph_names:
-                return
-            if dbg.armed == (g, top, depth):
-                dbg.armed = None
-                if dbg.mode != "step" and not (dbg.mode == "over" and depth <= dbg.depth):
-                    return
-            m = dbg.mode
-            if (g, top) in breakpoints or m == "step" or (m == "over" and depth <= dbg.depth):
-                pause(g, top, snapshot, depth, inputs_ready=True)
-            elif m == "animate" and depth == 0:
+            act = dbg.decide(g, node, depth, phase, breakpoints, graph_names)
+            if act == "pause":
+                pause(g, top, snapshot, depth, inputs_ready=phase == "ready")
+            elif act == "animate":
                 self.out_queue.put(("pause", (g, top, snapshot(), False, Counter(counts), True)))
                 time.sleep(dbg.delay)
 
@@ -1907,18 +1894,6 @@ class EditorApp:
         self.view.run_counts = self.run_counts_for(self.graph_name)
         self.view.fault_node = self.fault.get(self.graph_name)
         self.view.redraw()
-
-
-class DebugState:
-    """Shared between the editor (main thread) and the VM hook (worker thread)."""
-
-    def __init__(self, mode: str, delay: float):
-        self.mode = mode           # run | step | over | animate
-        self.depth = 0             # call depth that `over` stays at
-        self.armed = None          # (graph, node, depth) of a breakpoint already hit on arrival
-        self.delay = delay         # seconds per node when animating
-        self.stop = False
-        self.resume = threading.Event()
 
 
 def main(path=None):

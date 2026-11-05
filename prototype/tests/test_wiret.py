@@ -6328,6 +6328,144 @@ class WebApiTests(unittest.TestCase):
         self.assertIn("wiret/std/flow.wiret", names)
         self.assertIn("lessons/01_hello.wiret", names)
         self.assertFalse(names & {"wiret/editor.py", "wiret/graphview.py", "wiret/palette.py"})
+        self.assertIn("wiret/debugstate.py", names)
+
+    def test_check_maps_nodes_to_lines(self):
+        from wiret import webapi
+        text = lesson("05_functions.wiret")
+        r = json.loads(webapi.check(text))
+        self.assertEqual(r["diags"], [])
+        lines = text.split("\n")
+        for g, nodes in r["nodes"].items():
+            for nid, info in nodes.items():
+                self.assertRegex(lines[info["line"] - 1], rf"^\s*node {nid} = ")
+        self.assertEqual(r["nodes"]["Square"]["ret"]["what"], "Return")
+
+    def test_debug_run_records_frames_and_values(self):
+        from wiret import webapi
+        text = lesson("05_functions.wiret")
+        r = json.loads(webapi.debug_run(text))
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["output"], json.loads(webapi.run(text))["output"])
+        self.assertFalse(r["truncated"])
+        rets = [s for s in r["steps"] if (s["graph"], s["node"], s["phase"]) == ("Square", "ret", "ready")]
+        self.assertEqual(len(rets), 5)
+        frames = [[r["frame_table"][i] for i in s["frames"]] for s in rets]
+        self.assertEqual([(f["graph"], f["node"]) for f in frames[0]], [("Main", "squared"), ("Square", "ret")])
+        self.assertEqual([f[-1]["vars"] for f in frames][:2],
+                         [[["x", "parameter", "i32", "1"]], [["x", "parameter", "i32", "2"]]])
+        self.assertEqual([s["depth"] for s in rets], [1] * 5)
+        self.assertEqual(r["counts"]["Square"]["ret"], 5)
+        # the output a step had seen grows as the run goes on
+        self.assertEqual([s["out"] for s in rets], [0, 1, 2, 3, 4])
+
+    def test_debug_run_fault_and_truncation(self):
+        from wiret import webapi
+        text = (lesson("02_variables.wiret").replace("node plus = Add::<i32>", "node plus = Div::<i32>")
+                .replace(".b <- 5", ".b <- 0"))
+        r = json.loads(webapi.debug_run(text))
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["fault"], {"graph": "Main", "node": "plus"})
+        self.assertIn("divide by zero", r["explain"])
+        r = json.loads(webapi.debug_run(lesson("06_fizzbuzz.wiret"), max_steps=10))
+        self.assertTrue(r["ok"] and r["truncated"])
+        self.assertEqual(len(r["steps"]), 10)
+        self.assertEqual(len(r["output"]), 15)              # the run itself went on to the end
+        self.assertEqual(sum(r["counts"]["Main"].values()) > 10, True)
+
+    def test_web_stepping_matches_desktop(self):
+        """web/debugger.js, stepping through a recording, pauses where the desktop editor's
+        hook (DebugState.decide, driven live by the VM) pauses, for random breakpoints and
+        random sequences of Step, Over, Run and Animate."""
+        import random
+        import shutil
+        from wiret import webapi
+        from wiret.debugstate import DebugState
+        from wiret.runner import run_function
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("needs Node.js to run web/debugger.js")
+
+        class Done(Exception):
+            pass
+
+        def desktop(text, script, breakpoints):
+            m = parse(text)
+            r = compile_module(m, text, debug=True)
+            prefix, names = m.name + ".", {g.name for g in m.graphs()}
+            dbg, cmds, log = DebugState(script[0]), list(script[1:]), []
+
+            def hook(fname, node_id, _pending, depth, _snapshot, phase):
+                g = fname[len(prefix):] if fname.startswith(prefix) else fname
+                top = node_id.split("/")[0].split("!")[0]
+                act = dbg.decide(g, node_id, depth, phase, breakpoints, names)
+                if act == "animate":
+                    log.append(["anim", g, top, depth])
+                elif act == "pause":
+                    dbg.depth = depth
+                    log.append(["pause", g, top, depth, phase == "ready"])
+                    if not cmds:
+                        raise Done()
+                    dbg.mode = cmds.pop(0)
+            vm = VM(output=lambda s: None, hook=hook)
+            try:
+                run_function(vm, vm.load(r.wbc), "Main", [])
+            except Done:
+                return log
+            except WiretError:
+                pass
+            return log + [["end"]]
+
+        rng = random.Random(1)
+        cases = []
+        files = sorted(n for n in os.listdir(LESSONS) if n.endswith(".wiret"))
+        for name in files:
+            text = lesson(name)
+            trace = json.loads(webapi.debug_run(text))
+            keys = [(g, n) for g, ns in trace["nodes"].items() for n in ns]
+            for _ in range(6):
+                bps = set(rng.sample(keys, min(len(keys), rng.choice([0, 1, 2, 4]))))
+                script = [rng.choice(["run", "step", "over", "animate"])] + [
+                    rng.choice(["run", "step", "step", "over", "over", "animate"])
+                    for _ in range(rng.randint(3, 30))]
+                cases.append({"name": name, "bps": sorted(map(list, bps)), "script": script,
+                              "trace": trace, "expect": desktop(text, script, bps)})
+        js = r"""
+import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+const { Session } = await import(pathToFileURL(process.argv[1]).href);
+const cases = JSON.parse(readFileSync(process.argv[2], "utf8"));
+const got = cases.map((c) => {
+  const s = new Session(c.trace, new Set(c.bps.map(([g, n]) => `${g}\t${n}`)));
+  const cmds = [...c.script]; let mode = cmds.shift(); const log = [];
+  for (;;) {
+    const r = s.advance(mode);
+    if (!r) { log.push(["end"]); break; }
+    const st = s.current;
+    if (!r.paused) { log.push(["anim", st.graph, st.node, st.depth]); continue; }
+    log.push(["pause", st.graph, st.node, st.depth, st.phase === "ready"]);
+    if (!cmds.length) break;
+    mode = cmds.shift();
+  }
+  return log;
+});
+process.stdout.write(JSON.stringify(got));
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            data = os.path.join(tmp, "cases.json")
+            with open(data, "w", encoding="utf-8") as f:
+                json.dump(cases, f)
+            module = os.path.join(os.path.dirname(HERE), "web", "debugger.js")
+            p = subprocess.run([node, "--input-type=module", "-e", js, module, data],
+                               capture_output=True, text=True, timeout=120)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        got = json.loads(p.stdout)
+        pauses = 0
+        for c, g in zip(cases, got):
+            with self.subTest(lesson=c["name"], breakpoints=c["bps"], script=c["script"]):
+                self.assertEqual(g, c["expect"])
+            pauses += sum(1 for e in g if e[0] == "pause")
+        self.assertGreater(pauses, 200)
 
 
 if __name__ == "__main__":
