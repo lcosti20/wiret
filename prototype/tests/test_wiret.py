@@ -9,12 +9,14 @@ import json
 import math
 import os
 import random
+import re
 import shutil
 import struct
 import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -6330,6 +6332,25 @@ class WebApiTests(unittest.TestCase):
         self.assertFalse(names & {"wiret/editor.py", "wiret/graphview.py", "wiret/palettepopup.py"})
         self.assertIn("wiret/palette.py", names)
         self.assertIn("wiret/debugstate.py", names)
+
+    def test_site_holds_only_what_the_page_serves(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(HERE), "web"))
+        try:
+            import build_web
+        finally:
+            sys.path.pop(0)
+        with tempfile.TemporaryDirectory() as tmp:
+            with contextlib.redirect_stdout(io.StringIO()):
+                build_web.main(["--site", tmp])
+            self.assertEqual(sorted(os.listdir(tmp)),
+                             ["debugger.js", "graphview.js", "index.html", "wiret_bundle.zip"])
+            with zipfile.ZipFile(os.path.join(tmp, "wiret_bundle.zip")) as z:
+                self.assertIn("wiret/webapi.py", z.namelist())
+        # every file the page loads is in the site
+        with open(os.path.join(os.path.dirname(HERE), "web", "index.html"), encoding="utf-8") as f:
+            page = f.read()
+        for name in re.findall(r'from "\./([^"]+)"|fetch\("([^"]+)"\)', page):
+            self.assertIn(next(n for n in name if n), build_web.SITE_FILES + [build_web.BUNDLE])
 
     def test_check_maps_nodes_to_lines(self):
         from wiret import webapi

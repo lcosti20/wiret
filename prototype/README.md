@@ -59,6 +59,16 @@ python3 web/build_web.py                # packs wiret/, lessons/ and examples/ i
 python3 -m http.server -d web 8000      # then open http://localhost:8000
 ```
 
+### Publishing
+
+`.github/workflows/pages.yml` publishes the page to GitHub Pages at
+<https://lcosti20.github.io/wiret/>. Every push to `main` runs the tests, builds the site with
+`python3 web/build_web.py --site DIR` (the page, its scripts and the bundle, nothing else from
+`web/`) and deploys it. Pull requests into `main` run the same tests and build without
+deploying. The repository's Pages source must be set to "GitHub Actions" (Settings → Pages).
+
+### How it works
+
 The page calls `wiret/webapi.py`, which takes plain values and returns JSON. A page has no
 thread to block at a breakpoint, so `debug_run` runs the program once and records every point
 where the debugger could pause (up to 5,000), with the call stack, variables and wire values.
