@@ -85,7 +85,9 @@ class GraphInfo:
         return None
 
 
-def check(module: Module, comments_ok=False) -> list:
+def check(module: Module, comments_ok=False, project=None) -> list:
+    """Every diagnostic for a module. With a `project` (wiret.ids.Project), also the identity
+    checks that need the project's id registry: E0140 and W0202 (section 2.4)."""
     diags: list[Diag] = []
     idx = ModuleIndex(module)
     mod = module.name
@@ -120,6 +122,9 @@ def check(module: Module, comments_ok=False) -> list:
                       dst=ty)
     check_type_decls(module, idx, D)
     check_attr_names(module, D)
+    if project is not None:
+        from .ids import check_ids
+        check_ids(module, project, D)
     for owner in [module] + [i for i in module.items if not isinstance(i, Graph)]:
         for nt in notes(owner.meta):
             if note_detached(nt) is not None:

@@ -28,6 +28,7 @@ from .model import Box, Graph, Lit, Local, Module, Param, PinRef, note_text, set
 from .natives import STD
 from .parser import KEYWORDS, ParseError, parse, parse_literal
 from .printer import layout_hash, print_module, semantic_hash
+from .ids import assign_ids, find_project, retired_between
 from .registry import (ModuleIndex, STATIC_KINDS, can_convert, enum_values, lit_fits,
                        type_choices, type_ok)
 from .explain import explain, explain_runtime, type_words
@@ -337,6 +338,8 @@ class EditorApp:
         with open(path, encoding="utf-8") as f:
             text = f.read()
         self.path = path
+        self.project = find_project(path)       # wiret.toml above the file, or None
+        self.session_retired = set()            # ids this session added to wiret.ids
         self.root.title(f"Wiret Graph Editor — {os.path.basename(path)}")
         self.file_label.config(text=path)
         self.undo_stack.clear()
@@ -402,9 +405,41 @@ class EditorApp:
     def write_file(self, text):
         if not self.path:
             return
+        self.track_retired(self.disk_text, text)
         with open(self.path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
         self.disk_text = text
+
+    def keep_ids(self, text):
+        """In a project, an undo or redo keeps the @ids assigned since that snapshot."""
+        if getattr(self, "project", None) is None:
+            return text
+        try:
+            old, cur = parse(text), parse(self.text)
+        except ParseError:
+            return text
+        from .ids import carry_ids
+        return print_module(old) if carry_ids(cur, old) else text
+
+    def track_retired(self, old_text, new_text):
+        """In a project, every id a save removes is retired in wiret.ids (section 7.5). An
+        undo that brings back an id this session retired takes it out again."""
+        proj = getattr(self, "project", None)
+        if proj is None:
+            return
+        try:
+            old, new = parse(old_text or ""), parse(new_text)
+        except ParseError:
+            return
+        from .ids import ids_of
+        back = ids_of(new) & self.session_retired
+        if back:
+            proj.unretire(back)
+            self.session_retired -= back
+        written = proj.retire(retired_between(old, new))
+        self.session_retired |= set(written)
+        for r in written:
+            self.log(f"retired {r.kind} id '{r.id}' in wiret.ids", "dim")
 
     def poll_file(self):
         try:
@@ -557,6 +592,8 @@ class EditorApp:
                     x, y = self.auto_pos.get((g.name, n.id), (0, 0))
                     ops.place(g, n.id, x, y)
             ops.prune_box_members(g)
+        if getattr(self, "project", None) is not None:   # editors always write @id (2.4)
+            assign_ids(m, retired={r.id for r in self.project.retired})
         self.last_counts, self.fault = {}, {}
         self.view.run_counts, self.view.fault_node = {}, None
         text = print_module(m)
@@ -573,7 +610,7 @@ class EditorApp:
             self.status("Nothing to undo.")
             return
         self.redo_stack.append(self.text)
-        text = self.undo_stack.pop()
+        text = self.keep_ids(self.undo_stack.pop())
         self.write_file(text)
         self.set_text(text)
         self.after_text_parsed()
@@ -583,7 +620,7 @@ class EditorApp:
         if not self.redo_stack:
             return
         self.undo_stack.append(self.text)
-        text = self.redo_stack.pop()
+        text = self.keep_ids(self.redo_stack.pop())
         self.write_file(text)
         self.set_text(text)
         self.after_text_parsed()
@@ -610,7 +647,7 @@ class EditorApp:
         self.idx = ModuleIndex(m)
         g = self.graph
         self.info = GraphInfo(g, self.idx) if g else None
-        self.diags = check(m)
+        self.diags = check(m, project=getattr(self, "project", None))
         self.problems.delete(*self.problems.get_children())
         for i, d in enumerate(self.diags):
             self.problems.insert("", "end", iid=str(i), values=(d.severity, d.code, d.graph or "",
