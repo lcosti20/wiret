@@ -569,6 +569,298 @@ struct S {
                 self.assertNotIn("None", friendly)
 
 
+STRUCT_NODES = """
+enum Mode: u8 {
+  Idle
+  Chase
+  Flee = 5
+}
+
+struct Enemy {
+  pos: Vec2
+  mode: Mode = Mode.Idle
+  hp: i32 = 10
+}
+
+struct Vec2 {
+  x: f32
+  y: f32 = 1.5
+}
+
+func Spawn() -> (e: Enemy) @pure {
+  node entry = Entry
+  node origin = MakeStruct Vec2
+  node r = Return
+    .e <- spawn.result
+  node spawn = MakeStruct Enemy
+    .pos <- origin.result
+    .mode <- Mode.Chase
+
+  flow {
+    entry -> r
+  }
+}
+
+func Step(e: Enemy) -> (out: Enemy, fleeing: bool) {
+  node back = Convert::<u8, Mode>
+    .value <- code.result
+  node chased = WithField Enemy.pos
+    .obj <- entry.e
+    .value <- moved.result
+  node code = Convert::<Mode, u8>
+    .value <- mode.value
+  node entry = Entry
+  node is_flee = Eq::<Mode>
+    .a <- mode.value
+    .b <- Mode.Flee
+  node later = Lt::<Mode>
+    .a <- mode.value
+    .b <- Mode.Flee
+  node mode = GetField Enemy.mode
+    .obj <- entry.e
+  node moved = MakeStruct Vec2
+    .x <- nx.result
+    .y <- parts.y
+  node nx = Add::<f32>
+    .a <- parts.x
+    .b <- 1
+  node parts = BreakStruct Vec2
+    .obj <- pos.value
+  node pick = Select::<Mode>
+    .cond <- same.result
+    .a <- Mode.Idle
+    .b <- back.result
+  node pos = GetField Enemy.pos
+    .obj <- entry.e
+  node r1 = Return
+    .out <- chased.result
+    .fleeing <- is_flee.result
+  node r2 = Return
+    .out <- entry.e
+    .fleeing <- later.result
+  node same = Eq::<Enemy>
+    .a <- entry.e
+    .b <- chased.result
+  node sw = Switch::<Mode> @cases(Mode.Idle, Mode.Chase)
+    .value <- pick.result
+
+  flow {
+    entry -> sw
+    sw.case0 -> r1
+    sw.case1 -> r1
+    sw.default -> r2
+  }
+}
+"""
+
+
+class StructNodeTests(unittest.TestCase):
+    """Step 3 of struct/enum support: struct nodes, enum values and enum-aware kinds."""
+
+    def found(self, body):
+        diags = [d for d in check(parse(module(body, macros=False))) if d.severity == "error"]
+        return sorted(((d.code, d.node or d.graph or "", d.pin or "") for d in diags))
+
+    def graph_errors(self, nodes, decls=""):
+        """Diagnostics for nodes placed in a function next to STRUCT_NODES' types."""
+        types = STRUCT_NODES.split("\nfunc Spawn")[0]
+        return self.found(types + decls + "\nfunc G(e: Enemy, v: Vec2, m: Mode) {\n"
+                          "  node entry = Entry\n" + nodes + "}\n")
+
+    def test_program_checks_and_round_trips(self):
+        text = module(STRUCT_NODES, macros=False)
+        m = parse(text)
+        self.assertEqual(print_module(m), text)
+        self.assertEqual(codes(text), [])
+        g = m.graph("Step")
+        self.assertEqual(g.node("is_flee").binding("b").value.kind, "enum")
+        self.assertEqual(g.node("sw").attr("cases").args[1][1].kind, "enum")
+        enemy = next(it for it in m.items if it.name == "Enemy")
+        self.assertEqual(enemy.field("mode").default.kind, "enum")
+        # MakeStruct inputs default to the field's declared default, else to the zero value
+        spawn = parse(text.replace("    .mode <- Mode.Chase\n",
+                                   "    .mode <- Mode.Idle\n    .hp <- 10\n"))
+        self.assertEqual(print_module(spawn), text.replace("    .mode <- Mode.Chase\n", ""))
+
+    def test_pins(self):
+        from wiret.registry import ModuleIndex, signature
+        m = parse(module(STRUCT_NODES, macros=False))
+        idx, g = ModuleIndex(m), m.graph("Step")
+
+        def pins(nid):
+            s = signature(g.node(nid), g, idx)
+            return ([(p.name, p.type) for p in s.inputs], [(p.name, p.type) for p in s.outputs],
+                    s.purity)
+
+        self.assertEqual(pins("parts"), ([("obj", "Vec2")], [("x", "f32"), ("y", "f32")], "pure"))
+        self.assertEqual(pins("moved"), ([("x", "f32"), ("y", "f32")], [("result", "Vec2")],
+                                         "pure"))
+        self.assertEqual(pins("mode"), ([("obj", "Enemy")], [("value", "Mode")], "pure"))
+        self.assertEqual(pins("chased"), ([("obj", "Enemy"), ("value", "Vec2")],
+                                          [("result", "Enemy")], "pure"))
+
+    def test_struct_node_errors(self):
+        self.assertEqual(self.graph_errors("""
+  node a = GetField Enemy
+  node b = GetField Nope.x
+  node c = GetField Mode.Idle
+  node d = GetField Enemy.zz
+  node f = MakeStruct Vec2::<i32>
+  node g = MakeStruct Enemy.pos
+  node h = BreakStruct
+  node i = SetField Enemy.hp
+  node j = GetField Enemy.hp
+    .obj <- entry.v
+"""), [("E0110", "j", "obj")] + [("E0501", x, "") for x in "abcdfghi"])
+
+    def test_enum_values(self):
+        self.assertEqual(self.graph_errors("""
+  node a = Eq::<Mode>
+    .a <- entry.m
+    .b <- Mode.Run
+  node b = Eq::<i32>
+    .a <- 1
+    .b <- Mode.Idle
+  node c = Eq::<Mode>
+    .a <- entry.m
+    .b <- 1
+  node d = Eq::<Mode>
+    .a <- entry.m
+    .b <- Mood.Idle
+""", decls="\nvar ok: Mode = Mode.Chase\n\nvar bad: Mode = Mode.Zip\n"),
+            [("E0101", "d", "b"), ("E0110", "b", "b"), ("E0110", "c", "b"),
+             ("E0501", "a", "b"), ("E0501", "bad", "bad")])
+        self.assertEqual(self.found("""
+enum A {
+  X
+}
+
+enum B {
+  Y
+}
+
+struct S {
+  a: A = A.Nope
+  b: A = B.Y
+}
+
+func F(p: A = B.Y) {
+  local l: A = A.X
+  node entry = Entry
+}
+"""), [("E0110", "F", "p"), ("E0110", "S", "b"), ("E0501", "S", "a")])
+
+    def test_enum_aware_kinds(self):
+        self.assertEqual(self.graph_errors("""
+  node lt = Lt::<Mode>
+    .a <- entry.m
+    .b <- Mode.Idle
+  node sel = Select::<Vec2>
+    .a <- entry.v
+    .b <- entry.v
+  node eq = Eq::<Vec2>
+    .a <- entry.v
+    .b <- entry.v
+  node to_int = Convert::<Mode, u8>
+    .value <- entry.m
+  node bad_lt = Lt::<Vec2>
+    .a <- entry.v
+    .b <- entry.v
+  node bad_add = Add::<Mode>
+    .a <- entry.m
+    .b <- entry.m
+  node bad_conv = Convert::<Mode, i32>
+    .value <- entry.m
+  node bad_text = Convert::<Mode, string>
+    .value <- entry.m
+  node bad_struct = Convert::<Vec2, i32>
+    .value <- entry.v
+"""), [("E0110", x, "") for x in ("bad_add", "bad_conv", "bad_lt", "bad_struct", "bad_text")])
+
+    def test_switch_cases(self):
+        self.assertEqual(self.graph_errors("""
+  node a = Switch::<Mode> @cases(Mode.Idle, 3, Mode.Nope)
+    .value <- entry.m
+  node b = Switch::<i32> @cases(1, "two")
+    .value <- 0
+  node c = Switch::<u8> @cases(300)
+    .value <- 0
+  node Mode = Branch
+"""), [("E0102", "Mode", ""), ("E0110", "a", "case1"), ("E0110", "b", "case1"),
+       ("E0110", "c", "case0"), ("E0501", "a", "case2")])
+
+    def test_enum_value_literals(self):
+        from wiret.parser import parse_literal
+        lit = parse_literal("Mode.Chase")
+        self.assertEqual((lit.kind, lit.value), ("enum", "Mode.Chase"))
+        with self.assertRaises(ParseError) as cm:
+            parse_literal("a.b.c")
+        self.assertIn("Enum.Member", cm.exception.msg)
+
+    def test_compiling_reports_instead_of_crashing(self):
+        text = module("""
+struct Vec2 {
+  x: f32
+}
+
+func Main() {
+  node entry = Entry
+  node v = MakeStruct Vec2
+    .x <- 2
+  node x = GetField Vec2.x
+    .obj <- v.result
+  node text = Convert::<f32, string>
+    .value <- x.value
+  node log = Call host.Log
+    .message <- text.result
+
+  flow {
+    entry -> log
+  }
+}
+""", macros=False)
+        self.assertEqual(codes(text), [])
+        r = compile_module(parse(text))
+        self.assertFalse(r.ok)
+        self.assertEqual([(d.code, d.graph) for d in r.diags], [("E0501", "Main")])
+
+    def test_palette_and_explanations(self):
+        from wiret import palette
+        from wiret.explain import explain
+        from wiret.registry import ModuleIndex
+        m = parse(module(STRUCT_NODES, macros=False))
+        self.assertTrue(palette.items(m.graph("Step"), ModuleIndex(m)))
+        types = STRUCT_NODES.split("\nfunc Spawn")[0]
+        text = module(types + """
+var bad: Mode = Mode.Zip
+
+func G(e: Enemy, v: Vec2, m: Mode, p: Mode = Other.X) {
+  node entry = Entry
+  node a = GetField Enemy
+  node b = GetField Nope.x
+  node c = GetField Mode.Idle
+  node d = GetField Enemy.zz
+  node f = MakeStruct Vec2::<i32>
+  node g = MakeStruct Enemy.pos
+  node i = SetField Enemy.hp
+  node j = Eq::<i32>
+    .a <- 1
+    .b <- Mode.Idle
+  node k = Switch::<Mode> @cases(Mode.Idle, 3)
+    .value <- entry.m
+  node Mode = Branch
+}
+""", macros=False)
+        diags = [d for d in check(parse(text)) if d.severity == "error"]
+        self.assertEqual(len(diags), 12)   # with node Mode present, j.b is a wire to it
+        for d in diags:
+            with self.subTest(d=str(d)):
+                friendly = explain(d)
+                self.assertNotEqual(friendly, d.message)
+                self.assertNotIn(d.code, friendly)
+                self.assertNotIn("None", friendly)
+
+
 class HashTests(unittest.TestCase):
     def test_reorder_and_layout_removal_do_not_change_semantics(self):
         text = demo()

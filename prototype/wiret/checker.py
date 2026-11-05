@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass
 from typing import Optional
 
 from .model import Enum, Graph, Lit, Module, Node, PinRef, SEMANTIC_ATTRS, Struct, note_detached, notes
-from .model import Var
+from .model import Const, Var
 
 # Names that are metadata, not semantic attributes: `@doc` is `#[doc]` (section 2.4).
 META_NAMES = {"doc", "category", "keywords", "note"}
@@ -103,13 +103,21 @@ def check(module: Module, comments_ok=False) -> list:
         tparams = set(getattr(it, "tparams", []) or [])
         typed = list(getattr(it, "params", []) or []) + list(getattr(it, "results", []) or [])
         typed += list(getattr(it, "locals", []) or []) + list(getattr(it, "states", []) or [])
-        if isinstance(it, Var):
+        if isinstance(it, (Var, Const)):
             typed.append(it)
         for p in typed:
             ty = substitute(p.type, {t: "i32" for t in tparams})
             if ty != "exec" and not type_ok(ty, idx):
                 D("E0501", unknown_type_message(p.type, module.name),
                   getattr(it, "name", None), type=p.type)
+                continue
+            default = p.value if isinstance(p, Const) else p.default
+            if default is not None and default.kind == "enum":
+                if check_enum_value(default, idx, D, getattr(it, "name", None), pin=p.name) \
+                        and not lit_fits(default, ty):
+                    D("E0110", f"default of '{p.name}' is a {default.value.split('.')[0]} value, "
+                               f"not {ty}", getattr(it, "name", None), pin=p.name, literal=True,
+                      dst=ty)
     check_type_decls(module, idx, D)
     check_attr_names(module, D)
     for owner in [module] + [i for i in module.items if not isinstance(i, Graph)]:
@@ -165,6 +173,9 @@ def check_type_decls(module: Module, idx: ModuleIndex, D):
                 elif not type_ok(f.type, idx):
                     D("E0501", unknown_type_message(f.type, module.name), it.name, pin=f.name,
                       type=f.type)
+                elif f.default is not None and f.default.kind == "enum" and \
+                        not check_enum_value(f.default, idx, D, it.name, pin=f.name):
+                    pass
                 elif f.default is not None and not (lit_fits(f.default, f.type)
                                                     and lit_in_range(f.default, f.type)):
                     D("E0110", f"default of field '{it.name}.{f.name}' does not fit type {f.type}",
@@ -178,6 +189,44 @@ def check_type_decls(module: Module, idx: ModuleIndex, D):
                                f"type {base} ({lo} to {hi})", it.name, pin=name, literal=True,
                       dst=base)
     check_struct_cycles(idx, D)
+
+
+def check_enum_value(lit: Lit, idx: ModuleIndex, D, graph=None, node=None, pin=None) -> bool:
+    """E0501 unless `Mode.Chase` names an enum of this module and one of its members."""
+    name, _, member = lit.value.partition(".")
+    en = idx.enums.get(name)
+    if en is None:
+        D("E0501", f"unknown enum '{name}' in value '{lit.value}'", graph, node, pin)
+        return False
+    if en.member(member) is None:
+        D("E0501", f"enum '{name}' has no member '{member}'", graph, node, pin,
+          members=[m.name for m in en.members])
+        return False
+    return True
+
+
+def check_switch_cases(n: Node, sig: Sig, idx: ModuleIndex, G, D):
+    """Each `@cases` value must be a value of the Switch's type (section 3.3)."""
+    a = n.attr("cases")
+    vin = sig.input("value")
+    if a is None or not a.args or vin is None:
+        return
+    ty = vin.type
+    for i, (_, lit) in enumerate(a.args):
+        pin = f"case{i}"
+        if lit.kind == "enum":
+            if not check_enum_value(lit, idx, D, G, n.id, pin):
+                continue
+        if not (lit_fits(lit, ty) and lit_in_range(lit, ty)):
+            hint = (f"; write it as {ty}.Member" if ty in idx.enums and lit.kind != "enum"
+                    else "")
+            D("E0110", f"case {i} ({fmt_value(lit)}) is not a value of type {ty}{hint}",
+              G, n.id, pin, literal=True, dst=ty)
+
+
+def fmt_value(lit: Lit) -> str:
+    from .printer import fmt_lit
+    return fmt_lit(lit)
 
 
 def check_struct_cycles(idx: ModuleIndex, D):
@@ -252,6 +301,11 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
         sig = sigs[n.id]
         if sig.error:
             D(sig.error[0], sig.error[1], G, n.id)
+        if n.id in idx.enums:
+            D("E0102", f"node id '{n.id}' is also the name of an enum, so '{n.id}.x' could be "
+                       f"a wire or an enum value; rename the node", G, n.id)
+        if n.kind == "Switch" and not sig.error:
+            check_switch_cases(n, sig, idx, G, D)
         # data bindings
         bound = set()
         for b in n.bindings:
@@ -284,6 +338,9 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
                                f"Convert::<{spin.type}, {pin.type}>", G, n.id, b.pin,
                       src=spin.type, dst=pin.type)
             else:
+                if b.value.kind == "enum" and not check_enum_value(b.value, idx, D, G, n.id,
+                                                                   b.pin):
+                    continue
                 if not lit_fits(b.value, pin.type):
                     D("E0110", f"literal does not fit pin type {pin.type}", G, n.id, b.pin,
                       dst=pin.type, literal=True)

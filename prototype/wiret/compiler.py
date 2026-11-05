@@ -208,7 +208,16 @@ class Compiler:
                 typed = [it]
             else:
                 continue
-            uses += [(it.name, p.type) for p in typed if user(p.type)]
+            found = next((p.type for p in typed if user(p.type)), None)
+            if found is None and isinstance(it, Graph) and it.kind != "macro":
+                for n in it.nodes:      # e.g. a MakeStruct whose result only feeds a Call
+                    sig = signature(n, it, self.idx)
+                    found = next((p.type for p in sig.inputs + sig.outputs if user(p.type)),
+                                 None)
+                    if found:
+                        break
+            if found:
+                uses.append((it.name, found))
         for owner, ty in uses:
             self.diags.append(Diag("E0501", f"type '{ty}' is declared, but this prototype cannot "
                                             f"compile struct and enum values yet", self.m.name,

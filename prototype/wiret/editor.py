@@ -812,7 +812,7 @@ class EditorApp:
         if out.type == inp.type:
             ops.bind(g, nb, pb, PinRef(na, pa))
             self.commit(f"Bound {nb}.{pb} = {na}.{pa}")
-        elif can_convert(out.type, inp.type):
+        elif can_convert(out.type, inp.type, self.idx):
             # Insert a visible Convert node rather than changing a type silently (section 7.5)
             ga, gb = self.view.geoms[na], self.view.geoms[nb]
             conv = ops.create_node(g, "Convert", None, [out.type, inp.type],

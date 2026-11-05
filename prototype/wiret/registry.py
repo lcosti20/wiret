@@ -37,6 +37,21 @@ BUILTIN_TYPE_NAMES = set(PRIM_TYPES) | {"array", "set", "map", "delegate", "disp
 INT_RANGES = {t: ((-(1 << (b - 1)), (1 << (b - 1)) - 1) if t[0] == "i" else (0, (1 << b) - 1))
               for t in INT_TYPES for b in [int(t[1:])]}
 
+# Constraints that also admit structs and/or enums declared in the module (section 3.3).
+USER_CONSTRAINTS = {"eq": ("struct", "enum"), "ord": ("enum",), "switch": ("enum",),
+                    "any": ("struct", "enum"), "convertible": ("enum",)}
+
+
+def allows(constraint: str, ty: str, idx: "Optional[ModuleIndex]" = None) -> bool:
+    """Whether a type argument meets a constraint of a registry kind."""
+    if ty in CONSTRAINTS[constraint]:
+        return True
+    if idx is None:
+        return False
+    kinds = USER_CONSTRAINTS.get(constraint, ())
+    return ("struct" in kinds and ty in idx.structs) or ("enum" in kinds and ty in idx.enums)
+
+
 ZERO = object()  # pin default: the zero value of the pin's type
 
 
@@ -90,8 +105,11 @@ def zero_lit(ty: str) -> Lit:
 
 
 def lit_fits(lit: Lit, ty: str) -> bool:
-    """Whether a literal can be written for a value of type `ty`. Structs and enums have no
-    literal form; arrays take only `null`, the empty array."""
+    """Whether a literal can be written for a value of type `ty`. An enum takes a member of
+    its own enum (`Mode.Chase`; whether the member exists is the checker's business). Structs
+    have no literal form; arrays take only `null`, the empty array."""
+    if lit.kind == "enum":
+        return lit.value.rsplit(".", 1)[0] == ty
     if ty in INT_TYPES:
         return lit.kind == "int"
     if ty in FLOAT_TYPES:
@@ -117,9 +135,12 @@ def lit_equal(a: Lit, b: Lit) -> bool:
     return a.kind == b.kind and a.value == b.value
 
 
-def can_convert(src: str, dst: str) -> bool:
+def can_convert(src: str, dst: str, idx: "Optional[ModuleIndex]" = None) -> bool:
     if src == dst:
         return False
+    if idx is not None and (src in idx.enums or dst in idx.enums):
+        # an enum converts to its underlying integer type, and back (section 3.2)
+        return idx.enum_base(src) == dst or idx.enum_base(dst) == src
     if dst == "string":
         return src in PRIM_TYPES and src != "string"
     if "bool" in (src, dst):
@@ -215,12 +236,18 @@ CONTEXT_KINDS = {
     "ArrayAdd": "Arrays", "ArrayInsert": "Arrays", "ArrayRemove": "Arrays", "ArrayClear": "Arrays",
     "GetLocal": "Variables", "SetLocal": "Variables", "GetVar": "Variables",
     "SetVar": "Variables", "GetState": "Variables", "SetState": "Variables",
+    "MakeStruct": "Structs", "BreakStruct": "Structs", "GetField": "Structs",
+    "WithField": "Structs",
 }
+
+# Struct kinds and how their symbol is written: the struct (`MakeStruct Vec2`), or the struct
+# and one of its fields (`GetField Vec2.x`).
+STRUCT_KINDS = {"MakeStruct": "struct", "BreakStruct": "struct", "GetField": "field",
+                "WithField": "field"}
 
 # Kinds from the specification that later tiers add (section 1.6).
 LATER_TIER_KINDS = {
-    "Try", "Throw", "Delay", "Yield", "Await", "GetField", "SetField", "WithField", "MakeStruct",
-    "BreakStruct", "New", "Cast", "IsValid", "MapFind", "MapHas", "MapLength",
+    "Try", "Throw", "Delay", "Yield", "Await", "SetField", "New", "Cast", "IsValid", "MapFind", "MapHas", "MapLength",
     "MapKeyAt", "MapValueAt", "MapSet", "MapRemove", "MapClear", "SetHas", "SetLength", "SetAt",
     "SetAdd", "SetRemove", "SetClear", "CreateDelegate", "Invoke", "Bind", "Unbind", "Broadcast",
 }
@@ -344,7 +371,7 @@ def instantiate(m: Graph, targs: list) -> Graph:
     return g
 
 
-def _static_sig(node: Node) -> Sig:
+def _static_sig(node: Node, idx: "Optional[ModuleIndex]" = None) -> Sig:
     cat, purity, tps, pins = STATIC_KINDS[node.kind]
     sig = Sig(purity=purity, category=cat)
     targs = list(node.targs)
@@ -353,9 +380,9 @@ def _static_sig(node: Node) -> Sig:
         targs = (targs + ["i32"] * len(tps))[: len(tps)]
     else:
         for t, c in zip(targs, tps):
-            if t not in CONSTRAINTS[c]:
+            if not allows(c, t, idx):
                 sig.error = ("E0110", f"{node.kind} does not accept type {t}")
-    if node.kind == "Convert" and not sig.error and not can_convert(targs[0], targs[1]) \
+    if node.kind == "Convert" and not sig.error and not can_convert(targs[0], targs[1], idx) \
             and targs[0] != targs[1]:
         sig.error = ("E0110", f"no conversion from {targs[0]} to {targs[1]}")
     subst = {"T": targs[0] if targs else "i32"}
@@ -377,7 +404,7 @@ def attr_int(node: Node, name: str, default: int) -> int:
 def signature(node: Node, graph: Graph, idx: ModuleIndex) -> Sig:
     k = node.kind
     if k in STATIC_KINDS:
-        return _static_sig(node)
+        return _static_sig(node, idx)
     E = "exec"
     sig = Sig(category=CONTEXT_KINDS.get(k, "Other"))
     is_macro = graph.kind == "macro"
@@ -402,7 +429,7 @@ def signature(node: Node, graph: Graph, idx: ModuleIndex) -> Sig:
         if len(node.targs) != 1:
             sig.error = ("E0502", "Switch needs one type argument")
         t = node.targs[0] if node.targs else "i32"
-        if t not in CONSTRAINTS["switch"]:
+        if not allows("switch", t, idx):
             sig.error = ("E0110", f"Switch does not accept type {t}")
         a = node.attr("cases")
         n = len(a.args) if a and a.args else 0
@@ -469,7 +496,7 @@ def signature(node: Node, graph: Graph, idx: ModuleIndex) -> Sig:
             sig.error = ("E0502", f"macro {node.symbol} needs {len(generic.tparams)} type "
                                   f"argument(s), got {len(node.targs)}")
             return sig
-        bad = [t for t in node.targs if not type_ok(t)]
+        bad = [t for t in node.targs if not type_ok(t, idx)]
         if bad:
             sig.error = ("E0501", f"type '{bad[0]}' is not supported by this prototype")
             return sig
@@ -490,10 +517,62 @@ def signature(node: Node, graph: Graph, idx: ModuleIndex) -> Sig:
         return sig
     if k in ("MakeArray", "ArrayGet", "ArrayLength") or k in ARRAY_MUTATORS:
         return _array_sig(node, graph, idx, sig)
+    if k in STRUCT_KINDS:
+        return _struct_sig(node, idx, sig)
+    if k == "SetField" and (node.symbol or "").split(".")[0] in idx.structs:
+        sig.error = ("E0501", f"structs are immutable, so SetField cannot change one; use "
+                              f"'WithField {node.symbol}', which makes a changed copy")
+        return sig
     if k in LATER_TIER_KINDS:
         sig.error = ("E0501", f"node kind '{k}' belongs to a later tier and is not in this prototype")
     else:
         sig.error = ("E0501", f"unknown node kind '{k}'")
+    return sig
+
+
+def _struct_sig(node: Node, idx: ModuleIndex, sig: Sig) -> Sig:
+    """MakeStruct, BreakStruct, GetField, WithField (section 3.3). All are pure: a struct is a
+    value, so reading one cannot see a change (section 4.3)."""
+    k = node.kind
+    sig.purity = "pure"
+    sym = node.symbol or ""
+    if STRUCT_KINDS[k] == "field":
+        name, _, fname = sym.partition(".")
+        if not fname:
+            sig.error = ("E0501", f"{k} names the struct and the field, as in '{k} Vec2.x'")
+            return sig
+    else:
+        name, fname = sym, None
+        if not sym or "." in sym:
+            sig.error = ("E0501", f"{k} names the struct it works on, as in '{k} Vec2'")
+            return sig
+    if node.targs:
+        sig.error = ("E0501", f"{k} takes no type arguments; the struct's name says the type")
+        return sig
+    st = idx.structs.get(name)
+    if st is None:
+        what = "that is an enum" if name in idx.enums else "no struct of this module has that name"
+        sig.error = ("E0501", f"unknown struct '{name}': {what}")
+        return sig
+    if k == "MakeStruct":
+        sig.inputs = [Pin(f.name, f.type, f.default if f.default is not None else ZERO)
+                      for f in st.fields]
+        sig.outputs = [Pin("result", name)]
+        return sig
+    if k == "BreakStruct":
+        sig.inputs = [Pin("obj", name)]
+        sig.outputs = [Pin(f.name, f.type) for f in st.fields]
+        return sig
+    f = st.field(fname)
+    if f is None:
+        sig.error = ("E0501", f"struct '{name}' has no field '{fname}'")
+        return sig
+    if k == "GetField":
+        sig.inputs = [Pin("obj", name)]
+        sig.outputs = [Pin("value", f.type)]
+    else:
+        sig.inputs = [Pin("obj", name), Pin("value", f.type)]
+        sig.outputs = [Pin("result", name)]
     return sig
 
 
@@ -502,7 +581,7 @@ def _array_sig(node: Node, graph: Graph, idx: ModuleIndex, sig: Sig) -> Sig:
     if len(node.targs) != 1:
         sig.error = ("E0502", f"{k} needs one type argument: the element type, as in {k}::<i32>")
     t = node.targs[0] if node.targs else "i32"
-    if not type_ok(t):
+    if not type_ok(t, idx):
         sig.error = ("E0501", f"type '{t}' is not supported by this prototype")
     arr = f"array::<{t}>"
     if k == "MakeArray":

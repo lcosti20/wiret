@@ -14,8 +14,9 @@ from typing import Optional, Union
 class Lit:
     """A literal or attribute value.
 
-    kind is one of: int, float, bool, string, null, ident, tuple, list, map.
-    For tuple/list `value` is a list of Lit; for map a list of (Lit, Lit).
+    kind is one of: int, float, bool, string, null, enum, ident, tuple, list, map.
+    For an enum member `value` is "Enum.Member"; for tuple/list a list of Lit; for map a
+    list of (Lit, Lit).
     """
     kind: str
     value: object
