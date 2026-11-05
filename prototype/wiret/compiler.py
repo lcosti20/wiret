@@ -19,7 +19,7 @@ from .checker import Diag, check, has_errors
 from .model import Const, Extern, Graph, Lit, Module, Node, PinRef, Var
 from .natives import INTERNAL, STD
 from .printer import layout_hash, print_module, semantic_hash
-from .registry import (class_field_target, delegate_sig, dispatcher_params, dispatcher_target,
+from .registry import (class_field_target, field_place, parent_method, delegate_sig, dispatcher_params, dispatcher_target,
                        ARRAY_MUTATORS, FLOAT_TYPES, INT_TYPES, MAP_PURE, PLACE_MUTATORS,
                        REGISTRY_NAME, REGISTRY_VERSION, SET_PURE,
                        SIGNED_TYPES, ModuleIndex, Pin, Sig, array_elem, attr_int, enum_values,
@@ -199,6 +199,10 @@ class Compiler:
             for d in c.dispatchers:             # after the fields: one dispatcher per object
                 fields.append((self.vt(f"dispatcher::<({', '.join(p.type for p in d.params)})>"),
                                None))
+            for _, ty, default in self.idx.class_state(name):   # then the methods' state
+                vt = self.vt(ty)
+                fields.append((vt, self.const_value(default, ty)
+                               if default is not None and not isinstance(vt, wbc.Ref) else None))
             self.types[self.type_keys[key]] = wbc.ClassType(sup, tuple(fields), ())
         return self.type_keys[key]
 
@@ -570,8 +574,19 @@ class FuncLowerer:
             ctx.locals[l.name] = l.name
             self.add_local(l.name, l.type, l.default)
         for s in sorted(g.states, key=lambda s: s.name):
-            ctx.states[s.name] = self.c.add_global(f"{g.name}.{s.name}", s.type, s.default)
+            ctx.states[s.name] = self.state_slot(None, s)
         self.expand(ctx)
+
+    def state_slot(self, mpath, s):
+        """Where a `state` slot lives (section 2.3): a module global in a free function, a
+        hidden field of the object in a method (ClassType layout, see ModuleIndex.class_state)."""
+        g = self.g
+        if not g.owner:
+            name = f"{g.name}.{s.name}" if mpath is None else f"{g.name}/{mpath}.{s.name}"
+            return self.c.add_global(name, s.type, s.default)
+        where = g.short_name if mpath is None else f"{g.short_name}/{mpath}"
+        return ("field", self.c.class_type(g.owner),
+                self.c.class_field_index(g.owner, f"{where}.{s.name}"))
 
     def out_target(self, ctx: Ctx, n: Node, pin: str):
         sig = ctx.sigs[n.id]
@@ -662,10 +677,17 @@ class FuncLowerer:
                 else:
                     ir.extra["global"] = self.c.global_index[n.symbol]
             elif n.kind in PLACE_MUTATORS:
+                fp = None if n.symbol in ctx.locals else field_place(n.symbol, ctx.graph,
+                                                                       self.c.idx)
                 if n.symbol in ctx.locals:
                     ir.extra["place"] = ("local", ctx.locals[n.symbol])
+                elif fp is not None:
+                    ir.extra["place"] = ("field", (self.c.class_type(fp[0]),
+                                                   self.c.class_field_index(fp[0], fp[1])))
                 else:
                     ir.extra["place"] = ("global", self.c.global_index[n.symbol])
+            elif n.kind == "CallParent":
+                ir.extra["func"] = ("func", parent_method(n, ctx.graph, self.c.idx).name)
             elif n.kind == "Call":
                 callee = self.c.idx.callee(n.symbol)
                 if callee.kind in ("func", "event"):
@@ -727,8 +749,7 @@ class FuncLowerer:
             sub.locals[l.name] = f"{mpath}.{l.name}"
             self.add_local(sub.locals[l.name], l.type, l.default)
         for s in sorted(mg.states, key=lambda s: s.name):
-            sub.states[s.name] = self.c.add_global(f"{self.g.name}/{mpath}.{s.name}", s.type,
-                                                   s.default)
+            sub.states[s.name] = self.state_slot(mpath, s)
         entry = next((m for m in mg.nodes if m.kind == "Entry"), None)
         data_params = [p for p in sig.data_ins]
         for p in mg.params:
@@ -838,7 +859,7 @@ class FuncLowerer:
         if self.c.debug:   # every impure output gets a slot, read or not
             for nid in sorted(self.ir):
                 n = self.ir[nid]
-                if not n.pure and (n.kind in ("Call", "Try", "New", "Invoke")
+                if not n.pure and (n.kind in ("Call", "CallParent", "Try", "New", "Invoke")
                                    or n.kind in PLACE_MUTATORS):
                     for p in n.data_outs:
                         key = (nid, p.name)
@@ -920,9 +941,26 @@ class FuncLowerer:
             self.emit_inputs(n)
             self.E("local.set", self.local_index[n.extra["local"]])
             self.transfer(then, nxt)
+        elif k in ("SetVar", "SetState") and isinstance(n.extra["global"], tuple):
+            _, t, f = n.extra["global"]           # state on the object
+            self.E("local.get", self.local_index["self"])
+            self.emit_inputs(n)
+            self.E("class.set", t, f)
+            self.transfer(then, nxt)
         elif k in ("SetVar", "SetState"):
             self.emit_inputs(n)
             self.E("global.set", n.extra["global"])
+            self.transfer(then, nxt)
+        elif k == "CallParent":
+            self.E("local.get", self.local_index["self"])
+            self.emit_inputs(n)
+            self.E("call", n.extra["func"])
+            for p in reversed(n.sig.data_outs):
+                slot = self.slots.get((n.id, p.name))
+                if slot is None:
+                    self.E("drop")
+                else:
+                    self.E("local.set", slot)
             self.transfer(then, nxt)
         elif k == "Call":
             self.emit_inputs(n)
@@ -1037,8 +1075,23 @@ class FuncLowerer:
             # back; MapRemove, SetAdd and SetRemove also yield whether anything changed
             kind, where = n.extra["place"]
             idx = self.local_index[where] if kind == "local" else where
-            self.E(f"{kind}.get", idx)
-            self.emit_inputs(n)
+            if kind == "field":
+                # obj, then the field read without sharing it (it is the place this node
+                # changes); the changed container goes back with class.set on the same obj
+                ep = EvalPoint()
+                for _, _, s in n.inputs:
+                    self.count(s, ep)
+                self.eval(n.inputs[0][2], ep, keep=False)
+                obj = self.temp(n.inputs[0][1])
+                self.E("local.tee", obj)
+                self.E("local.get", obj)
+                self.E("class.get", *idx)
+                for _, _, s in n.inputs[1:]:
+                    self.eval(s, ep)
+                self.ready(n)
+            else:
+                self.E(f"{kind}.get", idx)
+                self.emit_inputs(n)
             if k in ARRAY_MUTATORS:
                 op = {"ArraySet": "array.set", "ArrayAdd": "array.push",
                       "ArrayInsert": "array.insert", "ArrayRemove": "array.remove",
@@ -1052,7 +1105,10 @@ class FuncLowerer:
                     self.E("drop")
                 else:
                     self.E("local.set", slot)
-            self.E(f"{kind}.set", idx)
+            if kind == "field":
+                self.E("class.set", *idx)
+            else:
+                self.E(f"{kind}.set", idx)
             self.transfer(then, nxt)
         else:
             raise AssertionError(f"cannot lower impure node kind {k}")
@@ -1267,6 +1323,10 @@ class FuncLowerer:
         if k in ("GetVar", "GetState"):
             if "const" in n.extra:
                 self.emit_const(n.extra["const"], n.sig.outputs[0].type)
+            elif isinstance(n.extra["global"], tuple):     # state on the object
+                _, t, f = n.extra["global"]
+                self.E("local.get", self.local_index["self"])
+                self.E("class.get", t, f)
             else:
                 self.E("global.get", n.extra["global"])
             return
@@ -1336,10 +1396,15 @@ class FuncLowerer:
             self.E("local.get", tc)
             self.E("select")
             return
+        if k == "CallParent":
+            self.E("local.get", self.local_index["self"])
         for _, _, s in n.inputs:          # Eq and Ne only compare, so they do not share
             self.eval(s, ep, keep=k not in ("Eq", "Ne"))
         if k == "Call":
             self.emit_call(n)
+            return
+        if k == "CallParent":                       # a @pure parent: self went first
+            self.E("call", n.extra["func"])
             return
         if k == "Convert":
             self.emit_convert(n.targs[0], n.targs[1])

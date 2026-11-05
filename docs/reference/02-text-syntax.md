@@ -114,7 +114,7 @@ Rules:
 7. **Targets** are exec inputs. The default exec input is `in`; write `node.pin` to target another one. Any number of producers may target the same exec input (merging flow).
 8. **Data wires** may fan out freely: any number of nodes may reference the same output pin.
 9. A pin reference must name an output pin of a node in the same graph. Function and event parameters appear as output pins of the `Entry` node (`entry.amount`, and `entry.self` for methods).
-10. **`state`** declares a slot that keeps its value between executions of the graph. In a macro there is one slot per expansion site, which is what `DoOnce` and `FlipFlop` need. In a method it lives on the object, in a free function on the module instance. The compiler allocates hidden fields or globals for it, named after the expansion path. Read and write it with `GetState` and `SetState`.
+10. **`state`** declares a slot that keeps its value between executions of the graph. In a macro there is one slot per expansion site, which is what `DoOnce` and `FlipFlop` need. In a method it lives on the object, in a free function on the module instance. On an object, each class's state slots follow its fields and dispatchers: for each method by name, its own `state` by name, then that of each macro it expands, node by node. The compiler allocates hidden fields or globals for it, named after the expansion path. Read and write it with `GetState` and `SetState`.
 11. `Reroute::<T>` is a visual-only node that passes a wire through a bend point. It is erased by the compiler. `Reroute::<exec>` reroutes control flow.
 
 #### The flow block

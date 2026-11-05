@@ -121,6 +121,10 @@ def explain(d: Diag) -> str:
                 "override), so it must take the same inputs and give the same outputs. A method "
                 "marked @final cannot be replaced at all. Rename this method, or match the "
                 "parent's signature.")
+    if c == "E0501" and "CallParent" in m:
+        return ("CallParent runs the parent class's version of the method it is in. It only "
+                "works inside a method that overrides one from a parent class (the class line "
+                "says ': Parent', and the parent has a method of the same name).")
     if c == "E0160":
         return ("This project's wiret.toml lists which capabilities its modules may ask for, "
                 "and this one is not on the list. Add it to 'allow' under [capabilities] if the "

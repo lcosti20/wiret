@@ -409,7 +409,7 @@ for _k in ("BitAnd", "BitOr", "BitXor", "Shl", "Shr"):
 # Kinds handled by `signature` directly.
 CONTEXT_KINDS = {
     "Entry": "Flow", "Return": "Flow", "Sequence": "Flow", "Switch": "Flow", "Reroute": "Flow",
-    "Macro": "Macro", "Exit": "Macro", "Call": "Call",
+    "Macro": "Macro", "Exit": "Macro", "Call": "Call", "CallParent": "Call",
     "MakeArray": "Arrays", "ArrayGet": "Arrays", "ArrayLength": "Arrays", "ArraySet": "Arrays",
     "ArrayAdd": "Arrays", "ArrayInsert": "Arrays", "ArrayRemove": "Arrays", "ArrayClear": "Arrays",
     "GetLocal": "Variables", "SetLocal": "Variables", "GetVar": "Variables",
@@ -563,13 +563,39 @@ class ModuleIndex:
 
     def class_layout(self, name: str) -> list:
         """(member name, type) of every slot of an object, inherited ones first: for each
-        class its fields, then its dispatchers (section 5.3)."""
+        class its fields, then its dispatchers, then the `state` of its methods (section 5.3)."""
         out = []
         for c in reversed(self.class_chain(name)):
             out += [(f.name, f.type) for f in self.classes[c].fields]
             out += [(d.name, dispatcher_type([p.type for p in d.params]))
                     for d in self.classes[c].dispatchers]
+            out += [(slot, ty) for slot, ty, _ in self.class_state(c)]
         return out
+
+    def class_state(self, cls: str) -> list:
+        """(slot name, type, default) for the `state` of a class's own methods, macro state
+        expanded in them included, in a fixed order. In a method, state lives on the object
+        (section 2.3): `Tick.count`, or `Tick/loop.done` for a macro expanded at node loop."""
+        out = []
+        for g in self.methods(cls):
+            for path, s in self.graph_states(g):
+                where = f"{g.short_name}/{path}" if path else g.short_name
+                out.append((f"{where}.{s.name}", s.type, s.default))
+        return out
+
+    def graph_states(self, g: Graph, path: str = "", depth: int = 0) -> list:
+        """(macro path, Local) for the state slots a graph needs: its own, then each macro's,
+        node by node, as macro expansion visits them."""
+        out = [(path, s) for s in sorted(g.states, key=lambda s: s.name)]
+        if depth > 32:
+            return out
+        for n in sorted(g.nodes, key=lambda n: n.id):
+            if n.kind == "Macro":
+                mg = self.macro(n.symbol, n.targs)
+                if mg is not None:
+                    out += self.graph_states(mg, f"{path}{n.id}/" if path else f"{n.id}/",
+                                             depth + 1)
+        return [(p.rstrip("/"), s) for p, s in out]
 
     def class_interfaces(self, cls: str) -> list:
         """Every interface a class implements, its bases' first, in declaration order."""
@@ -815,6 +841,8 @@ def signature(node: Node, graph: Graph, idx: ModuleIndex) -> Sig:
         return _array_sig(node, graph, idx, sig)
     if k in DELEGATE_KINDS:
         return _delegate_sig(node, graph, idx, sig)
+    if k == "CallParent":
+        return _call_parent_sig(node, graph, idx, sig)
     if k in CLASS_KINDS or (k in ("GetField", "SetField") and class_field_target(node, graph, idx)):
         return _class_sig(node, graph, idx, sig)
     if k in STRUCT_KINDS:
@@ -845,6 +873,36 @@ def class_field_target(node: Node, graph: Graph, idx: ModuleIndex):
     if graph is not None and graph.owner:
         return graph.owner, sym
     return None
+
+
+def parent_method(node: Node, graph: Graph, idx: ModuleIndex) -> Optional[Graph]:
+    """The method CallParent calls: the nearest base class's version of the symbol."""
+    if graph is None or not graph.owner or graph.owner not in idx.classes:
+        return None
+    base = idx.classes[graph.owner].base
+    return idx.find_method(base, node.symbol or graph.short_name) if base else None
+
+
+def _call_parent_sig(node: Node, graph: Graph, idx: ModuleIndex, sig: Sig) -> Sig:
+    """`CallParent TakeDamage`: inside an override, the base class's version of a method,
+    called directly on the method's own `self` (Blueprint's Parent node)."""
+    sig.category = "Call"
+    g = parent_method(node, graph, idx)
+    if g is None:
+        where = f"'{graph.owner}'s base class" if graph is not None and graph.owner else \
+            "a base class"
+        sig.error = ("E0501", f"CallParent calls {where}'s version of a method, so it belongs "
+                              f"in a method whose class extends a class that has "
+                              f"'{node.symbol}'")
+        sig.inputs, sig.outputs = [Pin("in", "exec")], [Pin("then", "exec")]
+        return sig
+    c = idx.callee(g.name)
+    sig.purity = c.purity
+    if c.purity == "impure":
+        sig.inputs, sig.outputs = [Pin("in", "exec")], [Pin("then", "exec")]
+    sig.inputs += c.params[1:]                 # self is the method's own
+    sig.outputs += c.results
+    return sig
 
 
 def bindable(c: "Callee") -> Optional[str]:
@@ -1009,14 +1067,35 @@ def _struct_sig(node: Node, idx: ModuleIndex, sig: Sig) -> Sig:
     return sig
 
 
+def field_place(place: Optional[str], graph: Graph, idx: ModuleIndex) -> Optional[tuple]:
+    """A mutator place that is a class field (section 3.3): `Player.items` anywhere, or the
+    bare `items` inside the class's own methods when no local or variable has that name.
+    (class, field name, type), or None."""
+    if not place:
+        return None
+    cls, _, fname = place.rpartition(".")
+    if not cls:
+        if graph is None or not graph.owner or graph.local(place) or place in idx.vars:
+            return None
+        cls = graph.owner
+    if cls not in idx.classes:
+        return None
+    found = idx.class_field(cls, fname)
+    return (cls, fname, found[1].type) if found else None
+
+
 def place_type(place: Optional[str], graph: Graph, idx: ModuleIndex) -> Optional[str]:
-    """The type of a mutator's place: a local of the graph, else a module variable."""
+    """The type of a mutator's place: a local of the graph, a module variable, or a field
+    of an object."""
     if not place:
         return None
     loc = graph.local(place)
     if loc:
         return loc.type
-    return idx.vars[place].type if place in idx.vars else None
+    if place in idx.vars:
+        return idx.vars[place].type
+    fp = field_place(place, graph, idx)
+    return fp[2] if fp else None
 
 
 def _container_sig(node: Node, graph: Graph, idx: ModuleIndex, sig: Sig) -> Sig:
@@ -1056,11 +1135,13 @@ def _container_sig(node: Node, graph: Graph, idx: ModuleIndex, sig: Sig) -> Sig:
     place = node.symbol
     ty = place_type(place, graph, idx)
     if ty is None:
-        sig.error = ("E0130", f"{k} must name the local or variable it changes, as in "
+        sig.error = ("E0130", f"{k} must name the local, variable or field it changes, as in "
                               f"{example} scores")
     elif ty != container and not sig.error:
         sig.error = ("E0110", f"'{place}' is {ty}, not {container}")
-    sig.inputs = [Pin("in", "exec")] + [Pin(n, subst.get(t, t)) for n, t in ins]
+    fp = field_place(place, graph, idx) if not graph.local(place or "") else None
+    sig.inputs = [Pin("in", "exec")] + ([Pin("obj", fp[0])] if fp else []) + \
+        [Pin(n, subst.get(t, t)) for n, t in ins]
     sig.outputs = [Pin("then", "exec")] + [Pin(n, subst.get(t, t)) for n, t in outs]
     return sig
 
@@ -1088,15 +1169,15 @@ def _array_sig(node: Node, graph: Graph, idx: ModuleIndex, sig: Sig) -> Sig:
     else:
         # A mutator changes a place: a local or a module variable of type array::<T>.
         place = node.symbol
-        loc = graph.local(place) if place else None
-        ty = loc.type if loc else (idx.vars[place].type if place in idx.vars else None)
+        ty = place_type(place, graph, idx)
         if not place or ty is None:
-            sig.error = ("E0130", f"{k} must name the local or variable it changes, as in "
-                                  f"{k}::<{t}> scores")
+            sig.error = ("E0130", f"{k} must name the local, variable or field it changes, as "
+                                  f"in {k}::<{t}> scores")
         elif ty != arr and not sig.error:
             sig.error = ("E0110", f"'{place}' is {ty}, not {arr}")
-        sig.inputs = [Pin("in", "exec")] + [Pin(n, t if pt == "T" else pt)
-                                            for n, pt in ARRAY_MUTATORS[k]]
+        fp = field_place(place, graph, idx) if not graph.local(place or "") else None
+        sig.inputs = [Pin("in", "exec")] + ([Pin("obj", fp[0])] if fp else []) + \
+            [Pin(n, t if pt == "T" else pt) for n, pt in ARRAY_MUTATORS[k]]
         sig.outputs = [Pin("then", "exec")]
     return sig
 

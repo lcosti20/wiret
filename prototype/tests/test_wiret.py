@@ -4386,17 +4386,6 @@ func P(p: Player) -> (hp: i32) @pure {
 """)
         self.assertIn("E0304", codes(text))
 
-    def test_state_in_a_method_is_reported(self):
-        text = module("""
-class A {
-  func F() {
-    state n: i32
-    node entry = Entry
-  }
-}
-""", macros=False)
-        self.assertEqual(codes(text), ["E0501"])
-
     def test_flow_view_reorders_methods(self):
         text = classes_text()
         view = view_flow(parse(text))
@@ -5510,6 +5499,208 @@ func Hello() {
             self.assertIn("hi", ok.stdout)
         finally:
             shutil.rmtree(d)
+
+
+GAPS = """
+class Shouter : Ticker {
+  func Tick() -> (n: i32) {
+    node entry = Entry
+    node parent = CallParent Tick
+    node ret = Return
+      .n <- times.result
+    node times = Mul::<i32>
+      .a <- parent.n
+      .b <- 10
+
+    flow {
+      entry -> parent
+      parent -> ret
+    }
+  }
+}
+
+class Ticker {
+  items: array::<i32>
+
+  func Greet() {
+    node entry = Entry
+    node hi = Call host.Log
+      .message <- "hello"
+    node once = Macro std.flow.DoOnce
+
+    flow {
+      entry -> once
+      once -> hi
+    }
+  }
+
+  func Keep(x: i32) {
+    node add = ArrayAdd::<i32> items
+      .obj <- entry.self
+      .item <- entry.x
+    node entry = Entry
+
+    flow {
+      entry -> add
+    }
+  }
+
+  func Tick() -> (n: i32) {
+    state count: i32
+    node cur = GetState count
+    node entry = Entry
+    node inc = Add::<i32>
+      .a <- cur.value
+      .b <- 1
+    node now = GetState count
+    node ret = Return
+      .n <- now.value
+    node set = SetState count
+      .value <- inc.result
+
+    flow {
+      entry -> set
+      set -> ret
+    }
+  }
+}
+
+func Fill(t: Ticker) -> (before: array::<i32>, after: array::<i32>) {
+  local snap: array::<i32>
+  node add = ArrayAdd::<i32> Ticker.items
+    .obj <- entry.t
+    .item <- 2
+  node entry = Entry
+  node get = GetField Ticker.items
+    .obj <- entry.t
+  node keep = Call Ticker.Keep
+    .self <- entry.t
+    .x <- 1
+  node ret = Return
+    .before <- s.value
+    .after <- get.value
+  node s = GetLocal snap
+  node take = SetLocal snap
+    .value <- get.value
+
+  flow {
+    add -> ret
+    entry -> keep
+    keep -> take
+    take -> add
+  }
+}
+"""
+
+
+def gaps_text(extra=""):
+    return module(GAPS + extra, macros=False)
+
+
+class ClassGapTests(unittest.TestCase):
+    """State on objects, container mutators on fields, and CallParent."""
+
+    def vm_for(self, text=None):
+        _, r = build(text or gaps_text())
+        out = []
+        vm = VM(output=out.append)
+        return vm, vm.load(r.wbc), out
+
+    def test_round_trip_and_check(self):
+        text = gaps_text()
+        self.assertEqual(print_module(parse(text)), text)
+        self.assertEqual([c for c in codes(text) if c.startswith("E")], [])
+
+    def test_state_in_a_method_lives_on_each_object(self):
+        vm, mod, out = self.vm_for()
+        a, b = vm.new(mod, "Ticker"), vm.new(mod, "Ticker")
+        self.assertEqual([vm.call(mod, "Ticker.Tick", [a])[0] for _ in range(3)], [1, 2, 3])
+        self.assertEqual(vm.call(mod, "Ticker.Tick", [b]), [1])
+        self.assertEqual((a.get("Tick.count"), b.get("Tick.count")), (3, 1))
+
+    def test_macro_state_in_a_method_is_per_object(self):
+        vm, mod, out = self.vm_for()
+        a, b = vm.new(mod, "Ticker"), vm.new(mod, "Ticker")
+        for o in (a, a, b, a, b):
+            vm.call(mod, "Ticker.Greet", [o])
+        self.assertEqual(out, ["hello", "hello"])     # once per object
+
+    def test_mutators_change_a_field_in_place_with_value_semantics(self):
+        vm, mod, out = self.vm_for()
+        t = vm.new(mod, "Ticker")
+        # Keep appends 1 through the bare field name; the snapshot taken next keeps (1,)
+        # while the qualified ArrayAdd appends 2 to the field
+        self.assertEqual(vm.call(mod, "Fill", [t]), [(1,), (1, 2)])
+
+    def test_a_null_object_place_faults(self):
+        vm, mod, out = self.vm_for()
+        with self.assertRaises(WiretError) as cm:
+            vm.call(mod, "Fill", [None])
+        self.assertEqual(cm.exception.code, -3)
+
+    def test_call_parent_runs_the_base_version_on_self(self):
+        vm, mod, out = self.vm_for()
+        s = vm.new(mod, "Shouter")
+        self.assertEqual(vm.call_method(mod, s, "Tick", []), [10])
+        self.assertEqual(vm.call_method(mod, s, "Tick", []), [20])
+        self.assertEqual(s.get("Tick.count"), 2)   # the base method's state, on this object
+        _, r = build(gaps_text())
+        shout = disassemble(r.wbc).split("func t.Shouter.Tick")[1].split("\nfunc ")[0]
+        self.assertIn("call t.Ticker.Tick", shout)
+        self.assertNotIn("call_virtual", shout)
+
+    def test_call_parent_needs_an_override(self):
+        text = gaps_text("""
+func Loose() {
+  node entry = Entry
+  node p = CallParent Tick
+}
+
+class Lonely {
+  func Tick() -> (n: i32) {
+    node entry = Entry
+    node p = CallParent Tick
+  }
+}
+""")
+        diags = sorted((d.graph, d.code) for d in check(parse(text)) if d.code.startswith("E"))
+        self.assertEqual(diags, [("Lonely.Tick", "E0501"), ("Loose", "E0501")])
+
+    def test_pure_functions_cannot_change_fields(self):
+        text = gaps_text("""
+func P(t: Ticker) @pure {
+  node add = ArrayAdd::<i32> Ticker.items
+    .obj <- entry.t
+    .item <- 1
+  node entry = Entry
+
+  flow {
+    entry -> add
+  }
+}
+""")
+        self.assertIn("E0302", codes(text))
+
+    def test_parent_event_needs_a_latent_caller(self):
+        text = module("""
+class A {
+  event Go() {
+    node entry = Entry
+  }
+}
+
+class B : A {
+  event Go() {
+    node entry = Entry
+    node p = CallParent Go
+
+    flow {
+      entry -> p
+    }
+  }
+}
+""", macros=False)
+        self.assertEqual([c for c in codes(text) if c.startswith("E")], [])
 
 
 class BytecodeTests(unittest.TestCase):
