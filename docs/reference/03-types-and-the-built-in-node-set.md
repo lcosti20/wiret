@@ -51,8 +51,8 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 | `Sequence` | `@count(n)`; exec out `then0` .. `then{n-1}` | Runs `then0`'s chain to its end, then `then1`'s, and so on. |
 | `Switch::<T>` | in `value: T`; `@cases(...)`; exec out `case0`.., `default` | `T` is an integer, enum, string or bool. |
 | `Select::<T>` | pure; in `cond`, `a`, `b`; out `result` | Both `a` and `b` are evaluated (they are pure). |
-| `Try` | exec out `body`, `fault`, `then`; out `message: string`, `code: i32` | Runs `body`. Normal end goes to `then`. A catchable fault inside it goes to `fault`. |
-| `Throw` | in `message: string`, `code: i32` | Raises a catchable fault. No exec out. |
+| `Try` | exec out `body`, `fault`, `then`; out `message: string`, `code: i32` | Runs `body`. A catchable fault inside it goes to `fault`, with `message` and `code` set from the fault. When the body's chain or the fault chain ends, `then` runs, as code after a try/catch would. Section 4.6. |
+| `Throw` | in `message: string`, `code: i32` (default 0) | Raises a catchable fault. No exec out. Use non-negative codes; the built-in faults use negative ones (section 4.6). |
 | `Delay` | in `seconds: f64`; exec out `then` | **Latent.** Suspends the fiber for virtual time. |
 | `Yield` | exec out `then` | **Latent.** Resumes on the next `wr_advance`. |
 | `Await` | in `signal: std.Signal`; exec out `then` | **Latent.** Resumes when the host fires the signal. |
@@ -119,6 +119,7 @@ The VM ships these namespaces as natives (callable through `Call`) and as Wiret 
 - `std.math`: `Sqrt`, `Pow`, `Sin`, `Cos`, `Atan2`, `Floor`, `Ceil`, `Round`, `Clamp::<T>`, `Lerp`, ... (pure).
 - `std.string`: `Concat`, `Length`, `Substring`, `Find`, `Format`, `TryParse::<T>`, `Split`, ... (pure).
 - `std.array`, `std.set`, `std.map`: `Equals` (two `anyref`, section 4.9), `Sort::<T>` (stable, caller supplies a comparison delegate), `IndexOf::<T>`, ...
+- `std.fault`: `Make(message, code) -> fault`, `Message(fault) -> string`, `Code(fault) -> i32` (pure). The compiler calls them to lower `Throw` and the outputs of `Try`; they are not nodes in the palette.
 - `std.random`: an explicit-state generator class (`New`, `NextI32`, `NextF64`). There is **no ambient randomness, clock or I/O**. The host provides any of those as natives, which keeps modules replayable.
 - `std.flow` (macros written in Wiret): `ForRange`, `ForEach::<T>`, `ForEachMap::<K,V>`, `While`, `DoOnce`, `DoN`, `Gate`, `FlipFlop`, `MultiGate`, `Retriggerable`. `ForEachMap::<K,V>` takes `map` and has the exec outputs `each` and `done` and the data outputs `key`, `value` and `index`, in insertion order.
 

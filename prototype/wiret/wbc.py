@@ -20,7 +20,9 @@ FLAG_HAS_SOURCE = 1
 I32, I64, F32, F64, STRING = 0x7F, 0x7E, 0x7D, 0x7C, 0x6E
 REF = 0x6B                      # `6B t`: reference to type index t (arrays and structs)
 ANYREF = 0x6D                   # the top of the reference types; only in function types here
-VT_NAMES = {I32: "i32", I64: "i64", F32: "f32", F64: "f64", STRING: "string", ANYREF: "anyref"}
+FAULT = 0x6A                    # a caught fault: its message and code (section 4.6)
+VT_NAMES = {I32: "i32", I64: "i64", F32: "f32", F64: "f64", STRING: "string", ANYREF: "anyref",
+            FAULT: "fault"}
 FUNC_TYPE = 0x60
 ARRAY_TYPE = 0x5E
 STRUCT_TYPE = 0x5F
@@ -89,11 +91,12 @@ class WbcError(Exception):
 
 # -- opcodes -----------------------------------------------------------------------
 # immediates: L = branch label (padded s32), u = u32, s = s32, S = s64, f = f32 bytes,
-#             d = f64 bytes, T = br_table, b = u8
+#             d = f64 bytes, T = br_table, b = u8, Lu = label then u32 (try.push)
 OPS: dict[str, tuple] = {
     "unreachable": (0x00, ""), "nop": (0x01, ""), "br": (0x02, "L"), "br_if": (0x03, "L"),
     "br_table": (0x04, "T"), "return": (0x05, ""), "call": (0x06, "u"),
-    "cont.push": (0x0A, "L"), "cont.pop": (0x0B, ""),
+    "cont.push": (0x0A, "L"), "cont.pop": (0x0B, ""), "try.push": (0x0C, "Lu"),
+    "throw": (0x0E, ""),
     "drop": (0x10, ""), "select": (0x11, ""),
     "local.get": (0x12, "u"), "local.set": (0x13, "u"), "local.tee": (0x14, "u"),
     "global.get": (0x15, "u"), "global.set": (0x16, "u"),
@@ -139,7 +142,7 @@ BY_CODE: dict[int, tuple] = {code: (name, imm) for name, (code, imm) in OPS.item
 # Opcodes the spec defines for later tiers (objects, containers, fibers, faults). They decode,
 # but this prototype's verifier rejects them.
 LATER_TIER_OPS = {0x07: "call_virtual", 0x08: "call_interface", 0x09: "call_delegate",
-                  0x0C: "try.push", 0x0D: "suspend", 0x0E: "throw", 0x25: "ref.null",
+                  0x0D: "suspend", 0x25: "ref.null",
                   0x26: "ref.is_null", 0x27: "ref.eq", 0x28: "ref.cast", 0x29: "ref.test",
                   0x2A: "ref.valid", 0x2B: "ref.share"}
 for _c in range(0xD3, 0xD6):
@@ -321,6 +324,8 @@ def decode_code(code: bytes) -> list:
             imms = ()
         elif imm == "L":
             imms = (r.sleb(32),)
+        elif imm == "Lu":
+            imms = (r.sleb(32), r.u32())
         elif imm == "u":
             imms = (r.u32(),)
         elif imm == "uu":
@@ -347,6 +352,9 @@ def encode_instr(w: Writer, name: str, imms: tuple):
     w.u8(code)
     if imm == "L":
         w.sleb5(imms[0])
+    elif imm == "Lu":
+        w.sleb5(imms[0])
+        w.u32(imms[1])
     elif imm == "u":
         w.u32(imms[0])
     elif imm == "uu":

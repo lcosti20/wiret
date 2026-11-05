@@ -12,9 +12,9 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from . import wbc
-from .natives import NativeFault, NativeSpec, _f32, all_natives
+from .natives import NO_FAULT, FaultValue, NativeFault, NativeSpec, _f32, all_natives
 from .verifier import VerifyError, verify
-from .wbc import (F32, F64, I32, I64, STRING, OPS, ArrayType, MapType, Ref, SetType,
+from .wbc import (F32, F64, FAULT, I32, I64, STRING, OPS, ArrayType, MapType, Ref, SetType,
                   StructType, WbcError)
 
 STATUS_OK = "WR_OK"
@@ -28,21 +28,38 @@ STATUS_INTERRUPT = "WR_ERR_INTERRUPT"
 
 VT_OF = {"bool": I32, "i8": I32, "u8": I32, "i16": I32, "u16": I32, "i32": I32, "u32": I32,
          "i64": I64, "u64": I64, "f32": F32, "f64": F64, "string": STRING,
-         "anyref": wbc.ANYREF}
+         "anyref": wbc.ANYREF, "fault": FAULT}
 
 MAX_FRAMES = 2000
 MAX_CONT = 10000
 
 
+# Codes of the built-in faults (section 4.6). `Throw` codes are the program's own; the
+# built-in ones are negative so that they never collide with a non-negative code.
+FAULT_DIVIDE = -1        # integer divide or remainder by zero
+FAULT_RANGE = -2         # index out of range, negative array length
+FAULT_NULL = -3          # null reference
+FAULT_CAST = -4          # failed ref.cast
+FAULT_STACK = -5         # call stack or continuation stack overflow
+FAULT_NATIVE = -6        # an error returned by a native
+FAULT_UNREACHABLE = -7   # unreachable executed
+
+
 class Fault(Exception):
-    """A runtime fault raised inside Wiret code."""
+    """A runtime fault raised inside Wiret code. Catchable by `Try` (section 4.6)."""
+
+    def __init__(self, message: str, code: int = FAULT_NATIVE):
+        super().__init__(message)
+        self.message = message
+        self.code = code
 
 
 class WiretError(Exception):
-    def __init__(self, status: str, message: str, traceback=None):
+    def __init__(self, status: str, message: str, traceback=None, code: int = 0):
         super().__init__(message)
         self.status = status
         self.message = message
+        self.code = code                   # an uncaught fault's code (wr_FaultInfo.code)
         self.traceback = traceback or []   # [(function, node id)], innermost last
 
     def __str__(self):
@@ -72,7 +89,7 @@ def u64(x):
 def _div_s(wrap, lo):
     def div(a, b):
         if b == 0:
-            raise Fault("integer divide by zero")
+            raise Fault("integer divide by zero", FAULT_DIVIDE)
         if a == lo and b == -1:
             return lo
         q = abs(a) // abs(b)
@@ -83,7 +100,7 @@ def _div_s(wrap, lo):
 def _rem_s(wrap, lo):
     def rem(a, b):
         if b == 0:
-            raise Fault("integer remainder by zero")
+            raise Fault("integer remainder by zero", FAULT_DIVIDE)
         if a == lo and b == -1:
             return 0
         q = abs(a) // abs(b)
@@ -95,7 +112,7 @@ def _rem_s(wrap, lo):
 def _div_u(wrap, unsigned):
     def div(a, b):
         if b == 0:
-            raise Fault("integer divide by zero")
+            raise Fault("integer divide by zero", FAULT_DIVIDE)
         return wrap(unsigned(a) // unsigned(b))
     return div
 
@@ -103,7 +120,7 @@ def _div_u(wrap, unsigned):
 def _rem_u(wrap, unsigned):
     def rem(a, b):
         if b == 0:
-            raise Fault("integer remainder by zero")
+            raise Fault("integer remainder by zero", FAULT_DIVIDE)
         return wrap(unsigned(a) % unsigned(b))
     return rem
 
@@ -245,6 +262,7 @@ NUMERIC = _build_numeric()
 (OP_UNREACHABLE, OP_NOP, OP_BR, OP_BR_IF, OP_RETURN, OP_CALL, OP_CONT_PUSH, OP_CONT_POP,
  OP_DROP, OP_SELECT, OP_LGET, OP_LSET, OP_LTEE, OP_GGET, OP_GSET, OP_CONST) = (
     0x00, 0x01, 0x02, 0x03, 0x05, 0x06, 0x0A, 0x0B, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x20)
+OP_TRY_PUSH, OP_THROW = 0x0C, 0x0E
 _CONST_OPS = {0x20, 0x21, 0x22, 0x23}
 
 
@@ -268,10 +286,12 @@ def normalise(vt, v, types=None):
         return _f32(float(v))
     if vt == F64:
         return float(v)
+    if vt == FAULT:
+        return v
     return str(v)
 
 
-ZERO = {I32: 0, I64: 0, F32: 0.0, F64: 0.0, STRING: ""}
+ZERO = {I32: 0, I64: 0, F32: 0.0, F64: 0.0, STRING: "", FAULT: NO_FAULT}
 
 
 def zero(vt):
@@ -298,7 +318,7 @@ def _container_ops(default) -> dict:
     place: every change makes a new one, the eager copy that Tier 1 allows."""
     def at(c, i):
         if not 0 <= i < len(c):
-            raise Fault(f"index {i} is out of range (length {len(c)})")
+            raise Fault(f"index {i} is out of range (length {len(c)})", FAULT_RANGE)
         return i
 
     def map_ops(entry):
@@ -390,14 +410,14 @@ def _array_ops(types: list, default=zero) -> dict:
     value semantics (section 4.9)."""
     def check(a, i, extra=0):
         if not 0 <= i < len(a) + extra:
-            raise Fault(f"array index {i} is out of range (length {len(a)})")
+            raise Fault(f"array index {i} is out of range (length {len(a)})", FAULT_RANGE)
 
     def new(elem_vt):
         z = default(elem_vt)
 
         def f(n):
             if n < 0:
-                raise Fault(f"array length {n} is negative")
+                raise Fault(f"array length {n} is negative", FAULT_RANGE)
             return (z,) * n
         return f
 
@@ -643,6 +663,8 @@ class VM:
             for ins in instrs:
                 if ins.name in ("br", "br_if", "cont.push"):
                     arg = index_of[ins.target()]
+                elif ins.name == "try.push":
+                    arg = (index_of[ins.target()], ins.imms[1])
                 elif ins.op in _CONST_OPS:
                     arg = ins.imms[0]
                 elif ins.name == "string.const":
@@ -679,6 +701,9 @@ class VM:
                 here = pure_pcs.get(ins.pc, here)
                 f.node_at.append(cur)
                 f.fault_at.append(here)
+            for k, (op, arg) in enumerate(f.code):     # a marker also names its Try node
+                if op == OP_TRY_PUSH:
+                    f.code[k] = (op, (arg[0], arg[1], f.node_at[k]))
             step_pcs = dict(steps.get(fi, []))
             for k, ins in enumerate(instrs):
                 if ins.pc in step_pcs:
@@ -716,6 +741,12 @@ class VM:
         out.append(FrameView(f, node, list(locs)))
         return out
 
+    @staticmethod
+    def _pending(f, cont) -> list:
+        """The continuation stack as node ids, bottom first. A handler marker shows as
+        `try!fault`, after the `Try` node that pushed it."""
+        return [f.node_at[k] if type(k) is int else f"{k[2]}!fault" for k in cont]
+
     def _traceback(self, frames, mod):
         tb = []
         for fr in frames:
@@ -740,143 +771,167 @@ class VM:
         executed = 0
         try:
             while True:
-                if hook is not None:
-                    nodes = f.starts.get(ip)
-                    if nodes is not None:
-                        pending = [f.node_at[k] for k in cont]
-                        for node in nodes:
-                            hook(f.name, node, pending, len(frames),
-                                 lambda node=node: self._snapshot(frames, f, locs, node), "enter")
-                    node = f.steps.get(ip)
-                    if node is not None:
-                        hook(f.name, node, [f.node_at[k] for k in cont], len(frames),
-                             lambda: self._snapshot(frames, f, locs, node), "ready")
-                op, arg = code[ip]
-                ip += 1
-                fuel -= 1
-                executed += 1
-                if fuel < 0:
-                    self.fuel = 0
-                    raise WiretError(STATUS_FUEL, "fuel exhausted",
-                                     self._traceback(frames + [(f, ip)], mod))
-                if executed & 0xFFF == 0 and self.interrupted:
-                    raise WiretError(STATUS_INTERRUPT, "interrupted by the host",
-                                     self._traceback(frames + [(f, ip)], mod))
-                if op == OP_LGET:
-                    stack.append(locs[arg])
-                elif op == OP_LSET:
-                    locs[arg] = stack.pop()
-                elif op in numeric:
-                    n, fn = numeric[op]
-                    if n == 2:
-                        b = stack.pop()
-                        stack[-1] = fn(stack[-1], b)
-                    else:
-                        stack[-1] = fn(stack[-1])
-                elif op in _CONST_OPS or op == 0x24:
-                    stack.append(arg)
-                elif op == OP_LTEE:
-                    locs[arg] = stack[-1]
-                elif op == OP_BR:
-                    ip = arg
-                elif op == OP_BR_IF:
-                    if stack.pop():
-                        ip = arg
-                elif op == OP_CONT_PUSH:
-                    if len(cont) >= MAX_CONT:
-                        raise Fault("continuation stack overflow")
-                    cont.append(arg)
-                elif op == OP_CONT_POP:
-                    if cont:
-                        ip = cont.pop()
-                elif op == OP_GGET:
-                    stack.append(gl[arg])
-                elif op == OP_GSET:
-                    gl[arg] = stack.pop()
-                elif op == OP_SELECT:
-                    c = stack.pop()
-                    b = stack.pop()
-                    if not c:
-                        stack[-1] = b
-                elif op == OP_DROP:
-                    stack.pop()
-                elif op == OP_CALL:
-                    callee = funcs[arg]
-                    fuel -= 4
-                    self.stats["calls"] += 1
-                    np = len(callee.params)
-                    cargs = stack[len(stack) - np:] if np else []
-                    del stack[len(stack) - np:]
-                    if callee.native is not None:
-                        if callee.cost is not None:
-                            fuel -= callee.cost(*cargs)
-                        try:
-                            res = callee.native(self, *cargs)
-                        except NativeFault as e:
-                            raise Fault(f"{callee.native_name}: {e}")
-                        stack.extend(normalise(vt, v) for vt, v in zip(callee.results, res))
-                    else:
-                        if len(frames) >= MAX_FRAMES:
-                            raise Fault("stack overflow")
-                        frames.append((f, ip, locs, stack, cont))
-                        f = callee
+                try:
+                    while True:
+                        if hook is not None:
+                            nodes = f.starts.get(ip)
+                            if nodes is not None:
+                                pending = self._pending(f, cont)
+                                for node in nodes:
+                                    hook(f.name, node, pending, len(frames),
+                                         lambda node=node: self._snapshot(frames, f, locs, node), "enter")
+                            node = f.steps.get(ip)
+                            if node is not None:
+                                hook(f.name, node, self._pending(f, cont), len(frames),
+                                     lambda: self._snapshot(frames, f, locs, node), "ready")
+                        op, arg = code[ip]
+                        ip += 1
+                        fuel -= 1
+                        executed += 1
+                        if fuel < 0:
+                            self.fuel = 0
+                            raise WiretError(STATUS_FUEL, "fuel exhausted",
+                                             self._traceback(frames + [(f, ip)], mod))
+                        if executed & 0xFFF == 0 and self.interrupted:
+                            raise WiretError(STATUS_INTERRUPT, "interrupted by the host",
+                                             self._traceback(frames + [(f, ip)], mod))
+                        if op == OP_LGET:
+                            stack.append(locs[arg])
+                        elif op == OP_LSET:
+                            locs[arg] = stack.pop()
+                        elif op in numeric:
+                            n, fn = numeric[op]
+                            if n == 2:
+                                b = stack.pop()
+                                stack[-1] = fn(stack[-1], b)
+                            else:
+                                stack[-1] = fn(stack[-1])
+                        elif op in _CONST_OPS or op == 0x24:
+                            stack.append(arg)
+                        elif op == OP_LTEE:
+                            locs[arg] = stack[-1]
+                        elif op == OP_BR:
+                            ip = arg
+                        elif op == OP_BR_IF:
+                            if stack.pop():
+                                ip = arg
+                        elif op == OP_CONT_PUSH or op == OP_TRY_PUSH:
+                            if len(cont) >= MAX_CONT:
+                                raise Fault("continuation stack overflow", FAULT_STACK)
+                            cont.append(arg)        # a handler marker is a (handler, local) tuple
+                        elif op == OP_CONT_POP:
+                            while cont:             # discard handler markers on the way
+                                k = cont.pop()
+                                if type(k) is int:
+                                    ip = k
+                                    break
+                        elif op == OP_THROW:
+                            fv = stack.pop()
+                            raise Fault(fv.message, fv.code)
+                        elif op == OP_GGET:
+                            stack.append(gl[arg])
+                        elif op == OP_GSET:
+                            gl[arg] = stack.pop()
+                        elif op == OP_SELECT:
+                            c = stack.pop()
+                            b = stack.pop()
+                            if not c:
+                                stack[-1] = b
+                        elif op == OP_DROP:
+                            stack.pop()
+                        elif op == OP_CALL:
+                            callee = funcs[arg]
+                            fuel -= 4
+                            self.stats["calls"] += 1
+                            np = len(callee.params)
+                            cargs = stack[len(stack) - np:] if np else []
+                            del stack[len(stack) - np:]
+                            if callee.native is not None:
+                                if callee.cost is not None:
+                                    fuel -= callee.cost(*cargs)
+                                try:
+                                    res = callee.native(self, *cargs)
+                                except NativeFault as e:
+                                    raise Fault(f"{callee.native_name}: {e}", FAULT_NATIVE)
+                                stack.extend(normalise(vt, v) for vt, v in zip(callee.results, res))
+                            else:
+                                if len(frames) >= MAX_FRAMES:
+                                    raise Fault("stack overflow", FAULT_STACK)
+                                frames.append((f, ip, locs, stack, cont))
+                                f = callee
+                                code = f.code
+                                locs = cargs + list(f.zeros)
+                                stack, cont, ip = [], [], 0
+                        elif op == OP_RETURN:
+                            nr = len(f.results)
+                            res = stack[len(stack) - nr:] if nr else []
+                            if not frames:
+                                self.fuel = fuel
+                                return res
+                            f, ip, locs, stack, cont = frames.pop()
+                            code = f.code
+                            stack.extend(res)
+                        elif op in ARRAY_ARITY:
+                            n = ARRAY_ARITY[op]
+                            if n == 1:
+                                stack[-1] = arg(stack[-1])
+                            elif n == 2:
+                                b = stack.pop()
+                                stack[-1] = arg(stack[-1], b)
+                            else:
+                                c = stack.pop()
+                                b = stack.pop()
+                                stack[-1] = arg(stack[-1], b, c)
+                            if op != 0xD7 and op != 0xD8:     # allocation: 1 fuel per 8 elements
+                                fuel -= len(stack[-1]) >> 3
+                        elif 0xE0 <= op <= 0xEF:               # map.* and set.*
+                            fn, nin, allocates = arg
+                            if nin:
+                                operands = stack[len(stack) - nin:]
+                                del stack[len(stack) - nin:]
+                                res = fn(*operands)
+                            else:
+                                res = fn()
+                            stack.extend(res)
+                            if allocates:                      # allocation: 1 fuel per 8 entries
+                                fuel -= len(res[0]) >> 3
+                        elif op == 0xD0:                       # struct.new
+                            vals = tuple(stack[len(stack) - arg:]) if arg else ()
+                            del stack[len(stack) - arg:]
+                            stack.append(vals)
+                            fuel -= arg >> 3
+                        elif op == 0xD1:                       # struct.get
+                            stack[-1] = stack[-1][arg]
+                        elif op == 0xD2:                       # struct.with
+                            v = stack.pop()
+                            s0 = stack[-1]
+                            stack[-1] = s0[:arg] + (v,) + s0[arg + 1:]
+                            fuel -= len(s0) >> 3
+                        elif op == OP_NOP:
+                            pass
+                        elif op == OP_UNREACHABLE:
+                            raise Fault("unreachable executed", FAULT_UNREACHABLE)
+                        else:
+                            raise WiretError(STATUS_API, f"unimplemented opcode 0x{op:02X}")
+                except Fault as e:
+                    # Unwind to the nearest handler marker, frame by frame (section 4.6): drop
+                    # the continuations above it, store the fault, clear the operand stack and
+                    # jump to the handler. With no marker in any frame, the call ends faulted.
+                    at = frames + [(f, ip)]
+                    while not any(type(k) is tuple for k in cont):
+                        if not frames:
+                            self.fuel = fuel
+                            raise WiretError(STATUS_FAULT, e.message, self._traceback(at, mod),
+                                             e.code)
+                        f, ip, locs, stack, cont = frames.pop()
                         code = f.code
-                        locs = cargs + list(f.zeros)
-                        stack, cont, ip = [], [], 0
-                elif op == OP_RETURN:
-                    nr = len(f.results)
-                    res = stack[len(stack) - nr:] if nr else []
-                    if not frames:
-                        self.fuel = fuel
-                        return res
-                    f, ip, locs, stack, cont = frames.pop()
-                    code = f.code
-                    stack.extend(res)
-                elif op in ARRAY_ARITY:
-                    n = ARRAY_ARITY[op]
-                    if n == 1:
-                        stack[-1] = arg(stack[-1])
-                    elif n == 2:
-                        b = stack.pop()
-                        stack[-1] = arg(stack[-1], b)
-                    else:
-                        c = stack.pop()
-                        b = stack.pop()
-                        stack[-1] = arg(stack[-1], b, c)
-                    if op != 0xD7 and op != 0xD8:     # allocation: 1 fuel per 8 elements
-                        fuel -= len(stack[-1]) >> 3
-                elif 0xE0 <= op <= 0xEF:               # map.* and set.*
-                    fn, nin, allocates = arg
-                    if nin:
-                        operands = stack[len(stack) - nin:]
-                        del stack[len(stack) - nin:]
-                        res = fn(*operands)
-                    else:
-                        res = fn()
-                    stack.extend(res)
-                    if allocates:                      # allocation: 1 fuel per 8 entries
-                        fuel -= len(res[0]) >> 3
-                elif op == 0xD0:                       # struct.new
-                    vals = tuple(stack[len(stack) - arg:]) if arg else ()
-                    del stack[len(stack) - arg:]
-                    stack.append(vals)
-                    fuel -= arg >> 3
-                elif op == 0xD1:                       # struct.get
-                    stack[-1] = stack[-1][arg]
-                elif op == 0xD2:                       # struct.with
-                    v = stack.pop()
-                    s0 = stack[-1]
-                    stack[-1] = s0[:arg] + (v,) + s0[arg + 1:]
-                    fuel -= len(s0) >> 3
-                elif op == OP_NOP:
-                    pass
-                elif op == OP_UNREACHABLE:
-                    raise Fault("unreachable executed")
-                else:
-                    raise WiretError(STATUS_API, f"unimplemented opcode 0x{op:02X}")
-        except Fault as e:
-            self.fuel = fuel
-            raise WiretError(STATUS_FAULT, str(e), self._traceback(frames + [(f, ip)], mod))
+                    while True:
+                        k = cont.pop()
+                        if type(k) is tuple:
+                            break
+                    ip, slot, _ = k
+                    locs[slot] = FaultValue(e.message, e.code)
+                    stack.clear()
         except RecursionError:
             raise WiretError(STATUS_FAULT, "stack overflow")
         finally:

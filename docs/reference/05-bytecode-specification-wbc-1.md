@@ -154,7 +154,7 @@ Notation: `[in] -> [out]`. `L` is a branch target, an `s32` offset relative to t
 | 0B | `cont.pop` |  | Jumps to the top continuation; discards handler markers on the way; falls through if none. |
 | 0C | `try.push` | L, local | Pushes a handler marker. On a fault the VM stores the fault in `local`, unwinds to the marker, clears the operand stack and jumps to L. |
 | 0D | `suspend` | kind: 0 yield, 1 timer, 2 signal | `[]`, `[f64]` or `[signal]` -> `[]` |
-| 0E | `throw` |  | `[fault]` -> |
+| 0E | `throw` |  | `[fault]` -> . A `fault` is made with the native `std.fault.Make` and read with `std.fault.Message` and `std.fault.Code` (section 3.4). The type `fault` appears only in locals and function types. |
 | 0F | `brk` |  | Reserved for debuggers. Never appears in a file. |
 
 **Variables and constants (10 to 2F)**

@@ -63,7 +63,7 @@ Compiler stages: parse, resolve names, type-check, validate graphs, expand macro
 
 ### 1.6 Implementation tiers
 
-The specification covers a language, a canonical format, an editor contract, a merge protocol, macros, async, objects, containers, bytecode, a verifier, a C ABI, capabilities, a debugger and a project manager. None of it has run through a real parser or VM, so it is staged. A tier is not started until the one before it passes its tests, and a guarantee in this document is only as firm as the tier that contains it.
+The specification covers a language, a canonical format, an editor contract, a merge protocol, macros, async, objects, containers, bytecode, a verifier, a C ABI, capabilities, a debugger and a project manager. It is staged, and the Python prototype in `prototype/` follows the stages: Tiers 0 and 1 run through its parser, checker, compiler, verifier and VM and pass their tests, and Tier 2 has started with `Try` and `Throw`. A tier is not started until the one before it passes its tests, and a guarantee in this document is only as firm as the tier that contains it.
 
 | Tier | Scope | Done when |
 | --- | --- | --- |
@@ -71,4 +71,4 @@ The specification covers a language, a canonical format, an editor contract, a m
 | 1. Data and tooling | `struct`, `enum`, `array`/`set`/`map` with **eager** copy (observably identical to 4.9), `Convert`, registry, `state`, `@reads`, metadata attributes and notes, the merge and edit protocol, WBC and the verifier, `wiretc view --flow` and the Git textconv | Editor round trips are byte-stable; merge and edit tests pass; verifier fuzz passes. |
 | 2. Deferred | `class`, interfaces, `delegate`, `dispatcher`; latent nodes, fibers, `Signal`; `Try`/`Throw` (catchable faults); copy-on-write containers (an optimisation of Tier 1's semantics, not a change to them); capabilities; the full C API; debugger hooks; the project manager and lockfile | Started only after Tier 1; each item keeps the **Provisional** mark until it has its own tests. |
 
-Sections 4.6 (faults), 4.5 (latent nodes), 4.9 (copy-on-write), 5 (bytecode), 6 (C API) and 7.3 (projects) are therefore specified ahead of the prototype and may change when their tier starts.
+Sections 4.6 (faults), 4.5 (latent nodes), 4.9 (copy-on-write), the Tier 2 opcodes of 5, 6 (C API) and 7.3 (projects) are therefore specified ahead of the prototype and may change when their tier starts.

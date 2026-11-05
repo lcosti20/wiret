@@ -1,13 +1,14 @@
 """Single-pass bytecode verifier (spec section 5.5)."""
 from __future__ import annotations
 
-from .wbc import (ANYREF, F32, F64, FN_LATENT, FN_PURE, I32, I64, STRING, ArrayType, MapType,
+from .wbc import (ANYREF, F32, F64, FAULT, FN_LATENT, FN_PURE, I32, I64, STRING, ArrayType, MapType,
                   Ref,
                   SetType, StructType, WbcError, WbcModule, decode_code, vt_name)
 
 REF_TYPES = (ArrayType, StructType, MapType, SetType)
 
 VALTYPES = {I32, I64, F32, F64, STRING}
+LOCAL_TYPES = VALTYPES | {FAULT}     # a `fault` lives in a local that `try.push` names
 _PREFIX = {"i32": I32, "i64": I64, "f32": F32, "f64": F64}
 _INT_CMP = {"eq", "ne", "lt_s", "lt_u", "gt_s", "gt_u", "le_s", "le_u", "ge_s", "ge_u"}
 _INT_BIN = {"add", "sub", "mul", "div_s", "div_u", "rem_s", "rem_u", "and", "or", "xor", "shl",
@@ -120,7 +121,8 @@ def verify(m: WbcModule) -> list:
         else:
             # a function type may also use anyref, which a native such as std.array.Equals
             # takes so that one signature serves every container type (section 4.9)
-            vts = [vt for vt in entry[0] + entry[1] if vt != ANYREF]
+            # and fault, which std.fault.Make, Message and Code take and return (section 4.6)
+            vts = [vt for vt in entry[0] + entry[1] if vt not in (ANYREF, FAULT)]
         for vt in vts:
             if not valid_vt(m, vt):
                 raise VerifyError(f"type {i} uses an unsupported value type")
@@ -166,7 +168,7 @@ def verify_function(m: WbcModule, i: int):
     params, results, flags = m.func_type(fidx)
     body = m.bodies[i]
     for vt in body.locals:
-        if not valid_vt(m, vt):
+        if vt != FAULT and not valid_vt(m, vt):
             raise VerifyError("local of unsupported type", fidx)
     local_types = list(params) + list(body.locals)
     try:
@@ -178,7 +180,7 @@ def verify_function(m: WbcModule, i: int):
     starts = {ins.pc for ins in instrs}
     labels = set()
     for ins in instrs:
-        if ins.name in ("br", "br_if", "cont.push"):
+        if ins.name in ("br", "br_if", "cont.push", "try.push"):
             t = ins.target()
             if t not in starts:
                 raise VerifyError(f"branch target {t} is not an instruction boundary", fidx, ins.pc)
@@ -248,6 +250,14 @@ def verify_function(m: WbcModule, i: int):
             stack.clear()
         elif n == "cont.push":
             pass
+        elif n == "try.push":
+            li = ins.imms[1]
+            if li >= len(local_types) or local_types[li] != FAULT:
+                raise VerifyError("try.push must name a local of type fault", fidx, ins.pc)
+        elif n == "throw":
+            pop(FAULT, ins)
+            stack.clear()
+            reachable = False
         elif n == "cont.pop":
             if stack:
                 raise VerifyError("cont.pop with a non-empty operand stack", fidx, ins.pc)

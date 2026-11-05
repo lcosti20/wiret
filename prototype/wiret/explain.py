@@ -114,6 +114,11 @@ def explain(d: Diag) -> str:
                 "promise. Pass the value in as an input instead, or remove @pure.")
     if c == "E0401":
         return "This macro uses itself, so expanding it would never end."
+    if c == "E0412":
+        return ("Everything wired after a Try's 'body' is protected by that Try, so it must only "
+                "be reachable through 'body'. Here a wire from outside the body leads into it (or "
+                "the body loops back to the Try, or leaves a macro through Exit). Give the outside "
+                "path its own nodes, or move the shared part after the Try's 'then'.")
     if c == "E0501":
         if "later tier" in m:
             return f"'{_quoted(m)}' nodes aren't available in this prototype yet."
@@ -217,7 +222,8 @@ def explain_runtime(status: str, message: str, where: str = "") -> str:
     if status == "WR_ERR_FAULT":
         if "divide by zero" in message or "remainder by zero" in message:
             return (f"The program tried to divide by zero{loc}. Dividing by zero has no answer, so "
-                    f"the program stopped. Use a Branch to check the number first.")
+                    f"the program stopped. Use a Branch to check the number first, or put the "
+                    f"division in the body of a Try to handle the error.")
         if "continuation stack overflow" in message:
             return (f"A Sequence keeps starting itself again before it finishes{loc}, so unfinished "
                     f"steps pile up forever. This is a loop that never ends: make sure something "
@@ -230,7 +236,8 @@ def explain_runtime(status: str, message: str, where: str = "") -> str:
                     f"Array positions start at 0, so the last item is at length − 1.")
         if "Substring" in message:
             return f"The program asked for part of a text that doesn't exist{loc}: {message}."
-        return f"The program stopped with an error{loc}: {message}."
+        return (f"The program stopped with an error{loc}: {message}. A Try around the nodes "
+                f"that can fail lets the program handle the error and carry on.")
     if status == "WR_ERR_FUEL":
         return ("The program ran for too long and was stopped. This usually means a loop never "
                 "ends: check that the loop's condition can become false.")
