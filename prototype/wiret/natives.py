@@ -11,6 +11,24 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 
+class CArray(list):
+    """An array value (section 4.9): a list plus the copy-on-write `shared` flag."""
+    __slots__ = ("shared",)
+
+    def __init__(self, items=(), shared=False):
+        super().__init__(items)
+        self.shared = shared
+
+
+class CMap(dict):
+    """A map, or a set (its values are None): an insertion-ordered dict plus `shared`."""
+    __slots__ = ("shared",)
+
+    def __init__(self, items=(), shared=False):
+        super().__init__(items)
+        self.shared = shared
+
+
 class NativeFault(Exception):
     """Raised by a native to report a fault to the VM. `code` is the fault code (section 4.6);
     -6 means an error from a native."""
@@ -123,7 +141,7 @@ def values_equal(a, b) -> bool:
     is never equal and a container holding NaN is not equal to itself. A map or a set is a
     dict and ignores insertion order: the same keys (keys match as in a lookup, so the one NaN
     key matches itself), and for a map equal values under each key."""
-    if isinstance(a, tuple):
+    if isinstance(a, (tuple, list)):
         return len(a) == len(b) and all(values_equal(x, y) for x, y in zip(a, b))
     if isinstance(a, dict):
         return len(a) == len(b) and all(k in b and values_equal(v, b[k]) for k, v in a.items())
@@ -132,10 +150,11 @@ def values_equal(a, b) -> bool:
 
 def value_size(v) -> int:
     """How many elements, entries and fields `values_equal` may visit."""
-    if isinstance(v, tuple):
-        return len(v) + sum(value_size(x) for x in v if isinstance(x, (tuple, dict)))
+    if isinstance(v, (tuple, list)):
+        return len(v) + sum(value_size(x) for x in v if isinstance(x, (tuple, list, dict)))
     if isinstance(v, dict):
-        return len(v) + sum(value_size(x) for x in v.values() if isinstance(x, (tuple, dict)))
+        return len(v) + sum(value_size(x) for x in v.values()
+                            if isinstance(x, (tuple, list, dict)))
     return 0
 
 

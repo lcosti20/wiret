@@ -559,6 +559,12 @@ def verify_function(m: WbcModule, i: int):
             else:                                  # ref.cast, ref.test
                 pop(ANYREF, ins)
                 stack.append(Ref(t) if n == "ref.cast" else I32)
+        elif n == "ref.share":
+            got = pop(None, ins)
+            if not (isinstance(got, Ref) and got.type < len(m.types)
+                    and isinstance(m.types[got.type], (ArrayType, MapType, SetType))):
+                raise VerifyError("ref.share needs an array, a map or a set", fidx, ins.pc)
+            stack.append(got)
         elif n in ("ref.is_null", "ref.valid"):
             pop(ANYREF, ins)
             stack.append(I32)

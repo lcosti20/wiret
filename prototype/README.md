@@ -306,7 +306,7 @@ array kinds (section 3.3):
 
 - They lower to the `5D` and `5C` type entries and the `map.*` and `set.*` opcodes (`E0` to
   `EF`). In the VM a map is an insertion-ordered dict and a set one with no values; a change
-  copies it, the eager copy that Tier 1 allows. Updating a key keeps its position.
+  is copy-on-write (see *Copy-on-write* below). Updating a key keeps its position.
 - Every NaN key is the same key, so a NaN can be looked up again (section 3.1).
 - `std.flow.ForEachMap::<K, V>` loops over a map in key order with outputs `key`, `value` and
   `index`. The palette offers map and set nodes for the map and set types the module uses.
@@ -538,6 +538,28 @@ node fire = Broadcast OnHit                   // bare name inside Player's own m
 - **Host.** `vm.delegate(mod, "Counter.Add", obj)`, `obj.get("OnHit").handlers`, and
   `vm.broadcast(mod, obj, "OnHit", [args])`.
 
+### Copy-on-write
+
+Containers keep value semantics (section 4.9) without eager copies, so a loop that appends to
+an array costs the same per item however long the array gets (100,000 appends take about
+0.3 s in this VM).
+
+- In the VM an array is a `CArray` (a list) and a map or set a `CMap` (a dict), each with a
+  `shared` flag. A mutating instruction changes an unshared container in place and returns
+  it, and changes a fresh copy of a shared one; the copy is unshared. `array.new`,
+  `array.clone` and every mutator's result start unshared. `ref.share` (`2B`) sets the flag.
+- The compiler emits `ref.share` after any container input whose consumer can keep the
+  value: `SetLocal`, `SetVar`, `SetField`, call and delegate arguments, `Return`, struct and
+  array construction, macro inputs (so `ForEach` iterates the array as it was when the loop
+  started), `Select`, and so on. Read-only consumers do not share: `ArrayGet`, `ArrayLength`,
+  the map and set queries, and `Eq`/`Ne`. A mutation node reads its own place directly, so it
+  never marks it.
+- Default and zero containers (a new local, a field's starting value, a missing map value)
+  are one object each, created shared, so the first change to one copies it.
+- Fuel is charged for what is allocated, 1 per 8 elements: `array.new`, `array.clone`, and a
+  mutation only when it copies.
+- The host still sees tuples and dicts: arguments are converted in, results converted out.
+
 ### Identity and the id registry
 
 A **project** is a directory with a `wiret.toml` (section 7.3); its `wiret.ids` lists every
@@ -611,9 +633,11 @@ pins for results, and flow wires for a macro's exec parameters and results.
 - **Exports.** Every `func` and `event` is exported, so the editor can run any of them. The
   spec exports only `@export` declarations.
 - **Tier 2, what is left:** the language half is done (`Try`/`Throw`, fibers, classes,
-  interfaces, delegates and dispatchers). Not yet: copy-on-write containers (`ref.share` is
-  still rejected; containers are copied eagerly), capabilities, the C API, debugger hooks
-  beyond the editor's, and the project manager and lockfile. The
+  interfaces, delegates and dispatchers), and so is copy-on-write. Not yet: capabilities, the
+  C API, debugger hooks beyond the editor's, and the project manager and lockfile.
+- **No `ref.share` removal.** Without `-O1` there is no liveness analysis, so a function that
+  builds a local array and returns it still shares it, and the caller's first change to it
+  makes one copy. The
   editor's debugger steps through one fiber, the one Run started.
 - **Classes, not yet:** `state` in a method (it would live on the object; `E0501`, including
   a macro with state expanded in a method), calling a base class's version of an overridden

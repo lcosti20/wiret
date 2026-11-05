@@ -146,6 +146,7 @@ OPS: dict[str, tuple] = {
     "dispatcher.unbind": (0xF6, "u"), "dispatcher.broadcast": (0xF7, "u"),
     "ref.null": (0x25, "u"), "ref.is_null": (0x26, ""), "ref.eq": (0x27, ""),
     "ref.cast": (0x28, "u"), "ref.test": (0x29, "u"), "ref.valid": (0x2A, ""),
+    "ref.share": (0x2B, ""),
     "class.new": (0xD3, "u"), "class.get": (0xD4, "uu"), "class.set": (0xD5, "uu"),
     "drop": (0x10, ""), "select": (0x11, ""),
     "local.get": (0x12, "u"), "local.set": (0x13, "u"), "local.tee": (0x14, "u"),
@@ -191,7 +192,7 @@ BY_CODE: dict[int, tuple] = {code: (name, imm) for name, (code, imm) in OPS.item
 
 # Opcodes the spec defines for later tiers (objects, containers, fibers, faults). They decode,
 # but this prototype's verifier rejects them.
-LATER_TIER_OPS = {0x2B: "ref.share"}
+LATER_TIER_OPS: dict = {}     # every opcode of section 5.6 is now in the prototype
 
 
 # -- byte writer / reader ------------------------------------------------------------

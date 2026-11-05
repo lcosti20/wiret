@@ -129,7 +129,7 @@ def format_value(ty: Optional[str], v, idx: Optional[ModuleIndex] = None) -> str
                                    for k, x in v.items()) + "}"
         return "{" + ", ".join(format_value(set_elem(ty or ""), x, idx) for x in v) + "}"
     elem = array_elem(ty) if ty else None
-    if elem is not None or isinstance(v, tuple):
+    if elem is not None or isinstance(v, (tuple, list)):
         return "[" + ", ".join(format_value(elem, x, idx) for x in v) + "]"
     if ty == "bool":
         return "true" if v else "false"
