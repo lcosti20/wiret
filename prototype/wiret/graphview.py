@@ -26,10 +26,14 @@ BREAK = "#ff3b30"
 
 HEADER_COLORS = {"Arrays": "#b9770e", "Flow": "#566573", "Call": "#2471a3", "Math": "#1e8449", "Compare": "#138d75",
                  "Logic": "#9a7d0a", "Bits": "#873600", "Variables": "#6c3483", "Macro": "#7d3c98",
-                 "Other": "#566573"}
+                 "Structs": "#1f618d", "Other": "#566573"}
 
 
-def type_color(ty: str) -> str:
+def type_color(ty: str, idx=None) -> str:
+    if idx is not None and ty in idx.structs:
+        return "#5dade2"        # structs: light blue, whatever they hold
+    if idx is not None and ty in idx.enums:
+        return "#af7ac5"        # enums: lavender (yellow is for the debugger's value tags)
     if ty == "exec":
         return "#ffffff"
     if ty == "bool":
@@ -42,7 +46,7 @@ def type_color(ty: str) -> str:
         return "#a3d65c"
     if ty == "string":
         return "#e056fd"
-    if ty.startswith("array<"):
+    if ty.startswith("array::<"):
         return "#f0a830"        # arrays: orange, whatever they hold
     return "#95a5a6"
 
@@ -288,7 +292,7 @@ class GraphView(tk.Canvas):
                                      text=f"? {b.value.node}.{b.value.pin}")
                     continue
                 ty = info.sigs[n.id].input(b.pin)
-                color = SELECT if self.selected == key else type_color(ty.type if ty else "")
+                color = SELECT if self.selected == key else type_color(ty.type if ty else "", self.app.idx)
                 self.draw_curve(*src, *dst, color, w, tags=("wire", "w=d|%s|%s" % (n.id, b.pin)))
             for e in n.execs:
                 out = info.exec_pin(n, e)
@@ -362,7 +366,7 @@ class GraphView(tk.Canvas):
         for (d, name), (px, py, ty) in gm.pins.items():
             sx, sy = self.to_screen(px, py)
             ptag = ("pin", f"p={n.id}|{d}|{name}")
-            col = type_color(ty)
+            col = type_color(ty, self.app.idx)
             if d == "in":
                 filled = name in connected_in or (ty == "exec" and (n.id, name) in exec_targets)
             else:

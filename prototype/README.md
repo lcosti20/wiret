@@ -18,7 +18,7 @@ cd prototype
 python3 wiret_editor.py                         # the editor, opening Lesson 1
 python3 wiret_editor.py examples/demo.wiret     # the editor on a larger example
 python3 wiretc.py run examples/demo.wiret Main  # the same program from the command line
-python3 -m unittest discover tests              # 89 tests
+python3 -m unittest discover tests              # 94 tests
 ```
 
 ## Building a desktop app
@@ -118,7 +118,7 @@ over a node. The code and the technical message stay alongside it.
 
 ### Lessons
 
-The **Lessons** menu opens seven short programs from `lessons/`:
+The **Lessons** menu opens eight short programs from `lessons/`:
 
 1. Hello
 2. Variables
@@ -127,6 +127,7 @@ The **Lessons** menu opens seven short programs from `lessons/`:
 5. Functions
 6. FizzBuzz, as a challenge
 7. Arrays
+8. Structs and enums
 
 Each one has an intro note and a "Try it" note on the graph. Lessons open as copies in
 `my_lessons/` (git-ignored), so the originals never change. **Lessons → Start this lesson over**
@@ -267,7 +268,21 @@ They compile and run:
   `Vec2 { x: 1.0, y: 1.5 }` and `Mode.Chase`, and the debugger shows values the same way.
   Struct arguments cannot be typed on the command line.
 
-Not done yet: editor support (palette entries, a "Break struct" helper, a lesson).
+In the editor:
+
+- The palette and the right-click menus list *Make*, *Break*, *Get* and *With* nodes for every
+  struct, and offer the module's types wherever a kind accepts them (`Switch::<Mode>`,
+  `Eq::<Vec2>`, `MakeArray::<Vec2>`, enum `Convert`). A struct's `#[doc]` and its fields'
+  `#[doc]` become the palette description.
+- Dragging a struct wire onto empty canvas offers the nodes that take it, *Break* first among
+  them. Right-clicking a struct output pin offers *Break into fields*, and a struct input pin
+  offers *Make a Vec2*, each adding the node already wired.
+- Right-clicking an enum input pin lists its members. Typing a literal into one accepts the bare
+  member name, and `@cases` on an enum `Switch` does too.
+- *Add local* accepts struct and enum types. Struct pins are light blue and enum pins lavender.
+- Lesson 8 walks through a struct, an enum, `WithField` and a `Switch` on an enum.
+
+Struct and enum declarations are edited in the Source pane; there is no dialog for them yet.
 
 ### Deviations and known gaps
 

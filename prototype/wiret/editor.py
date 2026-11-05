@@ -28,7 +28,8 @@ from .model import Box, Graph, Lit, Local, Module, Param, PinRef, note_text, set
 from .natives import STD
 from .parser import KEYWORDS, ParseError, parse, parse_literal
 from .printer import layout_hash, print_module, semantic_hash
-from .registry import (CONSTRAINTS, ModuleIndex, STATIC_KINDS, can_convert, lit_fits, type_ok)
+from .registry import (ModuleIndex, STATIC_KINDS, can_convert, enum_values, lit_fits,
+                       type_choices, type_ok)
 from .explain import explain, explain_runtime, type_words
 from .runner import format_results, format_value, parse_args_for, split_args
 from .vm import STATUS_INTERRUPT, VM, WiretError
@@ -921,7 +922,16 @@ class EditorApp:
             ops.bind(self.graph, nid, pin, new)
             self.commit(f"Set {nid}.{pin} = {'true' if new.value else 'false'}")
             return
-        text = simpledialog.askstring("Set literal", f"{nid}.{pin} : {p.type}\n"
+        if p.type in self.idx.structs:
+            if messagebox.askyesno("Set literal", f"A {p.type} has no typed value. Add a "
+                                   f"'Make {p.type}' node wired into {nid}.{pin}?"):
+                self.make_for_pin(nid, pin, p.type)
+            return
+        hint = ""
+        if p.type in self.idx.enums:
+            names = ", ".join(m for m, _ in enum_values(self.idx.enums[p.type]))
+            hint = f"\nOne of: {names}"
+        text = simpledialog.askstring("Set literal", f"{nid}.{pin} : {p.type}{hint}\n"
                                       f"(empty: unbind; the pin takes its default)",
                                       initialvalue=current, parent=self.root)
         if text is None:
@@ -933,16 +943,55 @@ class EditorApp:
             return
         if p.type == "string" and not text.startswith('"'):
             text = '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+        if p.type in self.idx.enums and "." not in text:
+            text = f"{p.type}.{text}"           # a bare member name is enough
         try:
             lit = parse_literal(text)
         except ParseError as e:
-            messagebox.showerror("Invalid literal", e.msg)
+            if p.type not in self.idx.enums:
+                messagebox.showerror("Invalid literal", e.msg)
+                return
+            lit = None
+        if p.type in self.idx.enums and (lit is None or not lit_fits(lit, p.type) or
+                                         self.idx.enums[p.type].member(lit.value.split(".")[1])
+                                         is None):
+            names = ", ".join(m for m, _ in enum_values(self.idx.enums[p.type]))
+            messagebox.showerror("Invalid literal", f"{text} is not a member of {p.type}. "
+                                                    f"Choose one of: {names}")
             return
         if not lit_fits(lit, p.type):
             messagebox.showerror("Invalid literal", f"{text} is not a valid {p.type}")
             return
         ops.bind(self.graph, nid, pin, lit)
         self.commit(f"Set {nid}.{pin} = {text}")
+
+    def set_enum_value(self, nid, pin, ty, member):
+        if not self.can_edit():
+            return
+        ops.bind(self.graph, nid, pin, Lit("enum", f"{ty}.{member}"))
+        self.commit(f"Set {nid}.{pin} = {ty}.{member}")
+
+    def break_struct(self, nid, pin, ty):
+        """A BreakStruct to the right of a struct output, wired to it."""
+        if not self.can_edit():
+            return
+        gm = self.view.geoms.get(nid)
+        x, y = (gm.x + gm.w + 60, gm.y) if gm else (0, 0)
+        n = ops.create_node(self.graph, "BreakStruct", ty, [], x, y)
+        ops.bind(self.graph, n.id, "obj", PinRef(nid, pin))
+        self.view.selected = ("node", n.id)
+        self.commit(f"Added {n.id}: {nid}.{pin} split into fields")
+
+    def make_for_pin(self, nid, pin, ty):
+        """A MakeStruct to the left of a struct input, wired into it."""
+        if not self.can_edit():
+            return
+        gm = self.view.geoms.get(nid)
+        x, y = (gm.x - 220, gm.y) if gm else (0, 0)
+        n = ops.create_node(self.graph, "MakeStruct", ty, [], x, y)
+        ops.bind(self.graph, nid, pin, PinRef(n.id, "result"))
+        self.view.selected = ("node", n.id)
+        self.commit(f"Added {n.id}: a {ty} for {nid}.{pin}")
 
     def add_node(self, kind, symbol=None, targs=None, x=0, y=0, attrs=None):
         if not self.can_edit():
@@ -1047,13 +1096,20 @@ class EditorApp:
         a = n.attr("cases")
         from .printer import fmt_lit
         cur = ", ".join(fmt_lit(v) for _, v in a.args) if a and a.args else ""
-        text = simpledialog.askstring("@cases", "Case values, comma separated:", initialvalue=cur,
-                                      parent=self.root)
+        ety = n.targs[0] if n.targs and n.targs[0] in self.idx.enums else None
+        prompt = "Case values, comma separated:"
+        if ety:
+            members = ", ".join(m for m, _ in enum_values(self.idx.enums[ety]))
+            prompt = f"{ety} members, comma separated (one of: {members}):"
+        text = simpledialog.askstring("@cases", prompt, initialvalue=cur, parent=self.root)
         if text is None:
             return
+        ty = n.targs[0] if n.targs else None
+        parts = [t.strip() for t in next(csv.reader([text], skipinitialspace=True)) if t.strip()]
+        if ty in self.idx.enums:      # bare member names are enough: Idle, Chase
+            parts = [t if "." in t else f"{ty}.{t}" for t in parts]
         try:
-            vals = [parse_literal(t.strip()) for t in next(csv.reader([text], skipinitialspace=True))
-                    if t.strip()]
+            vals = [parse_literal(t) for t in parts]
         except ParseError as e:
             messagebox.showerror("@cases", e.msg)
             return
@@ -1166,15 +1222,19 @@ class EditorApp:
         g = self.graph
         if g is None or not self.can_edit():
             return
+        own = sorted(self.idx.structs) + sorted(self.idx.enums)
+        example = f"  or  pos: {own[0]}" if own else ""
         text = simpledialog.askstring(f"Add {kw}", "name: type   (e.g.  count: i32  or  "
-                                                   "scores: array::<i32>)",
+                                                   f"scores: array::<i32>{example})",
                                       parent=self.root)
         if not text or ":" not in text:
             return
         name, ty = (s.strip() for s in text.split(":", 1))
-        if not re.fullmatch(r"[A-Za-z_]\w*", name) or not type_ok(ty):
+        if not re.fullmatch(r"[A-Za-z_]\w*", name) or not type_ok(ty, self.idx):
+            own = sorted(self.idx.structs) + sorted(self.idx.enums)
+            extra = f", or one of this module's types: {', '.join(own)}" if own else ""
             messagebox.showerror(f"Add {kw}", "Use a valid name and a type such as i32, string "
-                                              "or array::<i32>.")
+                                              f"or array::<i32>{extra}.")
             return
         (g.locals if kw == "local" else g.states).append(Local(name, ty))
         self.commit(f"Added {kw} {name}")
@@ -1210,9 +1270,22 @@ class EditorApp:
             _, nid, d, pin = h
             sig = self.info.sigs[nid]
             p = sig.input(pin) if d == "in" else sig.output(pin)
-            if d == "in" and p and not p.is_exec:
+            if d == "in" and p and p.type in self.idx.enums:
+                sub = tk.Menu(menu, tearoff=0)
+                for member, _ in enum_values(self.idx.enums[p.type]):
+                    sub.add_command(label=f"{p.type}.{member}",
+                                    command=lambda m=member: self.set_enum_value(nid, pin,
+                                                                                 p.type, m))
+                menu.add_cascade(label=f"Set '{pin}' to", menu=sub)
+            elif d == "in" and p and p.type in self.idx.structs:
+                menu.add_command(label=f"Make a {p.type} for '{pin}'",
+                                 command=lambda: self.make_for_pin(nid, pin, p.type))
+            elif d == "in" and p and not p.is_exec:
                 menu.add_command(label=f"Set literal for '{pin}'…",
                                  command=lambda: self.edit_literal(nid, pin))
+            if d == "out" and p and p.type in self.idx.structs:
+                menu.add_command(label=f"Break '{pin}' into fields",
+                                 command=lambda: self.break_struct(nid, pin, p.type))
             menu.add_command(label="Disconnect", command=lambda: self.disconnect(nid, d, pin))
             menu.add_separator()
             self.node_menu(menu, nid)
@@ -1287,7 +1360,7 @@ class EditorApp:
 
         def typed(m, label, kind, constraint):
             sub = tk.Menu(m, tearoff=0)
-            for t in CONSTRAINTS[constraint]:
+            for t in type_choices(constraint, idx):
                 add(sub, t, kind, None, [t])
             m.add_cascade(label=label, menu=sub)
 
@@ -1301,7 +1374,7 @@ class EditorApp:
         typed(flow, "Select", "Select", "any")
         typed(flow, "Switch", "Switch", "switch")
         sub = tk.Menu(flow, tearoff=0)
-        for t in ["exec"] + CONSTRAINTS["any"]:
+        for t in ["exec"] + type_choices("any", idx):
             add(sub, t, "Reroute", None, [t])
         flow.add_cascade(label="Reroute", menu=sub)
         menu.add_cascade(label="Flow", menu=flow)
@@ -1311,10 +1384,11 @@ class EditorApp:
             if cat == "Math" and k != "Convert":
                 typed(math_m, k, k, tps[0])
         conv = tk.Menu(math_m, tearoff=0)
-        for f in CONSTRAINTS["any"]:
+        convertible = type_choices("convertible", idx)
+        for f in convertible:
             sub = tk.Menu(conv, tearoff=0)
-            for t in CONSTRAINTS["any"]:
-                if can_convert(f, t):
+            for t in convertible:
+                if can_convert(f, t, idx):
                     add(sub, t, "Convert", None, [f, t])
             conv.add_cascade(label=f"from {f}", menu=sub)
         math_m.add_cascade(label="Convert", menu=conv)
@@ -1345,6 +1419,24 @@ class EditorApp:
         if var.index("end") is None:
             var.add_command(label="(no locals or variables: Graph > Add local…)", state="disabled")
         menu.add_cascade(label="Variables", menu=var)
+
+        structs = tk.Menu(menu, tearoff=0)
+        for name in sorted(idx.structs):
+            sub = tk.Menu(structs, tearoff=0)
+            add(sub, f"Make {name}", "MakeStruct", name)
+            add(sub, f"Break {name}", "BreakStruct", name)
+            fields = idx.structs[name].fields
+            if fields:
+                sub.add_separator()
+            for f in fields:
+                add(sub, f"Get {f.name}", "GetField", f"{name}.{f.name}")
+            for f in fields:
+                add(sub, f"With {f.name} (changed copy)", "WithField", f"{name}.{f.name}")
+            structs.add_cascade(label=name, menu=sub)
+        if structs.index("end") is None:
+            structs.add_command(label="(no structs: declare one in the Source pane)",
+                                state="disabled")
+        menu.add_cascade(label="Structs", menu=structs)
 
         call = tk.Menu(menu, tearoff=0)
         for name in sorted(idx.graphs):

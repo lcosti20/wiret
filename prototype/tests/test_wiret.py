@@ -1163,6 +1163,73 @@ func Same(a: Path) -> (same: bool) {
         self.assertIn("struct.get", dis)
 
 
+class StructEditorTests(unittest.TestCase):
+    """Step 5 of struct/enum support: what the palette and menus offer."""
+
+    def setUp(self):
+        from wiret.registry import ModuleIndex
+        self.m = parse(module(STRUCT_DATA))
+        self.idx = ModuleIndex(self.m)
+        self.g = self.m.graph("Equal")
+
+    def labels(self):
+        from wiret import palette
+        return {it.label: it for it in palette.items(self.g, self.idx)}
+
+    def test_type_choices(self):
+        from wiret.registry import type_choices
+        self.assertEqual(type_choices("switch", self.idx)[-2:], ["Mode", "Wide"])
+        eq = type_choices("eq", self.idx)
+        self.assertIn("Enemy", eq)
+        self.assertIn("Tree", type_choices("any", self.idx))
+        self.assertNotIn("Path", eq)          # holds an array
+        self.assertNotIn("Tree", eq)
+        self.assertNotIn("Enemy", type_choices("ord", self.idx))
+        self.assertEqual(type_choices("number", self.idx), type_choices("number"))
+
+    def test_palette_offers_struct_and_enum_nodes(self):
+        labels = self.labels()
+        for label in ("Make Vec2", "Break Enemy", "Get Enemy.mode", "With Vec2.y (changed copy)",
+                      "Switch::<Mode>", "Eq::<Enemy>", "Lt::<Mode>", "Select::<Tree>",
+                      "MakeArray::<Vec2>", "Convert::<Mode, u8> (to whole number)",
+                      "Convert::<u8, Mode> (to a Mode)"):
+            with self.subTest(label):
+                self.assertIn(label, labels)
+        for label in ("Eq::<Path>", "Lt::<Vec2>", "Add::<Mode>", "Convert::<Mode, i32> (to whole number)"):
+            with self.subTest(label):
+                self.assertNotIn(label, labels)
+        self.assertEqual(labels["Make Vec2"].category, "Structs")
+        self.assertEqual(labels["Get Enemy.mode"].description,
+                         "Reads the field 'mode' of an Enemy.")
+
+    def test_struct_docs_reach_the_palette(self):
+        from wiret import palette
+        src = (STRUCT_NODES.replace("struct Vec2 {", '#[doc("A point.")]\nstruct Vec2 {')
+               .replace("  x: f32\n", '  #[doc("Across.")]\n  x: f32\n'))
+        m = parse(module(src, macros=False))
+        from wiret.registry import ModuleIndex
+        idx = ModuleIndex(m)
+        self.assertTrue(palette.describe("MakeStruct", "Vec2", idx).endswith("A point."))
+        self.assertTrue(palette.describe("GetField", "Vec2.x", idx).endswith("Across."))
+
+    def test_dropping_a_struct_wire_offers_its_nodes(self):
+        from wiret import palette
+        fits = {it.label for it in palette.items(self.g, self.idx)
+                if palette.compatible(it, self.g, self.idx, "out", "Vec2") is not None}
+        for label in ("Break Vec2", "Get Vec2.x", "With Vec2.x (changed copy)", "Eq::<Vec2>"):
+            self.assertIn(label, fits)
+        self.assertNotIn("Break Enemy", fits)
+        into = {it.label for it in palette.items(self.g, self.idx)
+                if palette.compatible(it, self.g, self.idx, "in", "Mode") is not None}
+        self.assertIn("Get Enemy.mode", into)
+
+    def test_pin_colours(self):
+        from wiret.graphview import type_color
+        self.assertEqual(type_color("array::<i32>"), "#f0a830")
+        self.assertNotEqual(type_color("Vec2", self.idx), type_color("Vec2"))
+        self.assertNotEqual(type_color("Mode", self.idx), type_color("Vec2", self.idx))
+
+
 class HashTests(unittest.TestCase):
     def test_reorder_and_layout_removal_do_not_change_semantics(self):
         text = demo()
@@ -2015,6 +2082,7 @@ class LessonTests(unittest.TestCase):
                               "11", "Fizz", "13", "14", "FizzBuzz"],
         "07_arrays.wiret": ["Item 0 is 12", "Item 1 is 30", "Item 2 is 7", "Item 3 is 25",
                             "4 scores, total 74"],
+        "08_structs.wiret": ["Rex is happy.", "Rex is hungry."],
     }
 
     def test_lessons(self):
