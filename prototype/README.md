@@ -118,7 +118,7 @@ over a node. The code and the technical message stay alongside it.
 
 ### Lessons
 
-The **Lessons** menu opens eight short programs from `lessons/`:
+The **Lessons** menu opens fourteen short programs from `lessons/`:
 
 1. Hello
 2. Variables
@@ -128,6 +128,13 @@ The **Lessons** menu opens eight short programs from `lessons/`:
 6. FizzBuzz, as a challenge
 7. Arrays
 8. Structs and enums
+9. Maps: counting fruit with `MapFind`, `MapSet` and `ForEachMap`
+10. Errors: `Try` around a divide by zero and around a `Throw` of your own
+11. Waiting: a countdown event with `Delay` (its `Main` is an event)
+12. Objects: `Animal`, `Dog` and `Cat`, an override, and `CallParent`
+13. Interfaces: a `Shape` interface on unrelated classes, and one inherited implementation
+14. Events: a button's dispatcher, a function and a method as listeners, `Unbind`, and a
+    click count kept in the method's `state`
 
 Each one has an intro note and a "Try it" note on the graph. Lessons open as copies in
 `my_lessons/` (git-ignored), so the originals never change. **Lessons → Start this lesson over**
@@ -719,7 +726,7 @@ prototype/
     palette.py         searchable node palette and node descriptions
     explain.py         plain-language diagnostics and runtime errors
     std/flow.wiret     std.flow macros (ForRange, Repeat, DoOnce, DoN, FlipFlop)
-  lessons/             seven beginner lessons
+  lessons/             fourteen beginner lessons
   examples/demo.wiret
   tests/test_wiret.py
 ```

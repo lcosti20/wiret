@@ -277,8 +277,7 @@ def fmt_class(c: Class, methods: list, idx: ModuleIndex, semantic=False) -> list
     for g in sorted(methods, key=lambda g: (g.kind != "func", g.name)):
         if len(lines) > 1:
             lines.append("")
-        lines.extend(fmt_meta(g.meta, IND, semantic))
-        lines.extend(fmt_graph(g, idx, IND, semantic))
+        lines.extend(fmt_graph(g, idx, IND, semantic))     # its #[...] lines included
     return lines + ["}"]
 
 

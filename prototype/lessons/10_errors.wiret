@@ -1,0 +1,122 @@
+wiret 1
+module lessons.errors
+
+extern func host.Log(message: string)
+
+#[note("CheckAge stops with an error of its own when the age is negative. Throw gives the error a message and a code; whoever called CheckAge decides what to do about it.")]
+func CheckAge(age: i32) {
+  node bad = Lt::<i32>
+    .a <- entry.age
+    .b <- 0
+  node chk = Branch
+    .cond <- bad.result
+  node entry = Entry
+  node stop = Throw
+    .message <- "An age can't be negative"
+    .code <- 1
+
+  flow {
+    chk.then -> stop
+    entry -> chk
+  }
+
+  layout {
+    bad at (50, 110)
+    chk at (250, 0)
+    entry at (0, 0)
+    stop at (500, 0)
+  }
+}
+
+#[note("Lesson 10: Errors. Dividing by zero has no answer, so it is an error, and normally an error stops the whole program. A Try node catches it instead: what is wired after 'body' runs protected, and if something in it goes wrong, 'fault' runs with the error's message. Either way, 'then' runs afterwards.")]
+#[note("Try it: (1) Change 0 in 'zero' to 2: now 'never' prints, and 'fault' is skipped. (2) Disconnect 'sorted.fault' and run: the age error now stops the program, and the error panel names the node. (3) Make your own Throw with your own message.")]
+func Main() {
+  node age = Call CheckAge
+    .age <- -3
+  node ages_ok = Call host.Log
+    .message <- "That age is fine"
+  node each = Call std.string.Concat
+    .a <- "Each gets "
+    .b <- share_text.result
+  node entry = Entry
+  node good = Call Share
+    .total <- 12
+    .people <- 4
+  node log_share = Call host.Log
+    .message <- each.result
+  node never = Call host.Log
+    .message <- "This line never prints"
+  node oops = Call std.string.Concat
+    .a <- "Oops: "
+    .b <- safe.message
+  node oops2 = Call std.string.Concat
+    .a <- "Oops: "
+    .b <- sorted.message
+  #[note("Everything wired after 'body' is protected by this Try.")]
+  node safe = Try
+  node say_oops = Call host.Log
+    .message <- oops.result
+  node say_oops2 = Call host.Log
+    .message <- oops2.result
+  node share_text = Convert::<i32, string>
+    .value <- good.each
+  node sorted = Try
+  node still = Call host.Log
+    .message <- "Still running!"
+  node zero = Call Share
+    .total <- 7
+    .people <- 0
+
+  flow {
+    age -> ages_ok
+    entry -> safe
+    good -> log_share
+    log_share -> zero
+    safe.body -> good
+    safe.fault -> say_oops
+    safe.then -> sorted
+    sorted.body -> age
+    sorted.fault -> say_oops2
+    sorted.then -> still
+    zero -> never
+  }
+
+  layout {
+    age at (750, 0)
+    ages_ok at (1000, 0)
+    each at (550, 310)
+    entry at (0, 0)
+    good at (500, 0)
+    log_share at (750, 200)
+    never at (1250, 0)
+    oops at (300, 310)
+    oops2 at (550, 510)
+    safe at (250, 0)
+    say_oops at (500, 200)
+    say_oops2 at (750, 400)
+    share_text at (350, 420)
+    sorted at (500, 400)
+    still at (750, 600)
+    zero at (1000, 200)
+  }
+}
+
+#[note("Share divides a total between people. Divide by zero people and Div fails.")]
+func Share(total: i32, people: i32) -> (each: i32) {
+  node div = Div::<i32>
+    .a <- entry.total
+    .b <- entry.people
+  node entry = Entry
+  node ret = Return
+    .each <- div.result
+
+  flow {
+    entry -> ret
+  }
+
+  layout {
+    div at (50, 110)
+    entry at (0, 0)
+    ret at (250, 0)
+  }
+}

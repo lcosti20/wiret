@@ -854,7 +854,12 @@ class FuncLowerer:
                 if s.kind == "node" and s.a in self.ir and not self.ir[s.a].pure:
                     key = (s.a, s.b)
                     if key not in self.slots:
-                        self.slots[key] = self.add_local(f"{s.a}.{s.b}", ty)
+                        # typed by the producer's output: consumers may take a supertype
+                        # (a class into an interface pin), and each one reads the same slot
+                        sig = self.ir[s.a].sig
+                        out = sig.output(s.b) if sig is not None else None
+                        self.slots[key] = self.add_local(f"{s.a}.{s.b}",
+                                                         out.type if out else ty)
                         self.pin_map[self.slots[key]] = key
         if self.c.debug:   # every impure output gets a slot, read or not
             for nid in sorted(self.ir):

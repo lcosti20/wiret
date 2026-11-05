@@ -4113,6 +4113,17 @@ class ClassTests(unittest.TestCase):
         self.assertEqual(print_module(parse(text)), text)
         self.assertEqual(codes(text), [])
 
+    def test_a_note_on_a_method_round_trips_once(self):
+        text = module("""
+class A {
+  #[note("one note")]
+  func F() {
+    node entry = Entry
+  }
+}
+""", macros=False)
+        self.assertEqual(print_module(parse(text)), text)
+
     def test_methods_are_items_named_by_class(self):
         m = parse(classes_text())
         names = [g.name for g in m.graphs()]
@@ -4695,6 +4706,30 @@ class B impl A, Missing {
         diags = sorted((d.graph, d.code) for d in check(parse(text)) if d.code.startswith("E"))
         self.assertEqual(diags, [("B", "E0151"), ("B", "E0151"), ("I", "E0102"),
                                  ("I", "E0501")])
+
+    def test_an_object_used_as_a_class_and_as_an_interface(self):
+        # New's result goes into a Damageable pin first (sorted by id) and then into a Door
+        # field write; the slot holding it must keep the producer's type, Door
+        text = iface_text("""
+func Both() -> (left: i32) {
+  node a_use = Call Damageable.Hit
+    .self <- door.result
+    .amount <- 1
+  node door = New Door
+  node entry = Entry
+  node ret = Return
+    .left <- a_use.left
+  node z_cast = Cast Door
+    .obj <- door.result
+
+  flow {
+    a_use -> ret
+    door -> a_use
+    entry -> door
+  }
+}
+""")
+        self.assertEqual(run(text, "Both")[0], [99])
 
     def test_null_receiver_faults(self):
         text = iface_text("""
@@ -5832,6 +5867,9 @@ func Main() {
         self.assertEqual(run(text, "Main")[1], ["B", "A", "B", "1", "2"])
 
 
+from wiret.runner import run_function  # noqa: E402
+
+
 class LessonTests(unittest.TestCase):
     EXPECTED = {
         "01_hello.wiret": ["Hello!", "Programs run one step at a time.",
@@ -5845,6 +5883,14 @@ class LessonTests(unittest.TestCase):
         "07_arrays.wiret": ["Item 0 is 12", "Item 1 is 30", "Item 2 is 7", "Item 3 is 25",
                             "4 scores, total 74"],
         "08_structs.wiret": ["Rex is happy.", "Rex is hungry."],
+        "09_maps.wiret": ["apple: 2", "pear: 1", "kiwi: 1", "3 different fruits"],
+        "10_errors.wiret": ["Each gets 3", "Oops: integer divide by zero",
+                            "Oops: An age can't be negative", "Still running!"],
+        "11_waiting.wiret": ["3...", "2...", "1...", "Go!"],
+        "12_objects.wiret": ["Rex makes a sound. Woof!", "Tom says Meow.",
+                             "An animal makes a sound."],
+        "13_interfaces.wiret": ["Rectangle: area 12", "Square: area 25", "Triangle: area 6"],
+        "14_events.wiret": ["Click number 1", "Click number 2", "The counter heard 3 clicks"],
     }
 
     def test_lessons(self):
@@ -5856,7 +5902,11 @@ class LessonTests(unittest.TestCase):
                 m = parse(text)
                 self.assertEqual(print_module(m), text, "not canonical")
                 self.assertEqual([str(d) for d in check(m)], [])
-                self.assertEqual(run(text, "Main")[1], self.EXPECTED[name])
+                _, r = build(text)
+                out = []
+                vm = VM(output=out.append)
+                run_function(vm, vm.load(r.wbc), "Main", [])   # Main may be an event
+                self.assertEqual(out, self.EXPECTED[name])
                 for g in m.graphs():
                     self.assertTrue(notes(g.meta), f"{g.name} has no intro")
                     placed = {p.id for p in g.places}
