@@ -609,6 +609,44 @@ extern func host.Log(message: string) @capability("console.write")
   `tomllib` where Python has it (3.11 and later), else with a small reader for this table.
 - `@capability` belongs on an `extern func` and takes one string (`E0104` otherwise).
 
+### Deterministic mode
+
+Section 4.10. `VM(deterministic=True)` (`WR_CFG_DETERMINISTIC`) promises that the same
+`.wbc`, configuration and input log give the same results, faults, instruction counts, fuel and
+output, which is what replays, lockstep networking and save-game reproduction need.
+
+- **Floating point.** Python floats are IEEE binary64 with round to nearest even, and the VM
+  never fuses a multiply and add or keeps extra precision. `f32` arithmetic is done in binary64
+  and rounded once to binary32, which gives the correctly rounded result for `+ - * /` and
+  `Sqrt` (binary64 has more than twice binary32's precision). `Min` and `Max` return NaN if
+  either input is NaN and order `-0` before `+0`; `Eq` with a NaN is false. Integer to `f32`
+  conversions now round once (a 64-bit integer used to go through `f64` first, which could
+  land one `f32` step off); that was wrong in any mode. Reinterpreting a float's bits gives the
+  canonical quiet NaN's bits for every NaN, so NaN payloads and signs are never observable.
+- **Bundled `std.math`.** `Sin`, `Cos`, `Tan`, `Exp`, `Log`, `Pow` and `Atan2` do not use the
+  platform's `libm`, whose last bits differ between systems. `wiret/detmath.py` computes each
+  in Python's `decimal` arithmetic (specified exactly and implemented in software, so the
+  digits are the same everywhere) to 60 digits, then rounds once to binary64, which is almost
+  always the correctly rounded value. Arguments are reduced modulo 2π exactly, so even
+  `Sin(1e22)` is right. Special values (zeros, infinities, NaN) follow C99 Annex F, as `libm`
+  does. Outside the mode `std.math` uses `libm`.
+- **Natives.** A `NativeSpec` has `deterministic=True` unless it reads something outside the
+  VM (a clock, input, files). A deterministic VM refuses to register one that is not
+  (`WR_ERR_LINK`).
+- **The input log.** Every API call (`load`, `grant`, `signal`, `call`, `start`, `advance`,
+  `fire`, `kill`, `new`, `call_method`, `delegate`, `broadcast`) is recorded in
+  `vm.input_log` as plain JSON: the arguments, the result or the fault, the instructions run,
+  the fuel left, and the lines printed. Floats are written in hex so they are exact; objects,
+  signals, fibers, delegates and the module are handles numbered in the order the log met
+  them, which is why a host signal must come from `vm.signal()`. `load` records the module's
+  SHA-256.
+- **Replay.** `replay(wbc_bytes, log)` runs the log again on a new deterministic VM and raises
+  `ReplayMismatch` at the first entry whose result, fault, instruction count, fuel or output
+  differs. `wiretc run --deterministic --record LOG.json FILE FUNC` records a run (a faulting
+  one too), and `wiretc replay FILE LOG.json` checks it.
+- `vm.interrupt()` still works, but marks the run non-replayable
+  (`vm.stats["replayable"]`), since an interrupt does not come from the log.
+
 ### Identity and the id registry
 
 A **project** is a directory with a `wiret.toml` (section 7.3); its `wiret.ids` lists every
@@ -693,7 +731,9 @@ pins for results, and flow wires for a macro's exec parameters and results.
   makes one copy. The
   editor's debugger steps through one fiber, the one Run started.
 - **Classes, not yet:** extern (host) types.
-- **Not implemented:** deterministic-mode float rules (section 4.10).
+- **Deterministic mode, not yet:** a logical heap limit (`max_heap_bytes`); the prototype has
+  no memory limit at all. Cross-platform golden traces (section 7.4) are a claim for real
+  implementations; this VM is one implementation on one interpreter.
 - **Optimisation.** There is no `-O1`, so the `cont.push`/`cont.pop` pairs are never replaced
   by direct branches.
 - **Example layout.** The spec's examples align the `=` signs; the canonical writer does not.
