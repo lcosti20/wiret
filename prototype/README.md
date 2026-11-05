@@ -187,11 +187,11 @@ The editor also follows the graph-editor contract in section 7.5:
 
 | Area | Status |
 | --- | --- |
-| Text syntax (2.1–2.4) | Full lexer and parser for `use`, `extern`, `const`, `var`, `enum`, `struct`, `func`, `event`, `macro`, `local`, `state`, nodes, bindings, semantic `@` attributes, `#[...]` metadata lines (`#[doc]`, `#[note]`, ...) above declarations, nodes and boxes, the `flow` block (exec wires) and `layout` (places and boxes). An old `markup` block is rejected with a hint, and an unknown `@` name such as `@doc` is `E0104`. `enum` and `struct` parse, print, hash and type-check (see *Structs and enums* below), but cannot be compiled yet. `interface`/`class` are rejected with a clear error. |
+| Text syntax (2.1–2.4) | Full lexer and parser for `use`, `extern`, `const`, `var`, `enum`, `struct`, `class` (with methods and a base class), `func`, `event`, `macro`, `local`, `state`, nodes, bindings, semantic `@` attributes, `#[...]` metadata lines (`#[doc]`, `#[note]`, ...) above declarations, nodes and boxes, the `flow` block (exec wires) and `layout` (places and boxes). An old `markup` block is rejected with a hint, and an unknown `@` name such as `@doc` is `E0104`. See *Structs and enums* and *Classes* below. `interface`, `impl` and `dispatcher` are rejected with a clear error. |
 | Canonical form and hashes (2.5) | Sorted items (struct fields and enum members keep the order written), nodes, `flow` wires (by source node id, then exec pin order) and layout lines, each with its metadata lines above it (`doc`, `category`, `keywords`, then notes as written); registry pin order; default-valued bindings omitted; 100-column wrapping; attribute ordering. Semantic hash (ignores layout, every `#[...]` line and `Reroute`) and layout hash. |
-| Node kinds (3.3) | `Entry`, `Return`, `Branch`, `Sequence`, `Switch`, `Select`, `Macro`, `Exit`, `Reroute`, `Get/SetLocal`, `Get/SetVar` (and `const`s), `Get/SetState`, `Call`, `Convert`, all arithmetic, comparison, logic and bit kinds, and the array kinds `MakeArray`, `ArrayGet`, `ArrayLength`, `ArraySet`, `ArrayAdd`, `ArrayInsert`, `ArrayRemove`, `ArrayClear`, the struct kinds, the map and set kinds (see *Maps and sets* below), `Try` and `Throw` (see *Faults* below), and the latent kinds `Delay`, `Yield` and `Await` (see *Fibers* below). Types: `bool`, all integer widths, `f32`, `f64`, `string`, `array::<T>`, `map::<K, V>`, `set::<T>`, structs, enums and `std.Signal`. |
+| Node kinds (3.3) | `Entry`, `Return`, `Branch`, `Sequence`, `Switch`, `Select`, `Macro`, `Exit`, `Reroute`, `Get/SetLocal`, `Get/SetVar` (and `const`s), `Get/SetState`, `Call`, `Convert`, all arithmetic, comparison, logic and bit kinds, and the array kinds `MakeArray`, `ArrayGet`, `ArrayLength`, `ArraySet`, `ArrayAdd`, `ArrayInsert`, `ArrayRemove`, `ArrayClear`, the struct kinds, the map and set kinds (see *Maps and sets* below), `Try` and `Throw` (see *Faults* below), the latent kinds `Delay`, `Yield` and `Await` (see *Fibers* below), and the class kinds `New`, `GetField`/`SetField` on objects, `Cast` and `IsValid` (see *Classes* below). Types: `bool`, all integer widths, `f32`, `f64`, `string`, `array::<T>`, `map::<K, V>`, `set::<T>`, structs, enums, classes and `std.Signal`. |
 | Execution model (4.2–4.3) | Continuation stack, `Sequence` push/pop, macro inlining with path-style ids (`loop/test`, `loop!in`), `Exit` as a jump, joins, evaluation points with per-point sharing, impure output slots, `@pure` and `@reads` calls as pure nodes, per-expansion `state`. The §4.2 `SumTo(2)` trace is reproduced exactly (see tests). |
-| Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0201 (latency), E0301, E0302, E0304, E0401, E0412, E0501, E0502, E0503, W0201, W0301, W0302, W0310, W0320, W0601, W0602, W0603, W0604. |
+| Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0150, E0151, E0201 (latency), E0301, E0302, E0304, E0401, E0412, E0501, E0502, E0503, W0201, W0301, W0302, W0310, W0320, W0601, W0602, W0603, W0604. |
 | Lowering (4.8) | `-O0`: one labelled block per impure node, `local.tee` for shared values, `cont.push`/`cont.pop` kept. Output closely matches the §5.8 listings. |
 | WBC (5.2–5.4) | Type (function, `5E` array and `5F` struct entries), Import, Function, Global, Export, Data and Code sections, plus custom sections `name`, `wr.debug`, `wr.pins`, `wr.pure`, `wr.meta` (hashes), `wr.caps` and `wr.graph` (deflated canonical source). |
 | Verifier (5.5) | One linear pass: decoding, branch targets, empty stack at labels, operand typing (including `struct.new`/`get`/`with`), returns, `max_stack`, latency/purity flags. Type references may point forward, but a struct may not hold itself by value. Fuzz-tested. |
@@ -400,6 +400,56 @@ declared `@latent` after its signature (`func Wait(s: f64) @latent { ... }`).
   straight to the next timer, and stop with `WR_YIELD` if it waits for a signal that nothing
   is left to fire. `wiretc run` then prints the virtual time it finished at.
 
+### Classes
+
+The third Tier 2 item (sections 2.2, 3.1, 3.3, 5.3 and 5.6). A class is a reference type with
+fields, methods and single inheritance:
+
+```
+class Boss : Player {
+  rage: i32 = 3
+
+  func Describe() -> (text: string) { ... }
+}
+```
+
+- **Methods are items.** The parser lifts each `func` and `event` out of its class into a
+  module item named `Class.Method` (`Player.TakeDamage`) with `owner` set, and the printer
+  writes it back inside the class. So diagnostics, exports, `wiretc edit`, merge, diff, the id
+  registry and the editor's graph list all treat a method like any other graph. A method takes
+  an implicit first parameter `self`, an output of its `Entry`. Canonical order inside a class:
+  fields as written (they are the object layout), then funcs, then events, each by name.
+- **Nodes.** `New Player` (impure: it makes an identity) has `result`. `GetField` and
+  `SetField` take the bare field name inside the class's own methods (`GetField health`, as in
+  section 2.6) and `Class.field` anywhere else; `GetField` on an object has `reads` purity, so
+  it is evaluated at each consumer. `Cast Boss` and `IsValid` take any object (`anyref`):
+  `Cast` gives `result` (null when the object is not a `Boss`) and `ok`. `Eq` and `Ne` on a
+  class compare identity. `null` is the class literal.
+- **Calls.** `Call Player.TakeDamage` has `self` as its first input. A method that is not
+  `@final` is called through the vtable (`call_virtual`), so the object's own override runs;
+  `Call Boss.TakeDamage` finds an inherited method. A subclass flows into a base-class pin,
+  and any object into `anyref`; never the other way (`E0110`).
+- **Checks.** `E0151`: a base that is not a class of the module, or an inheritance cycle.
+  `E0102`: a field declared twice along the chain. `E0150`: an override whose parameters,
+  results or latency differ from the method it replaces, or that replaces a `@final` method.
+  `@pure` may not read object fields (`E0304`); `@pure` and `@reads` may not set them or make
+  objects (`E0302`).
+- **Bytecode.** The `5B` class type entry (flags 0, superclass, no interfaces yet, own fields
+  with defaults, full vtable: the superclass's slots with overrides in place, then new methods
+  by name), and `class.new`/`get`/`set`, `ref.null`/`is_null`/`eq`/`test`/`cast`/`valid` and
+  `call_virtual`. `class.get` indexes the whole layout, inherited fields first. The verifier
+  checks the hierarchy, each vtable against its superclass's, receiver types and subtyping;
+  `select` on two references gives their common type, which is how `Cast` is lowered without
+  a branch (`ref.test`, `select` against `ref.null`, `ref.cast`). The `name` section gains a
+  fourth vector after the globals: per class, its type index, name and field names.
+- **VM.** An object is an `Obj` with a class and a field list. A null `GetField`, `SetField`
+  or method call faults with code -3, catchable with `Try`; a failed `ref.cast` with -4. The
+  host side has `vm.new(mod, "Player")`, `obj.get("health")` / `obj.set(...)`, and
+  `vm.call_method(mod, obj, "TakeDamage", [args])`, which dispatches like `wr_push_virtual`.
+- `wiretc run file Player.TakeDamage 30` and the editor's Run give a method a new object of
+  its class as `self`. The palette and the Add menu have a Classes section. Class
+  declarations are edited in the Source pane.
+
 ### Identity and the id registry
 
 A **project** is a directory with a `wiret.toml` (section 7.3); its `wiret.ids` lists every
@@ -472,10 +522,14 @@ pins for results, and flow wires for a macro's exec parameters and results.
 
 - **Exports.** Every `func` and `event` is exported, so the editor can run any of them. The
   spec exports only `@export` declarations.
-- **The rest of Tier 2 is not implemented:** classes, interfaces,
-  delegates and dispatchers. Their node kinds are reported as `E0501` and their opcodes are
-  rejected by the verifier. `Try`, `Throw` and fibers are done (see *Faults* and *Fibers*
-  above). The editor's debugger steps through one fiber, the one Run started.
+- **The rest of Tier 2 is not implemented:** interfaces (`impl`), delegates and dispatchers.
+  Their declarations are parse errors, their node kinds `E0501`, and their opcodes are
+  rejected by the verifier. `Try`, `Throw`, fibers and classes are done (see above). The
+  editor's debugger steps through one fiber, the one Run started.
+- **Classes, not yet:** `state` in a method (it would live on the object; `E0501`, including
+  a macro with state expanded in a method), calling a base class's version of an overridden
+  method, extern (host) types, and the container mutators on a class field place
+  (`ArrayAdd::<i32> Player.items`).
 - **Not implemented:** the rest of the
   project manager (`wiret.lock`, `use` of other modules), the C API and deterministic-mode
   float rules.

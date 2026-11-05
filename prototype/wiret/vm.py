@@ -14,8 +14,8 @@ from typing import Callable, Optional
 from . import wbc
 from .natives import NO_FAULT, FaultValue, NativeFault, NativeSpec, Signal, _f32, all_natives
 from .verifier import VerifyError, verify
-from .wbc import (F32, F64, FAULT, I32, I64, SIGNAL, STRING, OPS, ArrayType, MapType, Ref, SetType,
-                  StructType, WbcError)
+from .wbc import (F32, F64, FAULT, I32, I64, SIGNAL, STRING, OPS, ArrayType, ClassType, MapType,
+                  Ref, SetType, StructType, WbcError)
 
 STATUS_OK = "WR_OK"
 STATUS_FAULT = "WR_ERR_FAULT"
@@ -268,12 +268,44 @@ NUMERIC = _build_numeric()
  OP_DROP, OP_SELECT, OP_LGET, OP_LSET, OP_LTEE, OP_GGET, OP_GSET, OP_CONST) = (
     0x00, 0x01, 0x02, 0x03, 0x05, 0x06, 0x0A, 0x0B, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x20)
 OP_TRY_PUSH, OP_SUSPEND, OP_THROW = 0x0C, 0x0D, 0x0E
+OP_CALL_VIRTUAL = 0x07
+OP_REF_NULL, OP_REF_IS_NULL, OP_REF_EQ, OP_REF_CAST, OP_REF_TEST, OP_REF_VALID = range(0x25, 0x2B)
+OP_CLASS_NEW, OP_CLASS_GET, OP_CLASS_SET = 0xD3, 0xD4, 0xD5
 _CONST_OPS = {0x20, 0x21, 0x22, 0x23}
+
+
+class ClassInfo:
+    """A loaded class type: its name, field layout and defaults, vtable and ancestors."""
+    __slots__ = ("index", "name", "field_names", "defaults", "vtable", "ancestors")
+
+    def __init__(self, index, name, field_names, defaults, vtable, ancestors):
+        self.index, self.name, self.field_names = index, name, field_names
+        self.defaults, self.vtable, self.ancestors = defaults, vtable, ancestors
+
+
+class Obj:
+    """A class instance (section 3.1): a reference with identity, so `Eq` is `is`."""
+    __slots__ = ("cls", "fields")
+
+    def __init__(self, cls: ClassInfo):
+        self.cls = cls
+        self.fields = list(cls.defaults)
+
+    def get(self, name: str):
+        return self.fields[self.cls.field_names.index(name)]
+
+    def set(self, name: str, value):
+        self.fields[self.cls.field_names.index(name)] = value
+
+    def __repr__(self):
+        return f"<{self.cls.name} {id(self):x}>"
 
 
 def normalise(vt, v, types=None):
     if isinstance(vt, Ref):
         entry = types[vt.type] if types is not None else None
+        if isinstance(entry, ClassType) or isinstance(v, Obj) or v is None:
+            return v
         if isinstance(entry, StructType):
             return tuple(normalise(fvt, x, types) for (fvt, _), x in zip(entry.fields, v))
         if isinstance(entry, MapType):
@@ -296,7 +328,8 @@ def normalise(vt, v, types=None):
     return str(v)
 
 
-ZERO = {I32: 0, I64: 0, F32: 0.0, F64: 0.0, STRING: "", FAULT: NO_FAULT, SIGNAL: None}
+ZERO = {I32: 0, I64: 0, F32: 0.0, F64: 0.0, STRING: "", FAULT: NO_FAULT, SIGNAL: None,
+        wbc.ANYREF: None}
 
 
 def zero(vt):
@@ -397,6 +430,8 @@ def default_values(types: list, data: list):
         if not isinstance(vt, Ref):
             return ZERO[vt]
         entry = types[vt.type]
+        if isinstance(entry, ClassType):
+            return None                # a class reference starts null
         if isinstance(entry, (MapType, SetType)):
             return {}                  # never changed in place, so one empty dict is shared
         if not isinstance(entry, StructType):
@@ -520,6 +555,7 @@ class LoadedModule:
     meta: dict
     local_names: dict
     global_names: dict = field(default_factory=dict)   # name -> global index
+    classes: dict = field(default_factory=dict)        # class name -> ClassInfo
 
 
 def parse_pins(m: wbc.WbcModule, debug: dict) -> dict:
@@ -600,6 +636,13 @@ def parse_customs(m: wbc.WbcModule):
             for _ in range(r.u32()):
                 li = r.u32()
                 local_names[fi][li] = r.name()
+        for _ in range(r.u32()):                 # globals: read by parse_global_names
+            r.u32(), r.name()
+        if not r.eof():                          # classes: type index, name, field names
+            for _ in range(r.u32()):
+                ti = r.u32()
+                cname = r.name()
+                meta[("class", ti)] = (cname, [r.name() for _ in range(r.u32())])
     p = m.custom("wr.debug")
     if p:
         r = wbc.Reader(p)
@@ -672,6 +715,21 @@ class VM:
             raise WiretError(STATUS_LOAD, f"bad custom section: {e}")
         funcs = []
         defaults = default_values(m.types, m.data)
+        classes = {}
+        for ti, entry in enumerate(m.types):
+            if not isinstance(entry, ClassType):
+                continue
+            chain, t = [], ti
+            while t is not None:
+                chain.append(t)
+                t = m.types[t].super
+            layout = [fd for c in reversed(chain) for fd in m.types[c].fields]
+            cname, fnames = meta.pop(("class", ti), (f"class{ti}", []))
+            if len(fnames) != len(layout):
+                fnames = [f"field{i}" for i in range(len(layout))]
+            vals = [defaults(vt) if d is None else m.data[d] if vt == STRING else d
+                    for vt, d in layout]
+            classes[ti] = ClassInfo(ti, cname, fnames, vals, list(entry.vtable), set(chain))
         arrays = _array_ops(m.types, defaults)
         containers = _container_ops(defaults)
         for i, (mod, fld, t, flags) in enumerate(m.imports):
@@ -713,8 +771,13 @@ class VM:
                     arg = containers(m.types[ins.imms[0]], ins.name)
                 elif ins.name == "struct.new":
                     arg = len(m.types[ins.imms[0]].fields)
-                elif ins.name in ("struct.get", "struct.with"):
+                elif ins.name in ("struct.get", "struct.with", "class.get", "class.set"):
                     arg = ins.imms[1]
+                elif ins.name == "class.new":
+                    arg = classes[ins.imms[0]]
+                elif ins.name == "call_virtual":
+                    t, slot = ins.imms
+                    arg = (slot, len(m.func_type(m.types[t].vtable[slot])[0]))
                 else:
                     arg = ins.imms[0] if ins.imms else None
                 f.code.append((ins.op, arg))
@@ -747,7 +810,8 @@ class VM:
         gvals = [m.data[init] if vt == STRING else defaults(vt) if isinstance(vt, Ref) else init
                  for vt, _, init in m.globals]
         return LoadedModule(m, meta.get("module", ""), funcs, exports, gvals, m.data, meta,
-                            local_names, parse_global_names(m))
+                            local_names, parse_global_names(m),
+                            {c.name: c for c in classes.values()})
 
     # -- execution ----------------------------------------------------------------
     def _fiber(self, mod: LoadedModule, name: str, args: list) -> Fiber:
@@ -822,6 +886,25 @@ class VM:
         """The earliest time a Delay is waiting for, if any: lets a host skip idle time."""
         times = [fb.wake for fb in self.fibers if fb.waiting == "time"]
         return min(times) if times else None
+
+    def new(self, mod: LoadedModule, cls: str) -> Obj:
+        """An instance of `cls` with its declared defaults (wr_push_new)."""
+        if cls not in mod.classes:
+            raise WiretError(STATUS_LINK, f"no class '{cls}'")
+        return Obj(mod.classes[cls])
+
+    def call_method(self, mod: LoadedModule, obj: Obj, method: str, args: list) -> list:
+        """wr_push_virtual + wr_call: the override of `method` for obj's class, with obj as
+        self."""
+        if obj is None:
+            raise WiretError(STATUS_FAULT, "method call on a null object", code=FAULT_NULL)
+        for fi in obj.cls.vtable:
+            f = mod.funcs[fi]
+            if f.name.rpartition(".")[2] == method:
+                name = next((n for n, i in mod.exports.items() if i == fi), None)
+                if name is not None:
+                    return self.call(mod, name, [obj] + list(args))
+        raise WiretError(STATUS_LINK, f"class '{obj.cls.name}' has no method '{method}'")
 
     def _resume(self, fb: Fiber):
         self.fuel = self.fuel_limit
@@ -958,8 +1041,14 @@ class VM:
                                 stack[-1] = b
                         elif op == OP_DROP:
                             stack.pop()
-                        elif op == OP_CALL:
-                            callee = funcs[arg]
+                        elif op == OP_CALL or op == OP_CALL_VIRTUAL:
+                            if op == OP_CALL:
+                                callee = funcs[arg]
+                            else:                   # dispatch on the receiver's class
+                                recv = stack[len(stack) - arg[1]]
+                                if recv is None:
+                                    raise Fault("method call on a null object", FAULT_NULL)
+                                callee = funcs[recv.cls.vtable[arg[0]]]
                             fuel -= 4
                             self.stats["calls"] += 1
                             np = len(callee.params)
@@ -1027,6 +1116,37 @@ class VM:
                             s0 = stack[-1]
                             stack[-1] = s0[:arg] + (v,) + s0[arg + 1:]
                             fuel -= len(s0) >> 3
+                        elif op == OP_CLASS_GET:
+                            o = stack[-1]
+                            if o is None:
+                                raise Fault("field read on a null object", FAULT_NULL)
+                            stack[-1] = o.fields[arg]
+                        elif op == OP_CLASS_SET:
+                            v = stack.pop()
+                            o = stack.pop()
+                            if o is None:
+                                raise Fault("field write on a null object", FAULT_NULL)
+                            o.fields[arg] = v
+                        elif op == OP_CLASS_NEW:
+                            stack.append(Obj(arg))
+                            fuel -= len(arg.defaults) >> 3
+                        elif op == OP_REF_NULL:
+                            stack.append(None)
+                        elif op == OP_REF_IS_NULL:
+                            stack[-1] = int(stack[-1] is None)
+                        elif op == OP_REF_VALID:
+                            stack[-1] = int(stack[-1] is not None)
+                        elif op == OP_REF_EQ:
+                            b = stack.pop()
+                            stack[-1] = int(stack[-1] is b)
+                        elif op == OP_REF_TEST:
+                            o = stack[-1]
+                            stack[-1] = int(o is not None and arg in o.cls.ancestors)
+                        elif op == OP_REF_CAST:
+                            o = stack[-1]
+                            if o is not None and arg not in o.cls.ancestors:
+                                raise Fault(f"{o.cls.name} cannot be cast to type {arg}",
+                                            FAULT_CAST)
                         elif op == OP_NOP:
                             pass
                         elif op == OP_UNREACHABLE:

@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .model import Const, Enum, Extern, Graph, Lit, Module, Node, Struct, Var
+from .model import Class, Const, Enum, Extern, Graph, Lit, Module, Node, Struct, Var
 from .natives import STD, NativeSpec
 
 INT_TYPES = ["i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64"]
@@ -38,8 +38,8 @@ INT_RANGES = {t: ((-(1 << (b - 1)), (1 << (b - 1)) - 1) if t[0] == "i" else (0, 
               for t in INT_TYPES for b in [int(t[1:])]}
 
 # Constraints that also admit structs and/or enums declared in the module (section 3.3).
-USER_CONSTRAINTS = {"eq": ("struct", "enum"), "ord": ("enum",), "switch": ("enum",),
-                    "any": ("struct", "enum"), "convertible": ("enum",)}
+USER_CONSTRAINTS = {"eq": ("struct", "enum", "class"), "ord": ("enum",), "switch": ("enum",),
+                    "any": ("struct", "enum", "class"), "convertible": ("enum",)}
 
 
 def allows(constraint: str, ty: str, idx: "Optional[ModuleIndex]" = None) -> bool:
@@ -51,7 +51,8 @@ def allows(constraint: str, ty: str, idx: "Optional[ModuleIndex]" = None) -> boo
     if idx is None:
         return False
     kinds = USER_CONSTRAINTS.get(constraint, ())
-    return ("struct" in kinds and ty in idx.structs) or ("enum" in kinds and ty in idx.enums)
+    return (("struct" in kinds and ty in idx.structs) or ("enum" in kinds and ty in idx.enums)
+            or ("class" in kinds and ty in idx.classes))
 
 
 def type_choices(constraint: str, idx: "Optional[ModuleIndex]" = None) -> list:
@@ -127,6 +128,16 @@ def key_type_ok(ty: str, idx: "Optional[ModuleIndex]" = None) -> bool:
 HANDLE_TYPES = {"std.Signal"}
 
 
+def assignable(src: str, dst: str, idx: "Optional[ModuleIndex]" = None) -> bool:
+    """Whether a value of type `src` may flow into a pin of type `dst`: the same type, a class
+    into one of its bases, or any class into `anyref` (section 3.1)."""
+    if src == dst:
+        return True
+    if idx is None or src not in idx.classes:
+        return False
+    return dst == "anyref" or idx.is_subclass(src, dst)
+
+
 def handle_ok(ty: str, idx: "Optional[ModuleIndex]" = None) -> bool:
     """type_ok, also accepting a handle type such as std.Signal."""
     return ty in HANDLE_TYPES or type_ok(ty, idx)
@@ -180,10 +191,14 @@ def zero_lit(ty: str) -> Lit:
     return Lit("int", 0)
 
 
-def lit_fits(lit: Lit, ty: str) -> bool:
+def lit_fits(lit: Lit, ty: str, idx: "Optional[ModuleIndex]" = None) -> bool:
     """Whether a literal can be written for a value of type `ty`. An enum takes a member of
     its own enum (`Mode.Chase`; whether the member exists is the checker's business). Structs
-    have no literal form; arrays take only `null`, the empty array."""
+    have no literal form; arrays take only `null`, the empty array. A class reference, a
+    signal and `anyref` take `null` (with `idx`, to know the classes)."""
+    if lit.kind == "null" and (ty in ("anyref", "std.Signal")
+                               or (idx is not None and ty in idx.classes)):
+        return True
     if lit.kind == "enum":
         return lit.value.rsplit(".", 1)[0] == ty
     if ty in INT_TYPES:
@@ -342,7 +357,6 @@ STRUCT_KINDS = {"MakeStruct": "struct", "BreakStruct": "struct", "GetField": "fi
 
 # Kinds from the specification that later tiers add (section 1.6).
 LATER_TIER_KINDS = {
-    "SetField", "New", "Cast", "IsValid",
     "CreateDelegate", "Invoke", "Bind", "Unbind", "Broadcast",
 }
 
@@ -395,6 +409,8 @@ class Callee:
     results: list      # [Pin]
     purity: str
     latent: bool = False   # may suspend: an event, a @latent func (section 4.5)
+    method_of: Optional[str] = None   # a method: the class named in the symbol (self's type)
+    final: bool = False               # a @final method: called directly, not through the vtable
 
 
 _STD_FLOW = None
@@ -426,12 +442,51 @@ class ModuleIndex:
         self.consts = {i.name: i for i in module.items if isinstance(i, Const)}
         self.structs = {i.name: i for i in module.items if isinstance(i, Struct)}
         self.enums = {i.name: i for i in module.items if isinstance(i, Enum)}
+        self.classes = {i.name: i for i in module.items if isinstance(i, Class)}
         self._instances = {}
+
+    # -- classes (section 2.2) ---------------------------------------------------------
+    def class_chain(self, name: str) -> list:
+        """The class and its bases, nearest first. Stops at a cycle or an unknown base."""
+        out = []
+        while name in self.classes and name not in out:
+            out.append(name)
+            name = self.classes[name].base
+        return out
+
+    def is_subclass(self, sub: str, sup: str) -> bool:
+        return sup in self.class_chain(sub)
+
+    def class_fields(self, name: str) -> list:
+        """(declaring class, Field) for every field, inherited ones first: the object layout."""
+        out = []
+        for c in reversed(self.class_chain(name)):
+            out += [(c, f) for f in self.classes[c].fields]
+        return out
+
+    def class_field(self, name: str, fname: str):
+        """(declaring class, Field) of a field of `name` or one of its bases, or None."""
+        for c in self.class_chain(name):
+            f = self.classes[c].field(fname)
+            if f is not None:
+                return c, f
+        return None
+
+    def find_method(self, cls: str, short: str) -> Optional[Graph]:
+        """The method `short` as seen from `cls`: its own, else the nearest base's."""
+        for c in self.class_chain(cls):
+            g = self.graphs.get(f"{c}.{short}")
+            if g is not None:
+                return g
+        return None
+
+    def methods(self, cls: str) -> list:
+        return sorted((g for g in self.graphs.values() if g.owner == cls), key=lambda g: g.name)
 
     def user_type(self, ty: str):
         """The struct or enum a type name refers to. Types are named without the module
         prefix (`Vec2`, not `game.demo.Vec2`)."""
-        return self.structs.get(ty) or self.enums.get(ty)
+        return self.structs.get(ty) or self.enums.get(ty) or self.classes.get(ty)
 
     def enum_base(self, ty: str) -> Optional[str]:
         """The underlying integer type of an enum type (default `i32`), else None."""
@@ -454,12 +509,18 @@ class ModuleIndex:
 
     def callee(self, symbol: str) -> Optional[Callee]:
         s = self._strip(symbol)
-        if s in self.graphs:
-            g = self.graphs[s]
+        cls, _, short = s.rpartition(".")
+        g = self.graphs.get(s)
+        if g is None and cls in self.classes:
+            g = self.find_method(cls, short)      # an inherited method: `Boss.Heal`
+        if g is not None:
             purity = "pure" if g.has_attr("pure") else "reads" if g.has_attr("reads") else "impure"
-            return Callee(s, g.kind, [Pin(p.name, p.type, p.default) for p in g.params],
-                          [Pin(r.name, r.type) for r in g.result_list], purity,
-                          g.kind == "event" or g.has_attr("latent"))
+            params = [Pin(p.name, p.type, p.default) for p in g.params]
+            if g.owner:                            # methods take self first (section 2.2)
+                params = [Pin("self", cls)] + params
+            return Callee(g.name, g.kind, params, [Pin(r.name, r.type) for r in g.result_list],
+                          purity, g.kind == "event" or g.has_attr("latent"),
+                          cls if g.owner else None, g.has_attr("final"))
         if symbol in self.externs:
             e = self.externs[symbol]
             purity = "pure" if e.has_attr("pure") else "reads" if e.has_attr("reads") else "impure"
@@ -539,6 +600,8 @@ def signature(node: Node, graph: Graph, idx: ModuleIndex) -> Sig:
             sig.outputs = [Pin(p.name, p.type) for p in graph.params]
         else:
             sig.outputs = [Pin("then", E)] + [Pin(p.name, p.type) for p in graph.params]
+            if graph.owner:                        # a method's implicit receiver
+                sig.outputs.insert(1, Pin("self", graph.owner))
         return sig
     if k == "Return":
         sig.inputs = [Pin("in", E)] + [Pin(r.name, r.type) for r in graph.result_list]
@@ -640,6 +703,8 @@ def signature(node: Node, graph: Graph, idx: ModuleIndex) -> Sig:
         return sig
     if k in ("MakeArray", "ArrayGet", "ArrayLength") or k in ARRAY_MUTATORS:
         return _array_sig(node, graph, idx, sig)
+    if k in CLASS_KINDS or (k in ("GetField", "SetField") and class_field_target(node, graph, idx)):
+        return _class_sig(node, graph, idx, sig)
     if k in STRUCT_KINDS:
         return _struct_sig(node, idx, sig)
     if k in MAP_PURE or k in MAP_MUTATORS or k in SET_PURE or k in SET_MUTATORS:
@@ -652,6 +717,66 @@ def signature(node: Node, graph: Graph, idx: ModuleIndex) -> Sig:
         sig.error = ("E0501", f"node kind '{k}' belongs to a later tier and is not in this prototype")
     else:
         sig.error = ("E0501", f"unknown node kind '{k}'")
+    return sig
+
+
+CLASS_KINDS = {"New", "Cast", "IsValid"}
+
+
+def class_field_target(node: Node, graph: Graph, idx: ModuleIndex):
+    """For GetField and SetField on a class: (class, field name). The symbol is the bare field
+    name inside the class's own methods (`GetField health`), else `Class.field`."""
+    sym = node.symbol or ""
+    cls, _, fname = sym.rpartition(".")
+    if cls:
+        return (cls, fname) if cls in idx.classes else None
+    if graph is not None and graph.owner:
+        return graph.owner, sym
+    return None
+
+
+def _class_sig(node: Node, graph: Graph, idx: ModuleIndex, sig: Sig) -> Sig:
+    """New, Cast, IsValid and the class forms of GetField and SetField (section 3.3)."""
+    k = node.kind
+    E = "exec"
+    sig.category = "Classes"
+    if k == "New":
+        if node.symbol not in idx.classes:
+            sig.error = ("E0501", f"New names the class to make, as in 'New Player'; "
+                                  f"'{node.symbol}' is not a class of this module")
+        sig.inputs = [Pin("in", E)]
+        sig.outputs = [Pin("then", E), Pin("result", node.symbol or "anyref")]
+        return sig
+    if k == "Cast":
+        sig.purity = "pure"
+        target = node.symbol
+        if target not in idx.classes or node.targs:
+            sig.error = ("E0501", "Cast names the class to cast to, as in 'Cast Boss'")
+            target = target if target in idx.classes else None
+        sig.inputs = [Pin("obj", "anyref")]
+        sig.outputs = [Pin("result", target or "anyref"), Pin("ok", "bool")]
+        return sig
+    if k == "IsValid":
+        sig.purity = "pure"
+        sig.inputs = [Pin("obj", "anyref")]
+        sig.outputs = [Pin("result", "bool")]
+        return sig
+    cls, fname = class_field_target(node, graph, idx)
+    found = idx.class_field(cls, fname) if cls in idx.classes else None
+    if found is None:
+        sig.error = ("E0501", f"class '{cls}' has no field '{fname}'" if cls in idx.classes
+                     else f"unknown class '{cls}'")
+        ty = "i32"
+    else:
+        ty = found[1].type
+    if k == "GetField":
+        # reads purity: re-evaluated at each consumer's evaluation point (section 4.3)
+        sig.purity = "reads"
+        sig.inputs = [Pin("obj", cls)]
+        sig.outputs = [Pin("value", ty)]
+    else:
+        sig.inputs = [Pin("in", E), Pin("obj", cls), Pin("value", ty)]
+        sig.outputs = [Pin("then", E)]
     return sig
 
 

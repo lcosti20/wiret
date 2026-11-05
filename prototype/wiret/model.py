@@ -178,7 +178,9 @@ class Box(Place):
 
 @dataclass
 class Graph:
-    """A func, event or macro."""
+    """A func, event or macro. A method (a func or event declared in a class) is a module item
+    of its own, named `Class.Method`, with `owner` set; the printer writes it inside the
+    class (section 2.2)."""
     kind: str                                      # func | event | macro
     name: str
     tparams: list = field(default_factory=list)
@@ -191,6 +193,12 @@ class Graph:
     meta: list = field(default_factory=list)       # [Attr]: doc, graph-level notes, ...
     places: list = field(default_factory=list)     # [Place]
     boxes: list = field(default_factory=list)      # [Box]
+    owner: Optional[str] = None                    # the class of a method
+
+    @property
+    def short_name(self) -> str:
+        """The name as written in its declaration: `TakeDamage` for `Player.TakeDamage`."""
+        return self.name[len(self.owner) + 1:] if self.owner else self.name
 
     def node(self, nid: str) -> Optional[Node]:
         for n in self.nodes:
@@ -308,6 +316,23 @@ class Struct:
 
 
 @dataclass
+class Class:
+    """`class Name [: Base] { fields, methods }`, a reference type (section 2.2). Field order is
+    the order written. Methods are separate `Graph` items whose `owner` is this class."""
+    name: str
+    base: Optional[str] = None
+    fields: list = field(default_factory=list)     # [Field]
+    attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
+
+    def field(self, name: str) -> Optional[Field]:
+        for f in self.fields:
+            if f.name == name:
+                return f
+        return None
+
+
+@dataclass
 class EnumMember:
     """An enum member: `Name [= value] @attrs`."""
     name: str
@@ -376,6 +401,8 @@ def item_kind(item) -> str:
         return "enum"
     if isinstance(item, Struct):
         return "struct"
+    if isinstance(item, Class):
+        return "class"
     if isinstance(item, Graph):
         return item.kind
     raise TypeError(item)

@@ -116,6 +116,15 @@ def explain(d: Diag) -> str:
                 "promise. Pass the value in as an input instead, or remove @pure.")
     if c == "E0401":
         return "This macro uses itself, so expanding it would never end."
+    if c == "E0150":
+        return ("A method with the same name as one in the parent class replaces it (an "
+                "override), so it must take the same inputs and give the same outputs. A method "
+                "marked @final cannot be replaced at all. Rename this method, or match the "
+                "parent's signature.")
+    if c == "E0151":
+        return ("A class can only extend another class of this module, and a class cannot end up "
+                "extending itself through its parents. Check the name after ':' in the class "
+                "line.")
     if c == "E0412":
         return ("Everything wired after a Try's 'body' is protected by that Try, so it must only "
                 "be reachable through 'body'. Here a wire from outside the body leads into it (or "

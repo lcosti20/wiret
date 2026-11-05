@@ -9,6 +9,9 @@ from .wbc import ArrayType, decode_code, vt_name
 def disassemble(data: bytes) -> str:
     m = wbc.decode_module(data)
     names, local_names, debug, meta = parse_customs(m)
+    classes = {k[1]: v for k, v in meta.items() if isinstance(k, tuple) and k[0] == "class"}
+    wbc.CLASS_NAMES.clear()
+    wbc.CLASS_NAMES.update({ti: name for ti, (name, _) in classes.items()})
     out = []
     if meta:
         out.append(f"; module {meta.get('module', '')}  compiler {meta.get('compiler', '')}")
@@ -67,6 +70,20 @@ def disassemble(data: bytes) -> str:
                     comment = lnames.get(ins.imms[1], "")
             elif ins.name == "call":
                 text += f" {names.get(ins.imms[0], ins.imms[0])}"
+            elif ins.name == "call_virtual" and ins.imms[0] < len(m.types):
+                t, slot = ins.imms
+                text += f" {t} {slot}"
+                vt = getattr(m.types[t], "vtable", ())
+                if slot < len(vt):
+                    comment = f"{classes.get(t, ('class ' + str(t),))[0]} slot {slot}: " \
+                              f"{names.get(vt[slot], vt[slot])}"
+            elif ins.name.startswith(("class.", "ref.")) and ins.imms:
+                t = ins.imms[0]
+                text += " " + " ".join(str(x) for x in ins.imms)
+                cname, fnames = classes.get(t, (f"class {t}", []))
+                comment = cname
+                if ins.name in ("class.get", "class.set") and ins.imms[1] < len(fnames):
+                    comment = f"{cname}.{fnames[ins.imms[1]]}"
             elif ins.name.startswith("local."):
                 text += f" {ins.imms[0]}"
                 comment = lnames.get(ins.imms[0], "")

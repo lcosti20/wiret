@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import re
+from typing import Optional
 
-from .model import (Attr, Binding, Box, Comment, Const, Enum, EnumMember, ExecOut, Extern,
+from .model import (Attr, Binding, Box, Class, Comment, Const, Enum, EnumMember, ExecOut, Extern,
                     Field, Graph, Lit, Local, Module, Node, Param, PinRef, Place, Struct, Use,
                     Var)
 
@@ -13,7 +14,7 @@ KEYWORDS = set("wiret module use extern const var local enum struct interface cl
 MARKUP_HINT = ("the 'markup' block was removed: write each note as #[note(\"...\")] on its own "
                "line directly above the node, box or graph it explains")
 
-UNSUPPORTED_ITEMS = {"interface", "class"}
+UNSUPPORTED_ITEMS = {"interface"}
 
 INT_TYPES = {"i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64"}
 
@@ -133,6 +134,7 @@ class Parser:
         self.toks, self.raw_comments = lex(text)
         self.i = 0
         self.anchors = []  # (token index, anchor tuple)
+        self.pending_methods = []  # methods of the class just parsed
 
     # -- token helpers -------------------------------------------------------
     def peek(self, k=0) -> Tok:
@@ -207,6 +209,9 @@ class Parser:
             it = self.item()
             it.meta = meta
             mod.items.append(it)
+            if isinstance(it, Class):     # its methods are items of their own (model.Graph)
+                mod.items.extend(self.pending_methods)
+                self.pending_methods = []
             self.skip_nl()
         mod.comments = self.attach_comments()
         resolve_enum_values(mod)
@@ -282,21 +287,72 @@ class Parser:
             return self.struct()
         if kw == "enum":
             return self.enum()
+        if kw == "class":
+            return self.class_decl()
         if kw in ("func", "event", "macro"):
-            g = Graph(kw, self.ident())
-            self.anchors.append((start, ("graph", g.name)))
-            if self.at_p("::"):
-                g.tparams = self.generic_args(self.ident)
-            elif self.at_p("<"):
-                self.generics_hint()
-            g.params = self.params()
-            if self.at_p("->"):
-                self.next()
-                g.results = self.params()
-            g.attrs = self.attrs()
-            self.body(g)
-            return g
+            return self.graph(kw, start)
         self.error("expected a declaration")
+
+    def graph(self, kw: str, start: int, owner: Optional[str] = None) -> Graph:
+        short = self.ident()
+        g = Graph(kw, f"{owner}.{short}" if owner else short, owner=owner)
+        self.anchors.append((start, ("graph", g.name)))
+        if self.at_p("::"):
+            if owner:
+                self.error("methods take no type parameters")
+            g.tparams = self.generic_args(self.ident)
+        elif self.at_p("<"):
+            self.generics_hint()
+        g.params = self.params()
+        if self.at_p("->"):
+            self.next()
+            g.results = self.params()
+        g.attrs = self.attrs()
+        self.body(g)
+        return g
+
+    def class_decl(self) -> Class:
+        """`class Name [: Base] @attrs { field | func | event ... }` (section 2.2). The methods
+        are collected in `pending_methods`, and the module adds them after the class."""
+        c = Class(self.ident("class name"))
+        if self.at_p("::") or self.at_p("<"):
+            self.error("classes take no type parameters")
+        if self.at_p(":"):
+            self.next()
+            c.base = self.qname()
+        if self.at_kw("impl"):
+            self.error("'impl' needs interfaces, which this prototype does not support yet")
+        c.attrs = self.attrs()
+        self.expect_p("{")
+        self.skip_nl()
+        while not self.at_p("}"):
+            meta = self.meta_lines()
+            if self.at_kw("func") or self.at_kw("event"):
+                start = self.i
+                kw = self.next().value
+                g = self.graph(kw, start, owner=c.name)
+                g.meta = meta
+                self.pending_methods.append(g)
+                self.skip_nl()
+                continue
+            if self.at_kw("dispatcher"):
+                self.error("dispatchers are not supported by this prototype yet")
+            if self.at_kw("macro"):
+                self.error("a class cannot declare a macro; declare it at module level")
+            if not self.at("id"):
+                self.error("expected a field, func or event")
+            name = self.ident("field name")
+            self.expect_p(":")
+            ty = self.type()
+            default = None
+            if self.at_p("="):
+                self.next()
+                default = self.literal()
+            c.fields.append(Field(name, ty, default, self.attrs(), meta))
+            self.end_stmt()
+        self.next()
+        self.end_stmt()
+        return c
 
     def members(self, what: str, member) -> list:
         """The `{ ... }` of a struct or enum: one member per line, each may have metadata lines."""

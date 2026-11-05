@@ -18,7 +18,7 @@ from typing import Callable, Optional
 from .checker import check
 from .ids import get_id
 from .model import (Binding, Box, Const, Enum, EnumMember, ExecOut, Extern, Field, Graph, Lit,
-                    Local, Module, Node, Param, PinRef, Place, Struct, Use, Var)
+                    Local, Module, Node, Param, PinRef, Place, Struct, Use, Var, Class)
 from .parser import ParseError, parse
 from .printer import fmt_args, fmt_attr, fmt_lit, print_module
 from .registry import ModuleIndex, signature
@@ -129,7 +129,7 @@ def decl_kind(it) -> str:
     if isinstance(it, Graph):
         return it.kind
     return {Use: "use", Extern: "extern", Const: "const", Var: "var", Enum: "enum",
-            Struct: "struct"}[type(it)]
+            Struct: "struct", Class: "class"}[type(it)]
 
 
 def decl_fields(it) -> dict:
@@ -145,7 +145,7 @@ def decl_fields(it) -> dict:
         v = it.value if isinstance(it, Const) else it.default
         if v is not None:
             out["value"] = (fmt_lit(v), v)
-    if isinstance(it, Enum):
+    if isinstance(it, (Enum, Class)):
         out["base"] = (it.base or "", it.base)
     if isinstance(it, Graph):
         out["tparams"] = (",".join(it.tparams), list(it.tparams))
@@ -166,7 +166,7 @@ def build_decl(proto, fields: dict):
             it.value = v
         else:
             it.default = v
-    if isinstance(it, Enum):
+    if isinstance(it, (Enum, Class)):
         it.base = fields["base"][1]
     if isinstance(it, Graph):
         it.tparams = fields["tparams"][1]
@@ -378,7 +378,7 @@ class Merger:
             subs += [("params", "param"), ("results", "result")]
         if isinstance(it, Graph):
             subs += [("locals", "local"), ("states", "state")]
-        if isinstance(it, Struct):
+        if isinstance(it, (Struct, Class)):
             subs.append(("fields", "field"))
         if isinstance(it, Enum):
             subs.append(("members", "member"))

@@ -29,6 +29,7 @@ ARRAY_TYPE = 0x5E
 STRUCT_TYPE = 0x5F
 MAP_TYPE = 0x5D
 SET_TYPE = 0x5C
+CLASS_TYPE = 0x5B
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,21 @@ class SetType:
     elem: object
 
 
+@dataclass(frozen=True)
+class ClassType:
+    """Type entry `5B flags:u8 super:u32 interfaces:vec(...) fields:vec(field) vtable:vec(funcidx)`
+    (section 5.3). `super` is None or a type index; `fields` are the class's own, each
+    (value type, default or None), inherited ones coming first in the object; `vtable` is the
+    full slot list, overrides replacing inherited slots. No host types or interfaces yet."""
+    super: object
+    fields: tuple
+    vtable: tuple
+
+
+# Class names by type index, for messages and disassembly; set from a module's `name` section.
+CLASS_NAMES: dict = {}
+
+
 def vt_name(vt, types=None, depth=0) -> str:
     if isinstance(vt, Ref):
         entry = types[vt.type] if types is not None and vt.type < len(types) else None
@@ -71,6 +87,8 @@ def vt_name(vt, types=None, depth=0) -> str:
             return f"array::<{vt_name(entry.elem, types, depth + 1)}>"
         if isinstance(entry, StructType):
             return f"struct {vt.type}"
+        if isinstance(entry, ClassType):
+            return CLASS_NAMES.get(vt.type, f"class {vt.type}")
         if isinstance(entry, MapType) and depth < 8:
             return (f"map::<{vt_name(entry.key, types, depth + 1)}, "
                     f"{vt_name(entry.value, types, depth + 1)}>")
@@ -97,7 +115,10 @@ OPS: dict[str, tuple] = {
     "unreachable": (0x00, ""), "nop": (0x01, ""), "br": (0x02, "L"), "br_if": (0x03, "L"),
     "br_table": (0x04, "T"), "return": (0x05, ""), "call": (0x06, "u"),
     "cont.push": (0x0A, "L"), "cont.pop": (0x0B, ""), "try.push": (0x0C, "Lu"),
-    "throw": (0x0E, ""), "suspend": (0x0D, "b"),
+    "throw": (0x0E, ""), "suspend": (0x0D, "b"), "call_virtual": (0x07, "uu"),
+    "ref.null": (0x25, "u"), "ref.is_null": (0x26, ""), "ref.eq": (0x27, ""),
+    "ref.cast": (0x28, "u"), "ref.test": (0x29, "u"), "ref.valid": (0x2A, ""),
+    "class.new": (0xD3, "u"), "class.get": (0xD4, "uu"), "class.set": (0xD5, "uu"),
     "drop": (0x10, ""), "select": (0x11, ""),
     "local.get": (0x12, "u"), "local.set": (0x13, "u"), "local.tee": (0x14, "u"),
     "global.get": (0x15, "u"), "global.set": (0x16, "u"),
@@ -142,12 +163,7 @@ BY_CODE: dict[int, tuple] = {code: (name, imm) for name, (code, imm) in OPS.item
 
 # Opcodes the spec defines for later tiers (objects, containers, fibers, faults). They decode,
 # but this prototype's verifier rejects them.
-LATER_TIER_OPS = {0x07: "call_virtual", 0x08: "call_interface", 0x09: "call_delegate",
-                  0x25: "ref.null",
-                  0x26: "ref.is_null", 0x27: "ref.eq", 0x28: "ref.cast", 0x29: "ref.test",
-                  0x2A: "ref.valid", 0x2B: "ref.share"}
-for _c in range(0xD3, 0xD6):
-    LATER_TIER_OPS.setdefault(_c, f"object.0x{_c:02X}")
+LATER_TIER_OPS = {0x08: "call_interface", 0x09: "call_delegate", 0x2B: "ref.share"}
 for _c in (0xF4, 0xF5, 0xF6, 0xF7):
     LATER_TIER_OPS[_c] = f"object.0x{_c:02X}"
 
@@ -474,14 +490,24 @@ def encode_module(m: WbcModule) -> bytes:
             w.u8(SET_TYPE)
             write_vt(w, entry.elem)
             continue
-        if isinstance(entry, StructType):
-            w.u8(STRUCT_TYPE)
+        if isinstance(entry, (StructType, ClassType)):
+            if isinstance(entry, ClassType):
+                w.u8(CLASS_TYPE)
+                w.u8(0)                                   # flags: not a host type
+                w.u32(0 if entry.super is None else entry.super + 1)
+                w.u32(0)                                  # interfaces
+            else:
+                w.u8(STRUCT_TYPE)
             w.u32(len(entry.fields))
             for vt, default in entry.fields:
                 write_vt(w, vt)
                 w.u8(0 if default is None else 1)
                 if default is not None:
                     _write_const(w, vt, default)
+            if isinstance(entry, ClassType):
+                w.u32(len(entry.vtable))
+                for f in entry.vtable:
+                    w.u32(f)
             continue
         params, results = entry
         w.u8(FUNC_TYPE)
@@ -599,7 +625,15 @@ def decode_module(data: bytes) -> WbcModule:
                 if code == SET_TYPE:
                     m.types.append(SetType(s.vt()))
                     continue
-                if code == STRUCT_TYPE:
+                if code in (STRUCT_TYPE, CLASS_TYPE):
+                    sup = None
+                    if code == CLASS_TYPE:
+                        if s.u8() != 0:
+                            raise WbcError("host class types are not supported by this VM")
+                        sup = s.u32()
+                        sup = None if sup == 0 else sup - 1
+                        if s.u32() != 0:
+                            raise WbcError("interfaces are not supported by this VM")
                     fields = []
                     for _ in range(s.u32()):
                         vt = s.vt()
@@ -609,7 +643,11 @@ def decode_module(data: bytes) -> WbcModule:
                         if flags and isinstance(vt, Ref):
                             raise WbcError("a reference field cannot have a default")
                         fields.append((vt, _read_const(s, vt) if flags else None))
-                    m.types.append(StructType(tuple(fields)))
+                    if code == CLASS_TYPE:
+                        vtable = tuple(s.u32() for _ in range(s.u32()))
+                        m.types.append(ClassType(sup, tuple(fields), vtable))
+                    else:
+                        m.types.append(StructType(tuple(fields)))
                     continue
                 if code != FUNC_TYPE:
                     raise WbcError(f"type entry 0x{code:02X} is not supported by this VM")

@@ -387,7 +387,9 @@ struct P {
                           ("struct S {\n  x: i32 y: i32\n}\n", "end of line"),
                           ("struct S::<T> {\n}\n", "no type parameters"),
                           ("struct S {\n  #[doc(\"x\")]\n}\n", "directly above"),
-                          ("class C {\n}\n", "Tier 2"),
+                          ("class C impl I {\n}\n", "interfaces"),
+                          ("class C::<T> {\n}\n", "no type parameters"),
+                          ("class C {\n  macro M() {\n  }\n}\n", "module level"),
                           ("interface I {\n}\n", "Tier 2")):
             with self.subTest(src):
                 with self.assertRaises(ParseError) as cm:
@@ -4003,6 +4005,459 @@ func F(a: array::<std.Signal>) {
                 if "Beep" in mod.exports:
                     vm.start(mod, "Beep", [1.0], now=True)
                     vm.advance(2.0)
+            except WiretError:
+                pass
+
+
+CLASSES = """
+class Boss : Player {
+  rage: i32 = 3
+
+  func Describe() -> (text: string) {
+    node entry = Entry
+    node ret = Return
+      .text <- "boss"
+
+    flow {
+      entry -> ret
+    }
+  }
+}
+
+class Player {
+  health: i32 = 100
+  name: string = "hero"
+
+  func Describe() -> (text: string) {
+    node entry = Entry
+    node ret = Return
+      .text <- "player"
+
+    flow {
+      entry -> ret
+    }
+  }
+
+  func TakeDamage(amount: i32) -> (died: bool) {
+    local new_hp: i32
+    node chk = Branch
+      .cond <- is_dead.result
+    node cur = GetField health
+      .obj <- entry.self
+    node entry = Entry
+    node hp = GetLocal new_hp
+    node is_dead = Le::<i32>
+      .a <- hp.value
+      .b <- 0
+    node ret_alive = Return
+      .died <- false
+    node ret_dead = Return
+      .died <- true
+    node set_new = SetLocal new_hp
+      .value <- sub.result
+    node store = SetField health
+      .obj <- entry.self
+      .value <- hp.value
+    node sub = Sub::<i32>
+      .a <- cur.value
+      .b <- entry.amount
+
+    flow {
+      chk.then -> ret_dead
+      chk.else -> ret_alive
+      entry -> set_new
+      set_new -> store
+      store -> chk
+    }
+  }
+}
+
+func Make(boss: bool) -> (p: Player) {
+  local who: Player
+  node b = New Boss
+  node entry = Entry
+  node get = GetLocal who
+  node pick = Branch
+    .cond <- entry.boss
+  node pl = New Player
+  node ret = Return
+    .p <- get.value
+  node set_b = SetLocal who
+    .value <- b.result
+  node set_p = SetLocal who
+    .value <- pl.result
+
+  flow {
+    b -> set_b
+    entry -> pick
+    pick.then -> b
+    pick.else -> pl
+    pl -> set_p
+    set_b -> ret
+    set_p -> ret
+  }
+}
+"""
+
+
+def classes_text(extra=""):
+    return module(CLASSES + extra, macros=False)
+
+
+class ClassTests(unittest.TestCase):
+    """Classes (sections 2.2, 3.1, 3.3, 5.3 and 5.6): fields, methods, inheritance, virtual
+    dispatch, Cast, IsValid, identity, and null faults."""
+
+    def test_round_trip_and_clean_check(self):
+        text = classes_text()
+        self.assertEqual(print_module(parse(text)), text)
+        self.assertEqual(codes(text), [])
+
+    def test_methods_are_items_named_by_class(self):
+        m = parse(classes_text())
+        names = [g.name for g in m.graphs()]
+        self.assertIn("Player.TakeDamage", names)
+        self.assertEqual(m.graph("Boss.Describe").owner, "Boss")
+
+    def test_fields_methods_and_virtual_dispatch(self):
+        text = classes_text("""
+func Run(boss: bool) -> (said: string, died: bool, hp: i32, name: string) {
+  node desc = Call Player.Describe
+    .self <- mk.p
+  node entry = Entry
+  node hit = Call Player.TakeDamage
+    .self <- mk.p
+    .amount <- 150
+  node hp = GetField Player.health
+    .obj <- mk.p
+  node mk = Call Make
+    .boss <- entry.boss
+  node nm = GetField Player.name
+    .obj <- mk.p
+  node ret = Return
+    .said <- desc.text
+    .died <- hit.died
+    .hp <- hp.value
+    .name <- nm.value
+
+  flow {
+    desc -> hit
+    entry -> mk
+    hit -> ret
+    mk -> desc
+  }
+}
+""")
+        self.assertEqual(run(text, "Run", 0)[0], ["player", 1, -50, "hero"])
+        self.assertEqual(run(text, "Run", 1)[0], ["boss", 1, -50, "hero"])
+
+    def test_cast_isvalid_and_identity(self):
+        text = classes_text("""
+func Probe(boss: bool) -> (ok: bool, rage: i32, valid: bool, same: bool, other: bool) {
+  node as_boss = Cast Boss
+    .obj <- mk.p
+  node entry = Entry
+  node mk = Call Make
+    .boss <- entry.boss
+  node mk2 = Call Make
+    .boss <- entry.boss
+  node other = Eq::<Player>
+    .a <- mk.p
+    .b <- mk2.p
+  node rage = GetField Boss.rage
+    .obj <- as_boss.result
+  node ret = Return
+    .ok <- as_boss.ok
+    .rage <- rage.value
+    .valid <- valid.result
+    .same <- same.result
+    .other <- other.result
+  node same = Eq::<Player>
+    .a <- mk.p
+    .b <- mk.p
+  node valid = IsValid
+    .obj <- mk.p
+
+  flow {
+    entry -> mk
+    mk -> mk2
+    mk2 -> ret
+  }
+}
+""")
+        self.assertEqual(run(text, "Probe", 1)[0], [1, 3, 1, 1, 0])
+        with self.assertRaises(WiretError) as cm:          # Cast fails: result is null
+            run(text, "Probe", 0)
+        e = cm.exception
+        self.assertEqual((e.code, e.traceback[-1]), (-3, ("t.Probe", "rage")))
+
+    def test_null_reference_faults_are_catchable(self):
+        text = classes_text("""
+func Safe() -> (code: i32) {
+  node caught = Return
+    .code <- t.code
+  node entry = Entry
+  node ok = Return
+    .code <- 0
+  node set = SetField Player.health
+    .obj <- null
+    .value <- 1
+  node t = Try
+
+  flow {
+    entry -> t
+    set -> ok
+    t.body -> set
+    t.fault -> caught
+  }
+}
+""")
+        self.assertEqual(run(text, "Safe")[0], [-3])
+
+    def test_objects_are_shared_references(self):
+        text = classes_text("""
+func Alias() -> (hp: i32) {
+  node a = New Player
+  node arr = MakeArray::<Player> @count(1)
+    .item0 <- a.result
+  node entry = Entry
+  node first = ArrayGet::<Player>
+    .array <- arr.result
+    .index <- 0
+  node hp = GetField Player.health
+    .obj <- a.result
+  node ret = Return
+    .hp <- hp.value
+  node set = SetField Player.health
+    .obj <- first.item
+    .value <- 7
+
+  flow {
+    a -> set
+    entry -> a
+    set -> ret
+  }
+}
+""")
+        self.assertEqual(run(text, "Alias")[0], [7])
+
+    def test_host_api_new_and_call_method(self):
+        _, r = build(classes_text())
+        vm = VM(output=lambda s: None)
+        mod = vm.load(r.wbc)
+        boss = vm.new(mod, "Boss")
+        self.assertEqual((boss.get("health"), boss.get("rage")), (100, 3))
+        self.assertEqual(vm.call_method(mod, boss, "Describe", []), ["boss"])
+        self.assertEqual(vm.call_method(mod, boss, "TakeDamage", [40]), [0])
+        self.assertEqual(boss.get("health"), 60)
+
+    def test_run_function_gives_a_method_a_new_object(self):
+        from wiret.runner import run_function
+        _, r = build(classes_text())
+        vm = VM(output=lambda s: None)
+        self.assertEqual(run_function(vm, vm.load(r.wbc), "Player.TakeDamage", [30]), [0])
+
+    def test_subclass_flows_into_base_pins_but_not_back(self):
+        text = classes_text("""
+func Up() -> (p: Player) {
+  node b = New Boss
+  node entry = Entry
+  node ret = Return
+    .p <- b.result
+
+  flow {
+    b -> ret
+    entry -> b
+  }
+}
+
+func Down() -> (b: Boss) {
+  node entry = Entry
+  node p = New Player
+  node ret = Return
+    .b <- p.result
+
+  flow {
+    entry -> p
+    p -> ret
+  }
+}
+""")
+        diags = [(d.graph, d.code) for d in check(parse(text)) if d.code.startswith("E")]
+        self.assertEqual(diags, [("Down", "E0110")])
+
+    def test_e0150_bad_overrides(self):
+        text = module("""
+class A {
+  func F(x: i32) {
+    node entry = Entry
+  }
+
+  func G() @final {
+    node entry = Entry
+  }
+}
+
+class B : A {
+  func F(x: f32) {
+    node entry = Entry
+  }
+
+  func G() {
+    node entry = Entry
+  }
+}
+""", macros=False)
+        diags = sorted((d.graph, d.code) for d in check(parse(text)) if d.code.startswith("E"))
+        self.assertEqual(diags, [("B.F", "E0150"), ("B.G", "E0150")])
+
+    def test_final_methods_are_called_directly(self):
+        text = module("""
+class A {
+  func Id() -> (x: i32) @final {
+    node entry = Entry
+    node ret = Return
+      .x <- 1
+
+    flow {
+      entry -> ret
+    }
+  }
+}
+
+func F() -> (x: i32) {
+  node a = New A
+  node c = Call A.Id
+    .self <- a.result
+  node entry = Entry
+  node ret = Return
+    .x <- c.x
+
+  flow {
+    a -> c
+    c -> ret
+    entry -> a
+  }
+}
+""", macros=False)
+        _, r = build(text)
+        listing = disassemble(r.wbc)
+        self.assertIn("call t.A.Id", listing)
+        self.assertNotIn("call_virtual", listing)
+        self.assertEqual(run(text, "F")[0], [1])
+
+    def test_e0151_and_duplicate_fields(self):
+        text = module("""
+class A : B {
+  x: i32
+}
+
+class B : A {
+  y: i32
+}
+
+class C : Missing {
+}
+
+class D : E {
+  x: i32
+}
+
+class E {
+  x: i32
+}
+""", macros=False)
+        diags = sorted((d.graph, d.code) for d in check(parse(text)) if d.code.startswith("E"))
+        self.assertEqual(diags, [("A", "E0151"), ("B", "E0151"), ("C", "E0151"), ("D", "E0102")])
+
+    def test_purity_rules_for_objects(self):
+        text = classes_text("""
+func P(p: Player) -> (hp: i32) @pure {
+  node entry = Entry
+  node hp = GetField Player.health
+    .obj <- entry.p
+  node ret = Return
+    .hp <- hp.value
+
+  flow {
+    entry -> ret
+  }
+}
+""")
+        self.assertIn("E0304", codes(text))
+
+    def test_state_in_a_method_is_reported(self):
+        text = module("""
+class A {
+  func F() {
+    state n: i32
+    node entry = Entry
+  }
+}
+""", macros=False)
+        self.assertEqual(codes(text), ["E0501"])
+
+    def test_flow_view_reorders_methods(self):
+        text = classes_text()
+        view = view_flow(parse(text))
+        self.assertIn("  func TakeDamage(amount: i32) -> (died: bool) {\n    local new_hp: i32\n"
+                      "    node entry = Entry\n", view)
+
+    def test_verifier_rejects_bad_class_code(self):
+        _, r = build(classes_text())
+
+        def mutate(fn):
+            m = wbc.decode_module(r.wbc)
+            fn(m)
+            with self.assertRaises(WiretError) as cm:
+                VM().load(wbc.encode_module(m))
+            return cm.exception.status
+
+        cls = next(i for i, t in enumerate(wbc.decode_module(r.wbc).types)
+                   if isinstance(t, wbc.ClassType) and t.super is None)
+
+        def cyclic(m):
+            e = m.types[cls]
+            m.types[cls] = wbc.ClassType(cls, e.fields, e.vtable)
+        def bad_field(m):                     # class.get with no such field
+            m.bodies[-1].code = bytes([0x25, cls, 0xD4, cls, 0x7F, 0x10, 0x05])
+        def string_as_object(m):
+            m.bodies[-1].code = bytes([0x24, 0x00, 0xD4, cls, 0x00, 0x10, 0x05])
+        for fn in (cyclic, bad_field, string_as_object):
+            with self.subTest(fn.__name__):
+                self.assertEqual(mutate(fn), "WR_ERR_VERIFY")
+
+    def test_the_section_2_6_example_compiles_and_runs(self):
+        spec = os.path.join(os.path.dirname(os.path.dirname(HERE)), "docs", "reference",
+                            "02-text-syntax.md")
+        with open(spec, encoding="utf-8") as f:
+            sec = f.read().split("### 2.6 A complete example", 1)[1]
+        code = sec.split("```\n", 1)[1].split("```", 1)[0]
+        _, r = build(code)
+        out = []
+        vm = VM(output=out.append)
+        mod = vm.load(r.wbc)
+        p = vm.new(mod, "Player")
+        self.assertEqual(vm.call_method(mod, p, "TakeDamage", [150]), [1])
+        self.assertEqual((p.get("health"), out), (-50, ["Player died"]))
+        fb = vm.start(mod, "Player.Respawn", [p], now=True)
+        vm.advance(2.0)
+        self.assertEqual((fb.status, p.get("health")), ("DONE", 100))
+        self.assertEqual(vm.call(mod, "Fib", [10]), [55])
+
+    def test_fuzzed_class_modules_never_crash(self):
+        _, r = build(classes_text())
+        rng = random.Random(5150)
+        data = bytes(r.wbc)
+        for _ in range(800):
+            d = bytearray(data)
+            for _ in range(rng.randint(1, 4)):
+                d[rng.randrange(len(d))] = rng.randrange(256)
+            vm = VM(output=lambda _s: None, fuel=10_000)
+            try:
+                mod = vm.load(bytes(d))
+                if "Make" in mod.exports:
+                    vm.call(mod, "Make", [1])
             except WiretError:
                 pass
 
