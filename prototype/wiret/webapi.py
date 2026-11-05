@@ -22,9 +22,10 @@ from .compiler import compile_module
 from .explain import explain, explain_runtime
 from .parser import ParseError, Parser
 from .printer import print_module
-from .registry import ModuleIndex
+from .model import note_text
+from .registry import ModuleIndex, enum_values
 from .runner import format_results, format_value, run_function
-from .viewmodel import graph_json, positions
+from .viewmodel import graph_json, opens, positions
 from .vm import VM, WiretError
 
 MAX_STEPS = 5000      # pause points kept by debug_run; the run itself carries on past them
@@ -162,6 +163,9 @@ def edit(source: str, graph: str, request: str) -> str:
       toggle           "node", "pin": flip a bool input
       add              "kind", "symbol", "targs" (a palette item), "x", "y", and optionally
                        "context": the pin a wire was dragged from, to wire the new node to
+    and the context menu's edits (see `menu`, which builds these requests): set_enum,
+    make_struct, break_struct, rename, label, color, toggle_attr, int_attr, cases, add_note,
+    edit_note, delete_note, add_box, members, resize, retitle and add_local.
     and optionally "geoms": {node: [x, y, width]} as drawn (to place an inserted Convert node)
     and "comments": "convert". The result is {"ok", "text", "message", "select"} (`select`: a
     node the edit added). When the edit is refused, `ok` is false and `message` says why. The
@@ -216,6 +220,39 @@ def edit(source: str, graph: str, request: str) -> str:
             reason = canvasedit.set_literal(g, info, idx, req["node"], req["pin"], req["text"])
         elif op == "toggle":
             reason = canvasedit.toggle_bool(g, req["node"], req["pin"])
+        elif op == "set_enum":
+            reason = canvasedit.set_enum(g, req["node"], req["pin"], req["type"], req["member"])
+        elif op in ("make_struct", "break_struct"):
+            make = canvasedit.make_for_pin if op == "make_struct" else canvasedit.break_struct
+            _nid, reason = make(g, req["node"], req["pin"], req["type"], geom)
+        elif op == "rename":
+            reason = canvasedit.rename_node(g, req["node"], req["text"])
+        elif op == "label":
+            reason = canvasedit.set_label(g, req["node"], req["text"], _REMEMBERED)
+        elif op == "color":
+            reason = canvasedit.set_color(g, req["node"], req["text"], _REMEMBERED)
+        elif op == "toggle_attr":
+            reason = canvasedit.toggle_attr(g, req["node"], req["name"])
+        elif op == "int_attr":
+            reason = canvasedit.set_int_attr(g, req["node"], req["name"], req["text"])
+        elif op == "cases":
+            reason = canvasedit.set_cases(g, idx, req["node"], req["text"])
+        elif op == "add_note":
+            reason = canvasedit.add_note(g, req.get("on"), req["text"])
+        elif op == "edit_note":
+            reason = canvasedit.edit_note(g, req["key"], req["text"])
+        elif op == "delete_note":
+            reason = canvasedit.delete_note(g, req["key"])
+        elif op == "add_box":
+            reason = canvasedit.add_box(g, req.get("x", 0), req.get("y", 0), req["text"], req.get("member"))
+        elif op == "members":
+            reason = canvasedit.set_members(g, req["box"], req["text"])
+        elif op == "resize":
+            reason = canvasedit.resize_box(g, req["box"], req["text"])
+        elif op == "retitle":
+            reason = canvasedit.retitle_box(g, req["box"], req["text"])
+        elif op == "add_local":
+            reason = canvasedit.add_local(g, idx, req.get("kind", "local"), req["text"])
         elif op == "add":
             item = pal.Item("", req["kind"], req.get("symbol"), list(req.get("targs") or []))
             ctx = req.get("context")
@@ -235,6 +272,129 @@ def edit(source: str, graph: str, request: str) -> str:
     added = [n.id for n in g.nodes if n.id not in before]
     return json.dumps({"ok": True, "text": print_module(m), "message": reason,
                        "select": added[0] if added else None})
+
+def menu(source: str, graph: str, target: str) -> str:
+    """The context menu for something on the canvas, entry for entry as the desktop editor's
+    (editor.context_menu and node_menu). `target` is JSON: {"kind": "canvas"}, {"kind":
+    "node", "node"}, {"kind": "pin", "node", "dir", "pin"}, {"kind": "box", "box"}, {"kind":
+    "wire", "wire": "d|node|pin" or "e|node|pin"} or {"kind": "note", "note": key}.
+
+    Each entry is {"sep": true}, a heading {"label", "header": true}, or a choice {"label",
+    ...} with one of: "action" (a request for `edit`), "ask" ({"label", "value"}: ask for text
+    first and send it as the action's "text"), "confirm" (a question to ask first), or
+    "client" (something the page does itself: "palette", "breakpoint", "editPin" or
+    "open:<graph>"). An empty list when the target is gone or the text does not parse."""
+    try:
+        m = Parser(source).parse_module()
+    except ParseError:
+        return "[]"
+    g = m.graph(graph)
+    if g is None:
+        return "[]"
+    t = json.loads(target)
+    idx = ModuleIndex(m)
+    info = GraphInfo(g, idx)
+    out: list = []
+    sep = {"sep": True}
+
+    def choice(label, op=None, ask=None, value="", client=None, confirm=None, **req):
+        e = {"label": label}
+        if op:
+            e["action"] = {"op": op, **req}
+        if ask is not None:
+            e["ask"] = {"label": ask, "value": value}
+        if client:
+            e["client"] = client
+            e.update(req)               # what it is about: the node (and pin)
+        if confirm:
+            e["confirm"] = confirm
+        out.append(e)
+
+    def node_menu(nid):
+        n = g.node(nid)
+        if n is None:
+            return
+        out.append({"label": f"{nid}  ({n.kind})", "header": True})
+        target_graph = opens(m, n)
+        if target_graph:
+            choice(f"Open {n.symbol}", client=f"open:{target_graph}")
+        choice("Breakpoint  (F9)", client="breakpoint", node=nid)
+        choice("Rename id…", "rename", f"New id for '{nid}' (renames every wire):", nid, node=nid)
+        choice("Label…", "label", f"Display label for '{nid}' (layout only; empty to clear):",
+               canvasedit.current_prop(g, nid, "label"), node=nid)
+        choice("Colour…", "color", "Colour such as #C0392B (empty to clear):",
+               canvasedit.current_prop(g, nid, "color"), node=nid)
+        choice("Add note…", "add_note", f"Note text on '{nid}':", on=nid)
+        if n.kind == "Sequence":
+            choice("Set output count (@count)…", "int_attr", "Number of outputs:",
+                   str(canvasedit.int_attr(g, nid, "count")), node=nid, name="count")
+        if n.kind == "Switch":
+            prompt, cur = canvasedit.cases_prompt(g, idx, nid)
+            choice("Set cases (@cases)…", "cases", prompt, cur, node=nid)
+        if n.kind not in ("Entry",):
+            choice(("Enable" if n.attr("disabled") else "Disable") + " (@disabled)", "toggle_attr",
+                   node=nid, name="disabled")
+        out.append(sep)
+        choice("Delete node", "delete", node=nid,
+               confirm="Delete the graph's Entry node?" if n.kind == "Entry" else None)
+
+    kind = t.get("kind")
+    if kind == "canvas":
+        choice("Search nodes…   (Tab)", client="palette")
+        out.append(sep)
+        choice("Add box here…", "add_box", "Box title:", x=t.get("x", 0), y=t.get("y", 0))
+        choice("Add graph note…", "add_note", "Note text for the whole graph:", on=None)
+        choice("Add local…", "add_local", "Add local: " + canvasedit.local_prompt(idx), kind="local")
+    elif kind == "node":
+        node_menu(t["node"])
+    elif kind == "pin":
+        nid, d, pin = t["node"], t["dir"], t["pin"]
+        sig = info.sigs.get(nid)
+        p = (sig.input(pin) if d == "in" else sig.output(pin)) if sig else None
+        if p is None:
+            return "[]"
+        if d == "in" and p.type in idx.enums:
+            out.append({"label": f"Set '{pin}' to", "header": True})
+            for member, _ in enum_values(idx.enums[p.type]):
+                out.append({"label": f"{p.type}.{member}", "indent": True,
+                            "action": {"op": "set_enum", "node": nid, "pin": pin,
+                                       "type": p.type, "member": member}})
+        elif d == "in" and p.type in idx.structs:
+            choice(f"Make a {p.type} for '{pin}'", "make_struct", node=nid, pin=pin, type=p.type)
+        elif d == "in" and not p.is_exec:
+            choice(f"Set literal for '{pin}'…", client="editPin", node=nid, pin=pin)
+        if d == "out" and p.type in idx.structs:
+            choice(f"Break '{pin}' into fields", "break_struct", node=nid, pin=pin, type=p.type)
+        choice("Disconnect", "disconnect", node=nid, dir=d, pin=pin)
+        out.append(sep)
+        node_menu(nid)
+    elif kind == "box":
+        bid = t["box"]
+        b = g.box(bid)
+        if b is None:
+            return "[]"
+        choice("Rename title…", "retitle", "Title:", b.title, box=bid)
+        choice("Edit members…", "members",
+               "Member node/box ids, comma separated (membership is explicit, section 2.3):",
+               ", ".join(b.members()), box=bid)
+        choice("Resize…", "resize", "width, height:", f"{b.w}, {b.h}", box=bid)
+        choice("Colour…", "color", "Colour such as #C0392B (empty to clear):",
+               canvasedit.current_prop(g, bid, "color"), node=bid)
+        choice("Add note…", "add_note", f"Note text on '{bid}':", on=bid)
+        out.append(sep)
+        choice("Delete box", "delete", node=bid)
+        out.append(sep)
+        choice("Search nodes…   (Tab)", client="palette")
+    elif kind == "wire":
+        wkind, nid, pin = t["wire"].split("|")
+        choice("Delete wire", "disconnect", node=nid, dir="in" if wkind == "d" else "out", pin=pin)
+    elif kind == "note":
+        _, nt = ops.find_note(g, t["note"])
+        if nt is None:
+            return "[]"
+        choice("Edit note…", "edit_note", "Text:", note_text(nt), key=t["note"])
+        choice("Delete note", "delete_note", key=t["note"])
+    return json.dumps(out)
 
 def run(source: str, func: str = "Main", deterministic: bool = False,
         fuel: int = 50_000_000) -> str:

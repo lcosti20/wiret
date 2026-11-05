@@ -896,30 +896,23 @@ class EditorApp:
     def set_enum_value(self, nid, pin, ty, member):
         if not self.can_edit():
             return
-        ops.bind(self.graph, nid, pin, Lit("enum", f"{ty}.{member}"))
-        self.commit(f"Set {nid}.{pin} = {ty}.{member}")
+        self.commit(canvasedit.set_enum(self.graph, nid, pin, ty, member))
 
     def break_struct(self, nid, pin, ty):
         """A BreakStruct to the right of a struct output, wired to it."""
         if not self.can_edit():
             return
-        gm = self.view.geoms.get(nid)
-        x, y = (gm.x + gm.w + 60, gm.y) if gm else (0, 0)
-        n = ops.create_node(self.graph, "BreakStruct", ty, [], x, y)
-        ops.bind(self.graph, n.id, "obj", PinRef(nid, pin))
-        self.view.selected = ("node", n.id)
-        self.commit(f"Added {n.id}: {nid}.{pin} split into fields")
+        new, reason = canvasedit.break_struct(self.graph, nid, pin, ty, self.geom)
+        self.view.selected = ("node", new)
+        self.commit(reason)
 
     def make_for_pin(self, nid, pin, ty):
         """A MakeStruct to the left of a struct input, wired into it."""
         if not self.can_edit():
             return
-        gm = self.view.geoms.get(nid)
-        x, y = (gm.x - 220, gm.y) if gm else (0, 0)
-        n = ops.create_node(self.graph, "MakeStruct", ty, [], x, y)
-        ops.bind(self.graph, nid, pin, PinRef(n.id, "result"))
-        self.view.selected = ("node", n.id)
-        self.commit(f"Added {n.id}: a {ty} for {nid}.{pin}")
+        new, reason = canvasedit.make_for_pin(self.graph, nid, pin, ty, self.geom)
+        self.view.selected = ("node", new)
+        self.commit(reason)
 
     def add_node(self, kind, symbol=None, targs=None, x=0, y=0, attrs=None):
         if not self.can_edit():
@@ -949,101 +942,64 @@ class EditorApp:
     def rename_node(self, nid):
         new = simpledialog.askstring("Rename node", f"New id for '{nid}' (renames every wire):",
                                      initialvalue=nid, parent=self.root)
-        if not new or new == nid:
+        if not new:
             return
-        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", new) or new in KEYWORDS:
-            messagebox.showerror("Rename", "Not a valid identifier.")
+        try:
+            reason = canvasedit.rename_node(self.graph, nid, new)
+        except canvasedit.Refused as e:
+            messagebox.showerror("Rename", str(e))
             return
-        if self.graph.node(new) or self.graph.box(new):
-            messagebox.showerror("Rename", f"'{new}' is already used in this graph (E0102).")
+        if reason is None:
             return
-        ops.rename_node(self.graph, nid, new)
         if self.view.selected == ("node", nid):
             self.view.selected = ("node", new)
-        self.commit(f"Renamed {nid} to {new}")
+        self.commit(reason)
 
     def set_label(self, nid):
         if not self.can_edit():
             return
-        g = self.graph
-        p = g.place(nid)
-        cur = p.prop("label").value if p and p.prop("label") is not None else ""
+        cur = canvasedit.current_prop(self.graph, nid, "label")
         text = simpledialog.askstring("Label", f"Display label for '{nid}' (layout only; empty "
                                                f"to clear):", initialvalue=cur, parent=self.root)
         if text is None:
             return
-        if p is None:
-            x, y = self.auto_pos.get((g.name, nid), (0, 0))
-            ops.place(g, nid, x, y)
-            p = g.place(nid)
-        p.set_prop("label", Lit("string", text) if text else None)
-        self.commit(f"Labelled {nid}")
+        self.commit(canvasedit.set_label(self.graph, nid, text, self.auto_pos))
 
     def set_color(self, nid):
-        g = self.graph
-        p = g.place(nid) or g.box(nid)
-        cur = p.prop("color").value if p and p.prop("color") is not None else ""
+        cur = canvasedit.current_prop(self.graph, nid, "color")
         text = simpledialog.askstring("Colour", "Colour such as #C0392B (empty to clear):",
                                       initialvalue=cur, parent=self.root)
         if text is None:
             return
-        if text and not re.fullmatch(r"#[0-9A-Fa-f]{6}", text):
-            messagebox.showerror("Colour", "Use the form #RRGGBB.")
+        try:
+            reason = canvasedit.set_color(self.graph, nid, text, self.auto_pos)
+        except canvasedit.Refused as e:
+            messagebox.showerror("Colour", str(e))
             return
-        if p is None:
-            x, y = self.auto_pos.get((g.name, nid), (0, 0))
-            ops.place(g, nid, x, y)
-            p = g.place(nid)
-        p.set_prop("color", Lit("string", text.upper()) if text else None)
-        self.commit(f"Coloured {nid}")
+        self.commit(reason)
 
     def toggle_attr(self, nid, name):
-        n = self.graph.node(nid)
-        if n.attr(name):
-            n.attrs = [a for a in n.attrs if a.name != name]
-        else:
-            from .model import Attr
-            n.attrs.append(Attr(name))
-        self.commit(f"Toggled @{name} on {nid}")
+        self.commit(canvasedit.toggle_attr(self.graph, nid, name))
 
     def set_int_attr(self, nid, name, prompt):
-        from .model import Attr
-        n = self.graph.node(nid)
-        a = n.attr(name)
-        cur = a.args[0][1].value if a and a.args else 2
+        cur = canvasedit.int_attr(self.graph, nid, name)
         v = simpledialog.askinteger(f"@{name}", prompt, initialvalue=cur, minvalue=1, maxvalue=64,
                                     parent=self.root)
         if v is None:
             return
-        n.attrs = [x for x in n.attrs if x.name != name] + [Attr(name, [(None, Lit("int", v))])]
-        self.commit(f"Set @{name}({v}) on {nid}")
+        self.commit(canvasedit.set_int_attr(self.graph, nid, name, v))
 
     def set_cases(self, nid):
-        from .model import Attr
-        n = self.graph.node(nid)
-        a = n.attr("cases")
-        from .printer import fmt_lit
-        cur = ", ".join(fmt_lit(v) for _, v in a.args) if a and a.args else ""
-        ety = n.targs[0] if n.targs and n.targs[0] in self.idx.enums else None
-        prompt = "Case values, comma separated:"
-        if ety:
-            members = ", ".join(m for m, _ in enum_values(self.idx.enums[ety]))
-            prompt = f"{ety} members, comma separated (one of: {members}):"
+        prompt, cur = canvasedit.cases_prompt(self.graph, self.idx, nid)
         text = simpledialog.askstring("@cases", prompt, initialvalue=cur, parent=self.root)
         if text is None:
             return
-        ty = n.targs[0] if n.targs else None
-        parts = [t.strip() for t in next(csv.reader([text], skipinitialspace=True)) if t.strip()]
-        if ty in self.idx.enums:      # bare member names are enough: Idle, Chase
-            parts = [t if "." in t else f"{ty}.{t}" for t in parts]
         try:
-            vals = [parse_literal(t) for t in parts]
-        except ParseError as e:
-            messagebox.showerror("@cases", e.msg)
+            reason = canvasedit.set_cases(self.graph, self.idx, nid, text)
+        except canvasedit.Refused as e:
+            messagebox.showerror("@cases", str(e))
             return
-        n.attrs = [x for x in n.attrs if x.name != "cases"] + \
-            [Attr("cases", [(None, v) for v in vals])]
-        self.commit(f"Set cases on {nid}")
+        self.commit(reason)
 
     def add_note(self, on):
         if not self.can_edit():
@@ -1051,21 +1007,17 @@ class EditorApp:
         text = simpledialog.askstring("Note", "Note text" + (f" on '{on}'" if on else
                                                                " for the whole graph") + ":",
                                       parent=self.root)
-        if text:
-            ops.add_note(self.graph, on, text)
-            self.commit("Added note")
+        reason = canvasedit.add_note(self.graph, on, text)
+        if reason:
+            self.commit(reason)
 
     def add_box(self, x, y):
         title = simpledialog.askstring("Box", "Box title:", parent=self.root)
-        if not title:
-            return
-        g = self.graph
-        members = []
-        if self.view.selected and self.view.selected[0] == "node":
-            members = [Lit("ident", self.view.selected[1])]
-        g.boxes.append(Box(ops.fresh_id(g, "box"), x, y, [("members", Lit("list", members))],
-                           title=title, w=360, h=220))
-        self.commit(f"Added box {title!r}")
+        sel = self.view.selected
+        reason = canvasedit.add_box(self.graph, x, y, title,
+                                    sel[1] if sel and sel[0] == "node" else None)
+        if reason:
+            self.commit(reason)
 
     def edit_members(self, bid):
         b = self.graph.box(bid)
@@ -1074,29 +1026,25 @@ class EditorApp:
                                       initialvalue=", ".join(b.members()), parent=self.root)
         if text is None:
             return
-        ids = [t.strip() for t in text.split(",") if t.strip()]
-        b.set_prop("members", Lit("list", [Lit("ident", i) for i in ids]))
-        self.commit(f"Edited members of {bid}")
+        self.commit(canvasedit.set_members(self.graph, bid, text))
 
     def resize_box(self, bid):
         b = self.graph.box(bid)
         text = simpledialog.askstring("Box size", "width, height:", initialvalue=f"{b.w}, {b.h}",
                                       parent=self.root)
         try:
-            w, h = (int(v) for v in (text or "").split(","))
-        except ValueError:
+            reason = canvasedit.resize_box(self.graph, bid, text)
+        except canvasedit.Refused:
             return
-        b.w, b.h = max(40, w), max(40, h)
-        self.commit(f"Resized {bid}")
+        self.commit(reason)
 
     def rename_box(self, bid):
         b = self.graph.box(bid)
         text = simpledialog.askstring("Box title", "Title:", initialvalue=b.title, parent=self.root)
-        if text:
-            b.title = text
-            self.commit(f"Retitled {bid}")
+        reason = canvasedit.retitle_box(self.graph, bid, text)
+        if reason:
+            self.commit(reason)
 
-    # -- graph-level edits --------------------------------------------------------
     def new_graph(self, kind):
         if self.module is None or self.parse_error:
             return
@@ -1150,22 +1098,15 @@ class EditorApp:
         g = self.graph
         if g is None or not self.can_edit():
             return
-        own = sorted(self.idx.structs) + sorted(self.idx.enums)
-        example = f"  or  pos: {own[0]}" if own else ""
-        text = simpledialog.askstring(f"Add {kw}", "name: type   (e.g.  count: i32  or  "
-                                                   f"scores: array::<i32>{example})",
+        text = simpledialog.askstring(f"Add {kw}", canvasedit.local_prompt(self.idx, kw),
                                       parent=self.root)
-        if not text or ":" not in text:
+        try:
+            reason = canvasedit.add_local(g, self.idx, kw, text)
+        except canvasedit.Refused as e:
+            messagebox.showerror(f"Add {kw}", str(e))
             return
-        name, ty = (s.strip() for s in text.split(":", 1))
-        if not re.fullmatch(r"[A-Za-z_]\w*", name) or not type_ok(ty, self.idx):
-            own = sorted(self.idx.structs) + sorted(self.idx.enums)
-            extra = f", or one of this module's types: {', '.join(own)}" if own else ""
-            messagebox.showerror(f"Add {kw}", "Use a valid name and a type such as i32, string "
-                                              f"or array::<i32>{extra}.")
-            return
-        (g.locals if kw == "local" else g.states).append(Local(name, ty))
-        self.commit(f"Added {kw} {name}")
+        if reason:
+            self.commit(reason)
 
     def delete_graph(self):
         g = self.graph
@@ -1247,13 +1188,12 @@ class EditorApp:
         if nt is None:
             return
         text = simpledialog.askstring("Note", "Text:", initialvalue=note_text(nt), parent=self.root)
-        if text:
-            set_note_text(nt, text)
-            self.commit("Edited note")
+        reason = canvasedit.edit_note(self.graph, key, text)
+        if reason:
+            self.commit(reason)
 
     def delete_note(self, key):
-        ops.delete_note(self.graph, key)
-        self.commit("Deleted note")
+        self.commit(canvasedit.delete_note(self.graph, key))
 
     def node_menu(self, menu, nid):
         n = self.graph.node(nid)

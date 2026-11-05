@@ -8,13 +8,14 @@ the reason to show.
 """
 from __future__ import annotations
 
+import re
 from typing import Callable, Optional
 
 from . import ops
 from . import palette as pal
 from .checker import GraphInfo
 from .explain import type_words
-from .model import Graph, Lit, PinRef
+from .model import Attr, Box, Graph, Lit, PinRef, set_note_text
 from .parser import ParseError, parse_literal
 from .registry import can_convert, enum_values, lit_fits
 
@@ -209,3 +210,209 @@ def place_unplaced(g: Graph, remembered: dict) -> None:
             x, y = remembered.get((g.name, n.id), (0, 0))
             ops.place(g, n.id, x, y)
     ops.prune_box_members(g)
+
+
+# -- the context menu's edits ------------------------------------------------------------
+# Each takes what was typed into the menu's prompt. The desktop editor asks with its dialogs,
+# the web page with a box over the canvas; both then call these.
+
+def set_enum(g: Graph, nid: str, pin: str, ty: str, member: str) -> str:
+    ops.bind(g, nid, pin, Lit("enum", f"{ty}.{member}"))
+    return f"Set {nid}.{pin} = {ty}.{member}"
+
+
+def break_struct(g: Graph, nid: str, pin: str, ty: str, geom: Geom) -> tuple:
+    """A BreakStruct to the right of a struct output, wired to it: (its id, description)."""
+    gm = geom(nid)
+    x, y = (gm[0] + gm[2] + 60, gm[1]) if gm else (0, 0)
+    n = ops.create_node(g, "BreakStruct", ty, [], x, y)
+    ops.bind(g, n.id, "obj", PinRef(nid, pin))
+    return n.id, f"Added {n.id}: {nid}.{pin} split into fields"
+
+
+def make_for_pin(g: Graph, nid: str, pin: str, ty: str, geom: Geom) -> tuple:
+    """A MakeStruct to the left of a struct input, wired into it: (its id, description)."""
+    gm = geom(nid)
+    x, y = (gm[0] - 220, gm[1]) if gm else (0, 0)
+    n = ops.create_node(g, "MakeStruct", ty, [], x, y)
+    ops.bind(g, nid, pin, PinRef(n.id, "result"))
+    return n.id, f"Added {n.id}: a {ty} for {nid}.{pin}"
+
+
+def rename_node(g: Graph, nid: str, new: str) -> Optional[str]:
+    """Give a node a new id; every wire follows. None when the id is unchanged."""
+    from .parser import KEYWORDS
+    if not new or new == nid:
+        return None
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", new) or new in KEYWORDS:
+        raise Refused("Not a valid identifier.")
+    if g.node(new) or g.box(new):
+        raise Refused(f"'{new}' is already used in this graph (E0102).")
+    ops.rename_node(g, nid, new)
+    return f"Renamed {nid} to {new}"
+
+
+def _place_of(g: Graph, nid: str, remembered: dict):
+    p = g.place(nid)
+    if p is None:
+        x, y = remembered.get((g.name, nid), (0, 0))
+        ops.place(g, nid, x, y)
+        p = g.place(nid)
+    return p
+
+
+def current_prop(g: Graph, nid: str, key: str) -> str:
+    """A node's or box's `label` or `color`, as text ("" when it has none)."""
+    p = g.place(nid) or g.box(nid)
+    v = p.prop(key) if p else None
+    return v.value if v is not None else ""
+
+
+def set_label(g: Graph, nid: str, text: str, remembered: dict) -> str:
+    """A node's display label (layout only); empty clears it."""
+    _place_of(g, nid, remembered).set_prop("label", Lit("string", text) if text else None)
+    return f"Labelled {nid}"
+
+
+def set_color(g: Graph, nid: str, text: str, remembered: dict) -> str:
+    """A node's or box's colour, #RRGGBB; empty clears it."""
+    if text and not re.fullmatch(r"#[0-9A-Fa-f]{6}", text):
+        raise Refused("Use the form #RRGGBB.")
+    p = g.box(nid) or _place_of(g, nid, remembered)
+    p.set_prop("color", Lit("string", text.upper()) if text else None)
+    return f"Coloured {nid}"
+
+
+def toggle_attr(g: Graph, nid: str, name: str) -> str:
+    n = g.node(nid)
+    if n.attr(name):
+        n.attrs = [a for a in n.attrs if a.name != name]
+    else:
+        n.attrs.append(Attr(name))
+    return f"Toggled @{name} on {nid}"
+
+
+def int_attr(g: Graph, nid: str, name: str, default: int = 2) -> int:
+    a = g.node(nid).attr(name)
+    return a.args[0][1].value if a and a.args else default
+
+
+def set_int_attr(g: Graph, nid: str, name: str, value) -> str:
+    """@name(value) on a node, value a whole number from 1 to 64 (as Sequence's @count)."""
+    try:
+        v = int(str(value).strip())
+    except ValueError:
+        raise Refused("Enter a whole number from 1 to 64.")
+    if not 1 <= v <= 64:
+        raise Refused("Enter a whole number from 1 to 64.")
+    n = g.node(nid)
+    n.attrs = [x for x in n.attrs if x.name != name] + [Attr(name, [(None, Lit("int", v))])]
+    return f"Set @{name}({v}) on {nid}"
+
+
+def cases_prompt(g: Graph, idx, nid: str) -> tuple:
+    """(what to ask, the current cases as text) for a Switch's @cases."""
+    from .printer import fmt_lit
+    n = g.node(nid)
+    a = n.attr("cases")
+    cur = ", ".join(fmt_lit(v) for _, v in a.args) if a and a.args else ""
+    ety = n.targs[0] if n.targs and n.targs[0] in idx.enums else None
+    prompt = "Case values, comma separated:"
+    if ety:
+        members = ", ".join(m for m, _ in enum_values(idx.enums[ety]))
+        prompt = f"{ety} members, comma separated (one of: {members}):"
+    return prompt, cur
+
+
+def set_cases(g: Graph, idx, nid: str, text: str) -> str:
+    """A Switch's @cases from comma-separated values; enum members need no type name."""
+    import csv
+    n = g.node(nid)
+    ty = n.targs[0] if n.targs else None
+    parts = [t.strip() for t in next(csv.reader([text], skipinitialspace=True), []) if t.strip()]
+    if ty in idx.enums:      # bare member names are enough: Idle, Chase
+        parts = [t if "." in t else f"{ty}.{t}" for t in parts]
+    try:
+        vals = [parse_literal(t) for t in parts]
+    except ParseError as e:
+        raise Refused(e.msg)
+    n.attrs = [x for x in n.attrs if x.name != "cases"] + [Attr("cases", [(None, v) for v in vals])]
+    return f"Set cases on {nid}"
+
+
+def add_note(g: Graph, on: Optional[str], text: str) -> Optional[str]:
+    """A note on a node or box, or on the whole graph (`on` None)."""
+    if not text:
+        return None
+    ops.add_note(g, on, text)
+    return "Added note"
+
+
+def edit_note(g: Graph, key: str, text: str) -> Optional[str]:
+    _, nt = ops.find_note(g, key)
+    if nt is None or not text:
+        return None
+    set_note_text(nt, text)
+    return "Edited note"
+
+
+def delete_note(g: Graph, key: str) -> str:
+    ops.delete_note(g, key)
+    return "Deleted note"
+
+
+def add_box(g: Graph, x: float, y: float, title: str, member: Optional[str] = None) -> Optional[str]:
+    """A box at (x, y) titled `title`, holding the selected node (`member`) if there is one."""
+    if not title:
+        return None
+    members = [Lit("ident", member)] if member else []
+    g.boxes.append(Box(ops.fresh_id(g, "box"), int(x), int(y), [("members", Lit("list", members))],
+                       title=title, w=360, h=220))
+    return f"Added box {title!r}"
+
+
+def set_members(g: Graph, bid: str, text: str) -> str:
+    """A box's members: node or box ids, comma separated (membership is explicit, 2.3)."""
+    ids = [t.strip() for t in text.split(",") if t.strip()]
+    g.box(bid).set_prop("members", Lit("list", [Lit("ident", i) for i in ids]))
+    return f"Edited members of {bid}"
+
+
+def resize_box(g: Graph, bid: str, text: str) -> str:
+    """A box's size from "width, height" (at least 40 each)."""
+    try:
+        w, h = (int(v) for v in (text or "").split(","))
+    except ValueError:
+        raise Refused("Enter the width and height, as in 360, 220.")
+    b = g.box(bid)
+    b.w, b.h = max(40, w), max(40, h)
+    return f"Resized {bid}"
+
+
+def retitle_box(g: Graph, bid: str, text: str) -> Optional[str]:
+    if not text:
+        return None
+    g.box(bid).title = text
+    return f"Retitled {bid}"
+
+
+def local_prompt(idx, kw: str = "local") -> str:
+    own = sorted(idx.structs) + sorted(idx.enums)
+    example = f"  or  pos: {own[0]}" if own else ""
+    return f"name: type   (e.g.  count: i32  or  scores: array::<i32>{example})"
+
+
+def add_local(g: Graph, idx, kw: str, text: str) -> Optional[str]:
+    """A local (or state) variable from "name: type"."""
+    from .model import Local
+    from .registry import type_ok
+    if not text or ":" not in text:
+        return None
+    name, ty = (s.strip() for s in text.split(":", 1))
+    if not re.fullmatch(r"[A-Za-z_]\w*", name) or not type_ok(ty, idx):
+        own = sorted(idx.structs) + sorted(idx.enums)
+        extra = f", or one of this module's types: {', '.join(own)}" if own else ""
+        raise Refused("Use a valid name and a type such as i32, string "
+                      f"or array::<i32>{extra}.")
+    (g.locals if kw == "local" else g.states).append(Local(name, ty))
+    return f"Added {kw} {name}"

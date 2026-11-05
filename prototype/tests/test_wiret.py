@@ -6541,6 +6541,108 @@ class WebApiTests(unittest.TestCase):
         nodes = {n["id"]: n for n in json.loads(webapi.check(lesson("02_variables.wiret")))["graphs"][0]["nodes"]}
         self.assertEqual(nodes["plus"]["description"], "Adds two numbers: a + b.")
 
+    def menu(self, source, graph, **target):
+        from wiret import webapi
+        return json.loads(webapi.menu(source, graph, json.dumps(target)))
+
+    @staticmethod
+    def labels(entries):
+        return ["---" if e.get("sep") else f"[{e['label']}]" if e.get("header") else e["label"]
+                for e in entries]
+
+    def test_menus_follow_the_desktop(self):
+        pets = lesson("08_structs.wiret")
+        self.assertEqual(self.labels(self.menu(pets, "Main", kind="pin", node="hungry", dir="in", pin="value")),
+                         ["[Set 'value' to]", "Mood.Happy", "Mood.Hungry", "Mood.Sleepy", "Disconnect",
+                          "---", "[hungry  (WithField)]", "Breakpoint  (F9)", "Rename id…", "Label…",
+                          "Colour…", "Add note…", "Disable (@disabled)", "---", "Delete node"])
+        self.assertEqual(self.labels(self.menu(pets, "Main", kind="pin", node="hungry", dir="in", pin="obj"))[:2],
+                         ["Make a Pet for 'obj'", "Disconnect"])
+        self.assertEqual(self.labels(self.menu(pets, "Main", kind="pin", node="make", dir="out", pin="result"))[:2],
+                         ["Break 'result' into fields", "Disconnect"])
+        name = self.menu(pets, "Main", kind="pin", node="make", dir="in", pin="name")[0]
+        self.assertEqual(name, {"label": "Set literal for 'name'…", "client": "editPin", "node": "make", "pin": "name"})
+        self.assertEqual(self.labels(self.menu(pets, "Main", kind="canvas", x=5, y=6)),
+                         ["Search nodes…   (Tab)", "---", "Add box here…", "Add graph note…", "Add local…"])
+        self.assertEqual(self.labels(self.menu(pets, "Main", kind="wire", wire="d|save|value")), ["Delete wire"])
+        self.assertEqual(self.labels(self.menu(pets, "Main", kind="note", note="hungry|0")), ["Edit note…", "Delete note"])
+        entry = self.menu(pets, "Main", kind="node", node="entry")
+        self.assertNotIn("Disable (@disabled)", self.labels(entry))
+        self.assertEqual(entry[-1]["confirm"], "Delete the graph's Entry node?")
+        calls = self.labels(self.menu(lesson("05_functions.wiret"), "Main", kind="node", node="squared"))
+        self.assertIn("Open Square", calls)
+        self.assertEqual(self.menu(pets, "Main", kind="node", node="gone"), [])
+        self.assertEqual(self.menu(pets + "(", "Main", kind="canvas"), [])
+
+    def test_menu_actions(self):
+        import re
+        pets = lesson("08_structs.wiret")
+        # each entry's action, with the text the page asked for, is an edit request
+        def run(target, label, text=None, source=pets, **extra):
+            e = next(e for e in self.menu(source, "Main", **target) if e.get("label") == label)
+            req = {**e["action"], **extra}
+            if text is not None:
+                req["text"] = text
+            return self.edit(source, "Main", **req)
+        node = {"kind": "node", "node": "make"}
+        self.assertIn(".value <- Mood.Sleepy", run({"kind": "pin", "node": "hungry", "dir": "in", "pin": "value"}, "Mood.Sleepy")["text"])
+        r = run({"kind": "pin", "node": "hungry", "dir": "in", "pin": "obj"}, "Make a Pet for 'obj'", geoms={"hungry": [300, 0, 150]})
+        self.assertIn(f".obj <- {r['select']}.result", r["text"])
+        self.assertIn(f"{r['select']} at (80, 0)", r["text"])
+        r = run({"kind": "pin", "node": "make", "dir": "out", "pin": "result"}, "Break 'result' into fields", geoms={"make": [0, 160, 120]})
+        self.assertIn(f"{r['select']} at (180, 160)", r["text"])
+        r = run(node, "Rename id…", "build")
+        self.assertEqual((r["message"], r["select"]), ("Renamed make to build", "build"))
+        self.assertEqual(run(node, "Rename id…", "2x"), {"ok": False, "message": "Not a valid identifier."})
+        self.assertIn('[label = "Feed"]', run(node, "Label…", "Feed")["text"])
+        self.assertIn('color = "#C0392B"', run(node, "Colour…", "#c0392b")["text"])
+        self.assertEqual(run(node, "Colour…", "red")["message"], "Use the form #RRGGBB.")
+        self.assertIn("node make = MakeStruct Pet @disabled", run(node, "Disable (@disabled)")["text"])
+        self.assertIn('#[note("Hi")]\n  node make', run(node, "Add note…", "Hi")["text"])
+        r = run({"kind": "canvas", "x": 10, "y": 20}, "Add box here…", "Pets", member="make")
+        self.assertRegex(r["text"], r'box box_\w+ "Pets" at \(10, 20\) size \(360, 220\) \[members = \[make\]\]')
+        bid = re.search(r"box (box_\w+)", r["text"]).group(1)
+        box = {"kind": "box", "box": bid}
+        self.assertIn("size (500, 300)", run(box, "Resize…", "500, 300", source=r["text"])["text"])
+        self.assertEqual(run(box, "Resize…", "big", source=r["text"])["message"], "Enter the width and height, as in 360, 220.")
+        self.assertIn(f'box {bid} "Cats"', run(box, "Rename title…", "Cats", source=r["text"])["text"])
+        self.assertIn("[members = [entry, make]]", run(box, "Edit members…", "entry, make", source=r["text"])["text"])
+        self.assertIn("local count: i32", run({"kind": "canvas"}, "Add local…", "count: i32")["text"])
+        self.assertIn("Use a valid name", run({"kind": "canvas"}, "Add local…", "x: Nope")["message"])
+        self.assertIn('#[note("Short")]', run({"kind": "note", "note": "hungry|0"}, "Edit note…", "Short")["text"])
+        self.assertNotIn("WithField makes a copy", run({"kind": "note", "note": "hungry|0"}, "Delete note")["text"])
+
+    def test_menu_counts_and_cases(self):
+        text = """wiret 1
+module m
+
+extern func host.Log(message: string)
+
+enum Mode {
+  Idle
+  Chase
+}
+
+func Main() {
+  node entry = Entry
+  node seq = Sequence
+  node sw = Switch::<Mode>
+  flow {
+    entry -> seq
+  }
+}
+"""
+        seq = self.menu(text, "Main", kind="node", node="seq")
+        e = next(e for e in seq if e["label"] == "Set output count (@count)…")
+        self.assertEqual(e["ask"], {"label": "Number of outputs:", "value": "2"})
+        r = self.edit(text, "Main", **{**e["action"], "text": "3"})
+        self.assertIn("node seq = Sequence @count(3)", r["text"])
+        self.assertEqual(self.edit(text, "Main", **{**e["action"], "text": "99"})["message"],
+                         "Enter a whole number from 1 to 64.")
+        e = next(e for e in self.menu(text, "Main", kind="node", node="sw") if e["label"] == "Set cases (@cases)…")
+        self.assertEqual(e["ask"]["label"], "Mode members, comma separated (one of: Idle, Chase):")
+        self.assertIn("@cases(Mode.Idle, Mode.Chase)", self.edit(text, "Main", **{**e["action"], "text": "Idle, Chase"})["text"])
+
     def test_web_stepping_matches_desktop(self):
         """web/debugger.js, stepping through a recording, pauses where the desktop editor's
         hook (DebugState.decide, driven live by the VM) pauses, for random breakpoints and
