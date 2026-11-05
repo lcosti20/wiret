@@ -40,7 +40,8 @@ def check_range(project: Project, spec: str, record=False, out=print) -> int:
     base, _, head = spec.partition("..")
     head = head or None
     top = git(["rev-parse", "--show-toplevel"], project.root).strip()
-    root_rel = os.path.relpath(project.root, top).replace(os.sep, "/")
+    # git reports symlink-resolved paths (macOS: /var -> /private/var), so resolve ours too
+    root_rel = os.path.relpath(os.path.realpath(project.root), top).replace(os.sep, "/")
     ids_rel = "wiret.ids" if root_rel == "." else f"{root_rel}/wiret.ids"
     diff = ["diff", "--name-only", base] + ([head] if head else []) + ["--", "*.wiret"]
     files = [f for f in git(diff, top).splitlines()
