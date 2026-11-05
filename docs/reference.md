@@ -1,6 +1,6 @@
 # Wiret Language Specification
 
-*Draft 0.7: text syntax, bytecode (WBC) and embedding API for a text-based visual scripting language*
+*Draft 0.8: text syntax, bytecode (WBC) and embedding API for a text-based visual scripting language*
 
 > **Status.** This is a design draft, not an implementation. Nothing here has been run through a real parser, verifier or VM, so treat the grammar and opcode tables as a starting point to test, not a frozen standard. Where I went beyond your reference documents (mainly Blueprint runtime behaviour that the supplied documentation does not spell out), the text says so.
 
@@ -15,6 +15,8 @@
 **Draft 0.6.** Three syntax changes make graphs easier to scan (Appendix E). Every generic argument list is introduced by `::`, as in `Add::<i32>`, `macro ForEach::<T>` and `array::<i32>`, so a node line like `node x = NodeType::<a, b> sym` cannot be misread as a comparison (2.2, 2.3). A node's inputs move out of call-style parentheses onto their own lines below the node, `.pin <- value`, mirroring the `->` of exec wires (2.3, 2.5). Metadata that never changes compiled output is written `#[doc("...")]` on its own line above what it describes, while `@` is kept for semantic attributes such as `@pure`; notes become `#[note("...")]` lines and the `markup` block is removed (2.4).
 
 **Draft 0.7.** Records decisions made while adding structs and enums to the prototype (Appendix F). An enum value is written `Mode.Chase`, on pins, as defaults and in `@cases` (2.1, 2.3). Struct nodes name their struct, and field nodes the field too: `MakeStruct Vec2`, `GetField Vec2.x` (2.3, 3.3). Reading a struct is `pure`, also in a `@pure` function, since a struct is a value (3.3, 4.3). Struct fields and enum members keep their written order in the canonical form (2.5). A struct's default value comes from its field defaults, stored in its type entry (3.1, 5.3), and struct equality compares field by field (4.9). A struct may not hold itself by value (`E0503`; 2.2, 4.7, 5.5).
+
+**Draft 0.8.** Records decisions made while adding maps, sets, container equality, ids and merging to the prototype (Appendix G). Map and set nodes have fixed pins, and the mutators that may change nothing say whether they did (3.3). Every NaN is the same map key or set item (3.1). Container equality calls one native per container kind, which takes `anyref` and declares its fuel cost (3.4, 4.9, 5.7). `@id`s and `W0202` are required only in a project (2.4, 4.7), and `wiret.ids` has a fixed line format (7.3). A merge matches an element to the same element after it gains an `@id`, carries renames across, lets the incoming side win layout disagreements, and marks a deleted-versus-modified node as a whole block (7.1).
 
 **Implementation status.** Nothing in this document is implemented. Parts expected to change after prototyping are marked **Provisional**: catchable faults (4.6), the copy-on-write rules for containers (4.9), the deterministic-mode floating-point rules (4.10), and the choice of a stack rather than a register machine (9.1). Guarantees about exact diagnostics and cross-platform determinism are targets until the tier in section 1.6 that contains them has passed its tests.
 
@@ -35,3 +37,4 @@
 - [Appendix D. Changes in Draft 0.5](reference/appendix-d.md)
 - [Appendix E. Changes in Draft 0.6](reference/appendix-e.md)
 - [Appendix F. Changes in Draft 0.7](reference/appendix-f.md)
+- [Appendix G. Changes in Draft 0.8](reference/appendix-g.md)

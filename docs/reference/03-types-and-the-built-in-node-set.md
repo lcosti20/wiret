@@ -13,7 +13,7 @@
 | `struct` | immutable heap record with value semantics | Equality is structural, field by field. "Setting" a field makes a new struct (`WithField`). Default: each field's declared default, else that field type's default. |
 | `class` | nullable reference | Equality is identity. Default `null`. |
 | `array::<T>` | growable, zero-based; **value type** | Copied on assignment, argument passing and return. The VM copies lazily (copy-on-write, section 4.9), so two variables never alias one array. Equality is element-wise. |
-| `set::<T>`, `map::<K,V>` | insertion-ordered; **value types** | Same copy rules as arrays. Iteration order is insertion order, never hash order. Keys are primitives, `string`, enums or structs of those. Equality ignores order. |
+| `set::<T>`, `map::<K,V>` | insertion-ordered; **value types** | Same copy rules as arrays. Iteration order is insertion order, never hash order. Keys are primitives, `string`, enums or structs of those. Every NaN is the same key, also inside a struct key, so a NaN key can be found again. Equality ignores order. |
 | `delegate::<(A)->(R)>` | reference to a function plus optional bound receiver | Single-cast. |
 | `dispatcher::<(A)>` | reference to an ordered handler list | Multicast; the `dispatcher` member of a class. |
 | `extern type` | host handle (index plus generation) | `IsValid` is false once the host destroys the object. |
@@ -95,10 +95,11 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 | `MakeArray::<T>` | Pure. `@count(n)`, inputs `item0` ... |
 | `ArrayGet::<T>`, `ArrayLength::<T>` | Pure. Out-of-range index is a fault. |
 | `ArraySet::<T>`, `ArrayAdd::<T>`, `ArrayInsert::<T>`, `ArrayRemove::<T>`, `ArrayClear::<T>` | Impure. They change a **place**: the symbol names a local, a module variable, or a field. Examples: `ArrayAdd::<i32> acc` with input `.item <- x`, and `ArrayAdd::<i32> Player.items` with inputs `.obj <- p` and `.item <- x`. Targeting anything else, such as a call result, is `E0130`. Arrays are value types (section 4.9), so no other variable sees the change. |
-| `MapFind::<K,V>` | Pure. Out: `value`, `found`. A missing key gives the zero value and `found = false`. |
-| `MapHas`, `MapLength`, `MapKeyAt`, `MapValueAt` | Pure. The `At` kinds index by insertion order, which is how `ForEach` over a map is built. |
-| `MapSet`, `MapRemove`, `MapClear` | Impure, and change a place exactly like the array mutators. |
-| `SetHas`, `SetLength`, `SetAt` / `SetAdd`, `SetRemove`, `SetClear` | Same pattern. |
+| `MapFind::<K,V>` | Pure. In `map`, `key`; out `value`, `found`. A missing key gives the zero value and `found = false`. |
+| `MapHas`, `MapLength`, `MapKeyAt`, `MapValueAt` | Pure. In `map`, plus `key` (`MapHas`) or `index` (the `At` kinds); out `result`, `length`, `key` and `value`. The `At` kinds index by insertion order, which is how `ForEachMap` is built; an out-of-range index is a fault. |
+| `MapSet`, `MapRemove`, `MapClear` | Impure, and change a place exactly like the array mutators: `MapSet::<string, i32> counts` with inputs `.key` and `.value`. Setting a key that is present keeps its position. `MapRemove` has the output `removed`, false when the key was absent. |
+| `SetHas`, `SetLength`, `SetAt` | Pure. In `set`, plus `item` or `index`; out `result`, `length` and `item`. |
+| `SetAdd`, `SetRemove`, `SetClear` | Impure place mutators with the input `item`. `SetAdd` has the output `added` and `SetRemove` the output `removed`, false when nothing changed. The outputs are the flags that `map.remove`, `set.add` and `set.remove` return (section 5.6). |
 | `std.array.Append::<T>`, `std.array.With::<T>`, ... | Pure functional forms that return the updated container and change nothing, for use inside `@pure` functions. |
 
 **Calls and events**
@@ -117,9 +118,9 @@ The VM ships these namespaces as natives (callable through `Call`) and as Wiret 
 
 - `std.math`: `Sqrt`, `Pow`, `Sin`, `Cos`, `Atan2`, `Floor`, `Ceil`, `Round`, `Clamp::<T>`, `Lerp`, ... (pure).
 - `std.string`: `Concat`, `Length`, `Substring`, `Find`, `Format`, `TryParse::<T>`, `Split`, ... (pure).
-- `std.array`, `std.map`: `Equals`, `Sort::<T>` (stable, caller supplies a comparison delegate), `IndexOf::<T>`, ...
+- `std.array`, `std.set`, `std.map`: `Equals` (two `anyref`, section 4.9), `Sort::<T>` (stable, caller supplies a comparison delegate), `IndexOf::<T>`, ...
 - `std.random`: an explicit-state generator class (`New`, `NextI32`, `NextF64`). There is **no ambient randomness, clock or I/O**. The host provides any of those as natives, which keeps modules replayable.
-- `std.flow` (macros written in Wiret): `ForRange`, `ForEach::<T>`, `ForEachMap::<K,V>`, `While`, `DoOnce`, `DoN`, `Gate`, `FlipFlop`, `MultiGate`, `Retriggerable`.
+- `std.flow` (macros written in Wiret): `ForRange`, `ForEach::<T>`, `ForEachMap::<K,V>`, `While`, `DoOnce`, `DoN`, `Gate`, `FlipFlop`, `MultiGate`, `Retriggerable`. `ForEachMap::<K,V>` takes `map` and has the exec outputs `each` and `done` and the data outputs `key`, `value` and `index`, in insertion order.
 
 ### 3.5 The node registry
 

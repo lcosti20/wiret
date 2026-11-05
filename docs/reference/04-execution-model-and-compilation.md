@@ -164,7 +164,7 @@ Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber
 | E0201 | A function that is not latent contains a latent node or calls a latent function or event. |
 | E0303 | A path provably ends, with no pending continuation, in a function that declares results and has not returned. |
 | E0140 | A node, box or `@id` reuses an id recorded as retired in `wiret.ids` (section 7.3). |
-| W0202 | Element has no `@id`, or the file is not in a project and non-reuse cannot be checked (section 2.4). |
+| W0202 | Element in a project has no `@id` (section 2.4). A file outside a project gets no `W0202`. |
 | W0320 | A `reads` node feeds more than one impure consumer (section 4.3). |
 | W0601 | A box lists a member id that names no node or box. |
 | W0602 | A node or box is listed as a member of more than one box. |
@@ -202,7 +202,8 @@ Consequences:
 - Containers of containers follow the same rule at each level: reading an element that is itself a container marks it shared.
 - Classes, delegates and host handles stay reference types. An `array::<Player>` copies the references, not the players.
 - The optimiser removes a `ref.share` when liveness analysis shows the source holder is dead after the read, which is the common case when a function builds a local array and returns it.
-- `Eq` and `Ne` on containers are structural (element-wise for arrays; set and map equality ignores insertion order) and compile to calls to `std.array.Equals`, `std.set.Equals` and `std.map.Equals`.
+- `Eq` and `Ne` on containers are structural: element-wise for arrays; the same items for sets, and the same keys with equal values for maps, ignoring insertion order. Each element, value and field uses its own type's equality, so a container holding NaN is not equal to itself. Keys, however, match as they do in a lookup, where every NaN is one key (section 3.1), so two sets that each hold NaN are equal. A struct that holds a container is compared field by field as below, and that field with these rules.
+- Container equality compiles to calls to `std.array.Equals`, `std.set.Equals` and `std.map.Equals`, each `(a: anyref, b: anyref) -> bool`. One fixed signature serves every element type, because the native reads the values it is given. Each declares a fuel cost (section 5.7) of 1 unit per 8 elements, entries and fields of the smaller operand, nested containers included, and nothing when the two have different lengths.
 - `Eq` and `Ne` on structs compare field by field, in declaration order, each with its own field type's equality, so a struct holding NaN is not equal to itself. They compile inline to `struct.get` and the field comparisons; there is no struct native, since a native has one fixed signature.
 
 ### 4.10 Deterministic mode
