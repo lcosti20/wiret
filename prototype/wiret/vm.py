@@ -639,6 +639,7 @@ class LoadedModule:
     local_names: dict
     global_names: dict = field(default_factory=dict)   # name -> global index
     classes: dict = field(default_factory=dict)        # class name -> ClassInfo
+    capabilities: list = field(default_factory=list)   # wr.caps
 
 
 def parse_pins(m: wbc.WbcModule, debug: dict) -> dict:
@@ -705,6 +706,24 @@ def parse_global_names(m: wbc.WbcModule) -> dict:
     return out
 
 
+def parse_caps(m: wbc.WbcModule) -> list:
+    """wr.caps: the capabilities the module declares it needs, `vec(name)`."""
+    p = m.custom("wr.caps")
+    if not p:
+        return []
+    r = wbc.Reader(p)
+    return [r.name() for _ in range(r.u32())]
+
+
+def module_capabilities(data: bytes) -> list:
+    """wr_module_each_capability before loading: what a module asks for, read from its
+    `wr.caps` without verifying or linking anything, so a host can refuse it first."""
+    try:
+        return parse_caps(wbc.decode_module(data))
+    except (WbcError, IndexError, ValueError, struct.error) as e:
+        raise WiretError(STATUS_LOAD, str(e))
+
+
 def parse_customs(m: wbc.WbcModule):
     names, local_names, debug, meta = {}, {}, {}, {}
     p = m.custom("name")
@@ -755,7 +774,7 @@ def parse_customs(m: wbc.WbcModule):
 
 class VM:
     def __init__(self, output: Callable[[str], None] = print, fuel: int = 50_000_000,
-                 hook: Optional[Callable] = None):
+                 hook: Optional[Callable] = None, capabilities=None):
         self.output = output
         self.fuel_limit = fuel
         self.fuel = fuel
@@ -764,6 +783,12 @@ class VM:
         # are evaluated (phase "ready"). snapshot() returns the frames for a debugger (6.10).
         self.hook = hook
         self.natives: dict[str, NativeSpec] = dict(all_natives())
+        # Capabilities granted (wr_grant, section 6.5). This class is both libwiret and the
+        # reference host: by default it grants what its own host natives need; pass a list,
+        # possibly empty, for a sandbox that grants only those.
+        if capabilities is None:
+            capabilities = {s.capability for s in self.natives.values() if s.capability}
+        self.granted: set = set(capabilities)
         self.interrupted = False
         self.stats = {"instructions": 0, "calls": 0}
         self.alloc = [0]          # elements allocated by container instructions, for fuel
@@ -780,6 +805,10 @@ class VM:
     def register(self, qname: str, spec: NativeSpec):
         self.natives[qname] = spec
 
+    def grant(self, capability: str):
+        """wr_grant: let modules loaded from now on use imports that need `capability`."""
+        self.granted.add(capability)
+
     def interrupt(self):
         self.interrupted = True
 
@@ -793,6 +822,14 @@ class VM:
             verified = verify(m)
         except VerifyError as e:
             raise WiretError(STATUS_VERIFY, str(e))
+        try:
+            caps = parse_caps(m)
+        except (WbcError, IndexError, ValueError) as e:
+            raise WiretError(STATUS_LOAD, f"bad custom section: {e}")
+        for cap in caps:                 # what the module declares (wr.caps)
+            if cap not in self.granted:
+                raise WiretError(STATUS_LINK, f"the module needs capability '{cap}', which the "
+                                              f"host has not granted")
         try:
             names, local_names, debug, meta = parse_customs(m)
             pins = parse_pins(m, debug)
@@ -836,6 +873,12 @@ class VM:
             params, results = m.types[t]
             if spec is None:
                 raise WiretError(STATUS_LINK, f"unresolved import {q}")
+            if spec.capability and spec.capability not in self.granted:
+                # checked on the native as well, so leaving @capability off the extern does
+                # not get around a grant
+                raise WiretError(STATUS_LINK, f"import {q} needs capability "
+                                              f"'{spec.capability}', which the host has not "
+                                              f"granted")
             if [VT_OF[x] for _, x in spec.params] != params or \
                     [VT_OF[x] for _, x in spec.results] != results:
                 raise WiretError(STATUS_LINK, f"import {q} has a different signature than the "
@@ -918,7 +961,7 @@ class VM:
                  for vt, _, init in m.globals]
         return LoadedModule(m, meta.get("module", ""), funcs, exports, gvals, m.data, meta,
                             local_names, parse_global_names(m),
-                            {c.name: c for c in classes.values()})
+                            {c.name: c for c in classes.values()}, caps)
 
     # -- execution ----------------------------------------------------------------
     def _fiber(self, mod: LoadedModule, name: str, args: list) -> Fiber:

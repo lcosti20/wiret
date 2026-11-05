@@ -159,6 +159,8 @@ class Project:
     """A directory with a `wiret.toml` manifest (section 7.3), and its id registry."""
     root: str
     retired: set = field(default_factory=set)
+    # `[capabilities] allow` from wiret.toml; None when the manifest has no such table
+    capabilities: Optional[set] = None
 
     @property
     def ids_path(self) -> str:
@@ -166,6 +168,10 @@ class Project:
 
     def load(self) -> "Project":
         self.retired = set(read_registry(self.ids_path))
+        manifest = os.path.join(self.root, "wiret.toml")
+        if os.path.exists(manifest):
+            with open(manifest, encoding="utf-8") as f:
+                self.capabilities = read_allowed_capabilities(f.read())
         return self
 
     def retire(self, entries) -> list:
@@ -204,6 +210,28 @@ def parse_registry(text: str) -> list:
         if len(parts) == 4:
             out.append(Retired(*parts))
     return out
+
+
+def read_allowed_capabilities(text: str) -> Optional[set]:
+    """`allow = [...]` in the `[capabilities]` table of wiret.toml (section 7.3), or None
+    when there is no such table. Uses tomllib where Python has it (3.11+)."""
+    try:
+        import tomllib
+        caps = tomllib.loads(text).get("capabilities")
+        return None if caps is None else set(caps.get("allow", []))
+    except ImportError:
+        pass
+    table, allow = None, None
+    for line in text.splitlines():
+        line = line.split("#", 1)[0].strip()
+        if line.startswith("["):
+            table = line.strip("[] ")
+            if table == "capabilities" and allow is None:
+                allow = set()
+        elif table == "capabilities" and line.startswith("allow") and "=" in line:
+            items = line.split("=", 1)[1].strip().strip("[]")
+            allow = {x.strip().strip('"') for x in items.split(",") if x.strip()}
+    return allow
 
 
 def find_project(path: str) -> Optional[Project]:

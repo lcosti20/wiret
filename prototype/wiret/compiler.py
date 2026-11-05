@@ -109,8 +109,9 @@ class EvalPoint:
 
 class Compiler:
     def __init__(self, module: Module, source: Optional[str] = None, embed_source=True,
-                 debug=False):
+                 debug=False, project=None):
         self.m = module
+        self.project = project     # for the [capabilities] allow check (E0160)
         self.debug = debug   # -Og: keep every pin's value in a local for the debugger
         self.idx = ModuleIndex(module)
         self.source = source
@@ -324,7 +325,7 @@ class Compiler:
 
     # -- driver -------------------------------------------------------------------
     def compile(self) -> CompileResult:
-        self.diags = check(self.m, comments_ok=True)
+        self.diags = check(self.m, comments_ok=True, project=self.project)
         if has_errors(self.diags):
             return CompileResult(False, self.diags)
         for v in sorted(self.idx.vars.values(), key=lambda v: v.name):
@@ -1528,5 +1529,5 @@ class FuncLowerer:
 
 
 def compile_module(module: Module, source: Optional[str] = None, embed_source=True,
-                   debug=False) -> CompileResult:
-    return Compiler(module, source, embed_source, debug).compile()
+                   debug=False, project=None) -> CompileResult:
+    return Compiler(module, source, embed_source, debug, project).compile()

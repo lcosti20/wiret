@@ -76,6 +76,7 @@ class NativeSpec:
     fn: Optional[Callable]  # fn(vm, *args) -> tuple of results
     doc: str = ""
     cost: Optional[Callable] = None  # cost(*args) -> fuel beyond the call's own (section 5.7)
+    capability: Optional[str] = None  # what an import of it must be granted (section 6.5)
 
 
 def _f32(x: float) -> float:
@@ -255,7 +256,7 @@ for _kind in ("array", "set", "map"):
 # `extern func` declarations, whose signatures must match.
 HOST: dict[str, NativeSpec] = {
     "host.Log": NativeSpec([("message", "string")], [], "impure", _log,
-                           "Write a line to the console."),
+                           "Write a line to the console.", capability="console.write"),
 }
 
 

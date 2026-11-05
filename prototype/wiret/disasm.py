@@ -21,6 +21,9 @@ def disassemble(data: bytes) -> str:
         params, results = m.types[t]
         out.append(f"import {i} {mod}.{fld} ({', '.join(vt_name(p, m.types) for p in params)}) -> "
                    f"({', '.join(vt_name(r, m.types) for r in results)})" + (" pure" if flags & 1 else ""))
+    from .vm import parse_caps
+    for cap in parse_caps(m):
+        out.append(f"capability {cap}")
     for gi, (vt, mut, init) in enumerate(m.globals):
         out.append(f"global {gi} {vt_name(vt, m.types)} {names.get(gi, '')}")
     nimp = len(m.imports)

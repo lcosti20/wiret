@@ -1614,7 +1614,7 @@ class EditorApp:
         self.console.configure(state="disabled")
         func = self.entry_var.get()
         t0 = time.perf_counter()
-        r = compile_module(self.module, self.text, debug=True)
+        r = compile_module(self.module, self.text, debug=True, project=self.project)
         for d in r.diags:
             where = ".".join(x for x in (d.graph, d.node) if x)
             self.log(f"{d.severity} {d.code} {where}: {explain(d)}",

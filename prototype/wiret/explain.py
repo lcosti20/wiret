@@ -121,6 +121,10 @@ def explain(d: Diag) -> str:
                 "override), so it must take the same inputs and give the same outputs. A method "
                 "marked @final cannot be replaced at all. Rename this method, or match the "
                 "parent's signature.")
+    if c == "E0160":
+        return ("This project's wiret.toml lists which capabilities its modules may ask for, "
+                "and this one is not on the list. Add it to 'allow' under [capabilities] if the "
+                "project should be able to use it.")
     if c == "E0152":
         return ("A class that says it implements an interface (with 'impl') must have a method for "
                 "every method the interface lists, with the same inputs and outputs. Add the "
@@ -261,6 +265,10 @@ def explain_runtime(status: str, message: str, where: str = "") -> str:
                 f"could fire it, so it can never carry on. {message}")
     if status == "WR_ERR_INTERRUPT":
         return "You stopped the program."
+    if status == "WR_ERR_LINK" and "capability" in message:
+        return (f"The program needs permission the runner has not given it: {message}. A "
+                f"host decides what a module may do; from the command line, add "
+                f"--grant with the capability's name.")
     if status == "WR_ERR_LINK":
         return f"The program uses something the runtime doesn't provide: {message}."
     if status in ("WR_ERR_LOAD", "WR_ERR_VERIFY"):

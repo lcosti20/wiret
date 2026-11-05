@@ -191,7 +191,7 @@ The editor also follows the graph-editor contract in section 7.5:
 | Canonical form and hashes (2.5) | Sorted items (struct fields and enum members keep the order written), nodes, `flow` wires (by source node id, then exec pin order) and layout lines, each with its metadata lines above it (`doc`, `category`, `keywords`, then notes as written); registry pin order; default-valued bindings omitted; 100-column wrapping; attribute ordering. Semantic hash (ignores layout, every `#[...]` line and `Reroute`) and layout hash. |
 | Node kinds (3.3) | `Entry`, `Return`, `Branch`, `Sequence`, `Switch`, `Select`, `Macro`, `Exit`, `Reroute`, `Get/SetLocal`, `Get/SetVar` (and `const`s), `Get/SetState`, `Call`, `Convert`, all arithmetic, comparison, logic and bit kinds, and the array kinds `MakeArray`, `ArrayGet`, `ArrayLength`, `ArraySet`, `ArrayAdd`, `ArrayInsert`, `ArrayRemove`, `ArrayClear`, the struct kinds, the map and set kinds (see *Maps and sets* below), `Try` and `Throw` (see *Faults* below), the latent kinds `Delay`, `Yield` and `Await` (see *Fibers* below), the class kinds `New`, `GetField`/`SetField` on objects, `Cast` and `IsValid` (see *Classes* below), and `CreateDelegate`, `Invoke`, `Bind`, `Unbind` and `Broadcast` (see *Delegates and dispatchers* below). Types: `bool`, all integer widths, `f32`, `f64`, `string`, `array::<T>`, `map::<K, V>`, `set::<T>`, structs, enums, classes, interfaces, `delegate::<(A) -> (R)>` and `std.Signal`. |
 | Execution model (4.2–4.3) | Continuation stack, `Sequence` push/pop, macro inlining with path-style ids (`loop/test`, `loop!in`), `Exit` as a jump, joins, evaluation points with per-point sharing, impure output slots, `@pure` and `@reads` calls as pure nodes, per-expansion `state`. The §4.2 `SumTo(2)` trace is reproduced exactly (see tests). |
-| Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0150, E0151, E0152, E0201 (latency), E0301, E0302, E0304, E0401, E0412, E0501, E0502, E0503, W0201, W0301, W0302, W0310, W0320, W0601, W0602, W0603, W0604. |
+| Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0150, E0151, E0152, E0160, E0201 (latency), E0301, E0302, E0304, E0401, E0412, E0501, E0502, E0503, W0201, W0301, W0302, W0310, W0320, W0601, W0602, W0603, W0604. |
 | Lowering (4.8) | `-O0`: one labelled block per impure node, `local.tee` for shared values, `cont.push`/`cont.pop` kept. Output closely matches the §5.8 listings. |
 | WBC (5.2–5.4) | Type (function, `5E` array and `5F` struct entries), Import, Function, Global, Export, Data and Code sections, plus custom sections `name`, `wr.debug`, `wr.pins`, `wr.pure`, `wr.meta` (hashes), `wr.caps` and `wr.graph` (deflated canonical source). |
 | Verifier (5.5) | One linear pass: decoding, branch targets, empty stack at labels, operand typing (including `struct.new`/`get`/`with`), returns, `max_stack`, latency/purity flags. Type references may point forward, but a struct may not hold itself by value. Fuzz-tested. |
@@ -560,6 +560,34 @@ an array costs the same per item however long the array gets (100,000 appends ta
   mutation only when it copies.
 - The host still sees tuples and dicts: arguments are converted in, results converted out.
 
+### Capabilities
+
+Sections 2.4, 6.5 and 7.3. An `extern func` names the capability it needs:
+
+```
+extern func host.Log(message: string) @capability("console.write")
+```
+
+- The compiler lists the capabilities of the imports a module uses in `wr.caps` (an extern
+  nothing calls is not imported, so it asks for nothing). `wiretc caps FILE` and
+  `module_capabilities(bytes)` read them without loading anything, and the disassembly starts
+  with them.
+- **Loading checks grants.** A module that needs a capability the VM has not granted fails to
+  load with `WR_ERR_LINK`, naming it. A native can also be registered with the capability it
+  needs (`NativeSpec(..., capability="console.write")`, as `host.Log` is); an import of it
+  needs that grant whether or not its `extern` says so, so leaving the attribute off does not
+  get around a grant.
+- **Who grants.** The `VM` class is both the runtime and the reference host. `VM()` grants
+  what its own host natives need (`console.write` for `host.Log`), so the editor, `wiretc run`
+  and the examples work as before. `VM(capabilities=[])` is a sandbox that grants nothing
+  until `vm.grant("...")` (`wr_grant`). `wiretc run --sandbox --grant console.write ...` does
+  the same from the command line.
+- **Build time.** In a project whose `wiret.toml` has a `[capabilities]` table, a capability
+  its `allow` list does not name is `E0160` from `wiretc check`, `wiretc build` and the
+  editor. A manifest with no such table does not restrict anything. The manifest is read with
+  `tomllib` where Python has it (3.11 and later), else with a small reader for this table.
+- `@capability` belongs on an `extern func` and takes one string (`E0104` otherwise).
+
 ### Identity and the id registry
 
 A **project** is a directory with a `wiret.toml` (section 7.3); its `wiret.ids` lists every
@@ -633,8 +661,9 @@ pins for results, and flow wires for a macro's exec parameters and results.
 - **Exports.** Every `func` and `event` is exported, so the editor can run any of them. The
   spec exports only `@export` declarations.
 - **Tier 2, what is left:** the language half is done (`Try`/`Throw`, fibers, classes,
-  interfaces, delegates and dispatchers), and so is copy-on-write. Not yet: capabilities, the
-  C API, debugger hooks beyond the editor's, and the project manager and lockfile.
+  interfaces, delegates and dispatchers), and so are copy-on-write and capabilities. Not yet:
+  the C API, debugger hooks beyond the editor's, and the project manager and lockfile (so no
+  `WR_LOAD_LAZY_LINK` or `wr_link` either).
 - **No `ref.share` removal.** Without `-O1` there is no liveness analysis, so a function that
   builds a local array and returns it still shares it, and the caller's first change to it
   makes one copy. The
