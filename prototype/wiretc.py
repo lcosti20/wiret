@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """wiretc: the Wiret command-line toolchain (spec section 7), prototype subset.
 
-  wiretc check [--json] FILE           diagnostics
-  wiretc fmt [--check] [--convert-comments | --drop-comments] FILE
+  wiretc check [--json] FILE           diagnostics (with E0140/W0202 inside a project)
+  wiretc fmt [--check] [--assign-ids] [--convert-comments | --drop-comments] FILE
   wiretc build FILE [-o OUT.wbc] [--no-source]
   wiretc dis FILE.wbc                  disassemble with node ids
   wiretc verify FILE.wbc               run only the verifier
@@ -10,6 +10,8 @@
   wiretc hash FILE                     semantic and layout hashes
   wiretc view --flow FILE              reading view in flow order
   wiretc schema --json                 the node registry
+  wiretc ids --check BASE[..HEAD] [--record] [--project DIR]
+                                       every deleted id retired in wiret.ids, none reused
 """
 from __future__ import annotations
 
@@ -24,6 +26,7 @@ from wiret.checker import check, has_errors  # noqa: E402
 from wiret.compiler import compile_module  # noqa: E402
 from wiret.disasm import disassemble  # noqa: E402
 from wiret.flow import view_flow  # noqa: E402
+from wiret.ids import assign_ids, find_project  # noqa: E402
 from wiret.ops import convert_comments  # noqa: E402
 from wiret.parser import ParseError, parse  # noqa: E402
 from wiret.printer import layout_hash, print_module, semantic_hash  # noqa: E402
@@ -64,6 +67,8 @@ def main(argv=None):
     p = sub.add_parser("fmt")
     p.add_argument("file")
     p.add_argument("--check", action="store_true")
+    p.add_argument("--assign-ids", action="store_true",
+                   help="give an @id to every element that has none (section 2.4)")
     g = p.add_mutually_exclusive_group()
     g.add_argument("--convert-comments", action="store_true")
     g.add_argument("--drop-comments", action="store_true")
@@ -87,11 +92,17 @@ def main(argv=None):
     p.add_argument("file")
     p = sub.add_parser("schema")
     p.add_argument("--json", action="store_true", required=True)
+    p = sub.add_parser("ids")
+    p.add_argument("--check", metavar="BASE[..HEAD]", required=True,
+                   help="compare two revisions; without ..HEAD, BASE and the working tree")
+    p.add_argument("--record", action="store_true",
+                   help="append ids deleted without being retired to wiret.ids")
+    p.add_argument("--project", default=".", help="a directory inside the project")
     a = ap.parse_args(argv)
 
     if a.cmd == "check":
         m, _ = load(a.file)
-        diags = check(m)
+        diags = check(m, project=find_project(a.file))
         for d in diags:
             print(d.to_json() if a.json else d)
         return 1 if has_errors(diags) else 0
@@ -108,6 +119,11 @@ def main(argv=None):
                     print(f"{a.file}:{c.line}: warning W0603: formatting would drop this comment; "
                           f"use --convert-comments or --drop-comments", file=sys.stderr)
                 return 1
+        if a.assign_ids:
+            proj = find_project(a.file)
+            retired = {r.id for r in proj.retired} if proj else set()
+            for e in assign_ids(m, retired=retired):
+                print(f"{e.kind} '{e.name}': @id(\"{e.id}\")", file=sys.stderr)
         out = print_module(m)
         if a.check:
             if out != text:
@@ -118,6 +134,18 @@ def main(argv=None):
             with open(a.file, "w", encoding="utf-8", newline="\n") as f:
                 f.write(out)
         return 0
+    if a.cmd == "ids":
+        from wiret.gitids import GitError, check_range
+        proj = find_project(os.path.join(a.project, "x.wiret"))
+        if proj is None:
+            print(f"no wiret.toml in {os.path.abspath(a.project)} or above it; wiret.ids "
+                  f"belongs to a project (section 7.3)", file=sys.stderr)
+            return 2
+        try:
+            return check_range(proj, a.check, a.record)
+        except GitError as e:
+            print(f"git: {e}", file=sys.stderr)
+            return 2
     if a.cmd == "build":
         _, out, data = build(a.file, a.output, not a.no_source)
         print(f"wrote {out} ({len(data)} bytes)")

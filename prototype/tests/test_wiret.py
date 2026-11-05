@@ -2,10 +2,16 @@
 
 Run from `prototype/`:  python3 -m unittest discover tests
 """
+import contextlib
+import copy
+import io
 import math
 import os
 import random
+import shutil
+import subprocess
 import sys
+import tempfile
 import unittest
 import zlib
 
@@ -1578,6 +1584,183 @@ func F(a: map::<array::<i32>, i32>, b: set::<Tree>, c: map::<string, Tree>) -> (
             with self.subTest(label):
                 self.assertIn(label, labels)
         self.assertFalse(any("ForEachMap::<i32, i32>" in x for x in labels))
+
+
+IDS_SRC = """wiret 1
+module game.ids
+
+struct Vec2 {
+  x: f32
+}
+
+func Add1(v: i32) -> (r: i32) {
+  local tmp: i32
+  node entry = Entry
+  node plus = Add::<i32>
+    .a <- entry.v
+    .b <- 1
+  node ret = Return
+    .r <- plus.result
+
+  flow {
+    entry -> ret
+  }
+}
+"""
+
+
+def read(path):
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def make_project(root, text=IDS_SRC, ids=""):
+    with open(os.path.join(root, "wiret.toml"), "w", encoding="utf-8") as f:
+        f.write('[project]\nname = "t"\nwiret = "1"\n')
+    with open(os.path.join(root, "wiret.ids"), "w", encoding="utf-8") as f:
+        f.write(ids)
+    path = os.path.join(root, "game.wiret")
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    return path
+
+
+class IdTests(unittest.TestCase):
+    """@id generation, wiret.ids, E0140 and W0202 (sections 2.4, 7.3, 7.5)."""
+
+    def test_assign_ids(self):
+        from wiret.ids import PREFIX, assign_ids, elements
+        from wiret.model import Attr, Lit
+        m = parse(IDS_SRC)
+        m.items[0].attrs.append(Attr("id", [(None, Lit("string", "st_mine"))]))
+        changed = assign_ids(m, random.Random(1))
+        self.assertEqual(sorted(e.kind for e in changed),
+                         ["field", "func", "local", "module", "param", "result"])
+        ids = [e.id for e in elements(m)]
+        self.assertEqual(len(set(ids)), len(ids))
+        self.assertIn("st_mine", ids)                        # existing ids are kept
+        for e in changed:
+            self.assertRegex(e.id, rf"^{PREFIX[e.kind]}_[a-z2-9]{{4}}$")
+        self.assertEqual(assign_ids(m), [])                  # idempotent
+        text = print_module(m)
+        self.assertEqual(print_module(parse(text)), text)
+        self.assertIn('module game.ids @id("mod_', text)
+        self.assertIn("v: i32 @id(\"p_", text)
+
+    def test_retired_between(self):
+        from wiret.ids import Retired, retired_between
+        old = parse(IDS_SRC)
+        new = parse(IDS_SRC.replace("  local tmp: i32\n", "")
+                    .replace("node plus", "node sum").replace("plus.result", "sum.result"))
+        self.assertEqual(retired_between(old, new),
+                         [Retired("game.ids", "Add1", "node", "plus")])
+        self.assertEqual(retired_between(None, new), [])
+        from wiret.ids import assign_ids
+        assign_ids(old, random.Random(2))
+        new = copy.deepcopy(old)
+        new.graph("Add1").locals.clear()
+        gone = retired_between(old, new)
+        self.assertEqual([(r.graph, r.kind) for r in gone], [("-", "id")])
+        self.assertTrue(gone[0].id.startswith("l_"))
+
+    def test_undo_keeps_assigned_ids(self):
+        from wiret.ids import assign_ids, carry_ids, elements
+        cur = parse(IDS_SRC)
+        assign_ids(cur, random.Random(5))
+        old = parse(IDS_SRC.replace("  local tmp: i32\n", ""))   # an older snapshot
+        self.assertEqual(carry_ids(cur, old), 6)
+        want = {(e.kind, e.name): e.id for e in elements(cur) if e.kind != "local"}
+        self.assertEqual({(e.kind, e.name): e.id for e in elements(old)}, want)
+        self.assertEqual(carry_ids(cur, old), 0)
+
+    def test_project_registry(self):
+        from wiret.ids import Retired, find_project
+        with tempfile.TemporaryDirectory() as d:
+            path = make_project(d, ids="# retired ids\ngame.ids Add1 node old_node\n")
+            sub = os.path.join(d, "a", "b")
+            os.makedirs(sub)
+            self.assertEqual(find_project(os.path.join(sub, "x.wiret")).root, d)
+            proj = find_project(path)
+            self.assertEqual(proj.retired, {Retired("game.ids", "Add1", "node", "old_node")})
+            r = Retired("game.ids", "-", "id", "l_abcd")
+            self.assertEqual(proj.retire([r, r]), [r])
+            self.assertEqual(proj.retire([r]), [])
+            proj.unretire([r])
+            self.assertEqual(find_project(path).retired,
+                             {Retired("game.ids", "Add1", "node", "old_node")})
+        self.assertIsNone(find_project(os.path.join(os.sep, "no_project_here", "x.wiret"))
+                          if not os.path.exists(os.path.join(os.sep, "wiret.toml")) else None)
+
+    def test_diagnostics_in_a_project(self):
+        from wiret.ids import assign_ids, find_project
+        m = parse(IDS_SRC)
+        self.assertEqual([d.code for d in check(m)], [])     # a lone file: no W0202
+        with tempfile.TemporaryDirectory() as d:
+            make_project(d, ids="game.ids Add1 node plus\ngame.ids - id fn_gone\n")
+            proj = find_project(os.path.join(d, "game.wiret"))
+            codes_ = sorted(d_.code for d_ in check(m, project=proj))
+            self.assertEqual(codes_.count("W0202"), 7)
+            self.assertIn("E0140", codes_)                   # node 'plus' is retired
+            assign_ids(m, random.Random(3))
+            m.graph("Add1").attrs = [a for a in m.graph("Add1").attrs if a.name != "id"]
+            from wiret.model import Attr, Lit
+            m.graph("Add1").attrs.append(Attr("id", [(None, Lit("string", "fn_gone"))]))
+            m.graph("Add1").params[0].attrs = list(m.graph("Add1").result_list[0].attrs)
+            found = sorted((d_.code, d_.message.split(" ")[0]) for d_ in check(m, project=proj))
+            self.assertEqual([c for c, _ in found], ["E0102", "E0140", "E0140"])
+
+    @unittest.skipUnless(shutil.which("git"), "git is not installed")
+    def test_ids_check_against_git(self):
+        from wiret.gitids import check_range
+        from wiret.ids import assign_ids, find_project
+        with tempfile.TemporaryDirectory() as d:
+            m = parse(IDS_SRC)
+            assign_ids(m, random.Random(4))
+            path = make_project(d, print_module(m))
+
+            def sh(*args):
+                subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t"] + list(args),
+                               cwd=d, check=True, capture_output=True)
+            sh("init", "-q")
+            sh("add", ".")
+            sh("commit", "-q", "-m", "base")
+            m2 = parse(read(path))
+            g = m2.graph("Add1")
+            g.locals.clear()
+            delete_node(g, "plus")
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(print_module(m2))
+            lines = []
+            proj = find_project(path)
+            self.assertEqual(check_range(proj, "HEAD", out=lines.append), 1)
+            self.assertEqual(sum("was deleted without being retired" in x for x in lines), 2)
+            lines.clear()
+            self.assertEqual(check_range(proj, "HEAD", record=True, out=lines.append), 0)
+            self.assertIn("recorded 2 retired id(s)", lines[0])
+            sh("add", ".")
+            sh("commit", "-q", "-m", "delete")
+            self.assertEqual(check_range(find_project(path), "HEAD~1..HEAD", out=lines.append), 0)
+            # bringing the node back is E0140
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(print_module(m))
+            lines.clear()
+            self.assertEqual(check_range(find_project(path), "HEAD", out=lines.append), 1)
+            self.assertTrue(any("E0140" in x and "'plus'" in x for x in lines))
+            self.assertIn("E0140", {d_.code for d_ in check(m, project=find_project(path))})
+
+    def test_fmt_assign_ids(self):
+        import wiretc
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "x.wiret")
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(IDS_SRC)
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(wiretc.main(["fmt", "--assign-ids", path]), 0)
+            text = read(path)
+            self.assertEqual(text.count("@id("), 7)
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(wiretc.main(["fmt", "--assign-ids", path]), 0)
+            self.assertEqual(read(path), text)
 
 
 class HashTests(unittest.TestCase):

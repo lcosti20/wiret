@@ -18,7 +18,7 @@ cd prototype
 python3 wiret_editor.py                         # the editor, opening Lesson 1
 python3 wiret_editor.py examples/demo.wiret     # the editor on a larger example
 python3 wiretc.py run examples/demo.wiret Main  # the same program from the command line
-python3 -m unittest discover tests              # 107 tests
+python3 -m unittest discover tests              # 114 tests
 ```
 
 ## Building a desktop app
@@ -309,6 +309,25 @@ draft leaves open, follow the array kinds:
 - `Eq` on arrays, maps and sets (structural equality, section 4.9) is not implemented, and so
   neither is `Eq` on a struct that holds one.
 
+### Identity and the id registry
+
+A **project** is a directory with a `wiret.toml` (section 7.3); its `wiret.ids` lists every
+retired id, one `module graph kind id` line each (`game.demo TakeDamage node set_new`, or
+`game.demo - id fn_k3f9` for an `@id`).
+
+- `wiretc fmt --assign-ids` gives an `@id` to every declaration, parameter, result, field, enum
+  member, local and state slot that has none, and never changes an existing one.
+- Inside a project, `wiretc check` and the editor also report `E0140` (a retired node, box or
+  `@id` used again), `E0102` (an `@id` used twice among siblings) and `W0202` (an element without
+  an `@id`). A lone file, such as a lesson, gets none of these: the draft wants `W0202` there
+  too ("non-reuse cannot be checked"), but on every lone file that would be noise.
+- Inside a project the editor writes `@id`s on every graph save (section 7.5) and appends each id
+  a save removes to `wiret.ids`. An undo keeps the ids assigned since, and takes back an id the
+  same session retired, so undoing a delete is not `E0140`.
+- `wiretc ids --check BASE[..HEAD]` compares the `.wiret` files changed between two Git revisions
+  (or BASE and the working tree) and fails if an id disappeared without being retired, or a
+  retired id is used again. `--record` appends the missing ones instead.
+
 ### Deviations and known gaps
 
 - **Exports.** Every `func` and `event` is exported, so the editor can run any of them. The
@@ -317,9 +336,9 @@ draft leaves open, follow the array kinds:
   delegates and dispatchers, latent nodes and fibers (`Delay`, `Yield`, `Await`), and
   `Try`/`Throw`. Their node kinds are reported as `E0501` and their opcodes are rejected by
   the verifier.
-- **Project-level features are not implemented:** the `wiret.ids` registry, `wiretc merge`,
-  `wiretc edit`, the C API and deterministic-mode float rules. `@id` attributes are kept
-  but not generated automatically.
+- **Not implemented:** `wiretc merge`, `wiretc edit`, `wiretc diff`, the rest of the
+  project manager (`wiret.lock`, `use` of other modules), the C API and deterministic-mode
+  float rules.
 - **Optimisation.** There is no `-O1`, so the `cont.push`/`cont.pop` pairs are never replaced
   by direct branches.
 - **Example layout.** The spec's examples align the `=` signs; the canonical writer does not.
