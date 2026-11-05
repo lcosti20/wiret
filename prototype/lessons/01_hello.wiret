@@ -5,9 +5,12 @@ extern func host.Log(message: string)
 
 func Main() {
   node entry = Entry
-  node say_arrows = Call host.Log(message: "The white arrows decide the order.")
-  node say_hello = Call host.Log(message: "Hello!")
-  node say_steps = Call host.Log(message: "Programs run one step at a time.")
+  node say_arrows = Call host.Log
+    .message <- "The white arrows decide the order."
+  node say_hello = Call host.Log
+    .message <- "Hello!"
+  node say_steps = Call host.Log
+    .message <- "Programs run one step at a time."
 
   flow {
     entry -> say_hello

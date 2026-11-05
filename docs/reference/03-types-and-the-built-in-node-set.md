@@ -12,10 +12,10 @@
 | `enum` | its underlying integer (default `i32`) | Names are kept in the `name` custom section for editors and reflection. |
 | `struct` | immutable heap record with value semantics | Equality is structural. "Setting" a field makes a new struct (`WithField`). |
 | `class` | nullable reference | Equality is identity. Default `null`. |
-| `array<T>` | growable, zero-based; **value type** | Copied on assignment, argument passing and return. The VM copies lazily (copy-on-write, section 4.9), so two variables never alias one array. Equality is element-wise. |
-| `set<T>`, `map<K,V>` | insertion-ordered; **value types** | Same copy rules as arrays. Iteration order is insertion order, never hash order. Keys are primitives, `string`, enums or structs of those. Equality ignores order. |
-| `delegate<(A)->(R)>` | reference to a function plus optional bound receiver | Single-cast. |
-| `dispatcher<(A)>` | reference to an ordered handler list | Multicast; the `dispatcher` member of a class. |
+| `array::<T>` | growable, zero-based; **value type** | Copied on assignment, argument passing and return. The VM copies lazily (copy-on-write, section 4.9), so two variables never alias one array. Equality is element-wise. |
+| `set::<T>`, `map::<K,V>` | insertion-ordered; **value types** | Same copy rules as arrays. Iteration order is insertion order, never hash order. Keys are primitives, `string`, enums or structs of those. Equality ignores order. |
+| `delegate::<(A)->(R)>` | reference to a function plus optional bound receiver | Single-cast. |
+| `dispatcher::<(A)>` | reference to an ordered handler list | Multicast; the `dispatcher` member of a class. |
 | `extern type` | host handle (index plus generation) | `IsValid` is false once the host destroys the object. |
 | `std.Signal`, `std.Fault` | built-in opaque classes | Used by `Await` and `Try`. |
 
@@ -23,7 +23,7 @@ Wires connect a source pin to a destination pin of the **same type**, or of a **
 
 ### 3.2 Conversions
 
-The editor, like Blueprint's, offers to insert a conversion node when you connect two compatible but different types. In Wiret that node is real and visible in the text: `Convert<From, To>`.
+The editor, like Blueprint's, offers to insert a conversion node when you connect two compatible but different types. In Wiret that node is real and visible in the text: `Convert::<From, To>`.
 
 | From | To | Behaviour |
 | --- | --- | --- |
@@ -35,7 +35,7 @@ The editor, like Blueprint's, offers to insert a conversion node when you connec
 | integer | bool | Non-zero is true. |
 | enum | its integer type, and back | Back-conversion does not check that the value names a member. |
 | bool, integer, float | string | Culture-independent decimal text. Floats use the shortest text that round-trips. |
-| string | number or bool | Not a `Convert`. Use `std.string.TryParse<T>`, which returns `(ok: bool, value: T)`. |
+| string | number or bool | Not a `Convert`. Use `std.string.TryParse::<T>`, which returns `(ok: bool, value: T)`. |
 
 ### 3.3 Built-in node kinds
 
@@ -49,8 +49,8 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 | `Return` | in: the graph's results | Leaves the function. `Return` has an exec input in every function, including `@pure` ones: a pure function's exec flow is internal and invisible to its callers. |
 | `Branch` | in `cond: bool`; exec out `then`, `else` | Two-way choice. |
 | `Sequence` | `@count(n)`; exec out `then0` .. `then{n-1}` | Runs `then0`'s chain to its end, then `then1`'s, and so on. |
-| `Switch<T>` | in `value: T`; `@cases(...)`; exec out `case0`.., `default` | `T` is an integer, enum, string or bool. |
-| `Select<T>` | pure; in `cond`, `a`, `b`; out `result` | Both `a` and `b` are evaluated (they are pure). |
+| `Switch::<T>` | in `value: T`; `@cases(...)`; exec out `case0`.., `default` | `T` is an integer, enum, string or bool. |
+| `Select::<T>` | pure; in `cond`, `a`, `b`; out `result` | Both `a` and `b` are evaluated (they are pure). |
 | `Try` | exec out `body`, `fault`, `then`; out `message: string`, `code: i32` | Runs `body`. Normal end goes to `then`. A catchable fault inside it goes to `fault`. |
 | `Throw` | in `message: string`, `code: i32` | Raises a catchable fault. No exec out. |
 | `Delay` | in `seconds: f64`; exec out `then` | **Latent.** Suspends the fiber for virtual time. |
@@ -58,7 +58,7 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 | `Await` | in `signal: std.Signal`; exec out `then` | **Latent.** Resumes when the host fires the signal. |
 | `Macro` | symbol: macro name; pins from its signature | Inlined at compile time. |
 | `Exit` | symbol: macro exec output; in: its data outputs | Macro-only. Leaves the macro through that exec output (a jump) and assigns the data outputs bound on the node. It never changes the continuation stack, so a continuation the macro pushed stays pending. On the first output of a Sequence it runs the caller's chain as a subroutine (see ForRange in section 2.6 and the trace in section 4.2). |
-| `Reroute<T>` | in `in`, out `out` | Visual only. |
+| `Reroute::<T>` | in `in`, out `out` | Visual only. |
 
 **Variables, fields and objects**
 
@@ -73,7 +73,7 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 | `New` | out `result`; exec out `then` | Allocates a class instance with declared defaults. Impure because it creates identity. |
 | `Cast` | pure; in `obj`; out `result`, `ok: bool` | `result` is null when the cast fails. |
 | `IsValid` | pure; in `obj`; out `result: bool` | Non-null and, for host handles, still alive. |
-| `Convert<From, To>` | pure; in `value`; out `result` | See section 3.2. |
+| `Convert::<From, To>` | pure; in `value`; out `result` | See section 3.2. |
 | GetState / SetState | value | Persistent slots declared with state (section 2.3). SetState is impure. |
 
 **Arithmetic, comparison, logic** (all pure)
@@ -91,14 +91,14 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 
 | Kind | Notes |
 | --- | --- |
-| `MakeArray<T>` | Pure. `@count(n)`, inputs `item0` ... |
-| `ArrayGet<T>`, `ArrayLength<T>` | Pure. Out-of-range index is a fault. |
-| `ArraySet<T>`, `ArrayAdd<T>`, `ArrayInsert<T>`, `ArrayRemove<T>`, `ArrayClear<T>` | Impure. They change a **place**: the symbol names a local, a module variable, or a field. Examples: `ArrayAdd<i32> acc (item: x)` and `ArrayAdd<i32> Player.items (obj: p, item: x)`. Targeting anything else, such as a call result, is `E0130`. Arrays are value types (section 4.9), so no other variable sees the change. |
-| `MapFind<K,V>` | Pure. Out: `value`, `found`. A missing key gives the zero value and `found = false`. |
+| `MakeArray::<T>` | Pure. `@count(n)`, inputs `item0` ... |
+| `ArrayGet::<T>`, `ArrayLength::<T>` | Pure. Out-of-range index is a fault. |
+| `ArraySet::<T>`, `ArrayAdd::<T>`, `ArrayInsert::<T>`, `ArrayRemove::<T>`, `ArrayClear::<T>` | Impure. They change a **place**: the symbol names a local, a module variable, or a field. Examples: `ArrayAdd::<i32> acc` with input `.item <- x`, and `ArrayAdd::<i32> Player.items` with inputs `.obj <- p` and `.item <- x`. Targeting anything else, such as a call result, is `E0130`. Arrays are value types (section 4.9), so no other variable sees the change. |
+| `MapFind::<K,V>` | Pure. Out: `value`, `found`. A missing key gives the zero value and `found = false`. |
 | `MapHas`, `MapLength`, `MapKeyAt`, `MapValueAt` | Pure. The `At` kinds index by insertion order, which is how `ForEach` over a map is built. |
 | `MapSet`, `MapRemove`, `MapClear` | Impure, and change a place exactly like the array mutators. |
 | `SetHas`, `SetLength`, `SetAt` / `SetAdd`, `SetRemove`, `SetClear` | Same pattern. |
-| `std.array.Append<T>`, `std.array.With<T>`, ... | Pure functional forms that return the updated container and change nothing, for use inside `@pure` functions. |
+| `std.array.Append::<T>`, `std.array.With::<T>`, ... | Pure functional forms that return the updated container and change nothing, for use inside `@pure` functions. |
 
 **Calls and events**
 
@@ -106,7 +106,7 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 | --- | --- | --- |
 | `Call` | symbol: function, method or extern; its parameters and results | Pure node if the callee is `@pure`, `@reads`, or a native flagged effect-free; otherwise impure. A method call has `self` as its first input; dispatch is virtual unless `@final`, and via the interface when the symbol names an interface method. |
 | `CreateDelegate` | pure; symbol: function; optional `target`; out `result` | Binds a function (and receiver) into a delegate. |
-| `Invoke<D>` | `D` is a delegate type; in `delegate` plus the arguments | Impure. |
+| `Invoke::<D>` | `D` is a delegate type; in `delegate` plus the arguments | Impure. |
 | `Bind`, `Unbind` | symbol: dispatcher; in `obj`, `handler: delegate` | Impure. |
 | `Broadcast` | symbol: dispatcher; in `obj` plus the arguments | Impure. Handlers run in bind order. A fault in one handler is reported to the host and does not stop the others. |
 
@@ -114,11 +114,11 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 
 The VM ships these namespaces as natives (callable through `Call`) and as Wiret source:
 
-- `std.math`: `Sqrt`, `Pow`, `Sin`, `Cos`, `Atan2`, `Floor`, `Ceil`, `Round`, `Clamp<T>`, `Lerp`, ... (pure).
-- `std.string`: `Concat`, `Length`, `Substring`, `Find`, `Format`, `TryParse<T>`, `Split`, ... (pure).
-- `std.array`, `std.map`: `Equals`, `Sort<T>` (stable, caller supplies a comparison delegate), `IndexOf<T>`, ...
+- `std.math`: `Sqrt`, `Pow`, `Sin`, `Cos`, `Atan2`, `Floor`, `Ceil`, `Round`, `Clamp::<T>`, `Lerp`, ... (pure).
+- `std.string`: `Concat`, `Length`, `Substring`, `Find`, `Format`, `TryParse::<T>`, `Split`, ... (pure).
+- `std.array`, `std.map`: `Equals`, `Sort::<T>` (stable, caller supplies a comparison delegate), `IndexOf::<T>`, ...
 - `std.random`: an explicit-state generator class (`New`, `NextI32`, `NextF64`). There is **no ambient randomness, clock or I/O**. The host provides any of those as natives, which keeps modules replayable.
-- `std.flow` (macros written in Wiret): `ForRange`, `ForEach<T>`, `ForEachMap<K,V>`, `While`, `DoOnce`, `DoN`, `Gate`, `FlipFlop`, `MultiGate`, `Retriggerable`.
+- `std.flow` (macros written in Wiret): `ForRange`, `ForEach::<T>`, `ForEachMap::<K,V>`, `While`, `DoOnce`, `DoN`, `Gate`, `FlipFlop`, `MultiGate`, `Retriggerable`.
 
 ### 3.5 The node registry
 

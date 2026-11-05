@@ -10,7 +10,6 @@ from .model import (Attr, Attribute, Binding, Box, Const, ExecOut, Extern, Graph
                     Module, Node, PinRef, Use, Var, item_kind)
 from .registry import ARRAY_MUTATORS, ModuleIndex, Sig, lit_equal, signature
 
-WRAP = 100
 IND = "  "
 
 SEMANTIC_ATTRS = {"id", "pure", "reads", "final", "private", "export", "inline", "deprecated",
@@ -141,23 +140,24 @@ def fmt_wires(node: Node, sig: Sig) -> list:
     return out
 
 
+def fmt_targs(targs: list) -> str:
+    return "::<" + ", ".join(targs) + ">" if targs else ""
+
+
 def fmt_node(node: Node, sig: Sig, indent: str) -> str:
+    """The node line, then one `.pin <- value` line per bound input."""
     head = f"{indent}node {node.id} = {node.kind}"
-    targs = "<" + ", ".join(node.targs) + ">" if node.targs else ""
-    if node.kind in ARRAY_MUTATORS:      # `ArrayAdd<i32> acc (item: x)`, as in section 3.3
+    targs = fmt_targs(node.targs)
+    if node.kind in ARRAY_MUTATORS:      # `ArrayAdd::<i32> acc`, as in section 3.3
         head += targs + (f" {node.symbol}" if node.symbol else "")
     else:
         head += (f" {node.symbol}" if node.symbol else "") + targs
-    binds = [f"{b.pin}: " + (f"{b.value.node}.{b.value.pin}" if isinstance(b.value, PinRef)
-                             else fmt_lit(b.value))
-             for b in _ordered_bindings(node, sig)]
-    sep = "" if (not node.symbol or node.kind in ("Call", "Macro")) else " "
-    attrs = fmt_attrs(node.attrs)
-    line = head + (sep + "(" + ", ".join(binds) + ")" if binds else "") + attrs
-    if len(line) <= WRAP or not binds:
-        return line
-    return (head + sep + "(\n" + ",\n".join(indent + IND + b for b in binds) + "\n" + indent + ")"
-            + attrs)
+    lines = [head + fmt_attrs(node.attrs)]
+    for b in _ordered_bindings(node, sig):
+        val = (f"{b.value.node}.{b.value.pin}" if isinstance(b.value, PinRef)
+               else fmt_lit(b.value))
+        lines.append(f"{indent}{IND}.{b.pin} <- {val}")
+    return "\n".join(lines)
 
 
 def fmt_attribute(a: Attribute) -> str:
@@ -190,7 +190,7 @@ def fmt_props(props: list, sort_members=True) -> str:
 def fmt_graph(g: Graph, idx: ModuleIndex, indent: str = "", semantic=False) -> list:
     head = f"{indent}{g.kind} {g.name}"
     if g.tparams:
-        head += "<" + ", ".join(g.tparams) + ">"
+        head += fmt_targs(g.tparams)
     head += fmt_params(g.params)
     if g.results is not None:
         head += " -> " + fmt_params(g.results)

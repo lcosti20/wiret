@@ -4,14 +4,24 @@ module lessons.decisions
 extern func host.Log(message: string)
 
 func CheckAge(age: i32) @doc("Prints whether a person of this age is an adult or a child.") {
-  node adult = Call host.Log(message: adult_line.result)
-  node adult_line = Call std.string.Concat(a: age_text.result, b: " is an adult.")
-  node age_text = Convert<i32, string>(value: entry.age)
-  node child = Call host.Log(message: child_line.result)
-  node child_line = Call std.string.Concat(a: age_text.result, b: " is a child.")
-  node decide = Branch(cond: grown.result)
+  node adult = Call host.Log
+    .message <- adult_line.result
+  node adult_line = Call std.string.Concat
+    .a <- age_text.result
+    .b <- " is an adult."
+  node age_text = Convert::<i32, string>
+    .value <- entry.age
+  node child = Call host.Log
+    .message <- child_line.result
+  node child_line = Call std.string.Concat
+    .a <- age_text.result
+    .b <- " is a child."
+  node decide = Branch
+    .cond <- grown.result
   node entry = Entry
-  node grown = Ge<i32>(a: entry.age, b: 18)
+  node grown = Ge::<i32>
+    .a <- entry.age
+    .b <- 18
 
   flow {
     decide.then -> adult
@@ -37,9 +47,12 @@ func CheckAge(age: i32) @doc("Prints whether a person of this age is an adult or
 
 func Main() {
   node entry = Entry
-  node first = Call CheckAge(age: 12)
-  node second = Call CheckAge(age: 30)
-  node third = Call CheckAge(age: 18)
+  node first = Call CheckAge
+    .age <- 12
+  node second = Call CheckAge
+    .age <- 30
+  node third = Call CheckAge
+    .age <- 18
 
   flow {
     entry -> first

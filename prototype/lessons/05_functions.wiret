@@ -5,13 +5,23 @@ extern func host.Log(message: string)
 
 func Main() {
   node entry = Entry
-  node loop = Macro std.flow.ForRange(first: 1, last: 5)
-  node n_text = Convert<i32, string>(value: loop.index)
-  node part1 = Call std.string.Concat(a: n_text.result, b: " squared is ")
-  node part2 = Call std.string.Concat(a: part1.result, b: sq_text.result)
-  node say = Call host.Log(message: part2.result)
-  node sq_text = Convert<i32, string>(value: squared.result)
-  node squared = Call Square(x: loop.index)
+  node loop = Macro std.flow.ForRange
+    .first <- 1
+    .last <- 5
+  node n_text = Convert::<i32, string>
+    .value <- loop.index
+  node part1 = Call std.string.Concat
+    .a <- n_text.result
+    .b <- " squared is "
+  node part2 = Call std.string.Concat
+    .a <- part1.result
+    .b <- sq_text.result
+  node say = Call host.Log
+    .message <- part2.result
+  node sq_text = Convert::<i32, string>
+    .value <- squared.result
+  node squared = Call Square
+    .x <- loop.index
 
   flow {
     entry -> loop
@@ -37,8 +47,11 @@ func Main() {
 
 func Square(x: i32) -> (result: i32) @pure @doc("Multiplies a number by itself.") {
   node entry = Entry
-  node ret = Return(result: times.result)
-  node times = Mul<i32>(a: entry.x, b: entry.x)
+  node ret = Return
+    .result <- times.result
+  node times = Mul::<i32>
+    .a <- entry.x
+    .b <- entry.x
 
   flow {
     entry -> ret

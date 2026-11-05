@@ -5,18 +5,31 @@ extern func host.Log(message: string)
 
 func Main() {
   local total: i32
-  node count = Macro std.flow.ForRange(first: 1, last: 5)
+  node count = Macro std.flow.ForRange
+    .first <- 1
+    .last <- 5
   node entry = Entry
   node final = GetLocal total
-  node keep = SetLocal total (value: plus.result)
-  node line = Call std.string.Concat(a: "Counting: ", b: num_text.result)
-  node num_text = Convert<i32, string>(value: count.index)
+  node keep = SetLocal total
+    .value <- plus.result
+  node line = Call std.string.Concat
+    .a <- "Counting: "
+    .b <- num_text.result
+  node num_text = Convert::<i32, string>
+    .value <- count.index
   node old = GetLocal total
-  node plus = Add<i32>(a: old.value, b: count.index)
-  node report = Call host.Log(message: report_line.result)
-  node report_line = Call std.string.Concat(a: "Total: ", b: total_text.result)
-  node say = Call host.Log(message: line.result)
-  node total_text = Convert<i32, string>(value: final.value)
+  node plus = Add::<i32>
+    .a <- old.value
+    .b <- count.index
+  node report = Call host.Log
+    .message <- report_line.result
+  node report_line = Call std.string.Concat
+    .a <- "Total: "
+    .b <- total_text.result
+  node say = Call host.Log
+    .message <- line.result
+  node total_text = Convert::<i32, string>
+    .value <- final.value
 
   flow {
     count.each -> say
