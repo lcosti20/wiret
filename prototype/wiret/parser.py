@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import re
 
-from .model import (Attr, Binding, Box, Comment, Const, ExecOut, Extern, Graph, Lit,
-                    Local, Module, Node, Param, PinRef, Place, Use, Var)
+from .model import (Attr, Binding, Box, Comment, Const, Enum, EnumMember, ExecOut, Extern,
+                    Field, Graph, Lit, Local, Module, Node, Param, PinRef, Place, Struct, Use,
+                    Var)
 
 KEYWORDS = set("wiret module use extern const var local enum struct interface class impl macro "
                "func event dispatcher node state flow layout box at size".split())
@@ -12,7 +13,9 @@ KEYWORDS = set("wiret module use extern const var local enum struct interface cl
 MARKUP_HINT = ("the 'markup' block was removed: write each note as #[note(\"...\")] on its own "
                "line directly above the node, box or graph it explains")
 
-UNSUPPORTED_ITEMS = {"enum", "struct", "interface", "class"}
+UNSUPPORTED_ITEMS = {"interface", "class"}
+
+INT_TYPES = {"i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64"}
 
 
 class ParseError(Exception):
@@ -225,7 +228,7 @@ class Parser:
             self.error("expected a declaration")
         kw = t.value
         if kw in UNSUPPORTED_ITEMS:
-            raise ParseError(f"'{kw}' declarations are Tier 1/2 and not supported by this prototype",
+            raise ParseError(f"'{kw}' declarations are Tier 2 and not supported by this prototype",
                              t.line, t.col)
         start = self.i
         self.next()
@@ -274,6 +277,10 @@ class Parser:
             it = Var(name, ty, default, self.attrs())
             self.end_stmt()
             return it
+        if kw == "struct":
+            return self.struct()
+        if kw == "enum":
+            return self.enum()
         if kw in ("func", "event", "macro"):
             g = Graph(kw, self.ident())
             self.anchors.append((start, ("graph", g.name)))
@@ -289,6 +296,70 @@ class Parser:
             self.body(g)
             return g
         self.error("expected a declaration")
+
+    def members(self, what: str, member) -> list:
+        """The `{ ... }` of a struct or enum: one member per line, each may have metadata lines."""
+        self.expect_p("{")
+        self.skip_nl()
+        out = []
+        while not self.at_p("}"):
+            meta = self.meta_lines()
+            if not self.at("id"):
+                self.error(f"expected {what}")
+            m = member()
+            m.meta = meta
+            out.append(m)
+            self.end_stmt()
+        self.next()
+        self.end_stmt()
+        return out
+
+    def struct(self) -> Struct:
+        """`struct Name @attrs { field: type [= default] @attrs ... }` (section 2.2)."""
+        st = Struct(self.ident("struct name"))
+        if self.at_p("::") or self.at_p("<"):
+            self.error("structs take no type parameters")
+        st.attrs = self.attrs()
+
+        def field():
+            name = self.ident("field name")
+            self.expect_p(":")
+            ty = self.type()
+            default = None
+            if self.at_p("="):
+                self.next()
+                default = self.literal()
+            return Field(name, ty, default, self.attrs())
+
+        st.fields = self.members("a field ('name: type')", field)
+        return st
+
+    def enum(self) -> Enum:
+        """`enum Name [: inttype] @attrs { Member [= INT] @attrs ... }` (section 2.2)."""
+        en = Enum(self.ident("enum name"))
+        if self.at_p(":"):
+            self.next()
+            t = self.peek()
+            base = self.ident("integer type")
+            if base not in INT_TYPES:
+                raise ParseError(f"an enum's underlying type must be an integer type such as "
+                                 f"u8 or i32, not '{base}'", t.line, t.col)
+            en.base = base
+        en.attrs = self.attrs()
+
+        def member():
+            m = EnumMember(self.ident("enum member"))
+            if self.at_p("="):
+                self.next()
+                t = self.peek()
+                if t.kind != "int" or t.value[1] is not None:
+                    self.error("an enum member's value is a plain integer, as in 'Idle = 0'")
+                m.value = self.next().value[0]
+            m.attrs = self.attrs()
+            return m
+
+        en.members = self.members("an enum member", member)
+        return en
 
     def params(self) -> list:
         self.expect_p("(")

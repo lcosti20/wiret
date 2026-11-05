@@ -243,6 +243,149 @@ func F() {
         self.assertEqual(cm.exception.line, 3)
 
 
+TYPE_DECLS = """
+const MAX: i32 = 3
+
+#[doc("What an enemy is doing.")]
+enum Mode: u8 @id("en_k3f9") {
+  Idle = 0
+  #[note("Moving towards the player.")]
+  Chase @id("m_c")
+  Flee = -1
+}
+
+struct Empty {}
+
+#[doc("A point on the map.")]
+struct Vec2 {
+  y: f32 = 1.5
+  #[doc("Across.")]
+  x: f32 @id("f_x")
+  name: string = "origin"
+}
+
+func Main() {
+  node entry = Entry
+  node log = Call host.Log
+    .message <- "hi"
+
+  flow {
+    entry -> log
+  }
+}
+"""
+
+
+class TypeDeclTests(unittest.TestCase):
+    """Step 1 of struct/enum support: parse, print and hash the declarations (section 2.2)."""
+
+    def test_canonical_round_trip(self):
+        text = module(TYPE_DECLS, macros=False)
+        m = parse(text)
+        out = print_module(m)
+        self.assertEqual(out, text)
+        self.assertEqual(print_module(parse(out)), out)
+        self.assertEqual(codes(text), [])
+        self.assertEqual(run(text, "Main")[1], ["hi"])
+
+    def test_model(self):
+        m = parse(module(TYPE_DECLS, macros=False))
+        items = {it.name: it for it in m.items}
+        mode, vec = items["Mode"], items["Vec2"]
+        self.assertEqual(mode.base, "u8")
+        self.assertEqual([(x.name, x.value) for x in mode.members],
+                         [("Idle", 0), ("Chase", None), ("Flee", -1)])
+        self.assertEqual(note_text(notes(mode.member("Chase").meta)[0]),
+                         "Moving towards the player.")
+        self.assertEqual([f.name for f in vec.fields], ["y", "x", "name"])
+        self.assertEqual(vec.field("y").default.value, 1.5)
+        self.assertEqual(vec.field("x").attrs[0].name, "id")
+        self.assertEqual(items["Empty"].fields, [])
+
+    def test_items_sorted_by_kind_then_name_members_kept_in_order(self):
+        text = module("""
+func Main() {
+  node entry = Entry
+}
+struct B {
+  z: i32
+  a: i32
+}
+struct A {}
+enum E { Second=2
+  First = 1
+}
+const K: i32 = 1
+""", macros=False)
+        out = print_module(parse(text))
+        body = out.split("extern func host.Log(message: string)\n", 1)[1]
+        self.assertEqual(body, """
+const K: i32 = 1
+
+enum E {
+  Second = 2
+  First = 1
+}
+
+struct A {}
+
+struct B {
+  z: i32
+  a: i32
+}
+
+func Main() {
+  node entry = Entry
+}
+""")
+
+    def test_metadata_is_not_semantic_but_member_order_is(self):
+        text = module(TYPE_DECLS, macros=False)
+        m1, m2 = parse(text), parse(text)
+        for it in m2.items:
+            it.meta = []
+            for x in getattr(it, "fields", []) + getattr(it, "members", []):
+                x.meta = []
+        self.assertEqual(semantic_hash(m1), semantic_hash(m2))
+        self.assertNotEqual(layout_hash(m1), layout_hash(m2))
+        m3 = parse(text)
+        vec = next(it for it in m3.items if it.name == "Vec2")
+        vec.fields.reverse()
+        self.assertNotEqual(semantic_hash(m1), semantic_hash(m3))
+
+    def test_unknown_attributes_on_members_are_e0104(self):
+        text = module("""
+enum Mode {
+  Idle @doc("x")
+}
+
+struct P {
+  hp: i32 = 100 @bogus
+}
+""", macros=False)
+        diags = [d for d in check(parse(text)) if d.code == "E0104"]
+        self.assertEqual(len(diags), 2)
+        self.assertIn("#[doc(", diags[0].message)
+        self.assertIn("'P.hp'", diags[1].message)
+
+    def test_parse_errors(self):
+        for src, hint in (("enum E: f32 {\n}\n", "integer type"),
+                          ("enum E: Mode {\n}\n", "integer type"),
+                          ("enum E {\n  A = 1u8\n}\n", "plain integer"),
+                          ('enum E {\n  A = "x"\n}\n', "plain integer"),
+                          ("enum E {\n  A B\n}\n", "end of line"),
+                          ("struct S {\n  x\n}\n", "expected :"),
+                          ("struct S {\n  x: i32 y: i32\n}\n", "end of line"),
+                          ("struct S::<T> {\n}\n", "no type parameters"),
+                          ("struct S {\n  #[doc(\"x\")]\n}\n", "directly above"),
+                          ("class C {\n}\n", "Tier 2"),
+                          ("interface I {\n}\n", "Tier 2")):
+            with self.subTest(src):
+                with self.assertRaises(ParseError) as cm:
+                    parse(module("\n" + src, macros=False))
+                self.assertIn(hint, cm.exception.msg)
+
+
 class HashTests(unittest.TestCase):
     def test_reorder_and_layout_removal_do_not_change_semantics(self):
         text = demo()

@@ -282,6 +282,56 @@ class Var:
 
 
 @dataclass
+class Field:
+    """A struct field: `name: type [= default] @attrs` (section 2.2)."""
+    name: str
+    type: str
+    default: Optional[Lit] = None
+    attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
+
+
+@dataclass
+class Struct:
+    """A value type. Field order is the order written; it is semantic and never sorted."""
+    name: str
+    fields: list = field(default_factory=list)     # [Field]
+    attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
+
+    def field(self, name: str) -> Optional[Field]:
+        for f in self.fields:
+            if f.name == name:
+                return f
+        return None
+
+
+@dataclass
+class EnumMember:
+    """An enum member: `Name [= value] @attrs`."""
+    name: str
+    value: Optional[int] = None                    # None: no `= INT` written
+    attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
+
+
+@dataclass
+class Enum:
+    """`enum Name [: inttype] { ... }`. Member order is the order written, never sorted."""
+    name: str
+    base: Optional[str] = None                     # None: no `: inttype` written
+    members: list = field(default_factory=list)    # [EnumMember]
+    attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
+
+    def member(self, name: str) -> Optional[EnumMember]:
+        for m in self.members:
+            if m.name == name:
+                return m
+        return None
+
+
+@dataclass
 class Comment:
     """A `//` comment: trivia, not part of the model (section 2.1)."""
     line: int
@@ -321,6 +371,10 @@ def item_kind(item) -> str:
         return "const"
     if isinstance(item, Var):
         return "var"
+    if isinstance(item, Enum):
+        return "enum"
+    if isinstance(item, Struct):
+        return "struct"
     if isinstance(item, Graph):
         return item.kind
     raise TypeError(item)
