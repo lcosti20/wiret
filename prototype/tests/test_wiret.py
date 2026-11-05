@@ -6294,5 +6294,41 @@ class PaletteTests(unittest.TestCase):
         self.assertNotIn("Add", [i.kind for i in execs])
 
 
+
+class WebApiTests(unittest.TestCase):
+    """wiret.webapi, the JSON calls the browser version makes through Pyodide."""
+
+    def test_runs_every_lesson(self):
+        from wiret import webapi
+        for name in sorted(n for n in os.listdir(LESSONS) if n.endswith(".wiret")):
+            with self.subTest(lesson=name):
+                with open(os.path.join(LESSONS, name), encoding="utf-8") as f:
+                    r = json.loads(webapi.run(f.read()))
+                self.assertTrue(r["ok"], r)
+                self.assertTrue(r["output"])
+
+    def test_reports_parse_and_check_errors(self):
+        from wiret import webapi
+        r = json.loads(webapi.run("wiret 1\nmodule x\nfunc Main( {"))
+        self.assertFalse(r["ok"])
+        self.assertEqual((r["diags"][0]["code"], r["diags"][0]["line"]), ("parse", 3))
+        r = json.loads(webapi.run("wiret 1\nmodule x\nfunc Main() {\n  node e = Entry\n"
+                                  "  node n = Nope\n  flow { e -> n }\n}\n"))
+        self.assertFalse(r["ok"])
+        self.assertTrue(any(d["severity"] == "error" for d in r["diags"]))
+
+    def test_bundle_leaves_out_tkinter(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(HERE), "web"))
+        try:
+            import build_web
+        finally:
+            sys.path.pop(0)
+        names = {arc for _, arc in build_web.files()}
+        self.assertIn("wiret/webapi.py", names)
+        self.assertIn("wiret/std/flow.wiret", names)
+        self.assertIn("lessons/01_hello.wiret", names)
+        self.assertFalse(names & {"wiret/editor.py", "wiret/graphview.py", "wiret/palette.py"})
+
+
 if __name__ == "__main__":
     unittest.main()

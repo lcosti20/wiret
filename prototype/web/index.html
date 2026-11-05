@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wiret (web spike)</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66;
+    --border: #d9d9d4; --accent: #2f6fdb; --error: #c4342d; --warn: #a86b00;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1b1d; --panel: #242427; --text: #e8e8e3; --muted: #9a9a94;
+      --border: #3a3a3e; --accent: #6b9cf0; --error: #f07067; --warn: #e0a940;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+           padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  h1 { font-size: 17px; margin: 0; }
+  #status { color: var(--muted); font-size: 13px; margin-left: auto; }
+  select, button, label { font: inherit; }
+  select { padding: 4px 6px; max-width: 100%; background: var(--panel); color: var(--text);
+           border: 1px solid var(--border); border-radius: 6px; }
+  button { padding: 5px 16px; border: 0; border-radius: 6px; background: var(--accent);
+           color: #fff; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  main { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 16px;
+         padding: 16px; height: calc(100vh - 58px); }
+  @media (max-width: 760px) { main { grid-template-columns: minmax(0, 1fr); height: auto; } }
+  textarea, #out { width: 100%; height: 100%; min-height: 300px; margin: 0; padding: 10px;
+           background: var(--panel); color: var(--text); border: 1px solid var(--border);
+           border-radius: 8px; font: 13px/1.5 var(--mono); }
+  textarea { resize: none; tab-size: 2; white-space: pre; }
+  #out { overflow: auto; white-space: pre-wrap; }
+  .err { color: var(--error); } .warn { color: var(--warn); } .note { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Wiret</h1>
+  <select id="lesson" disabled aria-label="Lesson"></select>
+  <label><input type="checkbox" id="det"> Deterministic</label>
+  <button id="run" disabled>▶ Run</button>
+  <span id="status">Loading Python…</span>
+</header>
+<main>
+  <textarea id="src" spellcheck="false" aria-label="Source"></textarea>
+  <div id="out" role="log" aria-label="Output"></div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.27.8/full/pyodide.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const FUEL = 5_000_000;   // a runaway loop stops in seconds instead of freezing the tab
+let py, webRun;
+
+function show(lines) {
+  const out = $("out");
+  out.replaceChildren(...lines.map(([cls, text]) => {
+    const div = document.createElement("div");
+    if (cls) div.className = cls;
+    div.textContent = text;
+    return div;
+  }));
+}
+
+async function boot() {
+  const t0 = performance.now();
+  py = await loadPyodide();
+  const zip = await (await fetch("wiret_bundle.zip")).arrayBuffer();
+  py.unpackArchive(zip, "zip", { extractDir: "/app" });
+  py.runPython(`import sys; sys.path.insert(0, "/app")`);
+  webRun = py.pyimport("wiret.webapi").run;
+  const files = py.runPython(`
+import os
+[f"lessons/{n}" for n in sorted(os.listdir("/app/lessons"))] + ["examples/demo.wiret"]
+`).toJs();
+  for (const f of files) {
+    const name = f.split("/").pop().replace(".wiret", "").replace(/^(\d+)_/, "$1. ").replace(/_/g, " ");
+    $("lesson").add(new Option(name, f));
+  }
+  $("lesson").disabled = $("run").disabled = false;
+  $("status").textContent = `Ready (Python ${py.runPython("sys.version.split()[0]")}, ` +
+                            `${Math.round(performance.now() - t0)} ms)`;
+  loadLesson();
+}
+
+function loadLesson() {
+  $("src").value = py.FS.readFile("/app/" + $("lesson").value, { encoding: "utf8" });
+  show([["note", "Press Run (Ctrl+Enter)."]]);
+}
+
+function run() {
+  const t0 = performance.now();
+  const r = JSON.parse(webRun($("src").value, "Main", $("det").checked, FUEL));
+  const ms = Math.round(performance.now() - t0);
+  const lines = r.output.map(l => ["", l]);
+  for (const d of r.diags) {
+    const where = d.line ? `line ${d.line}:${d.col}: ` : "";   // checker messages name their node
+    lines.push([d.severity === "error" ? "err" : "warn", `${where}${d.message}`]);
+  }
+  if (r.error) lines.push(["err", r.error]);
+  if (r.ok && r.result && r.result !== "(no results)") lines.push(["note", `→ ${r.result}`]);
+  lines.push(["note", r.ok ? `(finished in ${ms} ms)` : "(did not run)"]);
+  show(lines);
+}
+
+$("lesson").onchange = loadLesson;
+$("run").onclick = run;
+$("src").addEventListener("keydown", e => {
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); run(); }
+  if (e.key === "Tab") { e.preventDefault(); document.execCommand("insertText", false, "  "); }
+});
+boot().catch(e => { $("status").textContent = "Failed to load"; show([["err", String(e)]]); });
+</script>
+</body>
+</html>
