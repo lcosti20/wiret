@@ -48,12 +48,12 @@ func Main() {
   }
 
   layout {
-    after at (860, 200)
-    before at (420, 200)
+    after at (653, 116)
+    before at (193, 106)
     entry at (0, 0)
-    hungry at (420, 360)
-    make at (0, 160)
-    now at (200, 400)
+    hungry at (365, 187)
+    make at (-105, 81)
+    now at (201, 187)
     save at (640, 0)
     show_after at (860, 0)
     show_before at (420, 0)
@@ -94,13 +94,13 @@ func Show(p: Pet) {
 
   layout {
     entry at (0, 0)
-    happy at (680, -120)
+    happy at (774, -115)
     happy_line at (460, -200)
-    hungry at (680, 40)
-    hungry_line at (460, 80)
-    parts at (0, 160)
-    sleepy at (680, 200)
-    sleepy_line at (460, 300)
-    which at (240, 0)
+    hungry at (970, 20)
+    hungry_line at (724, 90)
+    parts at (205, 90)
+    sleepy at (759, 197)
+    sleepy_line at (434, 220)
+    which at (444, 0)
   }
 }
