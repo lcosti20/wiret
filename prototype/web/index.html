@@ -289,6 +289,10 @@ import { GraphView } from "./graphview.js";
 import { makeHighlighter } from "./syntax.js";
 
 const $ = (id) => document.getElementById(id);
+// The build this page belongs to. build_web.py --site replaces "dev" with an id made from the
+// published files, and puts the same id in the URLs of the scripts and the bundle (?v=...), so
+// a browser never pairs this page with a script or bundle it cached from an older deploy.
+const BUILD = "dev";
 const FUEL = 5_000_000;       // a runaway loop stops in seconds instead of freezing the tab
 const LH = 20, PAD = 10;      // line height and padding of the source, as in the CSS
 const el = (tag, cls, text) => {
@@ -476,6 +480,7 @@ async function boot() {
   const py = await loadPyodide();
   const zip = await (await fetch("wiret_bundle.zip")).arrayBuffer();
   py.unpackArchive(zip, "zip", { extractDir: "/app" });
+  checkBuild(py.FS.analyzePath("/app/BUILD").exists ? py.FS.readFile("/app/BUILD", { encoding: "utf8" }).trim() : "dev");
   py.runPython(`import sys; sys.path.insert(0, "/app")`);
   api = py.pyimport("wiret.webapi");
   const rules = JSON.parse(api.syntax());
@@ -976,9 +981,26 @@ document.addEventListener("keydown", (e) => {
   if (act) { e.preventDefault(); act(); }
 });
 
+/** The page and its bundle must come from the same deploy. If a cache still had an older
+ *  one, load the page again once from a fresh URL; if that does not help, say so plainly. */
+function checkBuild(bundleBuild) {
+  if (BUILD === "dev" || bundleBuild === BUILD) return;
+  const url = new URL(location.href);
+  if (!url.searchParams.has("fresh")) {
+    url.searchParams.set("fresh", Date.now().toString(36));
+    location.replace(url);
+    throw new StaleBuild();
+  }
+  throw new StaleBuild("This page was just updated, and your browser still has parts of the " +
+                       "old version. Wait a few minutes and reload, or press Ctrl+F5.");
+}
+
+class StaleBuild extends Error {}
+
 boot().catch((e) => {
+  if (e instanceof StaleBuild && !e.message) return;      // reloading
   $("ready").textContent = "failed to load";
-  say(`The page could not load Python: ${e}`, true);
+  say(e instanceof StaleBuild ? e.message : `The page could not load Python: ${e}`, true);
   console.error(e);
 });
 </script>
