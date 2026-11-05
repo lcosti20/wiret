@@ -660,10 +660,13 @@ pins for results, and flow wires for a macro's exec parameters and results.
 
 - **Exports.** Every `func` and `event` is exported, so the editor can run any of them. The
   spec exports only `@export` declarations.
-- **Tier 2, what is left:** the language half is done (`Try`/`Throw`, fibers, classes,
-  interfaces, delegates and dispatchers), and so are copy-on-write and capabilities. Not yet:
-  the C API, debugger hooks beyond the editor's, and the project manager and lockfile (so no
-  `WR_LOAD_LAZY_LINK` or `wr_link` either).
+- **Tier 2 in this prototype:** the language features are done (`Try`/`Throw`, fibers,
+  classes, interfaces, delegates and dispatchers), and so are copy-on-write and capabilities.
+  The prototype exists to show Wiret as a language, so the embedding and infrastructure items
+  are out of its scope: the C API (the `VM` class's Python methods stand in for it), the
+  project manager (`wiret.toml` dependencies, `use` of other modules, `@export`-only exports,
+  `wiret.lock`, `WR_LOAD_LAZY_LINK` and `wr_link`), and debugger hooks as a host API (the
+  editor has its own debugger). A module is one file.
 - **No `ref.share` removal.** Without `-O1` there is no liveness analysis, so a function that
   builds a local array and returns it still shares it, and the caller's first change to it
   makes one copy. The
@@ -672,9 +675,7 @@ pins for results, and flow wires for a macro's exec parameters and results.
   a macro with state expanded in a method), calling a base class's version of an overridden
   method, extern (host) types, and the container mutators on a class field place
   (`ArrayAdd::<i32> Player.items`).
-- **Not implemented:** the rest of the
-  project manager (`wiret.lock`, `use` of other modules), the C API and deterministic-mode
-  float rules.
+- **Not implemented:** deterministic-mode float rules (section 4.10).
 - **Optimisation.** There is no `-O1`, so the `cont.push`/`cont.pop` pairs are never replaced
   by direct branches.
 - **Example layout.** The spec's examples align the `=` signs; the canonical writer does not.
