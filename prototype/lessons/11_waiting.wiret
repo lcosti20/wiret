@@ -35,12 +35,12 @@ event Main() {
 
   layout {
     entry at (0, 0)
-    go at (500, 0)
-    left at (-100, 530)
-    line at (300, 310)
+    go at (724, 175)
+    left at (723, 62)
+    line at (1178, 62)
     loop at (250, 0)
-    number at (100, 420)
-    say at (500, 200)
-    wait at (750, 0)
+    number at (920, 62)
+    say at (1396, 0)
+    wait at (1614, 0)
   }
 }

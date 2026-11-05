@@ -28,7 +28,7 @@ class Button {
     }
 
     layout {
-      count at (-150, 220)
+      count at (-141, 110)
       entry at (0, 0)
       inc at (50, 110)
       now at (300, 110)
@@ -59,10 +59,10 @@ class Counter {
     }
 
     layout {
-      cur at (-150, 220)
+      cur at (213, 78)
       entry at (0, 0)
-      inc at (50, 110)
-      save at (250, 0)
+      inc at (393, 78)
+      save at (581, 0)
     }
   }
 }
@@ -84,9 +84,9 @@ func Announce(times: i32) {
 
   layout {
     entry at (0, 0)
-    line at (50, 110)
-    number at (-150, 220)
-    say at (250, 0)
+    line at (452, 53)
+    number at (185, 73)
+    say at (719, 0)
   }
 }
 
@@ -141,7 +141,7 @@ func Main() {
   }
 
   layout {
-    announce at (550, 110)
+    announce at (381, 214)
     b at (250, 0)
     bind_a at (750, 0)
     bind_c at (1000, 0)
@@ -150,12 +150,12 @@ func Main() {
     click2 at (1500, 0)
     click3 at (2000, 0)
     entry at (0, 0)
-    heard at (800, 110)
-    how_many at (1450, 440)
-    line at (2050, 110)
-    number at (1650, 330)
+    heard at (698, 154)
+    how_many at (1276, 161)
+    line at (1981, 141)
+    number at (1522, 161)
     say at (2250, 0)
-    tail at (1850, 220)
+    tail at (1764, 161)
     unbind_a at (1750, 0)
   }
 }

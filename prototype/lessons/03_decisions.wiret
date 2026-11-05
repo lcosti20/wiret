@@ -33,13 +33,13 @@ func CheckAge(age: i32) {
 
   layout {
     adult at (900, -120)
-    adult_line at (560, -200)
-    age_text at (300, 320)
+    adult_line at (637, -190)
+    age_text at (337, -189)
     child at (900, 120)
-    child_line at (560, 260)
+    child_line at (666, 226)
     decide at (420, 0)
     entry at (0, 0)
-    grown at (200, 160)
+    grown at (221, 76)
   }
 }
 

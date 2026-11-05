@@ -33,10 +33,10 @@ class Rectangle impl Shape {
 
     layout {
       entry at (0, 0)
-      h at (-150, 310)
-      ret at (250, 0)
-      times at (50, 110)
-      w at (-150, 220)
+      h at (283, 125)
+      ret at (757, 0)
+      times at (559, 68)
+      w at (282, 68)
     }
   }
 
@@ -102,12 +102,12 @@ class Triangle impl Shape {
     }
 
     layout {
-      b at (-350, 330)
+      b at (338, 71)
       entry at (0, 0)
-      h at (-350, 420)
-      half at (50, 110)
-      ret at (250, 0)
-      times at (-150, 220)
+      h at (338, 142)
+      half at (787, 71)
+      ret at (1010, -2)
+      times at (632, 71)
     }
   }
 
@@ -185,20 +185,20 @@ func Main() {
   layout {
     add_r at (500, 0)
     add_s at (1500, 0)
-    add_t at (2000, 0)
-    all at (2050, 110)
-    area at (2500, 0)
-    area_text at (2600, 310)
+    add_t at (1949, 0)
+    all at (2023, 98)
+    area at (2656, -3)
+    area_text at (3054, 177)
     entry at (0, 0)
-    label at (2600, 220)
-    line at (2800, 110)
+    label at (3185, 76)
+    line at (3445, 76)
     loop at (2250, 0)
-    name at (2750, 0)
+    name at (2921, 20)
     rect at (250, 0)
-    say at (3000, 0)
+    say at (3649, 20)
     side_h at (1250, 0)
     side_w at (1000, 0)
-    square at (750, 0)
+    square at (803, 0)
     tri at (1750, 0)
   }
 }

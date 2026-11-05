@@ -24,9 +24,9 @@ class Animal {
 
     layout {
       entry at (0, 0)
-      line at (50, 110)
-      name at (-150, 220)
-      ret at (250, 0)
+      line at (387, 82)
+      name at (208, 82)
+      ret at (678, 0)
     }
   }
 }
@@ -50,9 +50,9 @@ class Cat : Animal {
 
     layout {
       entry at (0, 0)
-      line at (50, 110)
-      name at (-150, 220)
-      ret at (250, 0)
+      line at (449, 71)
+      name at (244, 71)
+      ret at (711, 0)
     }
   }
 }
@@ -76,9 +76,9 @@ class Dog : Animal {
 
     layout {
       entry at (0, 0)
-      line at (300, 110)
-      parent at (250, 0)
-      ret at (500, 0)
+      line at (362, 67)
+      parent at (138, 0)
+      ret at (590, 0)
     }
   }
 }
@@ -138,7 +138,7 @@ func Main() {
     name_cat at (1250, 0)
     name_dog at (500, 0)
     other at (1750, 0)
-    say at (2750, 0)
-    speak at (2500, 0)
+    say at (2934, 0)
+    speak at (2659, 0)
   }
 }
