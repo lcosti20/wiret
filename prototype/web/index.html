@@ -45,8 +45,9 @@
   button:disabled { opacity: .45; cursor: default; }
   label { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
   #ready { color: var(--faint); font-size: 12px; margin-left: auto; }
-  #msg { padding: 7px 16px; min-height: 34px; border-bottom: 1px solid var(--border);
-         color: var(--muted); }
+  /* a fixed height, so the canvas below never moves while you work in it */
+  #msg { padding: 7px 16px; height: calc(2 * 1.45em + 14px); overflow-y: auto; flex: none;
+         border-bottom: 1px solid var(--border); color: var(--muted); }
   #msg.err { color: var(--error); }
   main { flex: 1; min-height: 0; display: grid; gap: 12px; padding: 12px 16px 16px;
          grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr); }
@@ -124,6 +125,16 @@
                   font-size: 13px; overflow: hidden; white-space: nowrap; }
   .gv-notes { position: absolute; left: 10px; top: 10px; width: min(460px, calc(100% - 20px));
               color: #f7dc6f; font-size: 13px; pointer-events: none; }
+  .gv-notes p, .gv-note > div { pointer-events: auto; }
+  .gv-menu { position: absolute; z-index: 3; min-width: 200px; max-width: min(340px, calc(100% - 8px));
+             padding: 4px; border-radius: 6px; background: #2b2e35; border: 1px solid #3a3e46;
+             box-shadow: 0 8px 28px rgba(0,0,0,.6); max-height: calc(100% - 8px); overflow: auto; }
+  .gv-menu-item { display: block; width: 100%; text-align: left; border: 0; border-radius: 4px;
+                  background: none; color: var(--g-text); padding: 4px 10px; font-size: 13px; }
+  .gv-menu-item.indent { padding-left: 24px; font-family: var(--mono); font-size: 12px; }
+  .gv-menu-item:focus { outline: none; background: #2471a3; color: #fff; }
+  .gv-menu-head { color: var(--g-dim); font-size: 12px; padding: 4px 10px 2px; }
+  .gv-menu-sep { height: 1px; margin: 4px 6px; background: #3a3e46; }
   .gv-notes p { margin: 0 0 8px; }
   .gv-notes .detached { color: var(--g-dim); }
   .gv-notes-toggle { pointer-events: auto; background: #2b2e35; color: var(--g-dim);
@@ -194,6 +205,7 @@
     #graphpanel { height: 58vh; }
     #side { height: 60vh; flex: none; }
     #graphbar .hint { display: none; }
+    #msg { height: calc(4 * 1.45em + 14px); }
   }
 </style>
 </head>
@@ -228,7 +240,7 @@
       <button id="addnode" title="Add a node (Tab on the canvas, or double-click empty canvas)">+ Add node</button>
       <button id="undo" title="Undo the last graph edit (Ctrl+Z)" disabled>↶ Undo</button>
       <button id="redo" title="Redo (Ctrl+Y)" disabled>↷ Redo</button>
-      <span class="hint">Drag nodes to move · drag from a pin to wire · Tab to add a node</span>
+      <span class="hint">Drag nodes to move · drag from a pin to wire · Tab to add a node · right-click for more</span>
     </div>
     <div id="graph"></div>
   </section>
@@ -302,6 +314,7 @@ const gv = new GraphView($("graph"), {
   },
   editPin: (node, pin, at) => editPin(node, pin, at),
   palette: (world, at, context) => openPalette(world, at, context),
+  menu: (target, at, world) => openMenu(target, at, world),
 });
 
 // ---------- editing on the canvas ----------
@@ -390,6 +403,37 @@ async function openPalette(world, at, context) {
   applyEdit({ op: "add", kind: item.kind, symbol: item.symbol, targs: item.targs,
               x: Math.round(world[0]), y: Math.round(world[1]), context,
               geoms: context ? gv.geomsFor([context[0]]) : {} });
+}
+
+/** The context menu for `target` (webapi.menu builds it, as the desktop editor's), then
+ *  what was chosen: an edit (asking for text first if it needs some), or something the page
+ *  does itself. */
+async function openMenu(target, at, world) {
+  const entries = JSON.parse(api.menu($("src").value, graphName, JSON.stringify(target)));
+  if (!entries.length) return;
+  for (const e of entries) {
+    if (e.client === "breakpoint") {
+      e.label = (breakpoints.has(`${graphName}\t${e.node}`) ? "Remove breakpoint" : "Set breakpoint") + "  (F9)";
+    }
+  }
+  const e = await gv.menu(at, entries);
+  if (!e) return;
+  if (e.client === "palette") return openPalette(world, at, null);
+  if (e.client === "breakpoint") return toggleBreakpoint(`${graphName}\t${e.node}`);
+  if (e.client === "editPin") return editPin(e.node, e.pin, at);
+  if (e.client?.startsWith("open:")) return showGraph(e.client.slice(5));
+  const ok = canEdit();
+  if (ok !== true) return say(ok, true);
+  const req = { ...e.action };
+  if (e.ask) {
+    const text = await gv.ask(at, { label: e.ask.label, value: e.ask.value });
+    if (text === null) return;
+    req.text = text;
+  }
+  if (e.confirm && !confirm(e.confirm)) return;
+  if (req.op === "add_box") req.member = selected;
+  if (req.node) req.geoms = gv.geomsFor([req.node]);
+  if (applyEdit(req) && req.op === "delete" && selected === req.node) selected = null;
 }
 
 /** Double-click on an input: flip a bool, or type a value in a box over the canvas. */

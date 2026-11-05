@@ -3,9 +3,10 @@
 // input into edits as the desktop canvas does: drag a node or a box title to move it, drag
 // from a pin to a pin (or onto a node) to wire them, click a wire and press Delete to remove
 // it, double-click an input to type its value, and add nodes from the palette (Tab, a double
-// click on empty canvas, or a wire dropped on empty canvas). The page makes the edits (on.move,
-// on.connect, ...); this file only reports them. Also: pan, zoom, select, open a call,
-// breakpoints.
+// click on empty canvas, or a wire dropped on empty canvas). A right click, or a long press on a
+// touch screen, opens the context menu for what is under it. The page makes the edits
+// (on.move, on.connect, ...); this file only reports them. Also: pan, zoom, select, open a
+// call, breakpoints.
 //
 // Everything is in graph units inside one "world" element that a CSS transform pans and zooms.
 // Boxes, nodes, notes and value tags are HTML, so the browser measures text; wires and pins
@@ -36,8 +37,9 @@ export class GraphView {
    *  toggleBreakpoint(nodeId), canEdit() -> true or the reason not, message(text),
    *  move(id, x, y), connect(a, b), connectToNode(a, nodeId), disconnect(node, dir, pin),
    *  deleteNode(id), editPin(node, pin, [screenX, screenY]),
-   *  palette([worldX, worldY], [screenX, screenY], pin or null)}. A pin is [node, "in"/"out", pin];
-   *  screen points are relative to the canvas. */
+   *  palette([worldX, worldY], [screenX, screenY], pin or null),
+   *  menu(target, [screenX, screenY], [worldX, worldY])}. A pin is [node, "in"/"out", pin];
+   *  screen points are relative to the canvas. A menu target is as webapi.menu takes it. */
   constructor(host, on) {
     this.host = host;
     this.on = on;
@@ -137,6 +139,7 @@ export class GraphView {
 
     for (const b of g.boxes) {
       const d = h("div", "gv-box");
+      d.dataset.boxbody = b.id;
       Object.assign(d.style, { left: `${b.x}px`, top: `${b.y}px`, width: `${b.w}px`, height: `${b.h}px`,
                                borderColor: b.color });
       const t = h("div", "gv-box-title", b.title);
@@ -287,10 +290,13 @@ export class GraphView {
     for (const nt of g.notes) {
       if (nt.on && this.geoms.has(nt.on)) {
         if (!byNode.has(nt.on)) byNode.set(nt.on, []);
-        byNode.get(nt.on).push(nt.text);
+        byNode.get(nt.on).push(nt);
       } else {
-        graphNotes.push(h("p", nt.detached ? "detached" : "",
-                          (nt.detached ? `✎ (detached from ${nt.detached}) ` : "✎ ") + nt.text));
+        const p = h("p", nt.detached ? "detached" : "",
+                    (nt.detached ? `✎ (detached from ${nt.detached}) ` : "✎ ") + nt.text);
+        p.dataset.note = nt.key;
+        p.title = "Right-click to edit or delete this note";
+        graphNotes.push(p);
       }
     }
     if (graphNotes.length) {
@@ -305,9 +311,15 @@ export class GraphView {
       toggle.onpointerdown = (e) => e.stopPropagation();
       this.notesBox.append(...(open ? graphNotes : []), toggle);
     }
-    for (const [id, texts] of byNode) {
+    for (const [id, list] of byNode) {
       const geom = this.geoms.get(id);
-      const d = h("div", "gv-note", texts.map((t) => "✎ " + t).join("\n"));
+      const d = h("div", "gv-note");
+      for (const nt of list) {
+        const one = h("div", "", "✎ " + nt.text);
+        one.dataset.note = nt.key;
+        one.title = "Right-click to edit or delete this note";
+        d.append(one);
+      }
       Object.assign(d.style, { left: `${geom.x}px`, top: `${geom.y + geom.h + 6}px`,
                                width: `${Math.max(140, geom.w * 1.4)}px` });
       over.append(d);
@@ -396,6 +408,77 @@ export class GraphView {
   middle() {
     const sx = this.host.clientWidth / 2, sy = this.host.clientHeight / 3;
     return [[(sx - this.ox) / this.scale, (sy - this.oy) / this.scale], [sx, sy]];
+  }
+
+  /** A context menu at [x, y] from webapi.menu's entries. Resolves to the entry chosen, or
+   *  null when closed (Escape, or a click elsewhere). */
+  menu([x, y], entries) {
+    this.askBox?.remove();
+    const box = h("div", "gv-menu");
+    box.setAttribute("role", "menu");
+    const items = [];
+    let resolveIt, done = false;
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      box.remove();
+      if (this.askBox === box) this.askBox = null;
+      this.host.focus({ preventScroll: true });
+      resolveIt(v);
+    };
+    for (const e of entries) {
+      if (e.sep) { box.append(h("div", "gv-menu-sep")); continue; }
+      if (e.header) { box.append(h("div", "gv-menu-head", e.label)); continue; }
+      const b = h("button", e.indent ? "gv-menu-item indent" : "gv-menu-item", e.label);
+      b.setAttribute("role", "menuitem");
+      b.tabIndex = -1;
+      b.addEventListener("click", () => finish(e));
+      b.addEventListener("pointerenter", () => b.focus());
+      items.push(b);
+      box.append(b);
+    }
+    box.addEventListener("pointerdown", (e) => e.stopPropagation());
+    box.addEventListener("contextmenu", (e) => e.preventDefault());
+    box.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      const i = items.indexOf(document.activeElement);
+      if (e.key === "ArrowDown") { e.preventDefault(); items[(i + 1) % items.length]?.focus(); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); items[(i - 1 + items.length) % items.length]?.focus(); }
+      else if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); finish(null); }
+    });
+    box.addEventListener("focusout", (e) => { if (!box.contains(e.relatedTarget)) setTimeout(() => {
+      if (!box.contains(document.activeElement)) finish(null);
+    }, 0); });
+    this.host.append(box);
+    this.askBox = box;
+    box.style.left = `${Math.max(4, Math.min(x, this.host.clientWidth - box.offsetWidth - 4))}px`;
+    box.style.top = `${Math.max(4, Math.min(y, this.host.clientHeight - box.offsetHeight - 4))}px`;
+    (items[0] ?? box).focus();
+    return new Promise((resolve) => { resolveIt = resolve; });
+  }
+
+  /** What a menu would be for: the thing under `el`, as webapi.menu takes it. */
+  #menuTarget(el) {
+    const pin = el?.closest?.(".gv-pinhit");
+    if (pin) return { kind: "pin", node: pin.dataset.node, dir: pin.dataset.dir, pin: pin.dataset.pin };
+    const note = el?.closest?.("[data-note]");
+    if (note) return { kind: "note", note: note.dataset.note };
+    const node = el?.closest?.(".gv-node");
+    if (node) return { kind: "node", node: node.dataset.id };
+    const wire = el?.closest?.(".gv-wirehit");
+    if (wire) return { kind: "wire", wire: wire.dataset.wire };
+    const box = el?.closest?.("[data-box], [data-boxbody]");
+    if (box) return { kind: "box", box: box.dataset.box ?? box.dataset.boxbody };
+    return { kind: "canvas" };
+  }
+
+  #openMenu(el, at) {
+    const target = this.#menuTarget(el);
+    const world = [(at[0] - this.ox) / this.scale, (at[1] - this.oy) / this.scale];
+    if (target.kind === "canvas") Object.assign(target, { x: Math.round(world[0]), y: Math.round(world[1]) });
+    if (target.kind === "node") this.on.select(target.node);
+    if (target.kind === "wire") { this.selWire = target.wire; this.on.select(null); }
+    this.on.menu(target, at, world);
   }
 
   /** The node palette over the canvas at [x, y]: a search box and the best matches.
@@ -489,6 +572,9 @@ export class GraphView {
 
     host.addEventListener("pointerdown", (e) => {
       if (e.button !== 0 && e.pointerType === "mouse") return;
+      // Touch: no emulated mouse events afterwards. (Everything here works from pointer
+      // events, and an emulated mousedown would take the focus from a menu a long press opened.)
+      if (e.pointerType !== "mouse") e.preventDefault();
       host.focus({ preventScroll: true });
       host.setPointerCapture(e.pointerId);
       pointers.set(e.pointerId, local(e));
@@ -503,8 +589,20 @@ export class GraphView {
       if (pointers.size !== 1) return;
       const t = e.target;
       drag = { start: local(e), ox: this.ox, oy: this.oy, moved: false, target: t, kind: "pan" };
+      if (e.pointerType !== "mouse") {          // a long press opens the context menu
+        const d = drag, at = local(e);
+        d.timer = setTimeout(() => {
+          if (drag !== d || d.moved) return;
+          drag = null;
+          this.temp.replaceChildren();
+          this.longPressAt = performance.now();
+          this.#openMenu(t, at);
+        }, 550);
+      }
       const pin = t.closest?.(".gv-pinhit");
-      const nodeEl = t.closest?.(".gv-node");
+      const bp = t.closest?.(".gv-bp");          // a node's breakpoint circle: a tap toggles it,
+      const nodeEl = t.closest?.(".gv-node") ??  // a drag moves the node
+        (bp ? this.world.querySelector(`.gv-node[data-id="${CSS.escape(bp.dataset.bp)}"]`) : null);
       const boxTitle = t.closest?.(".gv-box-title");
       if (pin) {
         drag.kind = "wire";
@@ -532,6 +630,7 @@ export class GraphView {
       const [x, y] = local(e);
       const dx = x - drag.start[0], dy = y - drag.start[1];
       if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+      clearTimeout(drag.timer);
       if (!drag.moved && drag.kind !== "pan") {
         const ok = this.on.canEdit();
         if (ok !== true) {                  // not now: say why, and pan instead
@@ -566,6 +665,7 @@ export class GraphView {
       drag = null;
       this.temp.replaceChildren();
       if (!d) return;
+      clearTimeout(d.timer);
       if (e.type !== "pointerup") {         // cancelled: put a dragged node back
         if (d.kind === "move" && d.moved) { d.item.x = d.x0; d.item.y = d.y0; this.render(); }
         return;
@@ -585,6 +685,11 @@ export class GraphView {
     };
     host.addEventListener("pointerup", end);
     host.addEventListener("pointercancel", end);
+    host.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      if (performance.now() - (this.longPressAt ?? 0) < 800) return;   // a long press opened it
+      this.#openMenu(document.elementFromPoint(e.clientX, e.clientY), local(e));
+    });
     host.addEventListener("wheel", (e) => {
       e.preventDefault();
       const [x, y] = local(e);
@@ -625,7 +730,7 @@ export class GraphView {
     this.lastClick = { key, at: now };
     if (last?.key === key && now - last.at < 400) {
       this.lastClick = null;
-      if (!id && !wire && !target.closest?.(".gv-box-title")) {
+      if (!id && !wire && !target.closest?.(".gv-box-title, [data-note]")) {
         return this.on.palette([(at[0] - this.ox) / this.scale, (at[1] - this.oy) / this.scale], at, null);
       }
       if (inPin) return this.on.editPin(id, inPin, at);

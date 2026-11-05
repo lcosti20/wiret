@@ -8,6 +8,7 @@ from collections import Counter
 from .explain import type_words
 from .palette import describe
 from .model import Graph, Lit, PinRef, note_detached, note_text
+from .ops import note_key
 from .printer import fmt_lit
 from .registry import FLOAT_TYPES, INT_TYPES
 
@@ -224,9 +225,9 @@ def graph_json(g: Graph, info, idx, diags=(), remembered=None, module=None) -> d
                 wires.append({"exec": True, "from": [n.id, out],
                               "to": [e.target, e.target_pin or "in"], "color": "#f0f0f0"})
     notes = []
-    for on, _i, nt in g.all_notes():
+    for on, i, nt in g.all_notes():
         notes.append({"on": on if on and g.node(on) else None, "text": note_text(nt),
-                      "detached": note_detached(nt)})
+                      "detached": note_detached(nt), "key": note_key(on, i)})
     boxes = []
     for b in g.boxes:
         c = b.prop("color")

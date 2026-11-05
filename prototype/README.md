@@ -45,8 +45,10 @@ Gatekeeper warning on first launch.
 right. On the canvas you can drag nodes and box titles to move them, drag from a pin to another
 pin (or onto a node) to wire them, click a wire or node and press Delete to remove it, and
 double-click an input to type its value, and add nodes from the palette (Tab, a double click
-on empty canvas, a wire dropped on empty canvas, or the Add node button); Ctrl+Z and Ctrl+Y undo
-and redo. You can debug with Step (F11),
+on empty canvas, a wire dropped on empty canvas, or the Add node button). Right-click (or press
+and hold on a touch screen) for the same context menus as the desktop editor: set an enum
+input, make or break a struct, rename, label, colour, notes, boxes, locals, @count and @cases.
+Ctrl+Z and Ctrl+Y undo and redo. You can debug with Step (F11),
 Over (F10), Back (Shift+F11), Run/Continue (F5), Animate and breakpoints (click the circle at a
 node's top-left corner or beside its line number, or press F9). The Tkinter modules, the Git
 commands and file watching are left out.
