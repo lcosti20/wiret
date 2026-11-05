@@ -1078,7 +1078,17 @@ class FuncLowerer:
             self.code.append(("step", n.id))
             self.E("nop")
 
-    def eval(self, s: Src, ep: EvalPoint):
+    def eval(self, s: Src, ep: EvalPoint, keep: bool = True):
+        """Push the value of an input. With `keep` (the consumer can retain the value: a
+        variable, field, argument, result, struct or macro input), a container gets
+        `ref.share`, so its next change copies it (section 4.9). Read-only consumers
+        (ArrayGet, ArrayLength, the map and set queries, Eq and Ne) pass keep=False, and a
+        mutation node reads its own place without this path."""
+        self._eval(s, ep)
+        if keep and s.kind != "lit" and is_container(s.type):
+            self.E("ref.share")
+
+    def _eval(self, s: Src, ep: EvalPoint):
         if s.kind == "lit":
             self.emit_const(s.a, s.type)
         elif s.kind == "local":
@@ -1261,7 +1271,7 @@ class FuncLowerer:
             return
         if k in MAP_PURE or k in SET_PURE:
             for _, _, src in n.inputs:     # the container, then the key, item or index
-                self.eval(src, ep)
+                self.eval(src, ep, keep=False)
             self.E(CONTAINER_OPS[k], self.c.container_type(k, n.targs))
             return
         if k == "MakeArray":
@@ -1274,12 +1284,12 @@ class FuncLowerer:
                 self.E("array.set", t)
             return
         if k == "ArrayGet":
-            self.eval(n.inputs[0][2], ep)
+            self.eval(n.inputs[0][2], ep, keep=False)
             self.eval(n.inputs[1][2], ep)
             self.E("array.get", self.c.array_type(n.targs[0]))
             return
         if k == "ArrayLength":
-            self.eval(n.inputs[0][2], ep)
+            self.eval(n.inputs[0][2], ep, keep=False)
             self.E("array.len")
             return
         if k == "GetField" and "class_field" in n.extra:
@@ -1325,8 +1335,8 @@ class FuncLowerer:
             self.E("local.get", tc)
             self.E("select")
             return
-        for _, _, s in n.inputs:
-            self.eval(s, ep)
+        for _, _, s in n.inputs:          # Eq and Ne only compare, so they do not share
+            self.eval(s, ep, keep=k not in ("Eq", "Ne"))
         if k == "Call":
             self.emit_call(n)
             return

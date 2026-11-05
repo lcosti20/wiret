@@ -5161,6 +5161,198 @@ func F(d: delegate::<(i32) -> ()>) {
                 pass
 
 
+COW = """
+class Bag {
+  items: array::<i32>
+}
+
+func Build(n: i32) -> (len: i32) {
+  local acc: array::<i32>
+  node add = ArrayAdd::<i32> acc
+    .item <- loop.index
+  node entry = Entry
+  node get = GetLocal acc
+  node len = ArrayLength::<i32>
+    .array <- get.value
+  node loop = Macro ForRange
+    .first <- 1
+    .last <- entry.n
+  node ret = Return
+    .len <- len.length
+
+  flow {
+    entry -> loop
+    loop.done -> ret
+    loop.each -> add
+  }
+}
+
+func Bump(a: array::<i32>) -> (len: i32) {
+  local mine: array::<i32>
+  node add = ArrayAdd::<i32> mine
+    .item <- 9
+  node entry = Entry
+  node get = GetLocal mine
+  node keep = SetLocal mine
+    .value <- entry.a
+  node len = ArrayLength::<i32>
+    .array <- get.value
+  node ret = Return
+    .len <- len.length
+
+  flow {
+    add -> ret
+    entry -> keep
+    keep -> add
+  }
+}
+
+func Mutate(x: array::<i32>) -> (y: array::<i32>) {
+  local mine: array::<i32>
+  node add = ArrayAdd::<i32> mine
+    .item <- 7
+  node entry = Entry
+  node get = GetLocal mine
+  node keep = SetLocal mine
+    .value <- entry.x
+  node ret = Return
+    .y <- get.value
+
+  flow {
+    add -> ret
+    entry -> keep
+    keep -> add
+  }
+}
+
+func Alias() -> (a: array::<i32>, b: array::<i32>, c: array::<i32>, d: array::<i32>) {
+  local a: array::<i32>
+  local b: array::<i32>
+  node add_a = ArrayAdd::<i32> a
+    .item <- 1
+  node add_a2 = ArrayAdd::<i32> a
+    .item <- 2
+  node bag = New Bag
+  node bag_items = GetField Bag.items
+    .obj <- bag.result
+  node call = Call Mutate
+    .x <- get_a.value
+  node copy_b = SetLocal b
+    .value <- get_a.value
+  node entry = Entry
+  node get_a = GetLocal a
+  node get_b = GetLocal b
+  node put = SetField Bag.items
+    .obj <- bag.result
+    .value <- get_a.value
+  node ret = Return
+    .a <- get_a.value
+    .b <- get_b.value
+    .c <- bag_items.value
+    .d <- call.y
+
+  flow {
+    add_a -> copy_b
+    add_a2 -> call
+    bag -> put
+    call -> ret
+    copy_b -> bag
+    entry -> add_a
+    put -> add_a2
+  }
+}
+
+func Snapshot() -> (seen: i32, after: i32) {
+  local a: array::<i32>
+  local n: i32
+  node a1 = ArrayAdd::<i32> a
+    .item <- 1
+  node a2 = ArrayAdd::<i32> a
+    .item <- 2
+  node cnt = GetLocal n
+  node entry = Entry
+  node get_a = GetLocal a
+  node grow = ArrayAdd::<i32> a
+    .item <- 0
+  node inc = Add::<i32>
+    .a <- cnt.value
+    .b <- 1
+  node len = ArrayLength::<i32>
+    .array <- get_a.value
+  node loop = Macro std.flow.ForEach::<i32>
+    .array <- get_a.value
+  node ret = Return
+    .seen <- cnt.value
+    .after <- len.length
+  node set_n = SetLocal n
+    .value <- inc.result
+
+  flow {
+    a1 -> a2
+    a2 -> loop
+    entry -> a1
+    grow -> set_n
+    loop.done -> ret
+    loop.each -> grow
+  }
+}
+"""
+
+
+class CopyOnWriteTests(unittest.TestCase):
+    """Containers are values, implemented copy-on-write (section 4.9)."""
+
+    def fuel_for(self, text, func, *args):
+        _, r = build(text)
+        vm = VM(output=lambda s: None)
+        res = vm.call(vm.load(r.wbc), func, list(args))
+        return res, vm.fuel_limit - vm.fuel
+
+    def test_append_loop_has_constant_cost_per_item(self):
+        text = module(COW)
+        r1, f1 = self.fuel_for(text, "Build", 1000)
+        r4, f4 = self.fuel_for(text, "Build", 4000)
+        self.assertEqual((r1, r4), ([1000], [4000]))
+        self.assertLess(f4, 4.5 * f1)          # eager copies would make it about 16 times
+
+    def test_values_stay_independent(self):
+        text = module(COW)
+        res = run(text, "Alias")[0]
+        # a: changed twice; b: copied after the first change; c: the bag got a after the first
+        # change; d: Mutate's own change, which the caller's a never sees
+        self.assertEqual(res, [(1, 2), (1,), (1,), (1, 2, 7)])
+
+    def test_callee_change_is_not_seen_by_the_caller(self):
+        text = module(COW)
+        _, r = build(text)
+        vm = VM(output=lambda s: None)
+        mod = vm.load(r.wbc)
+        arg = (1, 2)
+        self.assertEqual(vm.call(mod, "Bump", [arg]), [3])
+        self.assertEqual(arg, (1, 2))
+
+    def test_foreach_iterates_the_array_as_it_was(self):
+        text = module(COW)
+        self.assertEqual(run(text, "Snapshot")[0], [2, 4])
+
+    def test_shares_where_values_escape_and_not_for_reads(self):
+        text = module(COW)
+        _, r = build(text)
+        listing = disassemble(r.wbc)
+        build_fn = listing.split("func t.Build")[1].split("\nfunc ")[0]
+        self.assertNotIn("ref.share", build_fn)   # only an append and a length
+        alias = listing.split("func t.Alias")[1].split("\nfunc ")[0]
+        self.assertIn("ref.share", alias)
+
+    def test_verifier_rejects_sharing_a_number(self):
+        _, r = build(module(COW))
+        m = wbc.decode_module(r.wbc)
+        m.bodies[0].code = bytes([0x20, 0x00, 0x2B, 0x10, 0x05])
+        with self.assertRaises(WiretError) as cm:
+            VM().load(wbc.encode_module(m))
+        self.assertEqual(cm.exception.status, "WR_ERR_VERIFY")
+
+
 class BytecodeTests(unittest.TestCase):
     def test_disassembly_names_nodes(self):
         _, r = build(demo())

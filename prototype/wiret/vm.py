@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from . import wbc
-from .natives import NO_FAULT, FaultValue, NativeFault, NativeSpec, Signal, _f32, all_natives
+from .natives import CArray, CMap, NO_FAULT, FaultValue, NativeFault, NativeSpec, Signal, _f32, all_natives
 from .verifier import VerifyError, verify
 from .wbc import (F32, F64, FAULT, I32, I64, SIGNAL, STRING, OPS, ArrayType, ClassType,
                   DelegateType, DispatcherType, InterfaceType, MapType,
@@ -273,6 +273,7 @@ OP_CALL_VIRTUAL, OP_CALL_INTERFACE, OP_CALL_DELEGATE = 0x07, 0x08, 0x09
 OP_DELEGATE_NEW, OP_BIND, OP_UNBIND, OP_BROADCAST = 0xF4, 0xF5, 0xF6, 0xF7
 OP_REF_NULL, OP_REF_IS_NULL, OP_REF_EQ, OP_REF_CAST, OP_REF_TEST, OP_REF_VALID = range(0x25, 0x2B)
 OP_CLASS_NEW, OP_CLASS_GET, OP_CLASS_SET = 0xD3, 0xD4, 0xD5
+OP_REF_SHARE = 0x2B
 _CONST_OPS = {0x20, 0x21, 0x22, 0x23}
 
 
@@ -349,12 +350,14 @@ def normalise(vt, v, types=None):
         if isinstance(entry, StructType):
             return tuple(normalise(fvt, x, types) for (fvt, _), x in zip(entry.fields, v))
         if isinstance(entry, MapType):
-            return {_key(normalise(entry.key, k, types)): normalise(entry.value, x, types)
-                    for k, x in dict(v).items()}
+            return CMap({_key(normalise(entry.key, k, types)): normalise(entry.value, x, types)
+                         for k, x in dict(v).items()})
         if isinstance(entry, SetType):
-            return {_key(normalise(entry.elem, k, types)): None for k in v}
+            return CMap({_key(normalise(entry.elem, k, types)): None for k in v})
+        if entry is None and isinstance(v, dict):          # a native's result, untyped
+            return CMap(v)                                 # its own: never the native's
         elem = entry.elem if isinstance(entry, ArrayType) else None
-        return tuple(normalise(elem, x, types) if elem is not None else x for x in v)
+        return CArray(normalise(elem, x, types) if elem is not None else x for x in v)
     if vt == I32:
         return i32(int(v))
     if vt == I64:
@@ -372,9 +375,22 @@ ZERO = {I32: 0, I64: 0, F32: 0.0, F64: 0.0, STRING: "", FAULT: NO_FAULT, SIGNAL:
         wbc.ANYREF: None}
 
 
+def export(v):
+    """A value as the host sees it: arrays as tuples, maps and sets as dicts, at any depth
+    (inside structs too). Objects, delegates and signals stay what they are."""
+    if isinstance(v, CArray):
+        return tuple(export(x) for x in v)
+    if isinstance(v, CMap):
+        return {k: export(x) for k, x in v.items()}
+    if type(v) is tuple:
+        return tuple(export(x) for x in v)
+    return v
+
+
 def zero(vt):
-    """Zero value of a value type. Arrays are immutable tuples, so the empty array is ()."""
-    return () if isinstance(vt, Ref) else ZERO[vt]
+    """Zero value of a value type. A zero container is shared by every holder, so it is marked
+    shared and the first change to it makes a copy (section 4.9)."""
+    return CArray(shared=True) if isinstance(vt, Ref) else ZERO[vt]
 
 
 NAN_KEY = float("nan")
@@ -390,10 +406,19 @@ def _key(k):
     return k
 
 
-def _container_ops(default) -> dict:
-    """Map and set instructions (section 5.6) as (function, operand count). A map is a dict
-    and a set a dict of None values; both keep insertion order. A dict is never changed in
-    place: every change makes a new one, the eager copy that Tier 1 allows."""
+def own(c, alloc):
+    """Copy-on-write (section 4.9): the container itself when it is unshared, else a fresh
+    unshared copy, whose size is charged as an allocation."""
+    if not c.shared:
+        return c
+    alloc[0] += len(c)
+    return type(c)(c)
+
+
+def _container_ops(default, alloc) -> dict:
+    """Map and set instructions (section 5.6) as (function, operand count). A map is a CMap
+    and a set a CMap of None values; both keep insertion order. A change happens in place
+    when the container is unshared, else on a copy (section 4.9)."""
     def at(c, i):
         if not 0 <= i < len(c):
             raise Fault(f"index {i} is out of range (length {len(c)})", FAULT_RANGE)
@@ -407,7 +432,7 @@ def _container_ops(default) -> dict:
             return [m[k], 1] if k in m else [zero_v, 0]
 
         def set_(m, k, v):
-            n = dict(m)
+            n = own(m, alloc)
             n[_key(k)] = v
             return [n]
 
@@ -415,22 +440,22 @@ def _container_ops(default) -> dict:
             k = _key(k)
             if k not in m:
                 return [m, 0]
-            n = dict(m)
+            n = own(m, alloc)
             del n[k]
             return [n, 1]
-        return {"map.new": (lambda: [{}], 0), "map.find": (find, 2), "map.set": (set_, 3),
+        return {"map.new": (lambda: [CMap()], 0), "map.find": (find, 2), "map.set": (set_, 3),
                 "map.remove": (remove, 2), "map.has": (lambda m, k: [int(_key(k) in m)], 2),
                 "map.len": (lambda m: [len(m)], 1),
                 "map.key_at": (lambda m, i: [list(m)[at(m, i)]], 2),
                 "map.value_at": (lambda m, i: [list(m.values())[at(m, i)]], 2),
-                "map.clear": (lambda m: [{}], 1)}
+                "map.clear": (lambda m: [CMap()], 1)}
 
     def set_ops(entry):
         def add(st, v):
             v = _key(v)
             if v in st:
                 return [st, 0]
-            n = dict(st)
+            n = own(st, alloc)
             n[v] = None
             return [n, 1]
 
@@ -438,23 +463,22 @@ def _container_ops(default) -> dict:
             v = _key(v)
             if v not in st:
                 return [st, 0]
-            n = dict(st)
+            n = own(st, alloc)
             del n[v]
             return [n, 1]
-        return {"set.new": (lambda: [{}], 0), "set.add": (add, 2), "set.remove": (remove, 2),
+        return {"set.new": (lambda: [CMap()], 0), "set.add": (add, 2), "set.remove": (remove, 2),
                 "set.has": (lambda st, v: [int(_key(v) in st)], 2),
                 "set.len": (lambda st: [len(st)], 1),
                 "set.at": (lambda st, i: [list(st)[at(st, i)]], 2),
-                "set.clear": (lambda st: [{}], 1)}
+                "set.clear": (lambda st: [CMap()], 1)}
 
     cache = {}
 
     def ops(entry, name):
-        """(function, operand count, whether it makes a new container)."""
+        """(function, operand count)."""
         if id(entry) not in cache:
             cache[id(entry)] = map_ops(entry) if isinstance(entry, MapType) else set_ops(entry)
-        fn, nin = cache[id(entry)][name]
-        return fn, nin, name.split(".")[1] in ("new", "set", "remove", "add", "clear")
+        return cache[id(entry)][name]
     return ops
 
 
@@ -473,9 +497,9 @@ def default_values(types: list, data: list):
         if isinstance(entry, (ClassType, InterfaceType, DelegateType, DispatcherType)):
             return None                # a reference starts null
         if isinstance(entry, (MapType, SetType)):
-            return {}                  # never changed in place, so one empty dict is shared
+            return CMap(shared=True)   # a default many holders start from: copied on change
         if not isinstance(entry, StructType):
-            return ()
+            return CArray(shared=True)
         if vt.type not in cache:
             cache[vt.type] = tuple(
                 default(fvt) if d is None else data[d] if fvt == STRING else d
@@ -484,10 +508,13 @@ def default_values(types: list, data: list):
     return default
 
 
-def _array_ops(types: list, default=zero) -> dict:
-    """Array instructions (section 5.6). Arrays are tuples, so every change makes a new array:
-    the eager copy that Tier 1 allows instead of copy-on-write, with the same observable
-    value semantics (section 4.9)."""
+def _array_ops(types: list, default=zero, alloc=None) -> dict:
+    """Array instructions (section 5.6). An array is a CArray: a list with a `shared` flag. A
+    mutator changes an unshared array in place and returns it, or changes and returns a fresh
+    copy of a shared one; `array.new`, `array.clone` and every mutator's result are unshared
+    (section 4.9). `alloc[0]` counts elements allocated, for fuel."""
+    alloc = alloc if alloc is not None else [0]
+
     def check(a, i, extra=0):
         if not 0 <= i < len(a) + extra:
             raise Fault(f"array index {i} is out of range (length {len(a)})", FAULT_RANGE)
@@ -498,7 +525,8 @@ def _array_ops(types: list, default=zero) -> dict:
         def f(n):
             if n < 0:
                 raise Fault(f"array length {n} is negative", FAULT_RANGE)
-            return (z,) * n
+            alloc[0] += n
+            return CArray([z] * n)
         return f
 
     def get(a, i):
@@ -507,18 +535,33 @@ def _array_ops(types: list, default=zero) -> dict:
 
     def set_(a, i, v):
         check(a, i)
-        return a[:i] + (v,) + a[i + 1:]
+        a = own(a, alloc)
+        a[i] = v
+        return a
+
+    def push(a, v):
+        a = own(a, alloc)
+        a.append(v)
+        return a
 
     def insert(a, i, v):
         check(a, i, extra=1)
-        return a[:i] + (v,) + a[i:]
+        a = own(a, alloc)
+        a.insert(i, v)
+        return a
 
     def remove(a, i):
         check(a, i)
-        return a[:i] + a[i + 1:]
+        a = own(a, alloc)
+        del a[i]
+        return a
 
-    return {"new": new, "get": get, "set": set_, "push": lambda a, v: a + (v,),
-            "insert": insert, "remove": remove, "clear": lambda a: (), "clone": lambda a: a}
+    def clone(a):
+        alloc[0] += len(a)
+        return CArray(a)
+
+    return {"new": new, "get": get, "set": set_, "push": push, "insert": insert,
+            "remove": remove, "clear": lambda a: CArray(), "clone": clone}
 
 
 ARRAY_ARITY = {0xD6: 1, 0xD7: 1, 0xD8: 2, 0xD9: 3, 0xDA: 2, 0xDB: 3, 0xDC: 2, 0xDD: 1, 0xDE: 1}
@@ -723,6 +766,7 @@ class VM:
         self.natives: dict[str, NativeSpec] = dict(all_natives())
         self.interrupted = False
         self.stats = {"instructions": 0, "calls": 0}
+        self.alloc = [0]          # elements allocated by container instructions, for fuel
         # The scheduler (sections 4.5 and 6.8). Time is virtual and moves only in advance().
         self.time = 0.0
         self.fibers: list[Fiber] = []      # live fibers: ready or suspended, by creation order
@@ -783,8 +827,9 @@ class VM:
                         overrides.setdefault(fi, entry.vtable[s])
             classes[ti] = ClassInfo(ti, cname, fnames, vals, list(entry.vtable),
                                     set(chain) | set(itables), itables, tuple(slots), overrides)
-        arrays = _array_ops(m.types, defaults)
-        containers = _container_ops(defaults)
+        alloc = self.alloc
+        arrays = _array_ops(m.types, defaults, alloc)
+        containers = _container_ops(defaults, alloc)
         for i, (mod, fld, t, flags) in enumerate(m.imports):
             q = f"{mod}.{fld}"
             spec = self.natives.get(q)
@@ -1057,6 +1102,7 @@ class VM:
         numeric = NUMERIC
         hook = self.hook
         f, ip, locs, stack, cont = fb.f, fb.ip, fb.locs, fb.stack, fb.cont
+        alloc = self.alloc
         frames = fb.frames   # saved (f, ip, locs, stack, cont)
         code = f.code
         fuel = self.fuel
@@ -1206,6 +1252,7 @@ class VM:
                             res = stack[len(stack) - nr:] if nr else []
                             if not frames:
                                 self.fuel = fuel
+                                res = [export(x) for x in res]
                                 fb.status, fb.results = FIBER_DONE, res
                                 return res
                             f, ip, locs, stack, cont = frames.pop()
@@ -1222,10 +1269,11 @@ class VM:
                                 c = stack.pop()
                                 b = stack.pop()
                                 stack[-1] = arg(stack[-1], b, c)
-                            if op != 0xD7 and op != 0xD8:     # allocation: 1 fuel per 8 elements
-                                fuel -= len(stack[-1]) >> 3
+                            if alloc[0]:                       # 1 fuel per 8 elements allocated
+                                fuel -= alloc[0] >> 3
+                                alloc[0] = 0
                         elif 0xE0 <= op <= 0xEF:               # map.* and set.*
-                            fn, nin, allocates = arg
+                            fn, nin = arg
                             if nin:
                                 operands = stack[len(stack) - nin:]
                                 del stack[len(stack) - nin:]
@@ -1233,8 +1281,9 @@ class VM:
                             else:
                                 res = fn()
                             stack.extend(res)
-                            if allocates:                      # allocation: 1 fuel per 8 entries
-                                fuel -= len(res[0]) >> 3
+                            if alloc[0]:                       # 1 fuel per 8 entries allocated
+                                fuel -= alloc[0] >> 3
+                                alloc[0] = 0
                         elif op == 0xD0:                       # struct.new
                             vals = tuple(stack[len(stack) - arg:]) if arg else ()
                             del stack[len(stack) - arg:]
@@ -1261,6 +1310,10 @@ class VM:
                         elif op == OP_CLASS_NEW:
                             stack.append(Obj(arg))
                             fuel -= len(arg.defaults) >> 3
+                        elif op == OP_REF_SHARE:      # the value escapes: copy on next change
+                            c = stack[-1]
+                            if c is not None:
+                                c.shared = True
                         elif op == OP_REF_NULL:
                             stack.append(None)
                         elif op == OP_REF_IS_NULL:
