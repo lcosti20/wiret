@@ -262,7 +262,7 @@ def fmt_class(c: Class, methods: list, idx: ModuleIndex, semantic=False) -> list
     events, each by name, with a blank line before each method."""
     head = (f"class {c.name}" + (f" : {c.base}" if c.base else "")
             + (f" impl {', '.join(c.impls)}" if c.impls else "") + fmt_attrs(c.attrs))
-    if not c.fields and not methods:
+    if not c.fields and not c.dispatchers and not methods:
         return [head + " {}"]
     lines = [head + " {"]
     for f in c.fields:
@@ -271,6 +271,9 @@ def fmt_class(c: Class, methods: list, idx: ModuleIndex, semantic=False) -> list
             line += f" = {fmt_lit(f.default)}"
         lines.extend(fmt_meta(f.meta, IND, semantic))
         lines.append(line + fmt_attrs(f.attrs))
+    for d in c.dispatchers:
+        lines.extend(fmt_meta(d.meta, IND, semantic))
+        lines.append(f"{IND}dispatcher {d.name}{fmt_params(d.params)}{fmt_attrs(d.attrs)}")
     for g in sorted(methods, key=lambda g: (g.kind != "func", g.name)):
         if len(lines) > 1:
             lines.append("")

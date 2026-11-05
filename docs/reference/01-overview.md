@@ -63,7 +63,7 @@ Compiler stages: parse, resolve names, type-check, validate graphs, expand macro
 
 ### 1.6 Implementation tiers
 
-The specification covers a language, a canonical format, an editor contract, a merge protocol, macros, async, objects, containers, bytecode, a verifier, a C ABI, capabilities, a debugger and a project manager. It is staged, and the Python prototype in `prototype/` follows the stages: Tiers 0 and 1 run through its parser, checker, compiler, verifier and VM and pass their tests, and Tier 2 has started with `Try` and `Throw`, latent nodes and fibers, classes and interfaces. A tier is not started until the one before it passes its tests, and a guarantee in this document is only as firm as the tier that contains it.
+The specification covers a language, a canonical format, an editor contract, a merge protocol, macros, async, objects, containers, bytecode, a verifier, a C ABI, capabilities, a debugger and a project manager. It is staged, and the Python prototype in `prototype/` follows the stages: Tiers 0 and 1 run through its parser, checker, compiler, verifier and VM and pass their tests, and Tier 2 has started with `Try` and `Throw`, latent nodes and fibers, classes, interfaces, delegates and dispatchers. A tier is not started until the one before it passes its tests, and a guarantee in this document is only as firm as the tier that contains it.
 
 | Tier | Scope | Done when |
 | --- | --- | --- |

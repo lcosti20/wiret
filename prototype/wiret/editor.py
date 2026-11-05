@@ -1490,6 +1490,22 @@ class EditorApp:
             add(classes, "IsValid (not null)", "IsValid")
             menu.add_cascade(label="Classes", menu=classes)
 
+        dlg = tk.Menu(menu, tearoff=0)
+        for name in sorted(idx.classes):
+            for d in idx.classes[name].dispatchers:
+                sub = tk.Menu(dlg, tearoff=0)
+                for k in ("Bind", "Unbind", "Broadcast"):
+                    add(sub, k, k, f"{name}.{d.name}")
+                dlg.add_cascade(label=f"{name}.{d.name}", menu=sub)
+        made = tk.Menu(dlg, tearoff=0)
+        for name, fg in sorted(idx.graphs.items()):
+            if fg.kind == "event" or not fg.has_attr("latent"):
+                add(made, name, "CreateDelegate", name)
+        if made.index("end") is not None:
+            dlg.add_cascade(label="Delegate of", menu=made)
+        if dlg.index("end") is not None:
+            menu.add_cascade(label="Delegates", menu=dlg)
+
         structs = tk.Menu(menu, tearoff=0)
         for name in sorted(idx.structs):
             sub = tk.Menu(structs, tearoff=0)

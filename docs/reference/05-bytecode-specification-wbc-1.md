@@ -226,7 +226,7 @@ All `trunc` instructions are **saturating** and map NaN to 0. They never fault.
 | F0 | `string.concat` |  | `[string, string]` -> `[string]` |
 | F1 | `string.len` |  | `[string]` -> `[i32]` (bytes) |
 | F2 / F3 | `string.eq` / `string.cmp` |  | `[string, string]` -> `[i32]`; `cmp` is -1, 0 or 1 (ordinal bytes). |
-| F4 | `delegate.new` | func, flags | `[]` or `[recv]` -> `[ref]`. Flag bit 0: bind a receiver as the first argument. |
+| F4 | `delegate.new` | func, flags | `[]` or `[recv]` -> `[ref]`. Flag bit 0: bind a receiver as the first argument. Flag bit 1 (with bit 0): bind the receiver's override of `func`, as `call_virtual` would choose. The result's type is the module's delegate type for `func`'s signature without the receiver; the verifier requires one to exist. A latent function that is not an event cannot be bound. `call_delegate` on a delegate of an event queues the event on a new fiber and returns at once. |
 | F5 / F6 | `dispatcher.bind` / `.unbind` | T | `[ref, delegate]` -> `[]` |
 | F7 | `dispatcher.broadcast` | T | `[ref, args]` -> `[]`. Runs handlers in bind order; a handler's fault is reported to the host and does not stop the others. |
 | FB | *prefix* |  | Next byte is a LEB128 sub-opcode. Reserved for future instructions. |

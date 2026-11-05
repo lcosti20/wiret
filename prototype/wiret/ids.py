@@ -21,7 +21,8 @@ ID_CHARS = "abcdefghijkmnpqrstuvwxyz23456789"     # no 0/o, 1/l: ids are read al
 PREFIX = {"module": "mod", "use": "use", "extern": "ext", "const": "const", "var": "var",
           "enum": "en", "struct": "st", "func": "fn", "event": "ev", "macro": "mac",
           "param": "p", "result": "r", "field": "f", "member": "m", "local": "l",
-          "state": "s", "class": "cls", "interface": "if", "method": "im"}
+          "state": "s", "class": "cls", "interface": "if", "method": "im",
+          "dispatcher": "dsp"}
 
 
 def get_id(attrs: list) -> Optional[str]:
@@ -70,6 +71,9 @@ def elements(m: Module) -> Iterator[Element]:
         if isinstance(it, Interface):
             for im in it.methods:
                 yield Element("method", im.name, it.name, im)
+        if isinstance(it, Class):
+            for d in it.dispatchers:
+                yield Element("dispatcher", d.name, it.name, d)
         if isinstance(it, (Struct, Class)):
             for f in it.fields:
                 yield Element("field", f.name, it.name, f)

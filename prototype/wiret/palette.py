@@ -32,6 +32,16 @@ DESCRIBE = {
     "Throw": ("Stops with an error that a Try around it can catch, with your message and code.",
               "raise error fault exception fail"),
     "New": ("Makes a new object of a class.", "create object instance make class"),
+    "CreateDelegate": ("Wraps a function (and, for a method, its object) into a value you can "
+                       "store, pass around and call later.",
+                       "callback function pointer handler event bind reference"),
+    "Invoke": ("Calls the function a delegate holds.", "call run callback delegate"),
+    "Bind": ("Adds a handler to an object's dispatcher, so it runs on every Broadcast.",
+             "subscribe listen add handler event dispatcher on"),
+    "Unbind": ("Removes a handler from an object's dispatcher.",
+               "unsubscribe remove handler stop listening"),
+    "Broadcast": ("Runs every handler bound to an object's dispatcher, in the order they were "
+                  "bound.", "fire notify raise event call all handlers dispatcher"),
     "IsValid": ("True when an object reference is not null.", "null check exists valid none"),
     "Cast": ("Checks whether an object is of a given class.", "is type check downcast as"),
     "Delay": ("Waits for some seconds of game time, then carries on. Only in an event or a "
@@ -150,7 +160,7 @@ DESCRIBE = {
     "std.flow.FlipFlop": (None, "toggle alternate switch"),
 }
 
-CATEGORY_ORDER = ["Flow", "Time", "Call", "Variables", "Classes", "Structs", "Arrays", "Maps", "Sets", "Macro",
+CATEGORY_ORDER = ["Flow", "Time", "Call", "Variables", "Classes", "Delegates", "Structs", "Arrays", "Maps", "Sets", "Macro",
                   "Math", "Compare", "Logic", "Bits"]
 
 
@@ -321,6 +331,19 @@ def items(g: Graph, idx: ModuleIndex) -> list:
             out.append(_item("Call", f"Call {sym}", "Call", sym, idx=idx))
     if idx.classes:
         out.append(_item("IsValid", "IsValid (not null)", "Classes", idx=idx))
+    for name in sorted(idx.classes):
+        for d in idx.classes[name].dispatchers:
+            sym = f"{name}.{d.name}"
+            for k in ("Bind", "Unbind", "Broadcast"):
+                out.append(_item(k, f"{k} {sym}", "Delegates", sym, idx=idx))
+    for name, fg in sorted(idx.graphs.items()):
+        if fg.kind == "event" or not fg.has_attr("latent"):
+            out.append(_item("CreateDelegate", f"Delegate of {name}", "Delegates", name,
+                             idx=idx))
+    for t in sorted({p.type for gr in list(idx.graphs.values()) + [g]
+                     for p in list(gr.params) + gr.result_list + list(gr.locals)
+                     if p.type.startswith("delegate::<")}):
+        out.append(_item("Invoke", f"Invoke::<{t}>", "Delegates", targs=[t], idx=idx))
     for name in sorted(idx.structs):
         out.append(_item("MakeStruct", f"Make {name}", "Structs", name, idx=idx))
         out.append(_item("BreakStruct", f"Break {name}", "Structs", name, idx=idx))

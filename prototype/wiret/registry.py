@@ -42,12 +42,76 @@ USER_CONSTRAINTS = {"eq": ("struct", "enum", "class"), "ord": ("enum",), "switch
                     "any": ("struct", "enum", "class"), "convertible": ("enum",)}
 
 
+def split_types(s: str) -> list:
+    """`i32, map::<string, i32>, f32` -> the three types, splitting only at top-level commas."""
+    out, depth, cur = [], 0, ""
+    for ch in s:
+        if ch in "<(":
+            depth += 1
+        elif ch in ">)":
+            depth -= 1
+        if ch == "," and depth == 0:
+            out.append(cur.strip())
+            cur = ""
+        else:
+            cur += ch
+    if cur.strip():
+        out.append(cur.strip())
+    return out
+
+
+def _tlist(s: str) -> Optional[list]:
+    s = s.strip()
+    if not (s.startswith("(") and s.endswith(")")):
+        return None
+    return split_types(s[1:-1])
+
+
+def delegate_sig(ty: str) -> Optional[tuple]:
+    """`delegate::<(i32, f32) -> (bool)>` -> (["i32", "f32"], ["bool"]); None otherwise."""
+    if not ty.startswith("delegate::<") or not ty.endswith(">"):
+        return None
+    inner = ty[len("delegate::<"):-1]
+    depth, cut = 0, None
+    for i, ch in enumerate(inner):
+        if ch in "<(":
+            depth += 1
+        elif ch in ">)":
+            depth -= 1
+        elif depth == 0 and inner.startswith("->", i):
+            cut = i
+            break
+    params = _tlist(inner if cut is None else inner[:cut])
+    results = [] if cut is None else _tlist(inner[cut + 2:])
+    if params is None or results is None:
+        return None
+    return params, results
+
+
+def dispatcher_params(ty: str) -> Optional[list]:
+    """`dispatcher::<(i32)>` -> ["i32"]; None otherwise."""
+    if not ty.startswith("dispatcher::<") or not ty.endswith(">"):
+        return None
+    return _tlist(ty[len("dispatcher::<"):-1])
+
+
+def delegate_type(params: list, results: list) -> str:
+    """The canonical text of a delegate type (results left out when there are none)."""
+    t = f"delegate::<({', '.join(params)})"
+    return t + (f" -> ({', '.join(results)})>" if results else ">")
+
+
+def dispatcher_type(params: list) -> str:
+    return f"dispatcher::<({', '.join(params)})>"
+
+
 def allows(constraint: str, ty: str, idx: "Optional[ModuleIndex]" = None) -> bool:
     """Whether a type argument meets a constraint of a registry kind."""
     if ty in CONSTRAINTS[constraint]:
         return True
     if constraint == "eq":
-        return type_ok(ty, idx)        # every value type has an equality (section 4.9)
+        # every value type has an equality (section 4.9), except a delegate
+        return type_ok(ty, idx) and delegate_sig(ty) is None
     if idx is None:
         return False
     kinds = USER_CONSTRAINTS.get(constraint, ())
@@ -159,6 +223,9 @@ def type_ok(ty: str, idx: "Optional[ModuleIndex]" = None) -> bool:
     elem = set_elem(ty)
     if elem is not None:
         return key_type_ok(elem, idx)
+    sig = delegate_sig(ty)
+    if sig is not None:
+        return all(type_ok(t, idx) or t in HANDLE_TYPES for t in sig[0] + sig[1])
     return ty in PRIM_TYPES or (idx is not None and idx.user_type(ty) is not None)
 
 
@@ -200,7 +267,7 @@ def lit_fits(lit: Lit, ty: str, idx: "Optional[ModuleIndex]" = None) -> bool:
     its own enum (`Mode.Chase`; whether the member exists is the checker's business). Structs
     have no literal form; arrays take only `null`, the empty array. A class reference, a
     signal and `anyref` take `null` (with `idx`, to know the classes)."""
-    if lit.kind == "null" and (ty in ("anyref", "std.Signal")
+    if lit.kind == "null" and (ty in ("anyref", "std.Signal") or delegate_sig(ty) is not None
                                or (idx is not None and (ty in idx.classes
                                                         or ty in idx.interfaces))):
         return True
@@ -361,9 +428,9 @@ STRUCT_KINDS = {"MakeStruct": "struct", "BreakStruct": "struct", "GetField": "fi
                 "WithField": "field"}
 
 # Kinds from the specification that later tiers add (section 1.6).
-LATER_TIER_KINDS = {
-    "CreateDelegate", "Invoke", "Bind", "Unbind", "Broadcast",
-}
+LATER_TIER_KINDS: set = set()     # every kind of section 3.3 is now in the prototype
+
+DELEGATE_KINDS = {"CreateDelegate", "Invoke", "Bind", "Unbind", "Broadcast"}
 
 ALL_KINDS = sorted(set(STATIC_KINDS) | set(CONTEXT_KINDS))
 
@@ -485,6 +552,24 @@ class ModuleIndex:
             if g is not None:
                 return g
         return None
+
+    def class_dispatcher(self, cls: str, name: str):
+        """(declaring class, Dispatcher) of `name` on `cls` or one of its bases, or None."""
+        for c in self.class_chain(cls):
+            d = next((x for x in self.classes[c].dispatchers if x.name == name), None)
+            if d is not None:
+                return c, d
+        return None
+
+    def class_layout(self, name: str) -> list:
+        """(member name, type) of every slot of an object, inherited ones first: for each
+        class its fields, then its dispatchers (section 5.3)."""
+        out = []
+        for c in reversed(self.class_chain(name)):
+            out += [(f.name, f.type) for f in self.classes[c].fields]
+            out += [(d.name, dispatcher_type([p.type for p in d.params]))
+                    for d in self.classes[c].dispatchers]
+        return out
 
     def class_interfaces(self, cls: str) -> list:
         """Every interface a class implements, its bases' first, in declaration order."""
@@ -728,6 +813,8 @@ def signature(node: Node, graph: Graph, idx: ModuleIndex) -> Sig:
         return sig
     if k in ("MakeArray", "ArrayGet", "ArrayLength") or k in ARRAY_MUTATORS:
         return _array_sig(node, graph, idx, sig)
+    if k in DELEGATE_KINDS:
+        return _delegate_sig(node, graph, idx, sig)
     if k in CLASS_KINDS or (k in ("GetField", "SetField") and class_field_target(node, graph, idx)):
         return _class_sig(node, graph, idx, sig)
     if k in STRUCT_KINDS:
@@ -758,6 +845,75 @@ def class_field_target(node: Node, graph: Graph, idx: ModuleIndex):
     if graph is not None and graph.owner:
         return graph.owner, sym
     return None
+
+
+def bindable(c: "Callee") -> Optional[str]:
+    """Why a callee cannot be bound into a delegate, or None when it can (section 3.3)."""
+    if c.kind not in ("func", "event"):
+        return f"only a function, method or event of this module can be bound, not a {c.kind}"
+    if c.latent and c.kind != "event":
+        return ("a @latent func cannot be bound, since invoking a delegate never waits; "
+                "make it an event, which a delegate starts on a fiber of its own")
+    return None
+
+
+def dispatcher_target(node: Node, graph: Graph, idx: ModuleIndex):
+    """For Bind, Unbind and Broadcast: (class, dispatcher name), with the bare name inside the
+    class's own methods (`Broadcast OnDied`) and `Class.OnDied` anywhere else."""
+    sym = node.symbol or ""
+    cls, _, name = sym.rpartition(".")
+    if cls:
+        return cls, name
+    return (graph.owner, sym) if graph is not None and graph.owner else (None, sym)
+
+
+def _delegate_sig(node: Node, graph: Graph, idx: ModuleIndex, sig: Sig) -> Sig:
+    """CreateDelegate, Invoke, Bind, Unbind and Broadcast (section 3.3)."""
+    k = node.kind
+    E = "exec"
+    sig.category = "Delegates"
+    if k == "CreateDelegate":
+        sig.purity = "pure"
+        c = idx.callee(node.symbol or "")
+        if c is None:
+            sig.error = ("E0501", f"unresolved function '{node.symbol}'")
+            sig.outputs = [Pin("result", "delegate::<()>")]
+            return sig
+        why = bindable(c)
+        if why:
+            sig.error = ("E0501", f"cannot make a delegate of '{node.symbol}': {why}")
+        params = c.params[1:] if c.method_of else c.params
+        if c.method_of:                        # the receiver to bind
+            sig.inputs = [Pin("target", c.method_of)]
+        sig.outputs = [Pin("result", delegate_type([p.type for p in params],
+                                                   [r.type for r in c.results]))]
+        return sig
+    if k == "Invoke":
+        d = node.targs[0] if len(node.targs) == 1 else None
+        ds = delegate_sig(d) if d else None
+        if ds is None:
+            sig.error = ("E0502", "Invoke needs the delegate type, as in "
+                                  "'Invoke::<delegate::<(i32) -> (bool)>>'")
+            ds, d = ([], []), "delegate::<()>"
+        sig.inputs = [Pin("in", E), Pin("delegate", d)] + [Pin(f"arg{i}", t)
+                                                           for i, t in enumerate(ds[0])]
+        sig.outputs = [Pin("then", E)] + [Pin(f"result{i}", t) for i, t in enumerate(ds[1])]
+        return sig
+    cls, name = dispatcher_target(node, graph, idx)
+    found = idx.class_dispatcher(cls, name) if cls in idx.classes else None
+    if found is None:
+        sig.error = ("E0501", f"class '{cls}' has no dispatcher '{name}'" if cls in idx.classes
+                     else f"{k} names a dispatcher, as in '{k} Player.OnDied'")
+        params = []
+    else:
+        params = found[1].params
+    sig.inputs = [Pin("in", E), Pin("obj", cls or "anyref")]
+    if k == "Broadcast":
+        sig.inputs += [Pin(p.name, p.type, p.default) for p in params]
+    else:
+        sig.inputs.append(Pin("handler", delegate_type([p.type for p in params], [])))
+    sig.outputs = [Pin("then", E)]
+    return sig
 
 
 def _class_sig(node: Node, graph: Graph, idx: ModuleIndex, sig: Sig) -> Sig:

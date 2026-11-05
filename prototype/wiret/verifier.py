@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 from .wbc import (ANYREF, F32, F64, FAULT, FN_LATENT, SIGNAL, FN_PURE, I32, I64, STRING, ArrayType, MapType,
-                  ClassType, InterfaceType, Ref,
+                  ClassType, DelegateType, DispatcherType, FN_EVENT, InterfaceType, Ref,
                   SetType, StructType, WbcError, WbcModule, decode_code, vt_name)
 
-REF_TYPES = (ArrayType, StructType, MapType, SetType, ClassType, InterfaceType)
+REF_TYPES = (ArrayType, StructType, MapType, SetType, ClassType, InterfaceType, DelegateType,
+             DispatcherType)
 
 VALTYPES = {I32, I64, F32, F64, STRING}
 # Types allowed in locals, globals and function types but not in struct fields or containers:
@@ -224,6 +225,12 @@ def verify(m: WbcModule) -> list:
             vts = [entry.elem]
         elif isinstance(entry, (MapType, SetType)):
             vts = [entry.key, entry.value] if isinstance(entry, MapType) else [entry.elem]
+        elif isinstance(entry, (DelegateType, DispatcherType)):
+            vts = []
+            if not is_func_type(m, entry.functype):
+                raise VerifyError(f"type {i} names {entry.functype}, not a function type")
+            if isinstance(entry, DispatcherType) and m.types[entry.functype][1]:
+                raise VerifyError(f"dispatcher type {i} has results")
         elif isinstance(entry, InterfaceType):
             vts = []
             for ft in entry.methods:
@@ -559,6 +566,61 @@ def verify_function(m: WbcModule, i: int):
             pop(ANYREF, ins)
             pop(ANYREF, ins)
             stack.append(I32)
+        elif n == "delegate.new":
+            fi, fl = ins.imms
+            if fi >= len(m.imports) + len(m.funcs):
+                raise VerifyError(f"delegate.new: unknown function {fi}", fidx, ins.pc)
+            if fl & ~3 or (fl & 2 and not fl & 1):
+                raise VerifyError(f"delegate.new: bad flags {fl}", fidx, ins.pc)
+            cp, cr, cflags = m.func_type(fi)
+            if cflags & FN_LATENT and not cflags & FN_EVENT:
+                raise VerifyError("delegate.new: a latent function that is not an event", fidx,
+                                  ins.pc)
+            if fl & 1:
+                if not cp:
+                    raise VerifyError("delegate.new binds a receiver to a function with no "
+                                      "parameters", fidx, ins.pc)
+                pop(cp[0], ins)
+                cp = cp[1:]
+            want = (list(cp), list(cr))
+            dt = next((t for t, e in enumerate(m.types) if isinstance(e, DelegateType)
+                       and is_func_type(m, e.functype)
+                       and (list(m.types[e.functype][0]), list(m.types[e.functype][1])) == want),
+                      None)
+            if dt is None:
+                raise VerifyError("delegate.new: the module has no delegate type for this "
+                                  "function", fidx, ins.pc)
+            stack.append(Ref(dt))
+        elif n in ("call_delegate", "dispatcher.bind", "dispatcher.unbind",
+                   "dispatcher.broadcast"):
+            t = ins.imms[0]
+            if n == "call_delegate":
+                if not is_func_type(m, t):
+                    raise VerifyError(f"call_delegate: type {t} is not a function type", fidx,
+                                      ins.pc)
+                ft = m.types[t]
+            else:
+                if t >= len(m.types) or not isinstance(m.types[t], DispatcherType):
+                    raise VerifyError(f"{n}: type {t} is not a dispatcher type", fidx, ins.pc)
+                ft = m.types[m.types[t].functype]
+
+            def same_delegate(vt):
+                e = m.types[vt.type] if isinstance(vt, Ref) and vt.type < len(m.types) else None
+                return (isinstance(e, DelegateType)
+                        and (list(m.types[e.functype][0]), list(m.types[e.functype][1]))
+                        == (list(ft[0]), list(ft[1])))
+            if n in ("call_delegate", "dispatcher.broadcast"):
+                for vt in reversed(ft[0]):
+                    pop(vt, ins)
+            if n != "dispatcher.broadcast":
+                got = pop(None, ins)
+                if not same_delegate(got):
+                    raise VerifyError(f"{n}: expected a delegate of type {t}, found "
+                                      f"{vt_name(got, m.types)}", fidx, ins.pc)
+            if n != "call_delegate":
+                pop(Ref(t), ins)
+            if n == "call_delegate":
+                stack.extend(ft[1])
         elif n == "string.const":
             if ins.imms[0] >= len(m.data):
                 raise VerifyError(f"data index {ins.imms[0]} out of range", fidx, ins.pc)

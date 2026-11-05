@@ -31,6 +31,8 @@ MAP_TYPE = 0x5D
 SET_TYPE = 0x5C
 CLASS_TYPE = 0x5B
 INTERFACE_TYPE = 0x5A
+DELEGATE_TYPE = 0x59
+DISPATCHER_TYPE = 0x58
 
 
 @dataclass(frozen=True)
@@ -81,6 +83,18 @@ class ClassType:
 
 
 @dataclass(frozen=True)
+class DelegateType:
+    """Type entry `59 functype:u32`: a function plus, optionally, a bound receiver."""
+    functype: int
+
+
+@dataclass(frozen=True)
+class DispatcherType:
+    """Type entry `58 functype:u32` (no results): an ordered list of delegates."""
+    functype: int
+
+
+@dataclass(frozen=True)
 class InterfaceType:
     """Type entry `5A methods:vec(functype:u32)` (section 5.3): one function type per method,
     without the receiver. A method's index is its dispatch slot."""
@@ -127,7 +141,9 @@ OPS: dict[str, tuple] = {
     "br_table": (0x04, "T"), "return": (0x05, ""), "call": (0x06, "u"),
     "cont.push": (0x0A, "L"), "cont.pop": (0x0B, ""), "try.push": (0x0C, "Lu"),
     "throw": (0x0E, ""), "suspend": (0x0D, "b"), "call_virtual": (0x07, "uu"),
-    "call_interface": (0x08, "uu"),
+    "call_interface": (0x08, "uu"), "call_delegate": (0x09, "u"),
+    "delegate.new": (0xF4, "ub"), "dispatcher.bind": (0xF5, "u"),
+    "dispatcher.unbind": (0xF6, "u"), "dispatcher.broadcast": (0xF7, "u"),
     "ref.null": (0x25, "u"), "ref.is_null": (0x26, ""), "ref.eq": (0x27, ""),
     "ref.cast": (0x28, "u"), "ref.test": (0x29, "u"), "ref.valid": (0x2A, ""),
     "class.new": (0xD3, "u"), "class.get": (0xD4, "uu"), "class.set": (0xD5, "uu"),
@@ -175,9 +191,7 @@ BY_CODE: dict[int, tuple] = {code: (name, imm) for name, (code, imm) in OPS.item
 
 # Opcodes the spec defines for later tiers (objects, containers, fibers, faults). They decode,
 # but this prototype's verifier rejects them.
-LATER_TIER_OPS = {0x09: "call_delegate", 0x2B: "ref.share"}
-for _c in (0xF4, 0xF5, 0xF6, 0xF7):
-    LATER_TIER_OPS[_c] = f"object.0x{_c:02X}"
+LATER_TIER_OPS = {0x2B: "ref.share"}
 
 
 # -- byte writer / reader ------------------------------------------------------------
@@ -357,6 +371,8 @@ def decode_code(code: bytes) -> list:
             imms = (r.sleb(32), r.u32())
         elif imm == "b":
             imms = (r.u8(),)
+        elif imm == "ub":
+            imms = (r.u32(), r.u8())
         elif imm == "u":
             imms = (r.u32(),)
         elif imm == "uu":
@@ -388,6 +404,9 @@ def encode_instr(w: Writer, name: str, imms: tuple):
         w.u32(imms[1])
     elif imm == "b":
         w.u8(imms[0])
+    elif imm == "ub":
+        w.u32(imms[0])
+        w.u8(imms[1])
     elif imm == "u":
         w.u32(imms[0])
     elif imm == "uu":
@@ -501,6 +520,10 @@ def encode_module(m: WbcModule) -> bytes:
         if isinstance(entry, SetType):
             w.u8(SET_TYPE)
             write_vt(w, entry.elem)
+            continue
+        if isinstance(entry, (DelegateType, DispatcherType)):
+            w.u8(DELEGATE_TYPE if isinstance(entry, DelegateType) else DISPATCHER_TYPE)
+            w.u32(entry.functype)
             continue
         if isinstance(entry, InterfaceType):
             w.u8(INTERFACE_TYPE)
@@ -644,6 +667,10 @@ def decode_module(data: bytes) -> WbcModule:
                     continue
                 if code == MAP_TYPE:
                     m.types.append(MapType(s.vt(), s.vt()))
+                    continue
+                if code in (DELEGATE_TYPE, DISPATCHER_TYPE):
+                    cls = DelegateType if code == DELEGATE_TYPE else DispatcherType
+                    m.types.append(cls(s.u32()))
                     continue
                 if code == INTERFACE_TYPE:
                     m.types.append(InterfaceType(tuple(s.u32() for _ in range(s.u32()))))

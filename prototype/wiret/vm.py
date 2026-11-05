@@ -14,7 +14,8 @@ from typing import Callable, Optional
 from . import wbc
 from .natives import NO_FAULT, FaultValue, NativeFault, NativeSpec, Signal, _f32, all_natives
 from .verifier import VerifyError, verify
-from .wbc import (F32, F64, FAULT, I32, I64, SIGNAL, STRING, OPS, ArrayType, ClassType, InterfaceType, MapType,
+from .wbc import (F32, F64, FAULT, I32, I64, SIGNAL, STRING, OPS, ArrayType, ClassType,
+                  DelegateType, DispatcherType, InterfaceType, MapType,
                   Ref, SetType, StructType, WbcError)
 
 STATUS_OK = "WR_OK"
@@ -268,7 +269,8 @@ NUMERIC = _build_numeric()
  OP_DROP, OP_SELECT, OP_LGET, OP_LSET, OP_LTEE, OP_GGET, OP_GSET, OP_CONST) = (
     0x00, 0x01, 0x02, 0x03, 0x05, 0x06, 0x0A, 0x0B, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x20)
 OP_TRY_PUSH, OP_SUSPEND, OP_THROW = 0x0C, 0x0D, 0x0E
-OP_CALL_VIRTUAL, OP_CALL_INTERFACE = 0x07, 0x08
+OP_CALL_VIRTUAL, OP_CALL_INTERFACE, OP_CALL_DELEGATE = 0x07, 0x08, 0x09
+OP_DELEGATE_NEW, OP_BIND, OP_UNBIND, OP_BROADCAST = 0xF4, 0xF5, 0xF6, 0xF7
 OP_REF_NULL, OP_REF_IS_NULL, OP_REF_EQ, OP_REF_CAST, OP_REF_TEST, OP_REF_VALID = range(0x25, 0x2B)
 OP_CLASS_NEW, OP_CLASS_GET, OP_CLASS_SET = 0xD3, 0xD4, 0xD5
 _CONST_OPS = {0x20, 0x21, 0x22, 0x23}
@@ -276,12 +278,46 @@ _CONST_OPS = {0x20, 0x21, 0x22, 0x23}
 
 class ClassInfo:
     """A loaded class type: its name, field layout and defaults, vtable and ancestors."""
-    __slots__ = ("index", "name", "field_names", "defaults", "vtable", "ancestors", "itables")
+    __slots__ = ("index", "name", "field_names", "defaults", "vtable", "ancestors", "itables",
+                 "dispatchers", "overrides")
 
-    def __init__(self, index, name, field_names, defaults, vtable, ancestors, itables=None):
+    def __init__(self, index, name, field_names, defaults, vtable, ancestors, itables=None,
+                 dispatchers=(), overrides=None):
         self.index, self.name, self.field_names = index, name, field_names
         self.defaults, self.vtable, self.ancestors = defaults, vtable, ancestors
         self.itables = itables or {}     # interface type index -> [function index per method]
+        self.dispatchers = dispatchers   # layout slots holding a dispatcher (one per object)
+        self.overrides = overrides or {} # a base's function index -> this class's override
+
+
+class Delegate:
+    """A function plus, when `bound`, its receiver (section 3.1). Two delegates are equal when
+    they name the same function and the same receiver object, which is what Unbind matches."""
+    __slots__ = ("func", "recv", "bound")
+
+    def __init__(self, func: int, recv=None, bound=False):
+        self.func, self.recv, self.bound = func, recv, bound
+
+    def __eq__(self, other):
+        return (isinstance(other, Delegate) and self.func == other.func
+                and self.bound == other.bound and self.recv is other.recv)
+
+    def __hash__(self):
+        return hash((self.func, id(self.recv)))
+
+    def __repr__(self):
+        return f"<delegate func {self.func}{' bound' if self.bound else ''}>"
+
+
+class DispatcherObj:
+    """A dispatcher member of one object: its handlers in bind order."""
+    __slots__ = ("handlers",)
+
+    def __init__(self):
+        self.handlers = []
+
+    def __repr__(self):
+        return f"<dispatcher, {len(self.handlers)} bound>"
 
 
 class Obj:
@@ -291,6 +327,8 @@ class Obj:
     def __init__(self, cls: ClassInfo):
         self.cls = cls
         self.fields = list(cls.defaults)
+        for i in cls.dispatchers:        # every object has dispatchers of its own, empty
+            self.fields[i] = DispatcherObj()
 
     def get(self, name: str):
         return self.fields[self.cls.field_names.index(name)]
@@ -305,7 +343,8 @@ class Obj:
 def normalise(vt, v, types=None):
     if isinstance(vt, Ref):
         entry = types[vt.type] if types is not None else None
-        if isinstance(entry, (ClassType, InterfaceType)) or isinstance(v, Obj) or v is None:
+        if isinstance(entry, (ClassType, InterfaceType, DelegateType, DispatcherType)) or \
+                isinstance(v, (Obj, Delegate)) or v is None:
             return v
         if isinstance(entry, StructType):
             return tuple(normalise(fvt, x, types) for (fvt, _), x in zip(entry.fields, v))
@@ -431,8 +470,8 @@ def default_values(types: list, data: list):
         if not isinstance(vt, Ref):
             return ZERO[vt]
         entry = types[vt.type]
-        if isinstance(entry, (ClassType, InterfaceType)):
-            return None                # a class or interface reference starts null
+        if isinstance(entry, (ClassType, InterfaceType, DelegateType, DispatcherType)):
+            return None                # a reference starts null
         if isinstance(entry, (MapType, SetType)):
             return {}                  # never changed in place, so one empty dict is shared
         if not isinstance(entry, StructType):
@@ -690,6 +729,9 @@ class VM:
         self.next_fiber = 1
         # on_fault(fiber) is told when a fiber run by the scheduler faults (wr_Config.on_fault)
         self.on_fault: Optional[Callable] = None
+        # A fault in a Broadcast handler is reported here and does not stop the others (3.3)
+        self.handler_faults: list = []
+        self.on_handler_fault: Optional[Callable] = None
 
     def register(self, qname: str, spec: NativeSpec):
         self.natives[qname] = spec
@@ -732,8 +774,15 @@ class VM:
                     for vt, d in layout]
             itables = {i: list(impl) for i, impl in entry.interfaces}
             # ref.test and ref.cast against an interface see the interfaces as ancestors too
+            slots = [i for i, (vt, _) in enumerate(layout)
+                     if isinstance(vt, Ref) and isinstance(m.types[vt.type], DispatcherType)]
+            overrides = {}                   # what a method delegate on this class calls
+            for a in chain[1:]:
+                for s, fi in enumerate(m.types[a].vtable):
+                    if s < len(entry.vtable):
+                        overrides.setdefault(fi, entry.vtable[s])
             classes[ti] = ClassInfo(ti, cname, fnames, vals, list(entry.vtable),
-                                    set(chain) | set(itables), itables)
+                                    set(chain) | set(itables), itables, tuple(slots), overrides)
         arrays = _array_ops(m.types, defaults)
         containers = _container_ops(defaults)
         for i, (mod, fld, t, flags) in enumerate(m.imports):
@@ -782,6 +831,12 @@ class VM:
                 elif ins.name == "call_virtual":
                     t, slot = ins.imms
                     arg = (slot, len(m.func_type(m.types[t].vtable[slot])[0]))
+                elif ins.name == "call_delegate":
+                    arg = len(m.types[ins.imms[0]][0])
+                elif ins.name == "dispatcher.broadcast":
+                    arg = len(m.types[m.types[ins.imms[0]].functype][0])
+                elif ins.name == "delegate.new":
+                    arg = ins.imms
                 elif ins.name == "call_interface":
                     t, k = ins.imms
                     arg = (t, k, 1 + len(m.types[m.types[t].methods[k]][0]))
@@ -912,6 +967,53 @@ class VM:
                 if name is not None:
                     return self.call(mod, name, [obj] + list(args))
         raise WiretError(STATUS_LINK, f"class '{obj.cls.name}' has no method '{method}'")
+
+    def delegate(self, mod: LoadedModule, func: str, obj: Optional[Obj] = None) -> Delegate:
+        """A delegate of an exported function, or of a method bound to `obj`, which the host
+        can bind (`obj.get("OnHit").handlers.append(d)`) or hand to Wiret."""
+        if func not in mod.exports:
+            raise WiretError(STATUS_LINK, f"no exported function '{func}'")
+        fi = mod.exports[func]
+        if obj is not None:
+            return Delegate(obj.cls.overrides.get(fi, fi), obj, True)
+        return Delegate(fi)
+
+    def broadcast(self, mod: LoadedModule, obj: Obj, dispatcher: str, args: list):
+        """Broadcast an object's dispatcher from the host, as the Broadcast node does."""
+        disp = obj.get(dispatcher)
+        if not isinstance(disp, DispatcherObj):
+            raise WiretError(STATUS_API, f"'{dispatcher}' is not a dispatcher of {obj.cls.name}")
+        self.fuel = self.fuel_limit
+        self._broadcast(mod, disp, list(args))
+
+    def _spawn(self, mod: LoadedModule, f: "Func", args: list) -> Fiber:
+        """An event invoked through a delegate starts on a fiber of its own, queued for the
+        next advance, so invoking never waits (section 3.3)."""
+        fb = Fiber(self.next_fiber, mod, f.name, f=f, locs=list(args) + list(f.zeros),
+                   wake=self.time)
+        self.next_fiber += 1
+        self.fibers.append(fb)
+        return fb
+
+    def _broadcast(self, mod: LoadedModule, disp: DispatcherObj, args: list):
+        """Run each handler bound when the broadcast starts, in bind order. A handler's fault
+        is reported and the others still run; running out of fuel or an interrupt is not a
+        fault and ends the broadcast."""
+        for d in list(disp.handlers):
+            f = mod.funcs[d.func]
+            cargs = ([d.recv] if d.bound else []) + list(args)
+            if f.flags & wbc.FN_LATENT:
+                self._spawn(mod, f, cargs)
+                continue
+            sub = Fiber(0, mod, f.name, f=f, locs=cargs + list(f.zeros))
+            try:
+                self._run(sub)
+            except WiretError as e:
+                if e.status in (STATUS_FUEL, STATUS_INTERRUPT):
+                    raise
+                self.handler_faults.append(e)
+                if self.on_handler_fault is not None:
+                    self.on_handler_fault(e)
 
     def _resume(self, fb: Fiber):
         self.fuel = self.fuel_limit
@@ -1048,9 +1150,26 @@ class VM:
                                 stack[-1] = b
                         elif op == OP_DROP:
                             stack.pop()
-                        elif op == OP_CALL or op == OP_CALL_VIRTUAL or op == OP_CALL_INTERFACE:
+                        elif op == OP_CALL or op == OP_CALL_VIRTUAL or op == OP_CALL_INTERFACE \
+                                or op == OP_CALL_DELEGATE:
                             if op == OP_CALL:
                                 callee = funcs[arg]
+                            elif op == OP_CALL_DELEGATE:  # take the delegate out from under its args
+                                at = len(stack) - arg - 1
+                                d = stack[at]
+                                if d is None:
+                                    raise Fault("invoke of a null delegate", FAULT_NULL)
+                                if d.bound:
+                                    stack[at] = d.recv
+                                else:
+                                    del stack[at]
+                                callee = funcs[d.func]
+                                if callee.flags & wbc.FN_LATENT:   # an event: its own fiber
+                                    n = len(callee.params)
+                                    cargs = stack[len(stack) - n:] if n else []
+                                    del stack[len(stack) - n:]
+                                    self._spawn(mod, callee, cargs)
+                                    continue
                             elif op == OP_CALL_VIRTUAL:   # dispatch on the receiver's class
                                 recv = stack[len(stack) - arg[1]]
                                 if recv is None:
@@ -1159,6 +1278,38 @@ class VM:
                             if o is not None and arg not in o.cls.ancestors:
                                 raise Fault(f"{o.cls.name} cannot be cast to type {arg}",
                                             FAULT_CAST)
+                        elif op == OP_DELEGATE_NEW:
+                            fi, flags = arg
+                            if flags & 1:
+                                recv = stack.pop()
+                                if recv is None:
+                                    raise Fault("delegate bound to a null object", FAULT_NULL)
+                                if flags & 2:        # the receiver's own override
+                                    fi = recv.cls.overrides.get(fi, fi)
+                                stack.append(Delegate(fi, recv, True))
+                            else:
+                                stack.append(Delegate(fi))
+                        elif op == OP_BIND or op == OP_UNBIND:
+                            d = stack.pop()
+                            disp = stack.pop()
+                            if d is None or disp is None:
+                                raise Fault(f"{'Bind' if op == OP_BIND else 'Unbind'} with a "
+                                            f"null {'handler' if d is None else 'object'}",
+                                            FAULT_NULL)
+                            if op == OP_BIND:
+                                if d not in disp.handlers:
+                                    disp.handlers.append(d)
+                            elif d in disp.handlers:
+                                disp.handlers.remove(d)
+                        elif op == OP_BROADCAST:
+                            args = stack[len(stack) - arg:] if arg else []
+                            del stack[len(stack) - arg:]
+                            disp = stack.pop()
+                            if disp is None:
+                                raise Fault("Broadcast on a null object", FAULT_NULL)
+                            self.fuel = fuel
+                            self._broadcast(mod, disp, args)
+                            fuel = self.fuel
                         elif op == OP_NOP:
                             pass
                         elif op == OP_UNREACHABLE:
