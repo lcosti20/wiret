@@ -14,16 +14,25 @@ from typing import Optional, Union
 class Lit:
     """A literal or attribute value.
 
-    kind is one of: int, float, bool, string, null, ident, tuple, list, map.
-    For tuple/list `value` is a list of Lit; for map a list of (Lit, Lit).
+    kind is one of: int, float, bool, string, null, enum, ident, tuple, list, map.
+    For an enum member `value` is "Enum.Member"; for tuple/list a list of Lit; for map a
+    list of (Lit, Lit).
     """
     kind: str
     value: object
     suffix: Optional[str] = None
 
 
+# Semantic attributes (`@name`, section 2.4). Any other `@` name is E0104.
+SEMANTIC_ATTRS = {"id", "pure", "reads", "final", "private", "export", "inline", "deprecated",
+                  "count", "cases", "disabled", "capability", "latent"}
+# Metadata attributes (`#[name]`) in canonical order; any other name follows them (section 2.5).
+META_ORDER = ["doc", "category", "keywords", "note"]
+
+
 @dataclass
 class Attr:
+    """A semantic attribute (`@name(...)`) or, in a `meta` list, a metadata line (`#[name(...)]`)."""
     name: str
     args: Optional[list] = None  # None: written without parentheses; else [(key|None, Lit)]
 
@@ -31,6 +40,46 @@ class Attr:
         if not self.args or i >= len(self.args):
             return None
         return self.args[i][1]
+
+    def kwarg(self, key: str):
+        for k, v in self.args or []:
+            if k == key:
+                return v
+        return None
+
+
+def note(text: str, detached: Optional[str] = None) -> Attr:
+    """A `#[note("text")]` line; `detached` names the deleted target it came from (section 2.4)."""
+    args = [(None, Lit("string", text))]
+    if detached is not None:
+        args.append(("detached", Lit("string", detached)))
+    return Attr("note", args)
+
+
+def note_text(a: Attr) -> str:
+    v = a.arg()
+    return v.value if v is not None and v.kind == "string" else ""
+
+
+def set_note_text(a: Attr, text: str) -> None:
+    a.args = [(None, Lit("string", text))] + list((a.args or [])[1:])
+
+
+def note_detached(a: Attr) -> Optional[str]:
+    v = a.kwarg("detached")
+    return v.value if v is not None and v.kind == "string" else None
+
+
+def notes(meta: list) -> list:
+    return [a for a in meta if a.name == "note"]
+
+
+def meta_value(meta: list, name: str) -> Optional[str]:
+    """The string argument of the first `#[name("...")]` line, e.g. a declaration's doc."""
+    for a in meta:
+        if a.name == name and a.arg() is not None and a.arg().kind == "string":
+            return a.arg().value
+    return None
 
 
 @dataclass
@@ -62,6 +111,7 @@ class Node:
     bindings: list = field(default_factory=list)   # [Binding]
     execs: list = field(default_factory=list)      # [ExecOut]
     attrs: list = field(default_factory=list)      # [Attr]
+    meta: list = field(default_factory=list)       # [Attr], written as `#[...]` lines above
 
     def binding(self, pin: str) -> Optional[Binding]:
         for b in self.bindings:
@@ -90,40 +140,7 @@ class Local:
     type: str
     default: Optional[Lit] = None
     attrs: list = field(default_factory=list)
-
-
-@dataclass
-class Attribute:
-    """One line of a graph's `markup` block: a non-semantic annotation (section 2.3).
-
-    `kind` names what it is. Only `Note` exists today; others (colour, grouping, ...) may follow.
-    """
-    id: str
-    on: Optional[str]
-    kind: str = "Note"
-    args: list = field(default_factory=list)       # [(key, Lit)]
-    attrs: list = field(default_factory=list)      # trailing [Attr]
-
-    @classmethod
-    def note(cls, id: str, on: Optional[str], text: str) -> "Attribute":
-        return cls(id, on, "Note", [("message", Lit("string", text))])
-
-    def arg(self, key: str) -> Optional[Lit]:
-        for k, v in self.args:
-            if k == key:
-                return v
-        return None
-
-    @property
-    def text(self) -> str:
-        """The message of a Note."""
-        v = self.arg("message")
-        return v.value if v is not None and v.kind == "string" else ""
-
-    @text.setter
-    def text(self, value: str):
-        self.args = [(k, v) for k, v in self.args if k != "message"]
-        self.args.insert(0, ("message", Lit("string", value)))
+    meta: list = field(default_factory=list)
 
 
 @dataclass
@@ -150,6 +167,7 @@ class Box(Place):
     title: str = ""
     w: int = 200
     h: int = 120
+    meta: list = field(default_factory=list)
 
     def members(self) -> list:
         m = self.prop("members")
@@ -160,7 +178,9 @@ class Box(Place):
 
 @dataclass
 class Graph:
-    """A func, event or macro."""
+    """A func, event or macro. A method (a func or event declared in a class) is a module item
+    of its own, named `Class.Method`, with `owner` set; the printer writes it inside the
+    class (section 2.2)."""
     kind: str                                      # func | event | macro
     name: str
     tparams: list = field(default_factory=list)
@@ -170,9 +190,15 @@ class Graph:
     locals: list = field(default_factory=list)     # [Local]
     states: list = field(default_factory=list)     # [Local]
     nodes: list = field(default_factory=list)      # [Node]
-    markup: list = field(default_factory=list)     # [Attribute]
+    meta: list = field(default_factory=list)       # [Attr]: doc, graph-level notes, ...
     places: list = field(default_factory=list)     # [Place]
     boxes: list = field(default_factory=list)      # [Box]
+    owner: Optional[str] = None                    # the class of a method
+
+    @property
+    def short_name(self) -> str:
+        """The name as written in its declaration: `TakeDamage` for `Player.TakeDamage`."""
+        return self.name[len(self.owner) + 1:] if self.owner else self.name
 
     def node(self, nid: str) -> Optional[Node]:
         for n in self.nodes:
@@ -207,6 +233,19 @@ class Graph:
     def has_attr(self, name: str) -> bool:
         return any(a.name == name for a in self.attrs)
 
+    def note_owner(self, on: Optional[str]):
+        """The graph (`on` is None), node or box whose `meta` holds the notes on `on`."""
+        if on is None:
+            return self
+        return self.node(on) or self.box(on)
+
+    def all_notes(self) -> list:
+        """(target id, or None for the graph; index among that target's notes; the note)."""
+        out = [(None, i, a) for i, a in enumerate(notes(self.meta))]
+        for o in list(self.nodes) + list(self.boxes):
+            out += [(o.id, i, a) for i, a in enumerate(notes(o.meta))]
+        return out
+
     @property
     def result_list(self) -> list:
         return self.results or []
@@ -217,6 +256,7 @@ class Use:
     name: str
     alias: Optional[str] = None
     attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
 
 
 @dataclass
@@ -226,6 +266,7 @@ class Extern:
     params: list = field(default_factory=list)
     results: Optional[list] = None
     attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
 
     def has_attr(self, name: str) -> bool:
         return any(a.name == name for a in self.attrs)
@@ -237,6 +278,7 @@ class Const:
     type: str
     value: Lit
     attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
 
 
 @dataclass
@@ -245,6 +287,127 @@ class Var:
     type: str
     default: Optional[Lit] = None
     attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
+
+
+@dataclass
+class Field:
+    """A struct field: `name: type [= default] @attrs` (section 2.2)."""
+    name: str
+    type: str
+    default: Optional[Lit] = None
+    attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
+
+
+@dataclass
+class Struct:
+    """A value type. Field order is the order written; it is semantic and never sorted."""
+    name: str
+    fields: list = field(default_factory=list)     # [Field]
+    attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
+
+    def field(self, name: str) -> Optional[Field]:
+        for f in self.fields:
+            if f.name == name:
+                return f
+        return None
+
+
+@dataclass
+class Class:
+    """`class Name [: Base] { fields, methods }`, a reference type (section 2.2). Field order is
+    the order written. Methods are separate `Graph` items whose `owner` is this class."""
+    name: str
+    base: Optional[str] = None
+    fields: list = field(default_factory=list)     # [Field]
+    attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
+    impls: list = field(default_factory=list)      # interface names after `impl`
+    dispatchers: list = field(default_factory=list)  # [Dispatcher], in the order written
+
+    def field(self, name: str) -> Optional[Field]:
+        for f in self.fields:
+            if f.name == name:
+                return f
+        return None
+
+
+@dataclass
+class Dispatcher:
+    """`dispatcher Name(params) @attrs` in a class: a multicast event slot on each object
+    (section 2.2), of type `dispatcher::<(param types)>`."""
+    name: str
+    params: list = field(default_factory=list)     # [Param]
+    attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
+    results = None                                 # a dispatcher returns nothing
+
+    @property
+    def result_list(self) -> list:
+        return []
+
+    def has_attr(self, name: str) -> bool:
+        return any(a.name == name for a in self.attrs)
+
+
+@dataclass
+class IfaceMethod:
+    """`func Name(params) -> (results) @attrs` inside an interface: a signature, no body."""
+    name: str
+    params: list = field(default_factory=list)     # [Param]
+    results: Optional[list] = None
+    attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
+
+    @property
+    def result_list(self) -> list:
+        return self.results or []
+
+    def has_attr(self, name: str) -> bool:
+        return any(a.name == name for a in self.attrs)
+
+
+@dataclass
+class Interface:
+    """`interface Name { func ... }` (section 2.2). Method order is the order written: each
+    method's position is its dispatch slot (section 5.3), so it is never sorted."""
+    name: str
+    methods: list = field(default_factory=list)    # [IfaceMethod]
+    attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
+
+    def method(self, name: str) -> Optional[IfaceMethod]:
+        for m in self.methods:
+            if m.name == name:
+                return m
+        return None
+
+
+@dataclass
+class EnumMember:
+    """An enum member: `Name [= value] @attrs`."""
+    name: str
+    value: Optional[int] = None                    # None: no `= INT` written
+    attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
+
+
+@dataclass
+class Enum:
+    """`enum Name [: inttype] { ... }`. Member order is the order written, never sorted."""
+    name: str
+    base: Optional[str] = None                     # None: no `: inttype` written
+    members: list = field(default_factory=list)    # [EnumMember]
+    attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
+
+    def member(self, name: str) -> Optional[EnumMember]:
+        for m in self.members:
+            if m.name == name:
+                return m
+        return None
 
 
 @dataclass
@@ -261,6 +424,7 @@ class Module:
     name: str
     attrs: list = field(default_factory=list)
     items: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
     comments: list = field(default_factory=list)
 
     def graphs(self, kinds=("func", "event", "macro")) -> list:
@@ -286,6 +450,14 @@ def item_kind(item) -> str:
         return "const"
     if isinstance(item, Var):
         return "var"
+    if isinstance(item, Enum):
+        return "enum"
+    if isinstance(item, Struct):
+        return "struct"
+    if isinstance(item, Class):
+        return "class"
+    if isinstance(item, Interface):
+        return "interface"
     if isinstance(item, Graph):
         return item.kind
     raise TypeError(item)

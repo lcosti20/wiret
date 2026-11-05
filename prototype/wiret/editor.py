@@ -19,18 +19,21 @@ from collections import Counter, deque
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Optional
 
-from . import ops, palette
+from . import canvasedit, ops, palette, palettepopup, viewmodel
 from .checker import GraphInfo, check
 from .compiler import compile_module
+from .debugstate import DebugState
 from .disasm import disassemble
 from .graphview import BG, DIM, TEXT, GraphView
-from .model import Box, Graph, Lit, Local, Module, Param, PinRef
+from .model import Box, Graph, Lit, Local, Module, Param, PinRef, note_text, set_note_text
 from .natives import STD
 from .parser import KEYWORDS, ParseError, parse, parse_literal
 from .printer import layout_hash, print_module, semantic_hash
-from .registry import (CONSTRAINTS, ModuleIndex, STATIC_KINDS, can_convert, lit_fits, type_ok)
+from .ids import assign_ids, find_project, retired_between
+from .registry import (ModuleIndex, STATIC_KINDS, can_convert, enum_values,
+                       type_choices, type_ok)
 from .explain import explain, explain_runtime, type_words
-from .runner import format_results, format_value, parse_args_for, split_args
+from .runner import format_results, format_value, parse_args_for, run_function, split_args
 from .vm import STATUS_INTERRUPT, VM, WiretError
 
 NEW_FILE = """wiret 1
@@ -39,8 +42,14 @@ module untitled
 extern func host.Log(message: string)
 
 func Main() {
-  node entry = Entry -> hello
-  node hello = Call host.Log(message: "Hello, Wiret!")
+  node entry = Entry
+  node hello = Call host.Log
+    .message <- "Hello, Wiret!"
+
+  flow {
+    entry -> hello
+  }
+
   layout {
     entry at (0, 0)
     hello at (200, 0)
@@ -73,11 +82,42 @@ WORK_DIR = (os.path.join(user_dir(), "my_lessons") if FROZEN or os.environ.get("
             else os.path.join(HERE, "my_lessons"))
 
 COMMON_TYPES = ["i32", "i64", "u8", "u32", "f32", "f64", "bool", "string"]
-MONO = ("Menlo", 12)
+MONO = ("Menlo", 12)            # replaced by pick_mono once Tk is running
+
+# Monospace families to try, in order: macOS, Windows, then Linux. Tk quietly falls back to a
+# proportional font for a family that is not installed, so the editor picks one that is.
+MONO_FAMILIES = ("Menlo", "SF Mono", "Cascadia Mono", "Consolas", "DejaVu Sans Mono",
+                 "Liberation Mono", "Ubuntu Mono", "Noto Sans Mono", "Courier New")
+
+
+def pick_mono(root) -> tuple:
+    """The code font: the first installed monospace family, else Tk's own fixed font. Tk
+    sizes are points, which Windows draws larger than macOS, so Windows gets a smaller size."""
+    from tkinter import font as tkfont
+    size = 10 if sys.platform == "win32" else 12
+    installed = {f.lower() for f in tkfont.families(root)}
+    for family in MONO_FAMILIES:
+        if family.lower() in installed:
+            return (family, size)
+    return (tkfont.nametofont("TkFixedFont", root=root).actual("family"), size)
+
+
+def remove_lesson_copies(names, work_dir: Optional[str] = None) -> int:
+    """Delete the working copies of the named lessons from my_lessons. Returns how many."""
+    work_dir = work_dir or WORK_DIR
+    removed = 0
+    for name in names:
+        path = os.path.join(work_dir, name)
+        if os.path.exists(path):
+            os.remove(path)
+            removed += 1
+    return removed
 
 
 class EditorApp:
     def __init__(self, root: tk.Tk, path: Optional[str]):
+        global MONO
+        MONO = pick_mono(root)
         self.root = root
         self.path: Optional[str] = None
         self.module: Optional[Module] = None
@@ -150,6 +190,7 @@ class EditorApp:
             lm.add_command(label=self.lesson_title(name), command=lambda n=name: self.open_lesson(n))
         lm.add_separator()
         lm.add_command(label="Start this lesson over", command=self.reset_lesson)
+        lm.add_command(label="Start all lessons over…", command=self.reset_all_lessons)
         menubar.add_cascade(label="Lessons", menu=lm)
         r.config(menu=menubar)
         for seq, fn in (("<Command-n>", self.new_file), ("<Command-o>", self.open_dialog),
@@ -330,6 +371,8 @@ class EditorApp:
         with open(path, encoding="utf-8") as f:
             text = f.read()
         self.path = path
+        self.project = find_project(path)       # wiret.toml above the file, or None
+        self.session_retired = set()            # ids this session added to wiret.ids
         self.root.title(f"Wiret Graph Editor — {os.path.basename(path)}")
         self.file_label.config(text=path)
         self.undo_stack.clear()
@@ -392,12 +435,66 @@ class EditorApp:
             os.remove(self.path)
             self.open_lesson(name, ask=False)
 
+    def reset_all_lessons(self):
+        """Throw away every lesson's working copy, for instance after updating the prototype
+        when the copies still hold the old lessons. Only copies of bundled lessons are
+        removed; anything else in my_lessons stays."""
+        copies = [n for n in self.lesson_files() if os.path.exists(os.path.join(WORK_DIR, n))]
+        if not copies:
+            self.status("No lesson has been started yet, so there is nothing to reset.")
+            return
+        if not messagebox.askyesno(
+                "Start all lessons over",
+                f"Throw away your changes to all {len(copies)} lessons you have opened and "
+                f"start them again from the originals?\n\nThis cannot be undone."):
+            return
+        open_name = None
+        if self.path and os.path.normcase(os.path.dirname(os.path.abspath(self.path))) == \
+                os.path.normcase(WORK_DIR):
+            open_name = os.path.basename(self.path)
+        removed = remove_lesson_copies(copies)
+        if open_name in copies:
+            self.open_lesson(open_name, ask=False)
+        self.status(f"Started {removed} lesson{'s' if removed != 1 else ''} over.")
+
     def write_file(self, text):
         if not self.path:
             return
+        self.track_retired(self.disk_text, text)
         with open(self.path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
         self.disk_text = text
+
+    def keep_ids(self, text):
+        """In a project, an undo or redo keeps the @ids assigned since that snapshot."""
+        if getattr(self, "project", None) is None:
+            return text
+        try:
+            old, cur = parse(text), parse(self.text)
+        except ParseError:
+            return text
+        from .ids import carry_ids
+        return print_module(old) if carry_ids(cur, old) else text
+
+    def track_retired(self, old_text, new_text):
+        """In a project, every id a save removes is retired in wiret.ids (section 7.5). An
+        undo that brings back an id this session retired takes it out again."""
+        proj = getattr(self, "project", None)
+        if proj is None:
+            return
+        try:
+            old, new = parse(old_text or ""), parse(new_text)
+        except ParseError:
+            return
+        from .ids import ids_of
+        back = ids_of(new) & self.session_retired
+        if back:
+            proj.unretire(back)
+            self.session_retired -= back
+        written = proj.retire(retired_between(old, new))
+        self.session_retired |= set(written)
+        for r in written:
+            self.log(f"retired {r.kind} id '{r.id}' in wiret.ids", "dim")
 
     def poll_file(self):
         try:
@@ -490,15 +587,15 @@ class EditorApp:
         for tag in ("kw", "str", "attr", "comment", "num", "kind"):
             t.tag_remove(tag, "1.0", "end")
         for i, line in enumerate(self.text.split("\n"), start=1):
-            for m in re.finditer(r'"(?:[^"\\]|\\.)*"|//.*$|@[A-Za-z_.]+|\b[A-Za-z_]\w*\b|-?\b\d[\w.]*',
-                                 line):
+            for m in re.finditer(r'"(?:[^"\\]|\\.)*"|//.*$|@[A-Za-z_.]+|#\[[A-Za-z_.]+|\]$|'
+                                 r'\b[A-Za-z_]\w*\b|-?\b\d[\w.]*', line):
                 s = m.group(0)
                 tag = None
                 if s.startswith('"'):
                     tag = "str"
                 elif s.startswith("//"):
                     tag = "comment"
-                elif s.startswith("@"):
+                elif s.startswith(("@", "#[")) or s == "]":
                     tag = "attr"
                 elif s[0].isdigit() or s[0] == "-":
                     tag = "num"
@@ -545,11 +642,9 @@ class EditorApp:
                 m.comments = []
         g = self.graph
         if g is not None:   # auto-placed nodes get a place line when first saved (section 2.3)
-            for n in g.nodes:
-                if g.place(n.id) is None:
-                    x, y = self.auto_pos.get((g.name, n.id), (0, 0))
-                    ops.place(g, n.id, x, y)
-            ops.prune_box_members(g)
+            canvasedit.place_unplaced(g, self.auto_pos)
+        if getattr(self, "project", None) is not None:   # editors always write @id (2.4)
+            assign_ids(m, retired={r.id for r in self.project.retired})
         self.last_counts, self.fault = {}, {}
         self.view.run_counts, self.view.fault_node = {}, None
         text = print_module(m)
@@ -566,7 +661,7 @@ class EditorApp:
             self.status("Nothing to undo.")
             return
         self.redo_stack.append(self.text)
-        text = self.undo_stack.pop()
+        text = self.keep_ids(self.undo_stack.pop())
         self.write_file(text)
         self.set_text(text)
         self.after_text_parsed()
@@ -576,7 +671,7 @@ class EditorApp:
         if not self.redo_stack:
             return
         self.undo_stack.append(self.text)
-        text = self.redo_stack.pop()
+        text = self.keep_ids(self.redo_stack.pop())
         self.write_file(text)
         self.set_text(text)
         self.after_text_parsed()
@@ -603,7 +698,7 @@ class EditorApp:
         self.idx = ModuleIndex(m)
         g = self.graph
         self.info = GraphInfo(g, self.idx) if g else None
-        self.diags = check(m)
+        self.diags = check(m, project=getattr(self, "project", None))
         self.problems.delete(*self.problems.get_children())
         for i, d in enumerate(self.diags):
             self.problems.insert("", "end", iid=str(i), values=(d.severity, d.code, d.graph or "",
@@ -629,75 +724,13 @@ class EditorApp:
         return out
 
     def exec_targets(self) -> set:
-        g = self.graph
-        return {(e.target, e.target_pin or "in") for n in g.nodes for e in n.execs} if g else set()
+        return viewmodel.exec_targets(self.graph) if self.graph else set()
 
     def used_outputs(self) -> set:
-        g, info = self.graph, self.info
-        used = set()
-        for n in g.nodes:
-            for b in n.bindings:
-                if isinstance(b.value, PinRef):
-                    used.add((b.value.node, b.value.pin))
-            for e in n.execs:
-                used.add((n.id, info.exec_pin(n, e)))
-        return used
+        return viewmodel.used_outputs(self.graph, self.info)
 
     def positions(self) -> dict:
-        g, info = self.graph, self.info
-        pos = {p.id: (p.x, p.y) for p in g.places}
-        missing = [n for n in g.nodes if n.id not in pos]
-        if missing:
-            self.auto_layout(g, info, pos)
-        return pos
-
-    def auto_layout(self, g, info, pos):
-        """Place nodes without a `place` line (section 7.5: lay out only what has no layout)."""
-        for n in g.nodes:
-            if n.id not in pos and (g.name, n.id) in self.auto_pos:
-                pos[n.id] = self.auto_pos[(g.name, n.id)]
-        depth = {}
-        entry = info.entry()
-        if entry:
-            todo = [(entry, 0)]
-            while todo:
-                nid, d = todo.pop(0)
-                if nid in depth:
-                    continue
-                depth[nid] = d
-                todo += [(s, d + 1) for s in info.successors(nid)]
-        maxd = max(depth.values(), default=0)
-        col_rows = Counter()
-        for n in sorted(g.nodes, key=lambda n: (depth.get(n.id, maxd + 1), n.id)):
-            if n.id in pos or info.sigs[n.id].pure:
-                continue
-            d = depth.get(n.id, maxd + 1)
-            pos[n.id] = (d * 250, col_rows[d] * 200)
-            col_rows[d] += 1
-        stacked = Counter()
-
-        def place_pure(consumer):
-            cx, cy = pos[consumer]
-            for b in info.nodes[consumer].bindings:
-                if isinstance(b.value, PinRef):
-                    src = b.value.node
-                    if src in info.nodes and src not in pos and info.sigs[src].pure:
-                        k = stacked[consumer]
-                        stacked[consumer] += 1
-                        pos[src] = (cx - 200, cy + 110 + k * 90)
-                        place_pure(src)
-
-        for n in sorted(g.nodes, key=lambda n: n.id):
-            if n.id in pos:
-                place_pure(n.id)
-        y = 400
-        for n in sorted(g.nodes, key=lambda n: n.id):
-            if n.id not in pos:
-                pos[n.id] = (-250, y)
-                y += 90
-        for nid, p in pos.items():
-            if g.place(nid) is None:
-                self.auto_pos[(g.name, nid)] = p
+        return viewmodel.positions(self.graph, self.info, self.auto_pos)
 
     # -- graph navigation ---------------------------------------------------------
     def select_graph(self, name, fit=True):
@@ -765,7 +798,7 @@ class EditorApp:
                     text += f".{p.name}: {type_words(p.type)}"
                     v = self.view.pin_values.get((nid, p.name)) if h[2] == "out" else None
                     if v is not None:
-                        text += f" = {format_value(p.type, v)}"
+                        text += f" = {format_value(p.type, v, self.idx)}"
             elif n is not None:
                 desc = palette.describe(n.kind, n.symbol, self.idx)
                 if desc:
@@ -781,162 +814,105 @@ class EditorApp:
     def connect(self, a, b):
         if not self.can_edit():
             return
-        (na, da, pa), (nb, db, pb) = a, b
-        if da == db:
-            self.status("Connect an output pin to an input pin.")
+        try:
+            reason = canvasedit.connect(self.graph, self.info, self.idx, a, b, self.geom)
+        except canvasedit.Refused as e:
+            self.status(str(e))
             return
-        if da == "in":
-            (na, da, pa), (nb, db, pb) = b, a
-        if na == nb:
-            self.status("A node cannot be wired to itself.")
-            return
-        sig_a, sig_b = self.info.sigs[na], self.info.sigs[nb]
-        out, inp = sig_a.output(pa), sig_b.input(pb)
-        if out is None or inp is None:
-            return
-        g = self.graph
-        if out.is_exec != inp.is_exec:
-            self.status("Exec pins connect only to exec pins (E0120).")
-            return
-        if out.is_exec:
-            single = sig_a.exec_outs[0].name if len(sig_a.exec_outs) == 1 else None
-            ops.wire_exec(g, na, pa, nb, pb, single)
-            self.commit(f"Wired {na}.{pa} -> {nb}" + ("" if pb == "in" else f".{pb}"))
-            return
-        if out.type == inp.type:
-            ops.bind(g, nb, pb, PinRef(na, pa))
-            self.commit(f"Bound {nb}.{pb} = {na}.{pa}")
-        elif can_convert(out.type, inp.type):
-            # Insert a visible Convert node rather than changing a type silently (section 7.5)
-            ga, gb = self.view.geoms[na], self.view.geoms[nb]
-            conv = ops.create_node(g, "Convert", None, [out.type, inp.type],
-                                   (ga.x + ga.w + gb.x) / 2 - 60, (ga.y + gb.y) / 2 + 40)
-            ops.bind(g, conv.id, "value", PinRef(na, pa))
-            ops.bind(g, nb, pb, PinRef(conv.id, "result"))
-            self.commit(f"Inserted {conv.id} = Convert<{out.type}, {inp.type}>")
-        else:
-            self.status(f"Cannot connect {out.type} to {inp.type}: no conversion exists (E0110).")
+        if reason:
+            self.commit(reason)
+
+    def geom(self, nid):
+        gm = self.view.geoms.get(nid)
+        return (gm.x, gm.y, gm.w) if gm else None
 
     def open_palette(self, wx, wy, rx, ry, context=None):
         """The searchable node palette. With a pin `context`, only nodes that fit are listed,
         and the new node is wired to that pin."""
         if not self.can_edit():
             return
-        g = self.graph
-        candidates = palette.items(g, self.idx)
-        title = "Add node — type to search (↑↓, Enter)"
-        if context:
-            nid, d, pin = context
-            sig = self.info.sigs.get(nid)
-            p = (sig.output(pin) if d == "out" else sig.input(pin)) if sig else None
-            if p is None:
-                return
-            candidates = [it for it in candidates
-                          if palette.compatible(it, g, self.idx, d, p.type) is not None]
-            title = f"Add a node for {nid}.{pin} ({type_words(p.type)})"
-            if d == "in":
-                wx -= 200     # place the producer to the left of the pin it feeds
+        found = canvasedit.palette(self.graph, self.info, self.idx, context)
+        if found is None:
+            return
+        title, candidates = found
 
         def pick(it):
-            n = ops.create_node(g, it.kind, it.symbol, it.targs, wx, wy)
-            self.view.selected = ("node", n.id)
-            if context:
-                nid, d, pin = context
-                other = palette.compatible(it, g, self.idx, d, p.type)
-                self.info = GraphInfo(g, self.idx)
-                self.connect(context, (n.id, "in" if d == "out" else "out", other))
-            else:
-                self.commit(f"Added {n.id}")
+            try:
+                nid, reason = canvasedit.add_node(self.graph, self.idx, it, wx, wy, context,
+                                                  self.geom)
+            except canvasedit.Refused as e:
+                self.status(str(e))
+                return
+            self.view.selected = ("node", nid)
+            self.commit(reason)
             self.view.focus_set()
 
-        return palette.PalettePopup(self.root, rx, ry, candidates, pick, title)
+        return palettepopup.PalettePopup(self.root, rx, ry, candidates, pick, title)
 
     def connect_to_node(self, a, nid):
-        na, da, pa = a
-        sig = self.info.sigs.get(nid)
-        src_sig = self.info.sigs.get(na)
-        if sig is None or src_sig is None:
+        if not self.can_edit():
             return
-        pin = (src_sig.output(pa) if da == "out" else src_sig.input(pa))
-        if pin is None:
+        try:
+            reason = canvasedit.connect_to_node(self.graph, self.info, self.idx, a, nid, self.geom)
+        except canvasedit.Refused as e:
+            self.status(str(e))
             return
-        if da == "out":
-            cands = [p for p in sig.inputs if p.is_exec == pin.is_exec and
-                     (pin.is_exec or p.type == pin.type) and
-                     (pin.is_exec or self.graph.node(nid).binding(p.name) is None)]
-            if cands:
-                self.connect(a, (nid, "in", cands[0].name))
-        else:
-            cands = [p for p in sig.outputs if p.is_exec == pin.is_exec and
-                     (pin.is_exec or p.type == pin.type)]
-            if cands:
-                self.connect(a, (nid, "out", cands[0].name))
+        if reason:
+            self.commit(reason)
 
     def disconnect(self, nid, d, pin):
         if not self.can_edit():
             return
-        g = self.graph
-        if d == "in":
-            n = g.node(nid)
-            sig = self.info.sigs[nid]
-            p = sig.input(pin)
-            if p is not None and p.is_exec:     # remove every exec wire into this pin
-                for m in g.nodes:
-                    m.execs = [e for e in m.execs
-                               if not (e.target == nid and (e.target_pin or "in") == pin)]
-            else:
-                ops.unbind(g, nid, pin)
-        else:
-            sig = self.info.sigs[nid]
-            p = sig.output(pin)
-            if p is not None and p.is_exec:
-                single = sig.exec_outs[0].name if len(sig.exec_outs) == 1 else None
-                ops.unwire_exec(g, nid, pin, single)
-            else:
-                for m in g.nodes:
-                    for b in list(m.bindings):
-                        if isinstance(b.value, PinRef) and b.value.node == nid and b.value.pin == pin:
-                            m.bindings.remove(b)
-        self.commit(f"Disconnected {nid}.{pin}")
+        self.commit(canvasedit.disconnect(self.graph, self.info, nid, d, pin))
 
     def edit_literal(self, nid, pin):
         if not self.can_edit():
             return
-        sig = self.info.sigs[nid]
-        p = sig.input(pin)
-        if p is None or p.is_exec:
+        prompt = canvasedit.literal_prompt(self.graph, self.info, self.idx, nid, pin)
+        if prompt is None:
             return
-        n = self.graph.node(nid)
-        b = n.binding(pin)
-        from .printer import fmt_lit
-        current = fmt_lit(b.value) if b is not None and isinstance(b.value, Lit) else ""
-        if p.type == "bool":
-            new = Lit("bool", not (b is not None and isinstance(b.value, Lit) and b.value.value))
-            ops.bind(self.graph, nid, pin, new)
-            self.commit(f"Set {nid}.{pin} = {'true' if new.value else 'false'}")
+        ty = prompt["type"]
+        if ty == "bool":
+            self.commit(canvasedit.toggle_bool(self.graph, nid, pin))
             return
-        text = simpledialog.askstring("Set literal", f"{nid}.{pin} : {p.type}\n"
+        if ty in self.idx.structs:
+            if messagebox.askyesno("Set literal", f"A {ty} has no typed value. Add a "
+                                   f"'Make {ty}' node wired into {nid}.{pin}?"):
+                self.make_for_pin(nid, pin, ty)
+            return
+        hint = f"\n{prompt['hint']}" if prompt["hint"] else ""
+        text = simpledialog.askstring("Set literal", f"{nid}.{pin} : {ty}{hint}\n"
                                       f"(empty: unbind; the pin takes its default)",
-                                      initialvalue=current, parent=self.root)
+                                      initialvalue=prompt["current"], parent=self.root)
         if text is None:
             return
-        text = text.strip()
-        if not text:
-            ops.unbind(self.graph, nid, pin)
-            self.commit(f"Unbound {nid}.{pin}")
-            return
-        if p.type == "string" and not text.startswith('"'):
-            text = '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
         try:
-            lit = parse_literal(text)
-        except ParseError as e:
-            messagebox.showerror("Invalid literal", e.msg)
+            reason = canvasedit.set_literal(self.graph, self.info, self.idx, nid, pin, text)
+        except canvasedit.Refused as e:
+            messagebox.showerror("Invalid literal", str(e))
             return
-        if not lit_fits(lit, p.type):
-            messagebox.showerror("Invalid literal", f"{text} is not a valid {p.type}")
+        self.commit(reason)
+
+    def set_enum_value(self, nid, pin, ty, member):
+        if not self.can_edit():
             return
-        ops.bind(self.graph, nid, pin, lit)
-        self.commit(f"Set {nid}.{pin} = {text}")
+        self.commit(canvasedit.set_enum(self.graph, nid, pin, ty, member))
+
+    def break_struct(self, nid, pin, ty):
+        """A BreakStruct to the right of a struct output, wired to it."""
+        if not self.can_edit():
+            return
+        new, reason = canvasedit.break_struct(self.graph, nid, pin, ty, self.geom)
+        self.view.selected = ("node", new)
+        self.commit(reason)
+
+    def make_for_pin(self, nid, pin, ty):
+        """A MakeStruct to the left of a struct input, wired into it."""
+        if not self.can_edit():
+            return
+        new, reason = canvasedit.make_for_pin(self.graph, nid, pin, ty, self.geom)
+        self.view.selected = ("node", new)
+        self.commit(reason)
 
     def add_node(self, kind, symbol=None, targs=None, x=0, y=0, attrs=None):
         if not self.can_edit():
@@ -960,101 +936,70 @@ class EditorApp:
                                         if removed else ""))
 
     def delete_box(self, bid):
-        g = self.graph
-        g.boxes = [b for b in g.boxes if b.id != bid]
+        ops.delete_box(self.graph, bid)
         self.commit(f"Deleted box {bid}")
 
     def rename_node(self, nid):
         new = simpledialog.askstring("Rename node", f"New id for '{nid}' (renames every wire):",
                                      initialvalue=nid, parent=self.root)
-        if not new or new == nid:
+        if not new:
             return
-        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", new) or new in KEYWORDS:
-            messagebox.showerror("Rename", "Not a valid identifier.")
+        try:
+            reason = canvasedit.rename_node(self.graph, nid, new)
+        except canvasedit.Refused as e:
+            messagebox.showerror("Rename", str(e))
             return
-        if self.graph.node(new) or self.graph.box(new):
-            messagebox.showerror("Rename", f"'{new}' is already used in this graph (E0102).")
+        if reason is None:
             return
-        ops.rename_node(self.graph, nid, new)
         if self.view.selected == ("node", nid):
             self.view.selected = ("node", new)
-        self.commit(f"Renamed {nid} to {new}")
+        self.commit(reason)
 
     def set_label(self, nid):
         if not self.can_edit():
             return
-        g = self.graph
-        p = g.place(nid)
-        cur = p.prop("label").value if p and p.prop("label") is not None else ""
+        cur = canvasedit.current_prop(self.graph, nid, "label")
         text = simpledialog.askstring("Label", f"Display label for '{nid}' (layout only; empty "
                                                f"to clear):", initialvalue=cur, parent=self.root)
         if text is None:
             return
-        if p is None:
-            x, y = self.auto_pos.get((g.name, nid), (0, 0))
-            ops.place(g, nid, x, y)
-            p = g.place(nid)
-        p.set_prop("label", Lit("string", text) if text else None)
-        self.commit(f"Labelled {nid}")
+        self.commit(canvasedit.set_label(self.graph, nid, text, self.auto_pos))
 
     def set_color(self, nid):
-        g = self.graph
-        p = g.place(nid) or g.box(nid)
-        cur = p.prop("color").value if p and p.prop("color") is not None else ""
+        cur = canvasedit.current_prop(self.graph, nid, "color")
         text = simpledialog.askstring("Colour", "Colour such as #C0392B (empty to clear):",
                                       initialvalue=cur, parent=self.root)
         if text is None:
             return
-        if text and not re.fullmatch(r"#[0-9A-Fa-f]{6}", text):
-            messagebox.showerror("Colour", "Use the form #RRGGBB.")
+        try:
+            reason = canvasedit.set_color(self.graph, nid, text, self.auto_pos)
+        except canvasedit.Refused as e:
+            messagebox.showerror("Colour", str(e))
             return
-        if p is None:
-            x, y = self.auto_pos.get((g.name, nid), (0, 0))
-            ops.place(g, nid, x, y)
-            p = g.place(nid)
-        p.set_prop("color", Lit("string", text.upper()) if text else None)
-        self.commit(f"Coloured {nid}")
+        self.commit(reason)
 
     def toggle_attr(self, nid, name):
-        n = self.graph.node(nid)
-        if n.attr(name):
-            n.attrs = [a for a in n.attrs if a.name != name]
-        else:
-            from .model import Attr
-            n.attrs.append(Attr(name))
-        self.commit(f"Toggled @{name} on {nid}")
+        self.commit(canvasedit.toggle_attr(self.graph, nid, name))
 
     def set_int_attr(self, nid, name, prompt):
-        from .model import Attr
-        n = self.graph.node(nid)
-        a = n.attr(name)
-        cur = a.args[0][1].value if a and a.args else 2
+        cur = canvasedit.int_attr(self.graph, nid, name)
         v = simpledialog.askinteger(f"@{name}", prompt, initialvalue=cur, minvalue=1, maxvalue=64,
                                     parent=self.root)
         if v is None:
             return
-        n.attrs = [x for x in n.attrs if x.name != name] + [Attr(name, [(None, Lit("int", v))])]
-        self.commit(f"Set @{name}({v}) on {nid}")
+        self.commit(canvasedit.set_int_attr(self.graph, nid, name, v))
 
     def set_cases(self, nid):
-        from .model import Attr
-        n = self.graph.node(nid)
-        a = n.attr("cases")
-        from .printer import fmt_lit
-        cur = ", ".join(fmt_lit(v) for _, v in a.args) if a and a.args else ""
-        text = simpledialog.askstring("@cases", "Case values, comma separated:", initialvalue=cur,
-                                      parent=self.root)
+        prompt, cur = canvasedit.cases_prompt(self.graph, self.idx, nid)
+        text = simpledialog.askstring("@cases", prompt, initialvalue=cur, parent=self.root)
         if text is None:
             return
         try:
-            vals = [parse_literal(t.strip()) for t in next(csv.reader([text], skipinitialspace=True))
-                    if t.strip()]
-        except ParseError as e:
-            messagebox.showerror("@cases", e.msg)
+            reason = canvasedit.set_cases(self.graph, self.idx, nid, text)
+        except canvasedit.Refused as e:
+            messagebox.showerror("@cases", str(e))
             return
-        n.attrs = [x for x in n.attrs if x.name != "cases"] + \
-            [Attr("cases", [(None, v) for v in vals])]
-        self.commit(f"Set cases on {nid}")
+        self.commit(reason)
 
     def add_note(self, on):
         if not self.can_edit():
@@ -1062,21 +1007,17 @@ class EditorApp:
         text = simpledialog.askstring("Note", "Note text" + (f" on '{on}'" if on else
                                                                " for the whole graph") + ":",
                                       parent=self.root)
-        if text:
-            ops.add_note(self.graph, on, text)
-            self.commit("Added note")
+        reason = canvasedit.add_note(self.graph, on, text)
+        if reason:
+            self.commit(reason)
 
     def add_box(self, x, y):
         title = simpledialog.askstring("Box", "Box title:", parent=self.root)
-        if not title:
-            return
-        g = self.graph
-        members = []
-        if self.view.selected and self.view.selected[0] == "node":
-            members = [Lit("ident", self.view.selected[1])]
-        g.boxes.append(Box(ops.fresh_id(g, "box"), x, y, [("members", Lit("list", members))],
-                           title=title, w=360, h=220))
-        self.commit(f"Added box {title!r}")
+        sel = self.view.selected
+        reason = canvasedit.add_box(self.graph, x, y, title,
+                                    sel[1] if sel and sel[0] == "node" else None)
+        if reason:
+            self.commit(reason)
 
     def edit_members(self, bid):
         b = self.graph.box(bid)
@@ -1085,29 +1026,25 @@ class EditorApp:
                                       initialvalue=", ".join(b.members()), parent=self.root)
         if text is None:
             return
-        ids = [t.strip() for t in text.split(",") if t.strip()]
-        b.set_prop("members", Lit("list", [Lit("ident", i) for i in ids]))
-        self.commit(f"Edited members of {bid}")
+        self.commit(canvasedit.set_members(self.graph, bid, text))
 
     def resize_box(self, bid):
         b = self.graph.box(bid)
         text = simpledialog.askstring("Box size", "width, height:", initialvalue=f"{b.w}, {b.h}",
                                       parent=self.root)
         try:
-            w, h = (int(v) for v in (text or "").split(","))
-        except ValueError:
+            reason = canvasedit.resize_box(self.graph, bid, text)
+        except canvasedit.Refused:
             return
-        b.w, b.h = max(40, w), max(40, h)
-        self.commit(f"Resized {bid}")
+        self.commit(reason)
 
     def rename_box(self, bid):
         b = self.graph.box(bid)
         text = simpledialog.askstring("Box title", "Title:", initialvalue=b.title, parent=self.root)
-        if text:
-            b.title = text
-            self.commit(f"Retitled {bid}")
+        reason = canvasedit.retitle_box(self.graph, bid, text)
+        if reason:
+            self.commit(reason)
 
-    # -- graph-level edits --------------------------------------------------------
     def new_graph(self, kind):
         if self.module is None or self.parse_error:
             return
@@ -1161,18 +1098,15 @@ class EditorApp:
         g = self.graph
         if g is None or not self.can_edit():
             return
-        text = simpledialog.askstring(f"Add {kw}", "name: type   (e.g.  count: i32  or  "
-                                                   "scores: array<i32>)",
+        text = simpledialog.askstring(f"Add {kw}", canvasedit.local_prompt(self.idx, kw),
                                       parent=self.root)
-        if not text or ":" not in text:
+        try:
+            reason = canvasedit.add_local(g, self.idx, kw, text)
+        except canvasedit.Refused as e:
+            messagebox.showerror(f"Add {kw}", str(e))
             return
-        name, ty = (s.strip() for s in text.split(":", 1))
-        if not re.fullmatch(r"[A-Za-z_]\w*", name) or not type_ok(ty):
-            messagebox.showerror(f"Add {kw}", "Use a valid name and a type such as i32, string "
-                                              "or array<i32>.")
-            return
-        (g.locals if kw == "local" else g.states).append(Local(name, ty))
-        self.commit(f"Added {kw} {name}")
+        if reason:
+            self.commit(reason)
 
     def delete_graph(self):
         g = self.graph
@@ -1205,9 +1139,22 @@ class EditorApp:
             _, nid, d, pin = h
             sig = self.info.sigs[nid]
             p = sig.input(pin) if d == "in" else sig.output(pin)
-            if d == "in" and p and not p.is_exec:
+            if d == "in" and p and p.type in self.idx.enums:
+                sub = tk.Menu(menu, tearoff=0)
+                for member, _ in enum_values(self.idx.enums[p.type]):
+                    sub.add_command(label=f"{p.type}.{member}",
+                                    command=lambda m=member: self.set_enum_value(nid, pin,
+                                                                                 p.type, m))
+                menu.add_cascade(label=f"Set '{pin}' to", menu=sub)
+            elif d == "in" and p and p.type in self.idx.structs:
+                menu.add_command(label=f"Make a {p.type} for '{pin}'",
+                                 command=lambda: self.make_for_pin(nid, pin, p.type))
+            elif d == "in" and p and not p.is_exec:
                 menu.add_command(label=f"Set literal for '{pin}'…",
                                  command=lambda: self.edit_literal(nid, pin))
+            if d == "out" and p and p.type in self.idx.structs:
+                menu.add_command(label=f"Break '{pin}' into fields",
+                                 command=lambda: self.break_struct(nid, pin, p.type))
             menu.add_command(label="Disconnect", command=lambda: self.disconnect(nid, d, pin))
             menu.add_separator()
             self.node_menu(menu, nid)
@@ -1236,18 +1183,17 @@ class EditorApp:
         finally:
             menu.grab_release()
 
-    def edit_note(self, note_id):
-        nt = next((n for n in self.graph.markup if n.id == note_id), None)
+    def edit_note(self, key):
+        _, nt = ops.find_note(self.graph, key)
         if nt is None:
             return
-        text = simpledialog.askstring("Note", "Text:", initialvalue=nt.text, parent=self.root)
-        if text:
-            nt.text = text
-            self.commit(f"Edited note {note_id}")
+        text = simpledialog.askstring("Note", "Text:", initialvalue=note_text(nt), parent=self.root)
+        reason = canvasedit.edit_note(self.graph, key, text)
+        if reason:
+            self.commit(reason)
 
-    def delete_note(self, note_id):
-        self.graph.markup = [n for n in self.graph.markup if n.id != note_id]
-        self.commit(f"Deleted note {note_id}")
+    def delete_note(self, key):
+        self.commit(canvasedit.delete_note(self.graph, key))
 
     def node_menu(self, menu, nid):
         n = self.graph.node(nid)
@@ -1282,13 +1228,15 @@ class EditorApp:
 
         def typed(m, label, kind, constraint):
             sub = tk.Menu(m, tearoff=0)
-            for t in CONSTRAINTS[constraint]:
+            for t in type_choices(constraint, idx):
                 add(sub, t, kind, None, [t])
             m.add_cascade(label=label, menu=sub)
 
         flow = tk.Menu(menu, tearoff=0)
         add(flow, "Branch", "Branch")
         add(flow, "Sequence", "Sequence")
+        add(flow, "Try", "Try")
+        add(flow, "Throw", "Throw")
         if g.kind != "macro":
             add(flow, "Return", "Return")
         if not any(n.kind == "Entry" for n in g.nodes):
@@ -1296,20 +1244,27 @@ class EditorApp:
         typed(flow, "Select", "Select", "any")
         typed(flow, "Switch", "Switch", "switch")
         sub = tk.Menu(flow, tearoff=0)
-        for t in ["exec"] + CONSTRAINTS["any"]:
+        for t in ["exec"] + type_choices("any", idx):
             add(sub, t, "Reroute", None, [t])
         flow.add_cascade(label="Reroute", menu=sub)
         menu.add_cascade(label="Flow", menu=flow)
+
+        time_m = tk.Menu(menu, tearoff=0)
+        add(time_m, "Delay (wait seconds)", "Delay")
+        add(time_m, "Yield (wait a frame)", "Yield")
+        add(time_m, "Await (wait for a signal)", "Await")
+        menu.add_cascade(label="Time", menu=time_m)
 
         math_m = tk.Menu(menu, tearoff=0)
         for k, (cat, _, tps, _) in sorted(STATIC_KINDS.items()):
             if cat == "Math" and k != "Convert":
                 typed(math_m, k, k, tps[0])
         conv = tk.Menu(math_m, tearoff=0)
-        for f in CONSTRAINTS["any"]:
+        convertible = type_choices("convertible", idx)
+        for f in convertible:
             sub = tk.Menu(conv, tearoff=0)
-            for t in CONSTRAINTS["any"]:
-                if can_convert(f, t):
+            for t in convertible:
+                if can_convert(f, t, idx):
                     add(sub, t, "Convert", None, [f, t])
             conv.add_cascade(label=f"from {f}", menu=sub)
         math_m.add_cascade(label="Convert", menu=conv)
@@ -1340,6 +1295,65 @@ class EditorApp:
         if var.index("end") is None:
             var.add_command(label="(no locals or variables: Graph > Add local…)", state="disabled")
         menu.add_cascade(label="Variables", menu=var)
+
+        classes = tk.Menu(menu, tearoff=0)
+        for name in sorted(idx.classes):
+            sub = tk.Menu(classes, tearoff=0)
+            add(sub, f"New {name}", "New", name)
+            add(sub, f"Cast to {name}", "Cast", name)
+            fields = idx.class_fields(name)
+            if fields:
+                sub.add_separator()
+            for _, f in fields:
+                add(sub, f"Get {f.name}", "GetField", f"{name}.{f.name}")
+            for _, f in fields:
+                add(sub, f"Set {f.name}", "SetField", f"{name}.{f.name}")
+            classes.add_cascade(label=name, menu=sub)
+        for name in sorted(idx.interfaces):
+            sub = tk.Menu(classes, tearoff=0)
+            add(sub, f"Cast to {name}", "Cast", name)
+            sub.add_separator()
+            for m in idx.interfaces[name].methods:
+                add(sub, f"Call {m.name}", "Call", f"{name}.{m.name}")
+            classes.add_cascade(label=f"{name} (interface)", menu=sub)
+        if idx.classes:
+            classes.add_separator()
+            add(classes, "IsValid (not null)", "IsValid")
+            menu.add_cascade(label="Classes", menu=classes)
+
+        dlg = tk.Menu(menu, tearoff=0)
+        for name in sorted(idx.classes):
+            for d in idx.classes[name].dispatchers:
+                sub = tk.Menu(dlg, tearoff=0)
+                for k in ("Bind", "Unbind", "Broadcast"):
+                    add(sub, k, k, f"{name}.{d.name}")
+                dlg.add_cascade(label=f"{name}.{d.name}", menu=sub)
+        made = tk.Menu(dlg, tearoff=0)
+        for name, fg in sorted(idx.graphs.items()):
+            if fg.kind == "event" or not fg.has_attr("latent"):
+                add(made, name, "CreateDelegate", name)
+        if made.index("end") is not None:
+            dlg.add_cascade(label="Delegate of", menu=made)
+        if dlg.index("end") is not None:
+            menu.add_cascade(label="Delegates", menu=dlg)
+
+        structs = tk.Menu(menu, tearoff=0)
+        for name in sorted(idx.structs):
+            sub = tk.Menu(structs, tearoff=0)
+            add(sub, f"Make {name}", "MakeStruct", name)
+            add(sub, f"Break {name}", "BreakStruct", name)
+            fields = idx.structs[name].fields
+            if fields:
+                sub.add_separator()
+            for f in fields:
+                add(sub, f"Get {f.name}", "GetField", f"{name}.{f.name}")
+            for f in fields:
+                add(sub, f"With {f.name} (changed copy)", "WithField", f"{name}.{f.name}")
+            structs.add_cascade(label=name, menu=sub)
+        if structs.index("end") is None:
+            structs.add_command(label="(no structs: declare one in the Source pane)",
+                                state="disabled")
+        menu.add_cascade(label="Structs", menu=structs)
 
         call = tk.Menu(menu, tearoff=0)
         for name in sorted(idx.graphs):
@@ -1431,7 +1445,7 @@ class EditorApp:
         self.console.configure(state="disabled")
         func = self.entry_var.get()
         t0 = time.perf_counter()
-        r = compile_module(self.module, self.text, debug=True)
+        r = compile_module(self.module, self.text, debug=True, project=self.project)
         for d in r.diags:
             where = ".".join(x for x in (d.graph, d.node) if x)
             self.log(f"{d.severity} {d.code} {where}: {explain(d)}",
@@ -1466,28 +1480,14 @@ class EditorApp:
         def hook(fname, node, _pending, depth, snapshot, phase):
             g = fname[len(mod_prefix):] if fname.startswith(mod_prefix) else fname
             top = node.split("/")[0].split("!")[0]
-            if phase == "enter":
-                if "/" not in node:      # a macro counts once per entry, not per inner node
-                    counts[(g, top)] += 1
-                # A breakpoint stops on arrival too, so a node whose inputs fault still pauses.
-                if (g, top) in breakpoints and "/" not in node and dbg.armed != (g, top, depth):
-                    dbg.armed = (g, top, depth)
-                    pause(g, top, snapshot, depth, inputs_ready=False)
-                return
-            if dbg.stop:
+            if phase == "enter" and "/" not in node:  # a macro counts once per entry
+                counts[(g, top)] += 1
+            if phase == "ready" and dbg.stop:
                 raise WiretError(STATUS_INTERRUPT, "stopped by the user")
-            # A macro call site is stepped once, at its entry stub (`loop!in`); nodes inside
-            # macros and library code are not stepped into.
-            if "/" in node or g not in graph_names:
-                return
-            if dbg.armed == (g, top, depth):
-                dbg.armed = None
-                if dbg.mode != "step" and not (dbg.mode == "over" and depth <= dbg.depth):
-                    return
-            m = dbg.mode
-            if (g, top) in breakpoints or m == "step" or (m == "over" and depth <= dbg.depth):
-                pause(g, top, snapshot, depth, inputs_ready=True)
-            elif m == "animate" and depth == 0:
+            act = dbg.decide(g, node, depth, phase, breakpoints, graph_names)
+            if act == "pause":
+                pause(g, top, snapshot, depth, inputs_ready=phase == "ready")
+            elif act == "animate":
                 self.out_queue.put(("pause", (g, top, snapshot(), False, Counter(counts), True)))
                 time.sleep(dbg.delay)
 
@@ -1516,7 +1516,7 @@ class EditorApp:
                     data = f.read()
                 lm = self.vm.load(data)
                 self.loaded = lm
-                res = self.vm.call(lm, func, args)
+                res = run_function(self.vm, lm, func, args)
                 ms = (time.perf_counter() - t1) * 1000
                 self.out_queue.put(("done", (format_results(module, func, res), ms, counts, None)))
             except WiretError as e:
@@ -1609,14 +1609,14 @@ class EditorApp:
                 for p in items:
                     if p.name in values:
                         self.vars_tree.insert("", "end", values=(
-                            p.name, f"{kind} {p.type}", format_value(p.type, values[p.name])))
+                            p.name, f"{kind} {p.type}", format_value(p.type, values[p.name], self.idx)))
         lm = getattr(self, "loaded", None)
         if lm is not None:
             for v in sorted(self.idx.vars.values(), key=lambda v: v.name):
                 gi = lm.global_names.get(v.name)
                 if gi is not None:
                     self.vars_tree.insert("", "end", values=(
-                        v.name, f"variable {v.type}", format_value(v.type, lm.globals[gi])))
+                        v.name, f"variable {v.type}", format_value(v.type, lm.globals[gi], self.idx)))
 
     def on_stack_select(self, _e=None):
         """Show the graph and wire values of the frame picked in the call stack."""
@@ -1670,18 +1670,6 @@ class EditorApp:
         self.view.run_counts = self.run_counts_for(self.graph_name)
         self.view.fault_node = self.fault.get(self.graph_name)
         self.view.redraw()
-
-
-class DebugState:
-    """Shared between the editor (main thread) and the VM hook (worker thread)."""
-
-    def __init__(self, mode: str, delay: float):
-        self.mode = mode           # run | step | over | animate
-        self.depth = 0             # call depth that `over` stays at
-        self.armed = None          # (graph, node, depth) of a breakpoint already hit on arrival
-        self.delay = delay         # seconds per node when animating
-        self.stop = False
-        self.resume = threading.Event()
 
 
 def main(path=None):

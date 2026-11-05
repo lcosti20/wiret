@@ -1,0 +1,78 @@
+wiret 1
+module lessons.maps
+
+extern func host.Log(message: string)
+
+#[note("Lesson 9: Maps. A map stores a value under each key, like a dictionary: here, how many times each fruit appears. MapFind looks a key up (a missing key gives 0), and MapSet stores a new value under it. A map remembers the order keys were first added.")]
+#[note("Try it: (1) Add a fifth fruit to the array (right-click 'fruits', more inputs) and run again. (2) Step (F11) through the first loop and watch counts grow in the Variables panel. (3) Change the key type: what has to change with it?")]
+func Main() {
+  local counts: map::<string, i32>
+  node amount = Convert::<i32, string>
+    .value <- show.value
+  #[note("A key that is not there yet gives 0, so the first apple counts as 0 + 1.")]
+  node count = MapSet::<string, i32> counts
+    .key <- loop.item
+    .value <- plus.result
+  node each_line = Call std.string.Concat
+    .a <- name.result
+    .b <- amount.result
+  node entry = Entry
+  node find = MapFind::<string, i32>
+    .map <- got.value
+    .key <- loop.item
+  node fruits = MakeArray::<string> @count(4)
+    .item0 <- "apple"
+    .item1 <- "pear"
+    .item2 <- "apple"
+    .item3 <- "kiwi"
+  node got = GetLocal counts
+  node how_many = MapLength::<string, i32>
+    .map <- got.value
+  node log = Call host.Log
+    .message <- each_line.result
+  node log_total = Call host.Log
+    .message <- total.result
+  node loop = Macro std.flow.ForEach::<string>
+    .array <- fruits.result
+  node name = Call std.string.Concat
+    .a <- show.key
+    .b <- ": "
+  node number = Convert::<i32, string>
+    .value <- how_many.length
+  node plus = Add::<i32>
+    .a <- find.value
+    .b <- 1
+  #[note("ForEachMap visits every key in the order it was first added, with its value.")]
+  node show = Macro std.flow.ForEachMap::<string, i32>
+    .map <- got.value
+  node total = Call std.string.Concat
+    .a <- number.result
+    .b <- " different fruits"
+
+  flow {
+    entry -> loop
+    loop.each -> count
+    loop.done -> show
+    show.each -> log
+    show.done -> log_total
+  }
+
+  layout {
+    amount at (350, 310)
+    count at (500, 0)
+    each_line at (550, 110)
+    entry at (0, 0)
+    find at (100, 220)
+    fruits at (50, 110)
+    got at (-100, 330)
+    how_many at (150, 530)
+    log at (750, 0)
+    log_total at (750, 200)
+    loop at (250, 0)
+    name at (350, 220)
+    number at (350, 420)
+    plus at (300, 110)
+    show at (500, 200)
+    total at (550, 310)
+  }
+}

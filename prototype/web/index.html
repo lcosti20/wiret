@@ -1,0 +1,947 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wiret</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #f4f4f1; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --faint: #9a9a94;
+    --border: #d9d9d4; --accent: #2f6fdb; --accent-text: #ffffff;
+    --error: #c4342d; --warn: #a86b00; --ok: #2e7d4f;
+    --cur-bg: rgba(0, 170, 200, .18); --cur-edge: #0095b3;
+    --frame-bg: rgba(220, 150, 0, .16); --bad-bg: rgba(210, 50, 40, .14);
+    --sel-bg: rgba(245, 176, 65, .20); --sel-edge: #d08a10;
+    --mono: ui-monospace, "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace;
+    --lh: 20px;
+    /* the graph canvas is dark in both themes, as on the desktop: the wire colors need it */
+    --g-bg: #1d1f23; --g-grid: #25282e; --g-bar: #25282e; --g-text: #e8e8e8; --g-dim: #8a8f98;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #18181a; --panel: #222225; --text: #e8e8e3; --muted: #a2a29b; --faint: #6d6d68;
+      --border: #38383c; --accent: #5b8ff0; --accent-text: #0e1420;
+      --error: #f07067; --warn: #e0a940; --ok: #63c38a;
+      --cur-bg: rgba(40, 200, 230, .20); --cur-edge: #3cc8e6;
+      --frame-bg: rgba(240, 170, 40, .16); --bad-bg: rgba(240, 90, 80, .18);
+      --sel-bg: rgba(245, 176, 65, .18); --sel-edge: #f5b041;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); display: flex; flex-direction: column;
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+           padding: 10px 16px; border-bottom: 1px solid var(--border); }
+  h1 { font-size: 17px; margin: 0 6px 0 0; }
+  .group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  select, button, label { font: inherit; }
+  select { padding: 4px 6px; max-width: 100%; background: var(--panel); color: var(--text);
+           border: 1px solid var(--border); border-radius: 6px; }
+  button { padding: 4px 11px; border: 1px solid var(--border); border-radius: 6px;
+           background: var(--panel); color: var(--text); cursor: pointer; white-space: nowrap; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  button:disabled { opacity: .45; cursor: default; }
+  label { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+  #ready { color: var(--faint); font-size: 12px; margin-left: auto; }
+  /* a fixed height, so the canvas below never moves while you work in it */
+  #msg { padding: 7px 16px; height: calc(2 * 1.45em + 14px); overflow-y: auto; flex: none;
+         border-bottom: 1px solid var(--border); color: var(--muted); }
+  #msg.err { color: var(--error); }
+  main { flex: 1; min-height: 0; display: grid; gap: 12px; padding: 12px 16px 16px;
+         grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr); }
+  aside { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+
+  /* the graph canvas */
+  #graphpanel { display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+                border: 1px solid var(--border); border-radius: 8px; background: var(--g-bg); }
+  #graphbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 8px;
+              background: var(--g-bar); border-bottom: 1px solid #111214; }
+  #graphbar select, #graphbar button { background: #2b2e35; color: var(--g-text); border-color: #3a3e46;
+              padding: 2px 9px; font-size: 13px; }
+  #graphbar .hint { color: var(--g-dim); font-size: 12px; margin-left: auto; flex: 1 1 0; min-width: 0;
+                    text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gv { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: none;
+        user-select: none; cursor: grab; color: var(--g-text);
+        background-color: var(--g-bg);
+        background-image: linear-gradient(var(--g-grid) 1px, transparent 1px),
+                          linear-gradient(90deg, var(--g-grid) 1px, transparent 1px);
+        font-family: system-ui, -apple-system, "Segoe UI", Helvetica, sans-serif; }
+  .gv.panning { cursor: grabbing; }
+  .gv-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  .gv-svg { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible;
+            pointer-events: none; }
+  .gv-svg .gv-pinhit { pointer-events: all; cursor: crosshair; }
+  .gv-svg .gv-wirehit { pointer-events: stroke; cursor: pointer; }
+  .gv:focus { outline: none; }
+  .gv:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .gv-node { position: absolute; width: max-content; min-width: 96px; background: #2b2e35;
+             box-shadow: 3px 4px 0 #101114; cursor: move; }
+  .gv-box-title { cursor: move; }
+  .gv-ask { position: absolute; z-index: 2; width: 240px; padding: 6px 8px; border-radius: 6px;
+            background: #2b2e35; border: 1px solid #f5b041; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
+  .gv-ask-label { color: var(--g-dim); font-size: 12px; margin-bottom: 4px; }
+  .gv-palette { position: absolute; z-index: 2; padding: 6px 8px; border-radius: 6px;
+                background: #1d1f23; border: 1px solid #3a3e46; box-shadow: 0 8px 28px rgba(0,0,0,.6);
+                color: var(--g-text); cursor: default; }
+  .gv-palette input { width: 100%; font: 14px system-ui, sans-serif; padding: 5px 8px; border-radius: 4px;
+                      border: 1px solid #3a3e46; background: #15171a; color: #fff; }
+  .gv-palette ul { list-style: none; margin: 6px 0 0; padding: 0; max-height: 240px; overflow: auto; }
+  .gv-palette li { display: flex; justify-content: space-between; gap: 8px; padding: 3px 8px;
+                   border-radius: 4px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+  .gv-palette li[aria-selected=true] { background: #2471a3; color: #fff; }
+  .gv-palette-cat { color: var(--g-dim); font-size: 11px; }
+  .gv-palette li[aria-selected=true] .gv-palette-cat { color: #d6e6f5; }
+  .gv-palette-desc { color: #f7dc6f; font-size: 12px; margin-top: 6px; min-height: 1.4em; }
+  .gv-ask input { width: 100%; font: 13px var(--mono); padding: 3px 6px; border-radius: 4px;
+                  border: 1px solid #3a3e46; background: #1d1f23; color: var(--g-text); }
+  .gv-head { height: 24px; line-height: 24px; padding: 0 20px 0 8px; color: #fff;
+             font-weight: 700; font-size: 13px; white-space: nowrap; }
+  .gv-body { display: flex; justify-content: space-between; gap: 24px; padding: 3px 11px; }
+  .gv-col { display: flex; flex-direction: column; }
+  .gv-outs { align-items: flex-end; }
+  .gv-pin { height: 20px; line-height: 20px; font-size: 12px; white-space: nowrap; }
+  .gv-unbound { color: var(--g-dim); }
+  .gv-text { position: absolute; white-space: nowrap; pointer-events: none; }
+  .gv-id { color: var(--g-dim); font-size: 11px; }
+  .gv-count { color: #2ecc71; font-size: 11px; font-weight: 700; }
+  .gv-next { color: #00e5ff; font-size: 12px; font-weight: 700; }
+  .gv-current { position: absolute; border: 1px dashed #00e5ff; pointer-events: none; }
+  .gv-bp { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
+           cursor: pointer; border: 1px dashed rgba(255, 59, 48, .35); }
+  .gv-bp:hover { border-color: #ff3b30; background: rgba(255, 59, 48, .25); }
+  .gv-bp.on { background: #ff3b30; border: 1px solid #fff; }
+  .gv-badge { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%;
+              color: #fff; font-size: 12px; font-weight: 700; line-height: 16px; text-align: center;
+              pointer-events: none; }
+  .gv-badge.error { background: #e74c3c; } .gv-badge.warning { background: #f39c12; }
+  .gv-tag { background: #ffe082; color: #111; border: 1px solid #c9a227; font-size: 12px;
+            font-weight: 700; padding: 0 4px; pointer-events: auto; }
+  .gv-dangle { color: #e74c3c; font-size: 11px; }
+  .gv-note { position: absolute; color: #f7dc6f; font-size: 11px; white-space: pre-wrap; pointer-events: none; }
+  .gv-box { position: absolute; border: 2px solid; background: #23262c; }
+  .gv-box-title { height: 22px; line-height: 22px; padding: 0 8px; color: #fff; font-weight: 700;
+                  font-size: 13px; overflow: hidden; white-space: nowrap; }
+  .gv-notes { position: absolute; left: 10px; top: 10px; width: min(460px, calc(100% - 20px));
+              color: #f7dc6f; font-size: 13px; pointer-events: none; }
+  .gv-notes p, .gv-note > div { pointer-events: auto; }
+  .gv-menu { position: absolute; z-index: 3; min-width: 200px; max-width: min(340px, calc(100% - 8px));
+             padding: 4px; border-radius: 6px; background: #2b2e35; border: 1px solid #3a3e46;
+             box-shadow: 0 8px 28px rgba(0,0,0,.6); max-height: calc(100% - 8px); overflow: auto; }
+  .gv-menu-item { display: block; width: 100%; text-align: left; border: 0; border-radius: 4px;
+                  background: none; color: var(--g-text); padding: 4px 10px; font-size: 13px; }
+  .gv-menu-item.indent { padding-left: 24px; font-family: var(--mono); font-size: 12px; }
+  .gv-menu-item:focus { outline: none; background: #2471a3; color: #fff; }
+  .gv-menu-head { color: var(--g-dim); font-size: 12px; padding: 4px 10px 2px; }
+  .gv-menu-sep { height: 1px; margin: 4px 6px; background: #3a3e46; }
+  .gv-notes p { margin: 0 0 8px; }
+  .gv-notes .detached { color: var(--g-dim); }
+  .gv-notes-toggle { pointer-events: auto; background: #2b2e35; color: var(--g-dim);
+                     border: 1px solid #3a3e46; padding: 1px 8px; font-size: 12px; }
+
+  /* side panel: tabs */
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+           padding: 8px 10px; }
+  .panel h2 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+              color: var(--muted); margin: 0 0 6px; }
+  #side { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+  [role=tablist] { display: flex; gap: 2px; padding: 6px 6px 0; border-bottom: 1px solid var(--border); }
+  [role=tab] { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none;
+               color: var(--muted); padding: 4px 10px 6px; }
+  [role=tab][aria-selected=true] { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+  .tabpane { flex: 1; min-height: 0; overflow: auto; padding: 8px 10px; }
+  .tabpane[hidden] { display: none; }
+  #pane-source { padding: 0; }
+  #pane-source:not([hidden]) { display: flex; }
+
+  /* source editor: a gutter of line numbers and breakpoints, highlight strips behind the text */
+  #editor { position: relative; display: flex; flex: 1; min-height: 0; overflow: hidden;
+            font: 13px/var(--lh) var(--mono); }
+  #gutter-clip { flex: none; width: 74px; overflow: hidden; border-right: 1px solid var(--border);
+                 user-select: none; }
+  #gutter { padding: 10px 0; }
+  .gl { height: var(--lh); display: flex; align-items: center; gap: 4px; padding: 0 6px 0 4px;
+        color: var(--faint); font-size: 11px; }
+  .gl .dot { width: 11px; height: 11px; border-radius: 50%; flex: none; }
+  .gl.node { cursor: pointer; }
+  .gl.node:hover .dot { outline: 1px solid var(--error); outline-offset: -1px; }
+  .gl.bp .dot { background: var(--error); }
+  .gl .num { flex: 1; text-align: right; }
+  .gl .count { width: 22px; text-align: right; color: var(--ok); }
+  #code { position: relative; flex: 1; min-width: 0; }
+  #hl { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+  #hl div { position: absolute; left: 0; right: 0; height: var(--lh); }
+  #hl .sel { background: var(--sel-bg); box-shadow: inset 3px 0 var(--sel-edge); }
+  #hl .cur { background: var(--cur-bg); box-shadow: inset 3px 0 var(--cur-edge); }
+  #hl .frame { background: var(--frame-bg); }
+  #hl .bad { background: var(--bad-bg); box-shadow: inset 3px 0 var(--error); }
+  textarea { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 10px;
+             border: 0; outline: 0; resize: none; background: transparent; color: var(--text);
+             font: inherit; white-space: pre; overflow: auto; tab-size: 2; }
+  textarea[readonly] { color: var(--muted); }
+
+  #out { font: 13px/1.5 var(--mono); white-space: pre-wrap; max-height: 22vh; overflow: auto;
+         min-height: 3em; }
+  .note { color: var(--muted); } .err { color: var(--error); } .warn { color: var(--warn); }
+  .okc { color: var(--ok); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td { padding: 2px 6px 2px 0; vertical-align: top; }
+  td.v { font-family: var(--mono); word-break: break-all; }
+  td.k { color: var(--muted); white-space: nowrap; width: 1%; padding-right: 14px; }
+  h3 { font-size: 12px; color: var(--muted); font-weight: 600; margin: 8px 0 2px; }
+  h3:first-child { margin-top: 0; }
+  #stack { list-style: none; margin: 0; padding: 0; }
+  #stack li { padding: 2px 6px; border-radius: 4px; cursor: pointer; font-family: var(--mono);
+              font-size: 13px; }
+  #stack li.sel { background: var(--cur-bg); }
+  #problems { list-style: none; margin: 0; padding: 0; }
+  #problems li { padding: 3px 0; cursor: pointer; }
+  .empty { color: var(--faint); font-style: italic; }
+
+  /* narrow screens: graph, then the tabs, then the output, one under another */
+  @media (max-width: 860px) {
+    main { grid-template-columns: minmax(0, 1fr); }
+    #graphpanel { height: 58vh; }
+    #side { height: 60vh; flex: none; }
+    #graphbar .hint { display: none; }
+    #msg { height: calc(4 * 1.45em + 14px); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Wiret</h1>
+  <select id="lesson" disabled aria-label="Lesson"></select>
+  <div class="group" role="toolbar" aria-label="Run and debug">
+    <button id="run" class="primary" disabled title="Run, or continue to the next breakpoint (F5)">▶ Run</button>
+    <button id="step" disabled title="Run one node (F11)">⤵ Step</button>
+    <button id="over" disabled title="Run one node, running any call it makes in one go (F10)">↷ Over</button>
+    <button id="back" disabled title="Go back to the previous pause (Shift+F11)">↶ Back</button>
+    <button id="stop" disabled title="Stop and edit (Shift+F5)">■ Stop</button>
+  </div>
+  <div class="group">
+    <label><input type="checkbox" id="animate"> Animate</label>
+    <select id="speed" aria-label="Animation speed">
+      <option value="700">Slow</option><option value="300" selected>Medium</option><option value="100">Fast</option>
+    </select>
+    <label title="Run with the bundled math library, so results are the same on every machine"><input type="checkbox" id="det"> Deterministic</label>
+  </div>
+  <span id="ready">Loading Python…</span>
+</header>
+<div id="msg" role="status">Loading the Wiret compiler and VM into the page…</div>
+<main>
+  <section id="graphpanel" aria-label="Graph">
+    <div id="graphbar">
+      <select id="graphsel" aria-label="Graph"></select>
+      <button id="fit" title="Fit the graph to the view">Fit</button>
+      <button id="zoomout" title="Zoom out" aria-label="Zoom out">−</button>
+      <button id="zoomin" title="Zoom in" aria-label="Zoom in">+</button>
+      <button id="addnode" title="Add a node (Tab on the canvas, or double-click empty canvas)">+ Add node</button>
+      <button id="undo" title="Undo the last graph edit (Ctrl+Z)" disabled>↶ Undo</button>
+      <button id="redo" title="Redo (Ctrl+Y)" disabled>↷ Redo</button>
+      <span class="hint">Drag nodes to move · drag from a pin to wire · Tab to add a node · right-click for more</span>
+    </div>
+    <div id="graph"></div>
+  </section>
+  <aside>
+    <section id="side" class="panel">
+      <div role="tablist">
+        <button role="tab" id="tab-source" aria-selected="true" aria-controls="pane-source">Source</button>
+        <button role="tab" id="tab-debugger" aria-selected="false" aria-controls="pane-debugger">Debugger</button>
+        <button role="tab" id="tab-problems" aria-selected="false" aria-controls="pane-problems">Problems</button>
+      </div>
+      <div class="tabpane" id="pane-source" role="tabpanel">
+        <div id="editor">
+          <div id="gutter-clip"><div id="gutter"></div></div>
+          <div id="code"><div id="hl"></div><textarea id="src" spellcheck="false" aria-label="Source"></textarea></div>
+        </div>
+      </div>
+      <div class="tabpane" id="pane-debugger" role="tabpanel" hidden><div id="dbg-body"></div></div>
+      <div class="tabpane" id="pane-problems" role="tabpanel" hidden><ul id="problems"></ul></div>
+    </section>
+    <section class="panel"><h2>Output</h2><div id="out" role="log"></div></section>
+  </aside>
+</main>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.27.8/full/pyodide.js"></script>
+<script type="module">
+import { Session, nodeKey } from "./debugger.js";
+import { GraphView } from "./graphview.js";
+
+const $ = (id) => document.getElementById(id);
+const FUEL = 5_000_000;       // a runaway loop stops in seconds instead of freezing the tab
+const LH = 20, PAD = 10;      // line height and padding of the source, as in the CSS
+const el = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+};
+
+let api;                      // wiret.webapi
+let nodes = {};               // graph -> node -> {line, what}, from the last good parse
+let lineNodes = new Map();    // line -> [graph, node]
+let graphs = [];              // from the last good parse, as webapi.check describes them
+let graphName = null;         // the graph on the canvas
+let selected = null;          // the selected node of that graph
+let problems = [];
+const breakpoints = new Set();  // "graph\tnode"
+let counts = null;            // graph -> node -> runs, after a run
+let trace = null, session = null, frameSel = -1, timer = null;
+let fault = null;
+let busy = false;             // a run is being recorded; the controls wait for it
+let shownDebugger = false;    // the Debugger tab was brought forward in this session
+const undoStack = [], redoStack = [];   // texts before (after) each graph edit
+
+const gv = new GraphView($("graph"), {
+  select: (id) => {
+    selectNode(id, "graph");
+    if (!id && gv.selWire) say("Wire selected. Press Delete to remove it.");
+  },
+  open: (name) => showGraph(name),
+  toggleBreakpoint: (id) => toggleBreakpoint(`${graphName}\t${id}`),
+  canEdit: () => canEdit(),
+  message: (text) => say(text, true),
+  move: (id, x, y) => { selected = id; applyEdit({ op: "move", moves: [[id, x, y]] }); },
+  connect: (a, b) => applyEdit({ op: "connect", a, b, geoms: gv.geomsFor([a[0], b[0]]) }),
+  connectToNode: (a, node) => applyEdit({ op: "connect_to_node", a, node, geoms: gv.geomsFor([a[0], node]) }),
+  disconnect: (node, dir, pin) => { gv.selWire = null; applyEdit({ op: "disconnect", node, dir, pin }); },
+  deleteNode: (id) => {
+    const n = graph()?.nodes.find((x) => x.id === id);
+    if (n?.title === "Entry" && !confirm("Delete the graph's Entry node?")) return;
+    if (applyEdit({ op: "delete", node: id })) selected = null;
+  },
+  editPin: (node, pin, at) => editPin(node, pin, at),
+  palette: (world, at, context) => openPalette(world, at, context),
+  menu: (target, at, world) => openMenu(target, at, world),
+});
+
+// ---------- editing on the canvas ----------
+/** true, or why the graph cannot be edited now (as the desktop editor's can_edit). */
+function canEdit() {
+  if (!api || busy) return "Wait for the page to finish.";
+  if (session && !session.finished) return "The program is running. Stop it (■) before editing the graph.";
+  if (problems.some((d) => d.code === "parse")) return "Fix the parse error in the source pane before editing the graph.";
+  return graph() ? true : "There is no graph to edit.";
+}
+
+/** Make one canvas edit (webapi.edit) and take its canonical text. Returns true if it applied. */
+function applyEdit(req) {
+  const ok = canEdit();
+  if (ok !== true) { say(ok, true); recheck(); return false; }
+  const before = $("src").value;
+  let r = JSON.parse(api.edit(before, graphName, JSON.stringify(req)));
+  if (r.comments) {
+    if (!confirm(`The source has ${r.comments} '//' comment(s). Comments are not part of the model, ` +
+                 "so editing the graph cannot keep them (W0603).\n\nOK: convert them to notes\nCancel: undo this edit")) {
+      recheck();
+      return false;
+    }
+    r = JSON.parse(api.edit(before, graphName, JSON.stringify({ ...req, comments: "convert" })));
+  }
+  if (!r.ok) {
+    if (r.message) say(r.message, true);
+    recheck();                                         // put back what a drag changed
+    return false;
+  }
+  if (r.text !== before) {
+    undoStack.push(before);
+    redoStack.length = 0;
+  }
+  setText(r.text);
+  if (r.select) selected = r.select;
+  updateGraph();
+  renderHighlights();
+  say(r.message);
+  return true;
+}
+
+/** Replace the source text after a graph edit, undo or redo; the last run is now stale. */
+function setText(text) {
+  const ta = $("src"), top = ta.scrollTop;
+  if (trace) stop();
+  counts = fault = null;
+  ta.value = text;
+  ta.scrollTop = top;
+  recheck();
+  setButtons();
+}
+
+function undo() {
+  if (!undoStack.length) return say("Nothing to undo.");
+  const ok = canEdit();
+  if (ok !== true) return say(ok, true);
+  redoStack.push($("src").value);
+  setText(undoStack.pop());
+  say("Undone.");
+}
+
+function redo() {
+  if (!redoStack.length) return;
+  const ok = canEdit();
+  if (ok !== true) return say(ok, true);
+  undoStack.push($("src").value);
+  setText(redoStack.pop());
+  say("Redone.");
+}
+
+/** The node palette: search, pick, and add the node at `world` (wired to `context`, the pin
+ *  a wire was dragged from, if any). */
+async function openPalette(world, at, context) {
+  const ok = canEdit();
+  if (ok !== true) return say(ok, true);
+  const text = $("src").value, ctx = JSON.stringify(context ?? null);
+  const first = JSON.parse(api.palette(text, graphName, "", ctx));
+  if (!first) return;
+  if (!first.total) return say(`No node has a pin that fits ${context[0]}.${context[2]}.`, true);
+  const item = await gv.pick(at, {
+    title: first.title,
+    search: (q) => (q ? JSON.parse(api.palette(text, graphName, q, ctx)) : first),
+  });
+  if (!item) return;
+  applyEdit({ op: "add", kind: item.kind, symbol: item.symbol, targs: item.targs,
+              x: Math.round(world[0]), y: Math.round(world[1]), context,
+              geoms: context ? gv.geomsFor([context[0]]) : {} });
+}
+
+/** The context menu for `target` (webapi.menu builds it, as the desktop editor's), then
+ *  what was chosen: an edit (asking for text first if it needs some), or something the page
+ *  does itself. */
+async function openMenu(target, at, world) {
+  const entries = JSON.parse(api.menu($("src").value, graphName, JSON.stringify(target)));
+  if (!entries.length) return;
+  for (const e of entries) {
+    if (e.client === "breakpoint") {
+      e.label = (breakpoints.has(`${graphName}\t${e.node}`) ? "Remove breakpoint" : "Set breakpoint") + "  (F9)";
+    }
+  }
+  const e = await gv.menu(at, entries);
+  if (!e) return;
+  if (e.client === "palette") return openPalette(world, at, null);
+  if (e.client === "breakpoint") return toggleBreakpoint(`${graphName}\t${e.node}`);
+  if (e.client === "editPin") return editPin(e.node, e.pin, at);
+  if (e.client?.startsWith("open:")) return showGraph(e.client.slice(5));
+  const ok = canEdit();
+  if (ok !== true) return say(ok, true);
+  const req = { ...e.action };
+  if (e.ask) {
+    const text = await gv.ask(at, { label: e.ask.label, value: e.ask.value });
+    if (text === null) return;
+    req.text = text;
+  }
+  if (e.confirm && !confirm(e.confirm)) return;
+  if (req.op === "add_box") req.member = selected;
+  if (req.node) req.geoms = gv.geomsFor([req.node]);
+  if (applyEdit(req) && req.op === "delete" && selected === req.node) selected = null;
+}
+
+/** Double-click on an input: flip a bool, or type a value in a box over the canvas. */
+async function editPin(node, pin, at) {
+  const ok = canEdit();
+  if (ok !== true) return say(ok, true);
+  const prompt = JSON.parse(api.literal_prompt($("src").value, graphName, node, pin));
+  if (!prompt) return;
+  if (prompt.type === "bool") return applyEdit({ op: "toggle", node, pin });
+  const text = await gv.ask(at, {
+    label: `${node}.${pin} : ${prompt.type} (Enter to set; empty: use the default)`,
+    value: prompt.current, placeholder: prompt.hint || prompt.type,
+  });
+  if (text !== null) applyEdit({ op: "literal", node, pin, text });
+}
+
+// ---------- Python ----------
+async function boot() {
+  const t0 = performance.now();
+  const py = await loadPyodide();
+  const zip = await (await fetch("wiret_bundle.zip")).arrayBuffer();
+  py.unpackArchive(zip, "zip", { extractDir: "/app" });
+  py.runPython(`import sys; sys.path.insert(0, "/app")`);
+  api = py.pyimport("wiret.webapi");
+  const files = py.runPython(`
+import os
+[f"lessons/{n}" for n in sorted(os.listdir("/app/lessons")) if n.endswith(".wiret")] + ["examples/demo.wiret"]
+`).toJs();
+  for (const f of files) {
+    const name = f.split("/").pop().replace(".wiret", "").replace(/^(\d+)_/, "$1. ").replace(/_/g, " ");
+    $("lesson").add(new Option(name, f));
+  }
+  $("lesson").onchange = () => {
+    stop();
+    $("src").value = py.FS.readFile("/app/" + $("lesson").value, { encoding: "utf8" });
+    $("src").scrollTop = 0;
+    breakpoints.clear();
+    undoStack.length = redoStack.length = 0;
+    counts = fault = null;
+    graphName = selected = null;
+    showTab("source");
+    showOutput([]);
+    recheck();
+    say("Press Run (F5) to run the program, or Step (F11) to go through it one node at a time. " +
+        "To set a breakpoint, click the circle at a node's top-left corner or beside its line number.");
+  };
+  $("lesson").disabled = false;
+  $("ready").textContent = `Python ${py.runPython("sys.version.split()[0]")} · ready in ${((performance.now() - t0) / 1000).toFixed(1)} s`;
+  $("lesson").onchange();
+  setButtons();
+}
+
+function recheck() {
+  const r = JSON.parse(api.check($("src").value));
+  const parsed = !r.diags.some((d) => d.code === "parse");
+  if (parsed) { nodes = r.nodes; graphs = r.graphs; }
+  lineNodes = new Map();
+  for (const [g, ns] of Object.entries(nodes)) for (const [n, i] of Object.entries(ns)) lineNodes.set(i.line, [g, n]);
+  problems = r.diags;
+  renderProblems();
+  renderGutter();
+  renderHighlights();
+  renderGraphList();
+  if (graphName && graphs.some((g) => g.name === graphName)) {
+    if (parsed) gv.setGraph(graph(), true);            // same graph, edited: keep the view
+    updateGraph();
+  } else {
+    showGraph(graphs.find((g) => g.name === "Main")?.name ?? graphs[0]?.name ?? null);
+  }
+}
+
+// ---------- the graph ----------
+const graph = () => graphs.find((g) => g.name === graphName) ?? null;
+
+function renderGraphList() {
+  const sel = $("graphsel");
+  const want = graphs.map((g) => `${g.kind} ${g.name}`).join("\n");
+  if (sel.dataset.list === want) return;
+  sel.dataset.list = want;
+  sel.replaceChildren(...graphs.map((g) => new Option(`${g.kind} ${g.name}`, g.name)));
+  if (graphName) sel.value = graphName;
+}
+
+function showGraph(name) {
+  if (!name || !graphs.some((g) => g.name === name)) return;
+  if (name !== graphName) selected = null;
+  graphName = name;
+  $("graphsel").value = name;
+  gv.setGraph(graph());
+  updateGraph();
+}
+
+/** Redraw the canvas's marks: selection, breakpoints, run counts, the fault, and at a pause
+ *  the node that runs next and the values on the wires. */
+function updateGraph() {
+  const st = { selected, breakpoints: new Set(), counts: counts?.[graphName] ?? null,
+               fault: fault?.graph === graphName ? fault.node : null };
+  for (const k of breakpoints) {
+    const [g, n] = k.split("\t");
+    if (g === graphName) st.breakpoints.add(n);
+  }
+  const f = selectedFrame();
+  if (f && f.graph === graphName) { st.current = f.node; st.values = f.pins; }
+  gv.setState(st);
+}
+
+function selectNode(id, from) {
+  selected = id;
+  updateGraph();
+  renderHighlights();
+  if (!id) return;
+  const info = nodes[graphName]?.[id];
+  if (from === "graph" && info) scrollToLine(info.line);
+  const n = graph()?.nodes.find((x) => x.id === id);
+  const issues = problems.filter((d) => d.graph === graphName && d.node === id).map((d) => d.explain || d.message);
+  const opens = n?.opens ? ` Double-click it to open ${n.opens}.` : "";
+  const what = n?.description ? ` ${n.description}` : "";
+  say(issues.length ? `${id}: ${issues.join(" ")}` :
+      `${id}${info?.what ? ` (${info.what})` : ""}${info ? `, line ${info.line}` : ""}.${what}${opens}`, issues.length > 0);
+}
+
+$("graphsel").onchange = () => showGraph($("graphsel").value);
+$("fit").onclick = () => gv.fit(true);
+$("zoomin").onclick = () => gv.zoom(1.25);
+$("zoomout").onclick = () => gv.zoom(1 / 1.25);
+$("undo").onclick = undo;
+$("addnode").onclick = () => { const [w, a] = gv.middle(); openPalette(w, a, null); };
+$("redo").onclick = redo;
+
+// ---------- tabs ----------
+function showTab(name) {
+  for (const t of ["source", "debugger", "problems"]) {
+    $(`tab-${t}`).setAttribute("aria-selected", t === name);
+    $(`pane-${t}`).hidden = t !== name;
+  }
+  if (name === "source") syncScroll();
+}
+for (const t of ["source", "debugger", "problems"]) $(`tab-${t}`).onclick = () => showTab(t);
+
+// ---------- running and stepping ----------
+async function start(mode) {
+  if (busy) return;
+  stop();
+  setBusy(true);
+  try {
+    await record(mode);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function setBusy(on) {
+  busy = on;
+  document.body.dataset.busy = on ? "1" : "";
+  setButtons();
+}
+
+async function record(mode) {
+  const animate = mode === "run" && $("animate").checked;
+  const debugging = mode !== "run" || animate || breakpoints.size > 0;
+  say(debugging ? "Recording the run…" : "Running…");
+  await new Promise((r) => setTimeout(r, 20));          // let the message paint
+  const t0 = performance.now();
+  const r = JSON.parse(api.debug_run($("src").value, "Main", $("det").checked, FUEL,
+                                     debugging ? 5000 : 0));
+  const ms = Math.round(performance.now() - t0);
+  problems = r.diags; renderProblems();
+  if (r.diags.some((d) => d.severity === "error")) {   // did not compile
+    showOutput([["err", "The program has problems, so it did not run. See Problems."]]);
+    say("The program has problems, so it did not run. Their nodes are marked with a red !.", true);
+    showTab("problems");
+    return;
+  }
+  nodes = r.nodes;
+  trace = r; trace.ms = ms;
+  counts = null; fault = null;
+  shownDebugger = false;
+  if (!debugging) return finish();
+  $("src").readOnly = true;                            // the recording is of this text
+  session = new Session(trace, breakpoints);
+  if (animate) return animateNext();
+  move(mode);
+}
+
+function move(mode) {
+  if (!session) return;
+  clearTimeout(timer); timer = null;
+  const r = session.advance(mode);
+  if (!r) return finish();
+  frameSel = -1;
+  show(r);
+}
+
+function animateNext() {
+  const r = session.advance("animate");
+  if (!r) return finish();
+  frameSel = -1;
+  show(r);
+  if (!r.paused) timer = setTimeout(animateNext, +$("speed").value);
+}
+
+function back() {
+  if (!session) return;
+  clearTimeout(timer); timer = null;
+  if (!session.back()) return;
+  counts = fault = null;
+  $("src").readOnly = true;
+  renderGutter();
+  frameSel = -1;
+  show({ paused: true, breakpoint: false });
+}
+
+function finish() {
+  clearTimeout(timer); timer = null;
+  const r = trace;
+  counts = r.counts; fault = r.fault;
+  const lines = r.output.map((l) => ["", l]);
+  if (r.ok) {
+    if (r.result && r.result !== "(no results)") lines.push(["okc", `Finished: ${r.result}`]);
+    lines.push(["note", `(finished in ${r.ms} ms)`]);
+    say("The program finished. Green outlines show which nodes ran, and how often." +
+        (r.truncated ? " The run was too long to record all of it, so stepping stopped early." : ""));
+  } else {
+    lines.push(["err", r.explain || r.error]);
+    if (r.explain && r.error && r.explain !== r.error) lines.push(["note", r.error]);
+    say(r.explain || r.error, true);
+  }
+  showOutput(lines);
+  $("src").readOnly = false;
+  renderDebugger();
+  renderGutter();
+  renderHighlights();
+  if (fault && fault.graph !== graphName) showGraph(fault.graph);
+  updateGraph();
+  if (fault) { gv.reveal(fault.node); scrollToLine(lineOf(fault.graph, fault.node)); }
+  setButtons();
+}
+
+function stop() {
+  clearTimeout(timer); timer = null;
+  session = null; trace = null; frameSel = -1;
+  $("src").readOnly = false;
+  renderDebugger();
+  renderHighlights();
+  updateGraph();
+  setButtons();
+}
+
+// ---------- showing a pause ----------
+function show(r) {
+  const s = session.current;
+  showOutput(trace.output.slice(0, s.out).map((l) => ["", l]));
+  const what = nodes[s.graph]?.[s.node]?.what;
+  if (r.paused) {
+    const why = breakpoints.has(nodeKey(s)) ? " (breakpoint)" : "";
+    const inputs = s.phase === "ready" ? "Its inputs are shown on the wires."
+                                       : "Its inputs haven't been worked out yet; Step to compute them.";
+    say(`Paused${why} just before ${s.node}${what ? ` (${what})` : ""} in ${s.graph} runs. ${inputs} ` +
+        "Step runs one node; Over runs calls in one go; Run continues.");
+    if (!shownDebugger) { shownDebugger = true; showTab("debugger"); }
+  } else {
+    say(`Animating: ${s.node}${what ? ` (${what})` : ""} in ${s.graph}.`);
+  }
+  renderDebugger();
+  showFrame();
+  setButtons();
+}
+
+/** Bring the selected frame's graph and node into view, on the canvas and in the source. */
+function showFrame() {
+  const f = selectedFrame();
+  if (!f) return;
+  if (f.graph !== graphName) showGraph(f.graph);
+  updateGraph();
+  gv.reveal(f.node);
+  renderHighlights();
+  const line = lineOf(f.graph, f.node);
+  if (line) scrollToLine(line);
+}
+
+const lineOf = (g, n) => nodes[g]?.[n]?.line ?? null;
+const selectedFrame = () => {
+  const s = session?.current;
+  if (!s) return null;
+  const i = frameSel < 0 ? s.frames.length - 1 : frameSel;
+  return trace.frame_table[s.frames[i]];
+};
+
+function renderDebugger() {
+  const body = $("dbg-body");
+  const s = session?.current;
+  if (!s) {
+    body.replaceChildren(el("div", "empty", "Step through a program (F11) to see its call stack, variables and wire values here."));
+    return;
+  }
+  const frames = s.frames.map((i) => trace.frame_table[i]);
+  const sel = frameSel < 0 ? frames.length - 1 : frameSel;
+  const f = frames[sel];
+  const stack = el("ul"); stack.id = "stack";
+  for (let i = frames.length - 1; i >= 0; i--) {
+    const li = el("li", i === sel ? "sel" : "", `${frames[i].graph}  ·  ${frames[i].node}`);
+    li.onclick = () => { frameSel = i; renderDebugger(); showFrame(); };
+    stack.append(li);
+  }
+  const table = (rows, empty) => {
+    if (!rows.length) return el("div", "empty", empty);
+    const t = el("table");
+    for (const [k, v, title] of rows) {
+      const tr = el("tr");
+      const kc = el("td", "k", k); if (title) kc.title = title;
+      tr.append(kc, el("td", "v", v));
+      t.append(tr);
+    }
+    return t;
+  };
+  const vars = f.vars.map(([n, kind, ty, v]) => [n, v, `${kind} ${ty}`])
+    .concat(trace.globals_table[s.globals].map(([n, ty, v]) => [n, v, `variable ${ty}`]));
+  const order = (k) => lineOf(f.graph, k.split(".")[0]) ?? 1e9;
+  const pins = Object.entries(f.pins).sort((a, b) => order(a[0]) - order(b[0]) || a[0].localeCompare(b[0]));
+  body.replaceChildren(
+    el("h3", "", "Call stack"), stack,
+    el("h3", "", "Variables"), table(vars, "none"),
+    el("h3", "", "Wire values"), table(pins, "none"));
+}
+
+function showOutput(lines) {
+  if (!lines.length) { $("out").replaceChildren(el("div", "empty", "Nothing yet.")); return; }
+  $("out").replaceChildren(...lines.map(([cls, t]) => el("div", cls, t)));
+  $("out").scrollTop = $("out").scrollHeight;
+}
+
+function say(text, error = false) {
+  $("msg").textContent = text;
+  $("msg").className = error ? "err" : "";
+}
+
+function setButtons() {
+  const ready = !!api && !busy, live = !!session && !session.finished;
+  $("run").disabled = $("step").disabled = $("over").disabled = $("lesson").disabled = !ready;
+  $("run").textContent = live ? "▶ Continue" : "▶ Run";
+  $("back").disabled = busy || !session || session.history.length === 0 || session.history.at(-1)[0] < 0;
+  $("stop").disabled = busy || !trace;
+  $("undo").disabled = busy || !undoStack.length;
+  $("redo").disabled = busy || !redoStack.length;
+}
+
+// ---------- the source editor ----------
+function renderGutter() {
+  const n = $("src").value.split("\n").length;
+  const rows = [];
+  for (let line = 1; line <= n; line++) {
+    const row = el("div", "gl");
+    const gn = lineNodes.get(line);
+    const dot = el("span", "dot");
+    const count = el("span", "count");
+    if (gn) {
+      const key = `${gn[0]}\t${gn[1]}`;
+      row.classList.add("node");
+      if (breakpoints.has(key)) row.classList.add("bp");
+      row.title = `${gn[1]} in ${gn[0]}: click to ${breakpoints.has(key) ? "remove the" : "set a"} breakpoint`;
+      row.onclick = () => toggleBreakpoint(key);
+      const c = counts?.[gn[0]]?.[gn[1]];
+      if (c) { count.textContent = c > 999 ? "1k+" : c; count.title = `ran ${c} time${c === 1 ? "" : "s"}`; }
+    }
+    row.append(dot, el("span", "num", line), count);
+    rows.push(row);
+  }
+  $("gutter").replaceChildren(...rows);
+  syncScroll();
+}
+
+function toggleBreakpoint(key) {
+  breakpoints.has(key) ? breakpoints.delete(key) : breakpoints.add(key);
+  renderGutter();
+  updateGraph();
+}
+
+/** The strips behind the source: problems, the fault, the selected node and the pause. */
+function renderHighlights() {
+  const strips = [];
+  for (const d of problems) {
+    const line = d.line ?? (d.graph && d.node ? lineOf(d.graph, d.node) : null);
+    if (line && d.severity === "error") strips.push([line, "bad"]);
+  }
+  if (fault && !(session && !session.finished)) {
+    const line = lineOf(fault.graph, fault.node);
+    if (line) strips.push([line, "bad"]);
+  }
+  const sl = selected ? lineOf(graphName, selected) : null;
+  if (sl) strips.push([sl, "sel"]);
+  const f = selectedFrame();
+  const cl = f ? lineOf(f.graph, f.node) : null;
+  if (cl) strips.push([cl, frameSel < 0 || frameSel === session.current.frames.length - 1 ? "cur" : "frame"]);
+  $("hl").replaceChildren(...strips.map(([line, cls]) => {
+    const d = el("div", cls);
+    d.dataset.line = line;
+    return d;
+  }));
+  syncScroll();
+}
+
+function syncScroll() {
+  const top = $("src").scrollTop;
+  $("gutter").style.transform = `translateY(${-top}px)`;
+  for (const d of $("hl").children) d.style.top = `${PAD + (d.dataset.line - 1) * LH - top}px`;
+}
+
+function scrollToLine(line) {
+  if (!line) return;
+  const ta = $("src"), y = PAD + (line - 1) * LH;
+  if (y < ta.scrollTop + LH || y > ta.scrollTop + ta.clientHeight - 2 * LH) {
+    ta.scrollTop = Math.max(0, y - ta.clientHeight / 3);
+  }
+}
+
+function renderProblems() {
+  const ul = $("problems");
+  const errors = problems.filter((d) => d.severity === "error").length;
+  $("tab-problems").textContent = problems.length ? `Problems (${problems.length})` : "Problems";
+  $("tab-problems").classList.toggle("err", errors > 0);
+  if (!problems.length) { ul.replaceChildren(el("li", "empty", "No problems.")); return; }
+  ul.replaceChildren(...problems.map((d) => {
+    const line = d.line ?? (d.graph && d.node ? lineOf(d.graph, d.node) : null);
+    const li = el("li", d.severity === "error" ? "err" : "warn",
+                  `${line ? `Line ${line}: ` : ""}${d.explain || d.message}`);
+    li.title = d.message;
+    li.onclick = () => {
+      if (d.graph && d.node) { showGraph(d.graph); selectNode(d.node); gv.reveal(d.node); }
+      if (line) { showTab("source"); scrollToLine(line); placeCaret(line); }
+    };
+    return li;
+  }));
+}
+
+function placeCaret(line) {
+  const ta = $("src");
+  const lines = ta.value.split("\n");
+  const pos = lines.slice(0, line - 1).reduce((a, l) => a + l.length + 1, 0);
+  ta.focus();
+  ta.setSelectionRange(pos, pos);
+}
+
+/** Moving the text cursor onto a node's line selects that node on the canvas. */
+function caretMoved() {
+  const ta = $("src");
+  const gn = lineNodes.get(ta.value.slice(0, ta.selectionStart).split("\n").length);
+  if (!gn) return;
+  if (gn[0] !== graphName) showGraph(gn[0]);
+  if (selected !== gn[1]) { selectNode(gn[1], "text"); gv.reveal(gn[1]); }
+}
+
+let checkJob = null;
+$("src").addEventListener("input", () => {
+  if (trace) stop();                                   // the last run was of other text
+  counts = fault = null;
+  renderGutter();
+  clearTimeout(checkJob);
+  checkJob = setTimeout(recheck, 350);
+});
+$("src").addEventListener("scroll", syncScroll);
+$("src").addEventListener("click", caretMoved);
+$("src").addEventListener("keyup", (e) => { if (e.key.startsWith("Arrow") || e.key.startsWith("Page")) caretMoved(); });
+$("src").addEventListener("keydown", (e) => {
+  if (e.key === "Tab" && !$("src").readOnly) {
+    e.preventDefault();
+    document.execCommand("insertText", false, "  ");
+  }
+});
+
+// ---------- controls ----------
+function runOrContinue() { session && !session.finished ? move("run") : start("run"); }
+function stepMode(mode) { session && !session.finished ? move(mode) : start(mode); }
+$("run").onclick = runOrContinue;
+$("step").onclick = () => stepMode("step");
+$("over").onclick = () => stepMode("over");
+$("back").onclick = back;
+$("stop").onclick = () => { stop(); say("Stopped. You can edit the program again."); };
+
+document.addEventListener("keydown", (e) => {
+  if (!api || busy) return;
+  const k = e.key;
+  let act = null;
+  if (k === "F5" && e.shiftKey) act = () => $("stop").click();
+  else if (k === "F5" || (k === "Enter" && (e.ctrlKey || e.metaKey))) act = runOrContinue;
+  else if (k === "F10") act = () => stepMode("over");
+  else if (k === "F11" && e.shiftKey) act = back;
+  else if (k === "F11") act = () => stepMode("step");
+  else if ((e.ctrlKey || e.metaKey) && !["TEXTAREA", "INPUT"].includes(document.activeElement?.tagName)
+           && (k === "z" || k === "Z" || k === "y")) {
+    act = (k === "y" || e.shiftKey) ? redo : undo;
+  }
+  else if (k === "F9") act = () => {
+    const ta = $("src");
+    if (document.activeElement === ta) {
+      const gn = lineNodes.get(ta.value.slice(0, ta.selectionStart).split("\n").length);
+      if (gn) toggleBreakpoint(`${gn[0]}\t${gn[1]}`);
+    } else if (selected) {
+      toggleBreakpoint(`${graphName}\t${selected}`);
+    }
+  };
+  if (act) { e.preventDefault(); act(); }
+});
+
+boot().catch((e) => {
+  $("ready").textContent = "failed to load";
+  say(`The page could not load Python: ${e}`, true);
+  console.error(e);
+});
+</script>
+</body>
+</html>

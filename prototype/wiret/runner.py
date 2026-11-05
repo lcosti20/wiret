@@ -6,16 +6,42 @@ from typing import Optional
 from .model import Lit, Module
 from .natives import float_to_text
 from .parser import ParseError, Parser, parse_literal
-from .registry import FLOAT_TYPES, array_elem, lit_fits
+from .registry import (FLOAT_TYPES, ModuleIndex, array_elem, enum_values, is_container,
+                       lit_fits, map_types, set_elem)
 
 
-def lit_value(lit: Lit, ty: str, name: str):
-    """A Python value for a literal argument of type `ty` (arrays from `[a, b, ...]`)."""
+def lit_value(lit: Lit, ty: str, name: str, idx: Optional[ModuleIndex] = None):
+    """A Python value for a literal argument of type `ty`: arrays and sets from `[a, b, ...]`,
+    maps from `{k: v, ...}`, enum members as `Mode.Chase`. Structs cannot be typed as an
+    argument."""
     elem = array_elem(ty)
     if elem is not None:
         if lit.kind != "list":
             raise ValueError(f"argument {name}: write an array as [1, 2, 3]")
-        return tuple(lit_value(x, elem, name) for x in lit.value)
+        return tuple(lit_value(x, elem, name, idx) for x in lit.value)
+    elem = set_elem(ty)
+    if elem is not None:
+        if lit.kind != "list":
+            raise ValueError(f"argument {name}: write a set as [1, 2, 3]")
+        return {lit_value(x, elem, name, idx): None for x in lit.value}
+    kv = map_types(ty)
+    if kv is not None:
+        if lit.kind == "list" and not lit.value:
+            return {}
+        if lit.kind != "map":
+            raise ValueError(f"argument {name}: write a map as {{\"a\": 1, \"b\": 2}}")
+        return {lit_value(k, kv[0], name, idx): lit_value(v, kv[1], name, idx)
+                for k, v in lit.value}
+    if idx is not None and ty in idx.structs:
+        raise ValueError(f"argument {name}: a {ty} struct cannot be typed as an argument; "
+                         f"call a function that makes one instead")
+    if idx is not None and ty in idx.enums:
+        values = dict(enum_values(idx.enums[ty]))
+        member = lit.value.split(".", 1)[1] if lit.kind == "enum" else None
+        if not lit_fits(lit, ty) or member not in values:
+            names = ", ".join(f"{ty}.{m}" for m in values)
+            raise ValueError(f"argument {name}: write one of {names}")
+        return values[member]
     if not lit_fits(lit, ty):
         raise ValueError(f"argument {name}: {lit.value!r} is not a {ty}")
     if ty == "bool":
@@ -33,16 +59,17 @@ def parse_args_for(m: Module, func: str, texts: list) -> list:
         sig = ", ".join(f"{p.name}: {p.type}" for p in g.params)
         raise ValueError(f"{func}({sig}) takes {len(g.params)} argument(s), got {len(texts)}")
     out = []
+    idx = ModuleIndex(m)
     for p, t in zip(g.params, texts):
         try:
-            if array_elem(p.type) is not None:
+            if is_container(p.type):
                 parser = Parser(t)
                 lit = parser.value()
             else:
                 lit = parse_literal(t if p.type != "string" or t.startswith('"') else f'"{t}"')
         except ParseError as e:
             raise ValueError(f"argument {p.name}: {e.msg}")
-        out.append(lit_value(lit, p.type, p.name))
+        out.append(lit_value(lit, p.type, p.name, idx))
     return out
 
 
@@ -66,10 +93,44 @@ def split_args(text: str) -> list:
     return out
 
 
-def format_value(ty: Optional[str], v) -> str:
+def format_value(ty: Optional[str], v, idx: Optional[ModuleIndex] = None) -> str:
+    """A value as text: `Vec2 { x: 1.0, y: 1.5 }` for a struct and `Mode.Chase` for an enum
+    when `idx` knows the type; without it, a struct shows as a list of its field values."""
+    if v is None and (ty is None or idx is None or ty in idx.classes):
+        return "null"
+    if hasattr(v, "cls") and hasattr(v, "fields"):          # a class instance (vm.Obj)
+        names = v.cls.field_names
+        if idx is not None and v.cls.name in idx.classes:
+            types = [f.type for _, f in idx.class_fields(v.cls.name)]
+        else:
+            types = [None] * len(names)
+        inner = ", ".join(f"{n}: {format_value(t, x, idx) if not hasattr(x, 'cls') else '<' + x.cls.name + '>'}"
+                          for n, t, x in zip(names, types, v.fields))
+        return f"{v.cls.name} {{ {inner} }}" if inner else f"{v.cls.name} {{}}"
+    if idx is not None and ty in idx.structs and isinstance(v, tuple):
+        fields = idx.structs[ty].fields
+        inner = ", ".join(f"{f.name}: {format_value(f.type, x, idx)}" for f, x in zip(fields, v))
+        return f"{ty} {{ {inner} }}" if inner else f"{ty} {{}}"
+    if idx is not None and ty in idx.enums:
+        base = idx.enum_base(ty)
+        for name, value in enum_values(idx.enums[ty]):
+            if format_value(base, value) == format_value(base, v):
+                return f"{ty}.{name}"
+        return f"{ty}({format_value(base, v)})"   # Convert does not check membership
+    if isinstance(v, dict):           # a map {k: v} or a set {a, b}
+        kv = map_types(ty) if ty else None
+        if kv is None and set_elem(ty or "") is None:
+            is_map = any(x is not None for x in v.values())   # untyped: set values are None
+        else:
+            is_map = kv is not None
+        if is_map:
+            k_ty, v_ty = kv or (None, None)
+            return "{" + ", ".join(f"{format_value(k_ty, k, idx)}: {format_value(v_ty, x, idx)}"
+                                   for k, x in v.items()) + "}"
+        return "{" + ", ".join(format_value(set_elem(ty or ""), x, idx) for x in v) + "}"
     elem = array_elem(ty) if ty else None
-    if elem is not None or isinstance(v, tuple):
-        return "[" + ", ".join(format_value(elem, x) for x in v) + "]"
+    if elem is not None or isinstance(v, (tuple, list)):
+        return "[" + ", ".join(format_value(elem, x, idx) for x in v) + "]"
     if ty == "bool":
         return "true" if v else "false"
     if ty == "string":
@@ -89,4 +150,41 @@ def format_results(m: Optional[Module], func: str, values: list) -> str:
         return ", ".join(str(v) for v in values) if values else "(no results)"
     if not g.result_list:
         return "(no results)"
-    return ", ".join(f"{r.name} = {format_value(r.type, v)}" for r, v in zip(g.result_list, values))
+    idx = ModuleIndex(m)
+    return ", ".join(f"{r.name} = {format_value(r.type, v, idx)}"
+                     for r, v in zip(g.result_list, values))
+
+
+MAX_ADVANCES = 100_000
+
+
+def run_function(vm, lm, func: str, args: list) -> list:
+    """Call `func` and return its results. A latent function or event runs as a fiber (section
+    4.5): idle virtual time is skipped, each wait jumping straight to the next timer, so a
+    `Delay` of five seconds finishes at once. Stops with WR_YIELD if it waits for a signal
+    that nothing can fire any more."""
+    from .vm import (FIBER_DONE, FIBER_FAULTED, FIBER_READY, STATUS_FUEL, STATUS_YIELD,
+                     WiretError)
+    from .wbc import FN_LATENT
+    f = lm.funcs[lm.exports[func]] if func in lm.exports else None
+    owner = func.rpartition(".")[0]
+    if f is not None and owner in lm.classes and len(args) == len(f.params) - 1:
+        args = [vm.new(lm, owner)] + list(args)    # a method runs on a new object
+    if f is None or not f.flags & FN_LATENT:
+        return vm.call(lm, func, args)
+    fb = vm.start(lm, func, args, now=True)
+    for _ in range(MAX_ADVANCES):
+        if fb.status == FIBER_DONE:
+            return fb.results
+        if fb.status == FIBER_FAULTED:
+            raise fb.error
+        nxt = vm.next_wake()
+        if any(x.status == FIBER_READY for x in vm.fibers):
+            vm.advance(0.0)
+        elif nxt is not None:
+            vm.advance(max(nxt - vm.time, 0.0))
+        else:
+            raise WiretError(STATUS_YIELD, f"'{func}' is waiting for a signal that nothing will "
+                                           f"fire")
+    raise WiretError(STATUS_FUEL, f"'{func}' was still running after {MAX_ADVANCES} steps of "
+                                  f"virtual time")

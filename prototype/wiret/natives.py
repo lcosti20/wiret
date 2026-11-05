@@ -11,8 +11,61 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 
 
+class CArray(list):
+    """An array value (section 4.9): a list plus the copy-on-write `shared` flag."""
+    __slots__ = ("shared",)
+
+    def __init__(self, items=(), shared=False):
+        super().__init__(items)
+        self.shared = shared
+
+
+class CMap(dict):
+    """A map, or a set (its values are None): an insertion-ordered dict plus `shared`."""
+    __slots__ = ("shared",)
+
+    def __init__(self, items=(), shared=False):
+        super().__init__(items)
+        self.shared = shared
+
+
 class NativeFault(Exception):
-    """Raised by a native to report a fault to the VM."""
+    """Raised by a native to report a fault to the VM. `code` is the fault code (section 4.6);
+    -6 means an error from a native."""
+
+    def __init__(self, message: str, code: int = -6):
+        super().__init__(message)
+        self.code = code
+
+
+class Signal:
+    """A value of type `std.Signal` (section 4.5): fibers `Await` it and resume, in the order
+    they began waiting, when it is fired. Equality is identity."""
+    __slots__ = ("waiters",)
+
+    def __init__(self):
+        self.waiters = []
+
+    def __repr__(self):
+        return f"<signal {id(self):x}, {len(self.waiters)} waiting>"
+
+
+def _signal_fire(vm, s):
+    if s is None:
+        raise NativeFault("Fire on a null signal", -3)
+    vm.fire(s)
+    return ()
+
+
+@dataclass(frozen=True)
+class FaultValue:
+    """A value of type `fault` (section 4.6): what `try.push` stores in its local and `throw`
+    raises."""
+    message: str
+    code: int
+
+
+NO_FAULT = FaultValue("", 0)
 
 
 @dataclass
@@ -22,6 +75,12 @@ class NativeSpec:
     purity: str             # pure | reads | impure
     fn: Optional[Callable]  # fn(vm, *args) -> tuple of results
     doc: str = ""
+    cost: Optional[Callable] = None  # cost(*args) -> fuel beyond the call's own (section 5.7)
+    capability: Optional[str] = None  # what an import of it must be granted (section 6.5)
+    # WR_NATIVE_DETERMINISTIC (section 6.6): the same arguments and VM state give the same
+    # results. A native that reads a clock, input or files is not, and a deterministic VM
+    # refuses it (section 4.10).
+    deterministic: bool = True
 
 
 def _f32(x: float) -> float:
@@ -81,6 +140,38 @@ def _pow(_vm, a, b):
         return (math.inf if a > 0 else math.nan,)
 
 
+def values_equal(a, b) -> bool:
+    """`Eq` on two values of one type, as the VM stores them (section 4.9). An array or a
+    struct is a tuple and compares element-wise, each element with its own equality, so NaN
+    is never equal and a container holding NaN is not equal to itself. A map or a set is a
+    dict and ignores insertion order: the same keys (keys match as in a lookup, so the one NaN
+    key matches itself), and for a map equal values under each key."""
+    if isinstance(a, (tuple, list)):
+        return len(a) == len(b) and all(values_equal(x, y) for x, y in zip(a, b))
+    if isinstance(a, dict):
+        return len(a) == len(b) and all(k in b and values_equal(v, b[k]) for k, v in a.items())
+    return a == b
+
+
+def value_size(v) -> int:
+    """How many elements, entries and fields `values_equal` may visit."""
+    if isinstance(v, (tuple, list)):
+        return len(v) + sum(value_size(x) for x in v if isinstance(x, (tuple, list, dict)))
+    if isinstance(v, dict):
+        return len(v) + sum(value_size(x) for x in v.values()
+                            if isinstance(x, (tuple, list, dict)))
+    return 0
+
+
+def _equals(_vm, a, b):
+    return (int(values_equal(a, b)),)
+
+
+def _equals_cost(a, b) -> int:
+    """1 fuel per 8 elements visited, like allocation; nothing when the lengths differ."""
+    return 0 if len(a) != len(b) else min(value_size(a), value_size(b)) >> 3
+
+
 def _log(vm, message):
     vm.output(message)
     return ()
@@ -118,6 +209,13 @@ STD: dict[str, NativeSpec] = {
                                      lambda _vm, s: (s.lower(),)),
     "std.string.Repeat": NativeSpec([("s", "string"), ("count", "i32")], [("result", "string")],
                                     "pure", lambda _vm, s, n: (s * max(0, n),)),
+    # Signals (section 4.5). New is impure because each call makes a new identity.
+    "std.signal.New": NativeSpec([], [("signal", "std.Signal")], "impure",
+                                 lambda _vm: (Signal(),),
+                                 "Make a new signal that fibers can Await."),
+    "std.signal.Fire": NativeSpec([("signal", "std.Signal")], [], "impure", _signal_fire,
+                                  "Wake every fiber waiting on the signal. They run on the "
+                                  "next advance of time."),
 }
 
 # Natives the compiler calls on its own to lower `Convert<X, string>` and float `Rem`.
@@ -142,11 +240,27 @@ INTERNAL: dict[str, NativeSpec] = {
                                   lambda _vm, a, b: (math.fmod(a, b) if b else math.nan,)),
 }
 
+# `Throw` makes a fault from its message and code, and `Try` reads them back (section 4.6).
+INTERNAL["std.fault.Make"] = NativeSpec([("message", "string"), ("code", "i32")],
+                                        [("fault", "fault")], "pure",
+                                        lambda _vm, m, c: (FaultValue(m, c),))
+INTERNAL["std.fault.Message"] = NativeSpec([("fault", "fault")], [("message", "string")], "pure",
+                                           lambda _vm, f: (f.message,))
+INTERNAL["std.fault.Code"] = NativeSpec([("fault", "fault")], [("code", "i32")], "pure",
+                                        lambda _vm, f: (f.code,))
+
+# `Eq` and `Ne` on containers (section 4.9). One native per container kind, taking anyref so
+# that one signature serves every element type; the native reads the values it is given.
+for _kind in ("array", "set", "map"):
+    INTERNAL[f"std.{_kind}.Equals"] = NativeSpec(
+        [("a", "anyref"), ("b", "anyref")], [("r", "bool")], "pure", _equals,
+        f"True when two {_kind}s are equal.", cost=_equals_cost)
+
 # Host natives the reference runtime registers. A module reaches them only through
 # `extern func` declarations, whose signatures must match.
 HOST: dict[str, NativeSpec] = {
     "host.Log": NativeSpec([("message", "string")], [], "impure", _log,
-                           "Write a line to the console."),
+                           "Write a line to the console.", capability="console.write"),
 }
 
 
