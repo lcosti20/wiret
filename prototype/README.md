@@ -1,9 +1,10 @@
 # Wiret prototype
 
 A Python prototype of the Wiret graph editor, compiler and runtime, built against
-[`docs/reference.md`](../docs/reference.md) (Draft 0.7). It targets **Tier 0** of the spec
-(section 1.6) plus a few Tier 1 conveniences. It uses only the Python standard library; the
-editor uses Tkinter.
+[`docs/reference.md`](../docs/reference.md) (Draft 0.7). It implements **Tier 0** and **Tier 1**
+of the spec (section 1.6), except structural `Eq` on arrays, maps and sets (see *Deviations and
+known gaps*). It uses only the Python standard library; the editor uses Tkinter, and the Git
+commands need `git`.
 
 ```
 graph editor  <->  demo.wiret  --compile-->  demo.wbc  --load/verify/link-->  VM
@@ -18,7 +19,7 @@ cd prototype
 python3 wiret_editor.py                         # the editor, opening Lesson 1
 python3 wiret_editor.py examples/demo.wiret     # the editor on a larger example
 python3 wiretc.py run examples/demo.wiret Main  # the same program from the command line
-python3 -m unittest discover tests              # 142 tests
+python3 -m unittest discover tests              # 147 tests
 ```
 
 ## Building a desktop app
@@ -177,6 +178,7 @@ The editor also follows the graph-editor contract in section 7.5:
 | `hash FILE` | Semantic and layout hashes |
 | `view --flow FILE` | Reading view with nodes and `flow` wires in flow order |
 | `schema --json` | The node registry |
+| `diff [--raw] A B` | Node-aware semantic diff in flow order: behaviour per graph, then metadata, then layout-only changes. `--raw` is the id-ordered text diff. Exits 1 when the files differ |
 | `merge BASE OURS THEIRS [-o OUT]` | Keyed three-way merge (section 7.1); the Git merge driver. Writes OURS unless `-o` is given; exits 1 on a conflict |
 | `init-git` | Configure the merge driver and the flow-order `textconv` for `*.wiret`, and a union merge for `wiret.ids` |
 | `edit FILE REQUEST.json\|- [--dry-run]` | Apply JSON edit operations (section 7.2); see *Editing protocol* below |
@@ -390,7 +392,9 @@ pins for results, and flow wires for a macro's exec parameters and results.
   delegates and dispatchers, latent nodes and fibers (`Delay`, `Yield`, `Await`), and
   `Try`/`Throw`. Their node kinds are reported as `E0501` and their opcodes are rejected by
   the verifier.
-- **Not implemented:** `wiretc diff`, the rest of the
+- **Structural equality of containers.** `Eq` and `Ne` on arrays, maps and sets (section 4.9)
+  are not implemented, and so neither is `Eq` on a struct that holds one (`E0110`).
+- **Not implemented:** the rest of the
   project manager (`wiret.lock`, `use` of other modules), the C API and deterministic-mode
   float rules.
 - **Optimisation.** There is no `-O1`, so the `cont.push`/`cont.pop` pairs are never replaced

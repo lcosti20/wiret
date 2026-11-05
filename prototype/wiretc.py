@@ -10,6 +10,7 @@
   wiretc hash FILE                     semantic and layout hashes
   wiretc view --flow FILE              reading view in flow order
   wiretc schema --json                 the node registry
+  wiretc diff [--raw] A B              node-aware semantic diff in flow order
   wiretc merge BASE OURS THEIRS [-o OUT]
                                        keyed three-way merge (section 7.1); the Git driver
   wiretc init-git                      set up the merge driver, textconv and wiret.ids union
@@ -41,7 +42,8 @@ from wiret.vm import VM, WiretError  # noqa: E402
 
 
 def load(path):
-    text = open(path, encoding="utf-8").read()
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
     try:
         return parse(text), text
     except ParseError as e:
@@ -128,6 +130,10 @@ def main(argv=None):
     p.add_argument("file")
     p = sub.add_parser("schema")
     p.add_argument("--json", action="store_true", required=True)
+    p = sub.add_parser("diff")
+    p.add_argument("a")
+    p.add_argument("b")
+    p.add_argument("--raw", action="store_true", help="the id-ordered text diff instead")
     p = sub.add_parser("merge")
     p.add_argument("base")
     p.add_argument("ours")
@@ -181,6 +187,15 @@ def main(argv=None):
             with open(a.file, "w", encoding="utf-8", newline="\n") as f:
                 f.write(out)
         return 0
+    if a.cmd == "diff":
+        from wiret.diff import raw_diff, semantic_diff
+        (ma, ta), (mb, tb) = load(a.a), load(a.b)
+        if a.raw:
+            out = raw_diff(print_module(ma), print_module(mb), a.a, a.b)
+        else:
+            out = semantic_diff(ma, mb)
+        print(out, end="")
+        return 1 if out else 0
     if a.cmd == "merge":
         from wiret.merge import merge_texts
         texts = []

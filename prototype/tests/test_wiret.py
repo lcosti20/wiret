@@ -2293,6 +2293,76 @@ class MergeTests(unittest.TestCase):
             self.assertNotEqual(shown, raw)
 
 
+class DiffTests(unittest.TestCase):
+    """wiretc diff (section 7): behaviour first, then metadata, then layout."""
+
+    def diff(self, a, b):
+        from wiret.diff import semantic_diff
+        return semantic_diff(parse(a), parse(b))
+
+    def test_no_change(self):
+        self.assertEqual(self.diff(MERGE_BASE, MERGE_BASE), "")
+
+    def test_nodes_in_flow_order(self):
+        b = sub(MERGE_BASE, '.message <- "b"', '.message <- "B"')
+        b = sub(b, '    .message <- "B"\n  node entry = Entry\n',
+                '    .message <- "B"\n  node c = Call host.Log\n    .message <- "c"\n'
+                '  node entry = Entry\n')
+        b = sub(b, "    a -> b\n", "    a -> b\n    b -> c\n")
+        b = sub(b, "    .r <- twice.result\n", "    .r <- 1\n")
+        b = sub(b, "  node twice = Add::<i32>\n    .a <- entry.v\n    .b <- entry.v\n", "")
+        self.assertEqual(self.diff(MERGE_BASE, b), """func Double
+  ~ node ret: .r: twice.result -> 1
+  - node twice = Add
+func Main
+  ~ node b: .message: "b" -> "B"; exec then: (none) -> c
+  + node c = Call host.Log
+      .message <- "c"
+""")
+
+    def test_declarations(self):
+        from wiret.ids import assign_ids
+        m = parse(MERGE_BASE)
+        assign_ids(m, random.Random(9))
+        a = print_module(m)
+        b = a.replace("func Double(v: i32", "func Twice(n: i32").replace("entry.v", "entry.n")
+        b = b.replace("extern func host.Log", "var count: i32\n\nextern func host.Log")
+        out = self.diff(a, b)
+        self.assertIn("func Double -> Twice (renamed)\n  ~ param v -> n\n", out)
+        self.assertIn("+ var count\n", out)
+        self.assertIn("~ node twice: .a: entry.v -> entry.n; .b: entry.v -> entry.n", out)
+
+    def test_metadata_and_layout_are_separate(self):
+        b = sub(MERGE_BASE, "Says hello.", "Says hi.")
+        b = sub(b, "a at (100, 0)", "a at (150, 0)")
+        b = sub(b, "size (300, 100)", "size (320, 100)")
+        self.assertEqual(self.diff(MERGE_BASE, b), """metadata (does not change behaviour):
+  Main.a: - #[note("Says hello.")]
+  Main.a: + #[note("Says hi.")]
+
+layout only:
+  Main.a: (100, 0) -> (150, 0)
+  Main: box grp changed
+""")
+
+    def test_cli(self):
+        import wiretc
+        with tempfile.TemporaryDirectory() as d:
+            pa, pb = os.path.join(d, "a.wiret"), os.path.join(d, "b.wiret")
+            for path, text in ((pa, MERGE_BASE), (pb, sub(MERGE_BASE, '"a"', '"A"'))):
+                with open(path, "w", encoding="utf-8", newline="\n") as f:
+                    f.write(text)
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(wiretc.main(["diff", pa, pb]), 1)
+                self.assertEqual(wiretc.main(["diff", pa, pa]), 0)
+            self.assertIn('~ node a: .message: "a" -> "A"', out.getvalue())
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(wiretc.main(["diff", "--raw", pa, pb]), 1)
+            self.assertIn('-    .message <- "a"\n+    .message <- "A"\n', out.getvalue())
+
+
 class HashTests(unittest.TestCase):
     def test_reorder_and_layout_removal_do_not_change_semantics(self):
         text = demo()
