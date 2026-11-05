@@ -42,7 +42,10 @@ Gatekeeper warning on first launch.
 `web/` runs the same compiler and VM in the browser with [Pyodide](https://pyodide.org)
 (CPython compiled to WebAssembly). Like the desktop editor, it shows the graph on the left
 (pan, zoom, double-click a call to open it) and the Source, Debugger and Problems tabs on the
-right. The graph is read-only for now: you edit the source text. You can debug with Step (F11),
+right. On the canvas you can drag nodes and box titles to move them, drag from a pin to another
+pin (or onto a node) to wire them, click a wire or node and press Delete to remove it, and
+double-click an input to type its value; Ctrl+Z and Ctrl+Y undo and redo. Adding new nodes is
+done in the source text for now. You can debug with Step (F11),
 Over (F10), Back (Shift+F11), Run/Continue (F5), Animate and breakpoints (click the circle at a
 node's top-left corner or beside its line number, or press F9). The Tkinter modules, the Git
 commands and file watching are left out.
@@ -60,7 +63,9 @@ where the debugger could pause (up to 5,000), with the call stack, variables and
 desktop editor would: both use the rules in `wiret/debugstate.py`, and a test (which needs
 Node.js) checks they agree. The canvas (`web/graphview.js`) draws from `webapi.check`, which describes
 each graph with the same titles, pin labels, colors and automatic layout as the desktop canvas
-(`wiret/viewmodel.py`). `web/` is a static
+(`wiret/viewmodel.py`). Canvas edits go through `webapi.edit`, which applies the same rules as
+the desktop canvas (`wiret/canvasedit.py`: which pins connect, when a Convert node goes in
+between, what a typed value may be) and returns the new text in canonical form. `web/` is a static
 site, so any static host (GitHub Pages, for example) can serve it. The first visit downloads
 about 10 MB of Pyodide from the jsDelivr CDN.
 

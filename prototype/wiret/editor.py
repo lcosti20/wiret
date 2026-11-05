@@ -19,7 +19,7 @@ from collections import Counter, deque
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Optional
 
-from . import ops, palette, viewmodel
+from . import canvasedit, ops, palette, viewmodel
 from .checker import GraphInfo, check
 from .compiler import compile_module
 from .debugstate import DebugState
@@ -30,7 +30,7 @@ from .natives import STD
 from .parser import KEYWORDS, ParseError, parse, parse_literal
 from .printer import layout_hash, print_module, semantic_hash
 from .ids import assign_ids, find_project, retired_between
-from .registry import (ModuleIndex, STATIC_KINDS, can_convert, enum_values, lit_fits,
+from .registry import (ModuleIndex, STATIC_KINDS, can_convert, enum_values,
                        type_choices, type_ok)
 from .explain import explain, explain_runtime, type_words
 from .runner import format_results, format_value, parse_args_for, run_function, split_args
@@ -642,11 +642,7 @@ class EditorApp:
                 m.comments = []
         g = self.graph
         if g is not None:   # auto-placed nodes get a place line when first saved (section 2.3)
-            for n in g.nodes:
-                if g.place(n.id) is None:
-                    x, y = self.auto_pos.get((g.name, n.id), (0, 0))
-                    ops.place(g, n.id, x, y)
-            ops.prune_box_members(g)
+            canvasedit.place_unplaced(g, self.auto_pos)
         if getattr(self, "project", None) is not None:   # editors always write @id (2.4)
             assign_ids(m, retired={r.id for r in self.project.retired})
         self.last_counts, self.fault = {}, {}
@@ -818,41 +814,17 @@ class EditorApp:
     def connect(self, a, b):
         if not self.can_edit():
             return
-        (na, da, pa), (nb, db, pb) = a, b
-        if da == db:
-            self.status("Connect an output pin to an input pin.")
+        try:
+            reason = canvasedit.connect(self.graph, self.info, self.idx, a, b, self.geom)
+        except canvasedit.Refused as e:
+            self.status(str(e))
             return
-        if da == "in":
-            (na, da, pa), (nb, db, pb) = b, a
-        if na == nb:
-            self.status("A node cannot be wired to itself.")
-            return
-        sig_a, sig_b = self.info.sigs[na], self.info.sigs[nb]
-        out, inp = sig_a.output(pa), sig_b.input(pb)
-        if out is None or inp is None:
-            return
-        g = self.graph
-        if out.is_exec != inp.is_exec:
-            self.status("Exec pins connect only to exec pins (E0120).")
-            return
-        if out.is_exec:
-            single = sig_a.exec_outs[0].name if len(sig_a.exec_outs) == 1 else None
-            ops.wire_exec(g, na, pa, nb, pb, single)
-            self.commit(f"Wired {na}.{pa} -> {nb}" + ("" if pb == "in" else f".{pb}"))
-            return
-        if out.type == inp.type:
-            ops.bind(g, nb, pb, PinRef(na, pa))
-            self.commit(f"Bound {nb}.{pb} = {na}.{pa}")
-        elif can_convert(out.type, inp.type, self.idx):
-            # Insert a visible Convert node rather than changing a type silently (section 7.5)
-            ga, gb = self.view.geoms[na], self.view.geoms[nb]
-            conv = ops.create_node(g, "Convert", None, [out.type, inp.type],
-                                   (ga.x + ga.w + gb.x) / 2 - 60, (ga.y + gb.y) / 2 + 40)
-            ops.bind(g, conv.id, "value", PinRef(na, pa))
-            ops.bind(g, nb, pb, PinRef(conv.id, "result"))
-            self.commit(f"Inserted {conv.id} = Convert::<{out.type}, {inp.type}>")
-        else:
-            self.status(f"Cannot connect {out.type} to {inp.type}: no conversion exists (E0110).")
+        if reason:
+            self.commit(reason)
+
+    def geom(self, nid):
+        gm = self.view.geoms.get(nid)
+        return (gm.x, gm.y, gm.w) if gm else None
 
     def open_palette(self, wx, wy, rx, ry, context=None):
         """The searchable node palette. With a pin `context`, only nodes that fit are listed,
@@ -889,111 +861,48 @@ class EditorApp:
         return palette.PalettePopup(self.root, rx, ry, candidates, pick, title)
 
     def connect_to_node(self, a, nid):
-        na, da, pa = a
-        sig = self.info.sigs.get(nid)
-        src_sig = self.info.sigs.get(na)
-        if sig is None or src_sig is None:
+        if not self.can_edit():
             return
-        pin = (src_sig.output(pa) if da == "out" else src_sig.input(pa))
-        if pin is None:
+        try:
+            reason = canvasedit.connect_to_node(self.graph, self.info, self.idx, a, nid, self.geom)
+        except canvasedit.Refused as e:
+            self.status(str(e))
             return
-        if da == "out":
-            cands = [p for p in sig.inputs if p.is_exec == pin.is_exec and
-                     (pin.is_exec or p.type == pin.type) and
-                     (pin.is_exec or self.graph.node(nid).binding(p.name) is None)]
-            if cands:
-                self.connect(a, (nid, "in", cands[0].name))
-        else:
-            cands = [p for p in sig.outputs if p.is_exec == pin.is_exec and
-                     (pin.is_exec or p.type == pin.type)]
-            if cands:
-                self.connect(a, (nid, "out", cands[0].name))
+        if reason:
+            self.commit(reason)
 
     def disconnect(self, nid, d, pin):
         if not self.can_edit():
             return
-        g = self.graph
-        if d == "in":
-            n = g.node(nid)
-            sig = self.info.sigs[nid]
-            p = sig.input(pin)
-            if p is not None and p.is_exec:     # remove every exec wire into this pin
-                for m in g.nodes:
-                    m.execs = [e for e in m.execs
-                               if not (e.target == nid and (e.target_pin or "in") == pin)]
-            else:
-                ops.unbind(g, nid, pin)
-        else:
-            sig = self.info.sigs[nid]
-            p = sig.output(pin)
-            if p is not None and p.is_exec:
-                single = sig.exec_outs[0].name if len(sig.exec_outs) == 1 else None
-                ops.unwire_exec(g, nid, pin, single)
-            else:
-                for m in g.nodes:
-                    for b in list(m.bindings):
-                        if isinstance(b.value, PinRef) and b.value.node == nid and b.value.pin == pin:
-                            m.bindings.remove(b)
-        self.commit(f"Disconnected {nid}.{pin}")
+        self.commit(canvasedit.disconnect(self.graph, self.info, nid, d, pin))
 
     def edit_literal(self, nid, pin):
         if not self.can_edit():
             return
-        sig = self.info.sigs[nid]
-        p = sig.input(pin)
-        if p is None or p.is_exec:
+        prompt = canvasedit.literal_prompt(self.graph, self.info, self.idx, nid, pin)
+        if prompt is None:
             return
-        n = self.graph.node(nid)
-        b = n.binding(pin)
-        from .printer import fmt_lit
-        current = fmt_lit(b.value) if b is not None and isinstance(b.value, Lit) else ""
-        if p.type == "bool":
-            new = Lit("bool", not (b is not None and isinstance(b.value, Lit) and b.value.value))
-            ops.bind(self.graph, nid, pin, new)
-            self.commit(f"Set {nid}.{pin} = {'true' if new.value else 'false'}")
+        ty = prompt["type"]
+        if ty == "bool":
+            self.commit(canvasedit.toggle_bool(self.graph, nid, pin))
             return
-        if p.type in self.idx.structs:
-            if messagebox.askyesno("Set literal", f"A {p.type} has no typed value. Add a "
-                                   f"'Make {p.type}' node wired into {nid}.{pin}?"):
-                self.make_for_pin(nid, pin, p.type)
+        if ty in self.idx.structs:
+            if messagebox.askyesno("Set literal", f"A {ty} has no typed value. Add a "
+                                   f"'Make {ty}' node wired into {nid}.{pin}?"):
+                self.make_for_pin(nid, pin, ty)
             return
-        hint = ""
-        if p.type in self.idx.enums:
-            names = ", ".join(m for m, _ in enum_values(self.idx.enums[p.type]))
-            hint = f"\nOne of: {names}"
-        text = simpledialog.askstring("Set literal", f"{nid}.{pin} : {p.type}{hint}\n"
+        hint = f"\n{prompt['hint']}" if prompt["hint"] else ""
+        text = simpledialog.askstring("Set literal", f"{nid}.{pin} : {ty}{hint}\n"
                                       f"(empty: unbind; the pin takes its default)",
-                                      initialvalue=current, parent=self.root)
+                                      initialvalue=prompt["current"], parent=self.root)
         if text is None:
             return
-        text = text.strip()
-        if not text:
-            ops.unbind(self.graph, nid, pin)
-            self.commit(f"Unbound {nid}.{pin}")
-            return
-        if p.type == "string" and not text.startswith('"'):
-            text = '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
-        if p.type in self.idx.enums and "." not in text:
-            text = f"{p.type}.{text}"           # a bare member name is enough
         try:
-            lit = parse_literal(text)
-        except ParseError as e:
-            if p.type not in self.idx.enums:
-                messagebox.showerror("Invalid literal", e.msg)
-                return
-            lit = None
-        if p.type in self.idx.enums and (lit is None or not lit_fits(lit, p.type) or
-                                         self.idx.enums[p.type].member(lit.value.split(".")[1])
-                                         is None):
-            names = ", ".join(m for m, _ in enum_values(self.idx.enums[p.type]))
-            messagebox.showerror("Invalid literal", f"{text} is not a member of {p.type}. "
-                                                    f"Choose one of: {names}")
+            reason = canvasedit.set_literal(self.graph, self.info, self.idx, nid, pin, text)
+        except canvasedit.Refused as e:
+            messagebox.showerror("Invalid literal", str(e))
             return
-        if not lit_fits(lit, p.type):
-            messagebox.showerror("Invalid literal", f"{text} is not a valid {p.type}")
-            return
-        ops.bind(self.graph, nid, pin, lit)
-        self.commit(f"Set {nid}.{pin} = {text}")
+        self.commit(reason)
 
     def set_enum_value(self, nid, pin, ty, member):
         if not self.can_edit():

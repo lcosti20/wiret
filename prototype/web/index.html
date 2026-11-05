@@ -70,9 +70,18 @@
   .gv-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
   .gv-svg { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible;
             pointer-events: none; }
-  .gv-svg circle, .gv-svg polygon { pointer-events: visiblePainted; }
+  .gv-svg .gv-pinhit { pointer-events: all; cursor: crosshair; }
+  .gv-svg .gv-wirehit { pointer-events: stroke; cursor: pointer; }
+  .gv:focus { outline: none; }
+  .gv:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .gv-node { position: absolute; width: max-content; min-width: 96px; background: #2b2e35;
-             box-shadow: 3px 4px 0 #101114; cursor: pointer; }
+             box-shadow: 3px 4px 0 #101114; cursor: move; }
+  .gv-box-title { cursor: move; }
+  .gv-ask { position: absolute; z-index: 2; width: 240px; padding: 6px 8px; border-radius: 6px;
+            background: #2b2e35; border: 1px solid #f5b041; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
+  .gv-ask-label { color: var(--g-dim); font-size: 12px; margin-bottom: 4px; }
+  .gv-ask input { width: 100%; font: 13px var(--mono); padding: 3px 6px; border-radius: 4px;
+                  border: 1px solid #3a3e46; background: #1d1f23; color: var(--g-text); }
   .gv-head { height: 24px; line-height: 24px; padding: 0 20px 0 8px; color: #fff;
              font-weight: 700; font-size: 13px; white-space: nowrap; }
   .gv-body { display: flex; justify-content: space-between; gap: 24px; padding: 3px 11px; }
@@ -203,7 +212,9 @@
       <button id="fit" title="Fit the graph to the view">Fit</button>
       <button id="zoomout" title="Zoom out" aria-label="Zoom out">−</button>
       <button id="zoomin" title="Zoom in" aria-label="Zoom in">+</button>
-      <span class="hint">Drag to pan · wheel to zoom · double-click a call to open it</span>
+      <button id="undo" title="Undo the last graph edit (Ctrl+Z)" disabled>↶ Undo</button>
+      <button id="redo" title="Redo (Ctrl+Y)" disabled>↷ Redo</button>
+      <span class="hint">Drag nodes to move · drag from a pin to wire · double-click an input to set it</span>
     </div>
     <div id="graph"></div>
   </section>
@@ -255,12 +266,111 @@ let trace = null, session = null, frameSel = -1, timer = null;
 let fault = null;
 let busy = false;             // a run is being recorded; the controls wait for it
 let shownDebugger = false;    // the Debugger tab was brought forward in this session
+const undoStack = [], redoStack = [];   // texts before (after) each graph edit
 
 const gv = new GraphView($("graph"), {
-  select: (id) => selectNode(id, "graph"),
+  select: (id) => {
+    selectNode(id, "graph");
+    if (!id && gv.selWire) say("Wire selected. Press Delete to remove it.");
+  },
   open: (name) => showGraph(name),
   toggleBreakpoint: (id) => toggleBreakpoint(`${graphName}\t${id}`),
+  canEdit: () => canEdit(),
+  message: (text) => say(text, true),
+  move: (id, x, y) => { selected = id; applyEdit({ op: "move", moves: [[id, x, y]] }); },
+  connect: (a, b) => applyEdit({ op: "connect", a, b, geoms: gv.geomsFor([a[0], b[0]]) }),
+  connectToNode: (a, node) => applyEdit({ op: "connect_to_node", a, node, geoms: gv.geomsFor([a[0], node]) }),
+  disconnect: (node, dir, pin) => { gv.selWire = null; applyEdit({ op: "disconnect", node, dir, pin }); },
+  deleteNode: (id) => {
+    const n = graph()?.nodes.find((x) => x.id === id);
+    if (n?.title === "Entry" && !confirm("Delete the graph's Entry node?")) return;
+    if (applyEdit({ op: "delete", node: id })) selected = null;
+  },
+  editPin: (node, pin, at) => editPin(node, pin, at),
 });
+
+// ---------- editing on the canvas ----------
+/** true, or why the graph cannot be edited now (as the desktop editor's can_edit). */
+function canEdit() {
+  if (!api || busy) return "Wait for the page to finish.";
+  if (session && !session.finished) return "The program is running. Stop it (■) before editing the graph.";
+  if (problems.some((d) => d.code === "parse")) return "Fix the parse error in the source pane before editing the graph.";
+  return graph() ? true : "There is no graph to edit.";
+}
+
+/** Make one canvas edit (webapi.edit) and take its canonical text. Returns true if it applied. */
+function applyEdit(req) {
+  const ok = canEdit();
+  if (ok !== true) { say(ok, true); recheck(); return false; }
+  const before = $("src").value;
+  let r = JSON.parse(api.edit(before, graphName, JSON.stringify(req)));
+  if (r.comments) {
+    if (!confirm(`The source has ${r.comments} '//' comment(s). Comments are not part of the model, ` +
+                 "so editing the graph cannot keep them (W0603).\n\nOK: convert them to notes\nCancel: undo this edit")) {
+      recheck();
+      return false;
+    }
+    r = JSON.parse(api.edit(before, graphName, JSON.stringify({ ...req, comments: "convert" })));
+  }
+  if (!r.ok) {
+    if (r.message) say(r.message, true);
+    recheck();                                         // put back what a drag changed
+    return false;
+  }
+  if (r.text !== before) {
+    undoStack.push(before);
+    redoStack.length = 0;
+  }
+  setText(r.text);
+  if (r.select) selected = r.select;
+  updateGraph();
+  renderHighlights();
+  say(r.message);
+  return true;
+}
+
+/** Replace the source text after a graph edit, undo or redo; the last run is now stale. */
+function setText(text) {
+  const ta = $("src"), top = ta.scrollTop;
+  if (trace) stop();
+  counts = fault = null;
+  ta.value = text;
+  ta.scrollTop = top;
+  recheck();
+  setButtons();
+}
+
+function undo() {
+  if (!undoStack.length) return say("Nothing to undo.");
+  const ok = canEdit();
+  if (ok !== true) return say(ok, true);
+  redoStack.push($("src").value);
+  setText(undoStack.pop());
+  say("Undone.");
+}
+
+function redo() {
+  if (!redoStack.length) return;
+  const ok = canEdit();
+  if (ok !== true) return say(ok, true);
+  undoStack.push($("src").value);
+  setText(redoStack.pop());
+  say("Redone.");
+}
+
+/** Double-click on an input: flip a bool, or type a value in a box over the canvas. */
+async function editPin(node, pin, at) {
+  const ok = canEdit();
+  if (ok !== true) return say(ok, true);
+  const prompt = JSON.parse(api.literal_prompt($("src").value, graphName, node, pin));
+  if (!prompt) return;
+  if (prompt.type === "bool") return applyEdit({ op: "toggle", node, pin });
+  const text = await gv.ask(at, {
+    label: `${node}.${pin} : ${prompt.type} (Enter to set; empty: use the default)`,
+    value: prompt.current, placeholder: prompt.hint || prompt.type,
+  });
+  if (text !== null) applyEdit({ op: "literal", node, pin, text });
+}
 
 // ---------- Python ----------
 async function boot() {
@@ -283,6 +393,7 @@ import os
     $("src").value = py.FS.readFile("/app/" + $("lesson").value, { encoding: "utf8" });
     $("src").scrollTop = 0;
     breakpoints.clear();
+    undoStack.length = redoStack.length = 0;
     counts = fault = null;
     graphName = selected = null;
     showTab("source");
@@ -369,6 +480,8 @@ $("graphsel").onchange = () => showGraph($("graphsel").value);
 $("fit").onclick = () => gv.fit(true);
 $("zoomin").onclick = () => gv.zoom(1.25);
 $("zoomout").onclick = () => gv.zoom(1 / 1.25);
+$("undo").onclick = undo;
+$("redo").onclick = redo;
 
 // ---------- tabs ----------
 function showTab(name) {
@@ -583,6 +696,8 @@ function setButtons() {
   $("run").textContent = live ? "▶ Continue" : "▶ Run";
   $("back").disabled = busy || !session || session.history.length === 0 || session.history.at(-1)[0] < 0;
   $("stop").disabled = busy || !trace;
+  $("undo").disabled = busy || !undoStack.length;
+  $("redo").disabled = busy || !redoStack.length;
 }
 
 // ---------- the source editor ----------
@@ -726,6 +841,10 @@ document.addEventListener("keydown", (e) => {
   else if (k === "F10") act = () => stepMode("over");
   else if (k === "F11" && e.shiftKey) act = back;
   else if (k === "F11") act = () => stepMode("step");
+  else if ((e.ctrlKey || e.metaKey) && !["TEXTAREA", "INPUT"].includes(document.activeElement?.tagName)
+           && (k === "z" || k === "Z" || k === "y")) {
+    act = (k === "y" || e.shiftKey) ? redo : undo;
+  }
   else if (k === "F9") act = () => {
     const ta = $("src");
     if (document.activeElement === ta) {

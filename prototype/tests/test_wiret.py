@@ -6406,6 +6406,101 @@ class WebApiTests(unittest.TestCase):
         again = {n["id"]: n for n in json.loads(webapi.check(text + "\n"))["graphs"][0]["nodes"]}
         self.assertEqual((again["extra"]["x"], again["extra"]["y"]), first)
 
+    def edit(self, source, graph, **req):
+        from wiret import webapi
+        return json.loads(webapi.edit(source, graph, json.dumps(req)))
+
+    def test_edit_values(self):
+        from wiret import webapi
+        text = lesson("02_variables.wiret")
+        r = self.edit(text, "Main", op="literal", node="plus", pin="b", text="100")
+        self.assertTrue(r["ok"])
+        self.assertIn(".b <- 100", r["text"])
+        self.assertEqual(r["text"], print_module(parse(r["text"])))          # canonical
+        self.assertEqual(self.edit(text, "Main", op="literal", node="plus", pin="b", text="1.5"),
+                         {"ok": False, "message": "1.5 is not a valid i32"})
+        r = self.edit(text, "Main", op="literal", node="plus", pin="b", text="")
+        self.assertNotIn(".b <-", r["text"].split("node plus")[1].split("node show")[0])
+        self.assertEqual(json.loads(webapi.literal_prompt(text, "Main", "plus", "b")),
+                         {"type": "i32", "current": "5", "hint": ""})
+        # a string needs no quotes
+        r = self.edit(text, "Main", op="literal", node="line", pin="a", text='Score: "big"')
+        self.assertIn('.a <- "Score: \\"big\\""', r["text"])
+        # an enum member needs no type name, and must be a member
+        pets = lesson("08_structs.wiret")
+        g = next(g["name"] for g in json.loads(webapi.check(pets))["graphs"]
+                 if any(n["id"] == "hungry" for n in g["nodes"]))
+        self.assertIn("Happy, Hungry, Sleepy", json.loads(webapi.literal_prompt(pets, g, "hungry", "value"))["hint"])
+        self.assertIn(".value <- Mood.Sleepy", self.edit(pets, g, op="literal", node="hungry", pin="value", text="Sleepy")["text"])
+        self.assertIn("not a member of Mood", self.edit(pets, g, op="literal", node="hungry", pin="value", text="Bored")["message"])
+        self.assertIn("has no typed value", self.edit(pets, g, op="literal", node="hungry", pin="obj", text="1")["message"])
+        # a bool flips
+        r = self.edit(lesson("03_decisions.wiret"), "CheckAge", op="disconnect", node="decide", dir="in", pin="cond")
+        r = self.edit(r["text"], "CheckAge", op="toggle", node="decide", pin="cond")
+        self.assertIn(".cond <- true", r["text"])
+        r = self.edit(r["text"], "CheckAge", op="toggle", node="decide", pin="cond")
+        self.assertEqual(r["message"], "Set decide.cond = false")
+        self.assertNotIn(".cond <-", r["text"])          # false is cond's default, so it is not written
+        self.assertIn(".cond <- true", self.edit(r["text"], "CheckAge", op="toggle", node="decide", pin="cond")["text"])
+
+    def test_edit_wires(self):
+        text = lesson("02_variables.wiret")
+        # an i32 into a string input: a visible Convert node goes in between, and is selected
+        r = self.edit(text, "Main", op="connect", a=["show", "in", "message"], b=["now", "out", "value"],
+                      geoms={"now": [440, 420, 120], "show": [980, 0, 150]})
+        conv = r["select"]
+        self.assertTrue(r["ok"] and conv.startswith("convert_"))
+        self.assertIn(f"node {conv} = Convert::<i32, string>\n    .value <- now.value", r["text"])
+        self.assertIn(f".message <- {conv}.result", r["text"])
+        self.assertIn(f"{conv} at (710, 250)", r["text"])       # x: (440 + 120 + 980) / 2 - 60
+        refused = {
+            "Connect an output pin to an input pin.": (["plus", "out", "result"], ["now", "out", "value"]),
+            "A node cannot be wired to itself.": (["plus", "out", "result"], ["plus", "in", "a"]),
+            "Exec pins connect only to exec pins (E0120).": (["start", "out", "then"], ["plus", "in", "a"]),
+        }
+        for message, (a, b) in refused.items():
+            self.assertEqual(self.edit(text, "Main", op="connect", a=a, b=b), {"ok": False, "message": message})
+        r = self.edit(text, "Main", op="connect", a=["start", "out", "then"], b=["show", "in", "in"])
+        self.assertIn("start -> show", r["text"])
+        self.assertNotIn("start -> bonus", r["text"])
+        r = self.edit(r["text"], "Main", op="disconnect", node="start", dir="out", pin="then")
+        self.assertNotIn("start ->", r["text"])
+        # dropped on a node: the first free input of the same type
+        self.assertEqual(self.edit(text, "Main", op="connect_to_node", a=["old", "out", "value"], node="plus"),
+                         {"ok": False, "message": ""})                    # both inputs are taken
+        freed = self.edit(text, "Main", op="literal", node="plus", pin="b", text="")["text"]
+        r = self.edit(freed, "Main", op="connect_to_node", a=["old", "out", "value"], node="plus")
+        self.assertEqual(r["message"], "Bound plus.b = old.value")
+        r = self.edit(text, "Main", op="disconnect", node="plus", dir="out", pin="result")
+        self.assertNotIn("plus.result", r["text"])
+
+    def test_edit_move_delete_and_comments(self):
+        text = lesson("02_variables.wiret")
+        r = self.edit(text, "Main", op="move", moves=[["entry", 10.6, -20.2]])
+        self.assertIn("entry at (11, -20)", r["text"])
+        r = self.edit(text, "Main", op="delete", node="as_text")
+        self.assertEqual(r["message"], "Deleted as_text and 1 wire(s): as_text.result -> line.b")
+        self.assertIn('detached: "as_text"', r["text"])                # its note is kept
+        self.assertEqual(self.edit(text + "garbage(", "Main", op="move", moves=[]),
+                         {"ok": False, "message": "Fix the parse error in the source before editing the graph."})
+        # a node without a place line gets one where it was drawn
+        unplaced = text.replace("    entry at (0, 0)\n", "")
+        r = self.edit(unplaced, "Main", op="move", moves=[["start", 200, 0]])
+        self.assertRegex(r["text"], r"entry at \(-?\d+, -?\d+\)")
+        # // comments cannot be kept: ask first, then convert them to notes
+        commented = text.replace("func Main() {", "func Main() {\n  // keep me")
+        self.assertEqual(self.edit(commented, "Main", op="move", moves=[["entry", 1, 1]]),
+                         {"ok": False, "comments": 1})
+        r = self.edit(commented, "Main", op="move", moves=[["entry", 1, 1]], comments="convert")
+        self.assertIn('#[note("keep me")]', r["text"])
+
+    def test_canvas_edits_match_the_desktop(self):
+        """The desktop editor makes its canvas edits through canvasedit too."""
+        import inspect
+        from wiret import editor
+        for method in ("connect", "connect_to_node", "disconnect", "edit_literal"):
+            self.assertIn("canvasedit.", inspect.getsource(getattr(editor.EditorApp, method)))
+
     def test_web_stepping_matches_desktop(self):
         """web/debugger.js, stepping through a recording, pauses where the desktop editor's
         hook (DebugState.decide, driven live by the VM) pauses, for random breakpoints and
