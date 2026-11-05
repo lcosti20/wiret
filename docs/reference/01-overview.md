@@ -57,7 +57,7 @@ Compiler stages: parse, resolve names, type-check, validate graphs, expand macro
 | Fiber | One thread of VM execution with its own stack. Latent nodes suspend a fiber. |
 | Host | The application that embeds `libwiret`. |
 | Flow block | The section of a graph body that lists its exec wires, `source -> target`, one per line (section 2.3). |
-| Markup attribute | A persistent, layout-class annotation in a graph's `markup` block, attached to a graph, node or box; the `Note` kind holds explanatory text (section 2.3). |
+| Metadata attribute | A `#[...]` line above a declaration, node or box that never changes compiled output: `#[doc]` (tooltip text), `#[category]` and `#[keywords]` (palette), `#[note]` (explanatory prose). Contrast semantic attributes such as `@pure`, which end the line they modify (section 2.4). |
 | Evaluation point | The moment just before an impure node runs, when its pure inputs are evaluated (section 4.3). |
 | Join | An exec input with more than one producer (section 4.2). |
 
@@ -68,7 +68,7 @@ The specification covers a language, a canonical format, an editor contract, a m
 | Tier | Scope | Done when |
 | --- | --- | --- |
 | 0. Core | `func`; primitive types and literals; pure arithmetic, comparison and logic; `Entry`, `Return`, `Branch`, `Sequence`; exec back-edges; the `ForRange` macro as the one loop construct (it exercises `Sequence`, `Exit` and the continuation stack); `@pure`; structured diagnostics for these kinds; canonical formatter, both hashes, a reference interpreter over the lowered blocks | The examples in 2.6 that use only Tier 0 features, in canonical form, round-trip byte for byte, produce the traces in 4.2, and every Tier 0 diagnostic has a failing graph. |
-| 1. Data and tooling | `struct`, `enum`, `array`/`set`/`map` with **eager** copy (observably identical to 4.9), `Convert`, registry, `state`, `@reads`, markup attributes, the merge and edit protocol, WBC and the verifier, `wiretc view --flow` and the Git textconv | Editor round trips are byte-stable; merge and edit tests pass; verifier fuzz passes. |
+| 1. Data and tooling | `struct`, `enum`, `array`/`set`/`map` with **eager** copy (observably identical to 4.9), `Convert`, registry, `state`, `@reads`, metadata attributes and notes, the merge and edit protocol, WBC and the verifier, `wiretc view --flow` and the Git textconv | Editor round trips are byte-stable; merge and edit tests pass; verifier fuzz passes. |
 | 2. Deferred | `class`, interfaces, `delegate`, `dispatcher`; latent nodes, fibers, `Signal`; `Try`/`Throw` (catchable faults); copy-on-write containers (an optimisation of Tier 1's semantics, not a change to them); capabilities; the full C API; debugger hooks; the project manager and lockfile | Started only after Tier 1; each item keeps the **Provisional** mark until it has its own tests. |
 
 Sections 4.6 (faults), 4.5 (latent nodes), 4.9 (copy-on-write), 5 (bytecode), 6 (C API) and 7.3 (projects) are therefore specified ahead of the prototype and may change when their tier starts.

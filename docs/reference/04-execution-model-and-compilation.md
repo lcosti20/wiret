@@ -158,16 +158,17 @@ Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber
 | `W0302` | Chain can end in a function that declares results. |
 | `W0310` | Read of an impure output not dominated by its producer. |
 | E0130 | Container mutation node does not target a place (local, variable or field). |
+| E0104 | Unknown `@` attribute. For a metadata name such as `@doc`, the message shows the `#[...]` form (section 2.4). |
 | E0900 | Edit rejected: the document changed since the hash the edit was based on (section 7.2). |
 | E0201 | A function that is not latent contains a latent node or calls a latent function or event. |
 | E0303 | A path provably ends, with no pending continuation, in a function that declares results and has not returned. |
-| E0140 | A node, box, markup attribute or `@id` reuses an id recorded as retired in `wiret.ids` (section 7.3). |
+| E0140 | A node, box or `@id` reuses an id recorded as retired in `wiret.ids` (section 7.3). |
 | W0202 | Element has no `@id`, or the file is not in a project and non-reuse cannot be checked (section 2.4). |
 | W0320 | A `reads` node feeds more than one impure consumer (section 4.3). |
 | W0601 | A box lists a member id that names no node or box. |
 | W0602 | A node or box is listed as a member of more than one box. |
 | W0603 | `wiretc fmt` would drop a `//` comment (section 2.1). |
-| W0604 | A markup attribute's `on` target no longer exists. |
+| W0604 | A `#[note]` is detached: its target was deleted and the note was moved to the enclosing graph (section 2.4). |
 
 Diagnostics are structured records, not only text: `code`, `severity`, `message`, `module`, `graph`, `node` and `pin`. `wiretc check --json` prints one record per line. An editor uses `node` and `pin` to highlight the exact place on the graph, and an LLM agent feeds the records back to itself until the check is clean (section 7.2). Diagnostics that arise inside an expanded macro carry the path-style node id (section 4.4).
 
