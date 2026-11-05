@@ -6343,7 +6343,7 @@ class WebApiTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 build_web.main(["--site", tmp])
             self.assertEqual(sorted(os.listdir(tmp)),
-                             ["debugger.js", "graphview.js", "index.html", "wiret_bundle.zip"])
+                             ["debugger.js", "graphview.js", "index.html", "syntax.js", "wiret_bundle.zip"])
             with zipfile.ZipFile(os.path.join(tmp, "wiret_bundle.zip")) as z:
                 self.assertIn("wiret/webapi.py", z.namelist())
         # every file the page loads is in the site
@@ -6663,6 +6663,50 @@ func Main() {
         e = next(e for e in self.menu(text, "Main", kind="node", node="sw") if e["label"] == "Set cases (@cases)…")
         self.assertEqual(e["ask"]["label"], "Mode members, comma separated (one of: Idle, Chase):")
         self.assertIn("@cases(Mode.Idle, Mode.Chase)", self.edit(text, "Main", **{**e["action"], "text": "Idle, Chase"})["text"])
+
+    def test_web_highlighting_matches_desktop(self):
+        """web/syntax.js colours every line as the desktop editor does (wiret/syntax.py)."""
+        import shutil
+        from wiret import syntax, webapi
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("needs Node.js to run web/syntax.js")
+        self.assertEqual(json.loads(webapi.syntax()), json.loads(json.dumps(syntax.rules())))
+        lines = []
+        for name in sorted(os.listdir(LESSONS)):
+            if name.endswith(".wiret"):
+                lines += lesson(name).split("\n")
+        lines += demo().split("\n")
+        lines += ['  .a <- "say \\"hi\\" // not a comment"', "  // a comment with \"quotes\" and 12",
+                  "  .b <- -3.5e2", "node n = Add::<i32> @pure", '#[note("x")]', "  .s <- \"unfinished",
+                  "var x: i32 = 0x1F", "]"]
+        expect = [[list(s) for s in syntax.spans(line)] for line in lines]
+        self.assertGreater(sum(map(len, expect)), 1500)
+        js = r"""
+import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+const { makeHighlighter } = await import(pathToFileURL(process.argv[1]).href);
+const { rules, lines } = JSON.parse(readFileSync(process.argv[2], "utf8"));
+const hl = makeHighlighter(rules);
+process.stdout.write(JSON.stringify({ spans: lines.map(hl.spans), html: hl.html(lines.slice(-8).join("\n")) }));
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            data = os.path.join(tmp, "lines.json")
+            with open(data, "w", encoding="utf-8") as f:
+                json.dump({"rules": syntax.rules(), "lines": lines}, f)
+            module = os.path.join(os.path.dirname(HERE), "web", "syntax.js")
+            p = subprocess.run([node, "--input-type=module", "-e", js, module, data],
+                               capture_output=True, text=True, encoding="utf-8", timeout=120)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        got = json.loads(p.stdout)
+        for line, want, have in zip(lines, expect, got["spans"]):
+            self.assertEqual(have, want, line)
+        # the HTML escapes the text and keeps every character
+        html = got["html"]
+        self.assertIn('<span class="t-str">"say \\"hi\\" // not a comment"</span>', html)
+        self.assertIn('<span class="t-attr">@pure</span>', html)
+        self.assertEqual(re.sub(r"<[^>]+>", "", html).replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"),
+                         "\n".join(lines[-8:]))
 
     def test_web_stepping_matches_desktop(self):
         """web/debugger.js, stepping through a recording, pauses where the desktop editor's

@@ -23,7 +23,7 @@ ROOT = os.path.dirname(HERE)
 BUNDLE = "wiret_bundle.zip"
 
 TKINTER_MODULES = {"editor.py", "graphview.py", "palettepopup.py"}
-SITE_FILES = ["index.html", "debugger.js", "graphview.js"]   # served as they are
+SITE_FILES = ["index.html", "debugger.js", "graphview.js", "syntax.js"]   # served as they are
 
 
 def files():

@@ -15,7 +15,7 @@ import json
 from collections import Counter
 from typing import Optional
 
-from . import canvasedit, ops
+from . import canvasedit, ops, syntax as syn
 from . import palette as pal
 from .checker import GraphInfo
 from .compiler import compile_module
@@ -395,6 +395,12 @@ def menu(source: str, graph: str, target: str) -> str:
         choice("Edit note…", "edit_note", "Text:", note_text(nt), key=t["note"])
         choice("Delete note", "delete_note", key=t["note"])
     return json.dumps(out)
+
+
+def syntax() -> str:
+    """The Source pane's highlighting rules (wiret/syntax.py): {"pattern", "keywords",
+    "kinds", "colors"}. The page applies them itself (web/syntax.js), as you type."""
+    return json.dumps(syn.rules())
 
 def run(source: str, func: str = "Main", deterministic: bool = False,
         fuel: int = 50_000_000) -> str:
