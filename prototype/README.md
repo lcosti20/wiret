@@ -37,6 +37,22 @@ cross-compile). The packaged app saves students' lesson copies in `~/Documents/W
 Running from source still uses `prototype/my_lessons`. Unsigned builds show a SmartScreen or
 Gatekeeper warning on first launch.
 
+## Running it in a browser (spike)
+
+`web/` runs the same compiler and VM in the browser with [Pyodide](https://pyodide.org)
+(CPython compiled to WebAssembly). It has no graph view yet, only the source text, a Run
+button and the output. The Tkinter modules, the Git commands and file watching are left out.
+
+```sh
+cd prototype
+python3 web/build_web.py                # packs wiret/, lessons/ and examples/ into web/wiret_bundle.zip
+python3 -m http.server -d web 8000      # then open http://localhost:8000
+```
+
+The page calls `wiret/webapi.py`, which takes plain values and returns JSON. `web/` is a static
+site, so any static host (GitHub Pages, for example) can serve it. The first visit downloads
+about 10 MB of Pyodide from the jsDelivr CDN.
+
 ## Demo script (about 5 minutes)
 
 1. Run `python3 wiret_editor.py`. Lesson 1 opens with its notes. Press **▶ Run**.
