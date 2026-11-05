@@ -49,7 +49,27 @@ def allows(constraint: str, ty: str, idx: "Optional[ModuleIndex]" = None) -> boo
     if idx is None:
         return False
     kinds = USER_CONSTRAINTS.get(constraint, ())
+    if constraint == "eq" and ty in idx.structs:
+        return comparable(ty, idx)
     return ("struct" in kinds and ty in idx.structs) or ("enum" in kinds and ty in idx.enums)
+
+
+def comparable(ty: str, idx: "ModuleIndex") -> bool:
+    """Whether `Eq` can compare two values of a type field by field. Arrays cannot be
+    compared in this prototype, so neither can a struct that holds one. Structs never hold
+    themselves by value (E0503), so the recursion ends; a cycle check guards it anyway."""
+    path = set()
+
+    def ok(t):
+        if t in idx.structs:
+            if t in path:
+                return False
+            path.add(t)
+            result = all(ok(f.type) for f in idx.structs[t].fields)
+            path.discard(t)
+            return result
+        return t in CONSTRAINTS["eq"] or t in idx.enums
+    return ok(ty)
 
 
 ZERO = object()  # pin default: the zero value of the pin's type
@@ -381,7 +401,10 @@ def _static_sig(node: Node, idx: "Optional[ModuleIndex]" = None) -> Sig:
     else:
         for t, c in zip(targs, tps):
             if not allows(c, t, idx):
-                sig.error = ("E0110", f"{node.kind} does not accept type {t}")
+                why = ""
+                if c == "eq" and idx is not None and t in idx.structs:
+                    why = "; it holds an array, and this prototype cannot compare arrays"
+                sig.error = ("E0110", f"{node.kind} does not accept type {t}{why}")
     if node.kind == "Convert" and not sig.error and not can_convert(targs[0], targs[1], idx) \
             and targs[0] != targs[1]:
         sig.error = ("E0110", f"no conversion from {targs[0]} to {targs[1]}")

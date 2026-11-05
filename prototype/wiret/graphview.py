@@ -414,7 +414,7 @@ class GraphView(tk.Canvas):
                 pin = sig.output(b.value.pin) if sig else None
                 if src is None or dst is None or pin is None:
                     continue
-                text = format_value(pin.type, self.pin_values[key])
+                text = format_value(pin.type, self.pin_values[key], self.app.idx)
                 if len(text) > 24:
                     text = text[:22] + "…"
                 # one label per source pin, near the source, plus one near each consumer
