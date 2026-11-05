@@ -50,7 +50,7 @@ def disassemble(data: bytes) -> str:
         out.append(f"  max_stack: {body.max_stack}")
         instrs = decode_code(body.code)
         labels = {pc: node for pc, node in debug.get(fi, (None, [], []))[1]}
-        targets = {ins.target() for ins in instrs if ins.name in ("br", "br_if", "cont.push")}
+        targets = {ins.target() for ins in instrs if ins.name in ("br", "br_if", "cont.push", "try.push")}
         for ins in instrs:
             if ins.pc in labels:
                 out.append(f".{labels[ins.pc]}:")
@@ -58,9 +58,12 @@ def disassemble(data: bytes) -> str:
                 out.append(f".pc{ins.pc}:")
             text = ins.name
             comment = ""
-            if ins.name in ("br", "br_if", "cont.push"):
+            if ins.name in ("br", "br_if", "cont.push", "try.push"):
                 t = ins.target()
                 text += " ." + labels.get(t, f"pc{t}")
+                if ins.name == "try.push":
+                    text += f" {ins.imms[1]}"
+                    comment = lnames.get(ins.imms[1], "")
             elif ins.name == "call":
                 text += f" {names.get(ins.imms[0], ins.imms[0])}"
             elif ins.name.startswith("local."):

@@ -30,12 +30,12 @@ CONTAINER_OPS = {"MapFind": "map.find", "MapHas": "map.has", "MapLength": "map.l
                  "MapRemove": "map.remove", "MapClear": "map.clear", "SetHas": "set.has",
                  "SetLength": "set.len", "SetAt": "set.at", "SetAdd": "set.add",
                  "SetRemove": "set.remove", "SetClear": "set.clear"}
-from .wbc import F32, F64, I32, I64, STRING
+from .wbc import F32, F64, FAULT, I32, I64, STRING
 
 COMPILER_VERSION = "wiretc-proto 0.1"
 
 VT = {"bool": I32, "i8": I32, "u8": I32, "i16": I32, "u16": I32, "i32": I32, "u32": I32,
-      "i64": I64, "u64": I64, "f32": F32, "f64": F64, "string": STRING}
+      "i64": I64, "u64": I64, "f32": F32, "f64": F64, "string": STRING, "fault": FAULT}
 PFX = {I32: "i32", I64: "i64", F32: "f32", F64: "f64"}
 
 
@@ -612,6 +612,8 @@ class FuncLowerer:
         ts = [t for _, t in n.execs]
         if n.kind in ("Branch",):
             ts = list(reversed(ts))
+        elif n.kind == "Try":          # body, fault, then: the handler code falls into fault
+            ts = [ts[1], ts[0], ts[2]]
         elif n.kind == "Switch":
             ts = ts[-1:] + ts[:-1]
         return ts
@@ -656,7 +658,18 @@ class FuncLowerer:
                 continue
             states.add((nid, S))
             n = self.ir[nid]
-            if n.kind == "Return":
+            if n.kind in ("Return", "Throw"):
+                continue
+            if n.kind == "Try":
+                # then is pending under the handler marker (None: skipped by a chain end)
+                t = dict(n.execs)
+                base = S + ((t["then"],) if t.get("then") else ())
+                nexts = [(t.get("body"), base + (None,)), (t.get("fault"), base)]
+                for tgt, s in nexts:
+                    if tgt is None:
+                        chain_end(nid, s)
+                    else:
+                        work.append((tgt, s))
                 continue
             if n.kind == "Sequence":
                 outs = [t for _, t in n.execs]
@@ -689,7 +702,7 @@ class FuncLowerer:
         if self.c.debug:   # every impure output gets a slot, read or not
             for nid in sorted(self.ir):
                 n = self.ir[nid]
-                if not n.pure and (n.kind == "Call" or n.kind in PLACE_MUTATORS):
+                if not n.pure and (n.kind in ("Call", "Try") or n.kind in PLACE_MUTATORS):
                     for p in n.data_outs:
                         key = (nid, p.name)
                         if key not in self.slots:
@@ -792,6 +805,34 @@ class FuncLowerer:
             targets = dict(n.execs)
             self.E("br_if", self.L(targets.get("then")))
             self.transfer(targets.get("else"), nxt)
+        elif k == "Try":
+            # Section 4.6: push `then` as a continuation, then a handler marker above it, and
+            # run `body`. A chain end in the body discards the marker and resumes `then`; a
+            # fault unwinds to the marker, stores the fault and lands on the handler below,
+            # which runs `fault` with `then` still pending.
+            self.ready(n)
+            t = dict(n.execs)
+            if t.get("then") is not None:
+                self.E("cont.push", t["then"])
+            fault_local = self.add_local(f"{n.id}.$fault", "fault")
+            handler = f"{n.id}!fault"
+            self.E("try.push", handler, fault_local)
+            if t.get("body") is None:
+                self.emit_chain_end()
+            else:
+                self.E("br", t["body"])
+            self.code.append(("label", handler))
+            for pin, native in (("message", "std.fault.Message"), ("code", "std.fault.Code")):
+                slot = self.slots.get((n.id, pin))
+                if slot is not None:
+                    self.E("local.get", fault_local)
+                    self.E("call", self.c.import_ref(native))
+                    self.E("local.set", slot)
+            self.transfer(t.get("fault"), nxt)
+        elif k == "Throw":
+            self.emit_inputs(n)
+            self.E("call", self.c.import_ref("std.fault.Make"))
+            self.E("throw")
         elif k == "Sequence":
             self.ready(n)
             outs = [t for _, t in n.execs]
@@ -1236,6 +1277,8 @@ class FuncLowerer:
         kind = wbc.OPS[op][1]
         if kind == "L":
             return (pcs[imms[0]] - end,) if final else (0,)
+        if kind == "Lu":
+            return (pcs[imms[0]] - end, imms[1]) if final else (0, imms[1])
         if op == "call":
             return (self.c.func_index(imms[0]),)
         return imms

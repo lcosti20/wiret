@@ -15,6 +15,17 @@ class NativeFault(Exception):
     """Raised by a native to report a fault to the VM."""
 
 
+@dataclass(frozen=True)
+class FaultValue:
+    """A value of type `fault` (section 4.6): what `try.push` stores in its local and `throw`
+    raises."""
+    message: str
+    code: int
+
+
+NO_FAULT = FaultValue("", 0)
+
+
 @dataclass
 class NativeSpec:
     params: list            # [(name, type)]
@@ -173,6 +184,15 @@ INTERNAL: dict[str, NativeSpec] = {
     "std.math.FRem64": NativeSpec([("a", "f64"), ("b", "f64")], [("r", "f64")], "pure",
                                   lambda _vm, a, b: (math.fmod(a, b) if b else math.nan,)),
 }
+
+# `Throw` makes a fault from its message and code, and `Try` reads them back (section 4.6).
+INTERNAL["std.fault.Make"] = NativeSpec([("message", "string"), ("code", "i32")],
+                                        [("fault", "fault")], "pure",
+                                        lambda _vm, m, c: (FaultValue(m, c),))
+INTERNAL["std.fault.Message"] = NativeSpec([("fault", "fault")], [("message", "string")], "pure",
+                                           lambda _vm, f: (f.message,))
+INTERNAL["std.fault.Code"] = NativeSpec([("fault", "fault")], [("code", "i32")], "pure",
+                                        lambda _vm, f: (f.code,))
 
 # `Eq` and `Ne` on containers (section 4.9). One native per container kind, taking anyref so
 # that one signature serves every element type; the native reads the values it is given.

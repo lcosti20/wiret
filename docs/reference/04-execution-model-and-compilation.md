@@ -131,11 +131,25 @@ Every call runs on a **fiber**: its own value stack and call frames, heap-alloca
 
 A **fault** is a runtime error: null dereference, array index out of range, integer divide by zero, failed `ref.cast`, stack overflow, `Throw`, or an error returned by a native. Faults are catchable with `Try`. `Try` lowers to a *handler marker* pushed on the continuation stack. On a fault, the VM pops the stack down to the nearest marker, stores the fault in a local, clears the operand stack, and jumps to the handler. Normal chain ends discard markers while looking for the next continuation.
 
-A `Try` body must be properly nested: the nodes reachable from `body` must not also be reachable from outside it (`E0412`). Without that rule a stale marker could survive past the end of the region.
+`Try` pushes the continuation for `then` (when it is wired) and then the handler marker, and jumps to `body`. A chain end in the body pops the marker, discards it and resumes `then`. A fault unwinds to the marker, so the fault chain runs with `then` still pending and `then` follows either chain. Unwinding crosses frames: when the faulting frame has no marker, it is discarded and the search goes on in its caller, so a fault in a called function reaches the caller's `Try`. A `Throw` in the fault chain goes to the next marker out.
+
+A `Try` body must be properly nested: the nodes reachable from `body` must not also be reachable from outside it (`E0412`). Without that rule a stale marker could survive past the end of the region. The same code covers a body that leads back to its own `Try` (each pass would push another marker), and, in a macro, a body that reaches an `Exit`: the caller's chain would then run with the macro's marker still active, which the macro cannot see.
+
+Faults have a message and an `i32` code. `Throw` supplies both; programs should use non-negative codes. The built-in faults use negative codes:
+
+| Code | Fault |
+| --- | --- |
+| -1 | Integer divide or remainder by zero |
+| -2 | Index out of range (arrays, `MapKeyAt` and the like), or a negative array length |
+| -3 | Null reference |
+| -4 | Failed `ref.cast` |
+| -5 | Stack overflow: call depth or continuation stack |
+| -6 | An error returned by a native |
+| -7 | `unreachable` executed |
 
 Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber killed by the host. These end the fiber and are reported to the host.
 
-**Provisional.** Catchable faults are the least proven part of this design. If prototyping shows that the nesting rule `E0412` rejects graphs that users find natural, `Try` and `Throw` move to a later version. Every fault would then end its fiber and be reported to the host with a node-level traceback (section 6.9), which is a complete and simpler model on its own.
+**Provisional.** Catchable faults are the least proven part of this design. The prototype implements them, with the required macro test 5 of section 4.2. If prototyping shows that the nesting rule `E0412` rejects graphs that users find natural, `Try` and `Throw` move to a later version. Every fault would then end its fiber and be reported to the host with a node-level traceback (section 6.9), which is a complete and simpler model on its own.
 
 ### 4.7 Diagnostics
 

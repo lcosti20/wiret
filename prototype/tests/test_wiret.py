@@ -3191,6 +3191,422 @@ func F() {
                 self.assertTrue(nxt.startswith(("#[", "node ", "func ", "event ", "macro ")), nxt)
 
 
+SAFE_DIV = """
+func SafeDiv(a: i32, b: i32) -> (q: i32) {
+  node bad = Call host.Log
+    .message <- t.message
+  node div = Div::<i32>
+    .a <- entry.a
+    .b <- entry.b
+  node entry = Entry
+  node fail = Return
+    .q <- t.code
+  node ok = Return
+    .q <- div.result
+  node t = Try
+
+  flow {
+    bad -> fail
+    entry -> t
+    t.body -> ok
+    t.fault -> bad
+  }
+}
+"""
+
+
+class FaultTests(unittest.TestCase):
+    """Try and Throw (sections 3.3 and 4.6) and the fault rules of section 4.2."""
+
+    def test_try_catches_a_built_in_fault(self):
+        text = module(SAFE_DIV, macros=False)
+        self.assertEqual(run(text, "SafeDiv", 7, 2), ([3], []))
+        self.assertEqual(run(text, "SafeDiv", 7, 0), ([-1], ["integer divide by zero"]))
+
+    def test_try_and_throw_round_trip(self):
+        text = module(SAFE_DIV, macros=False)
+        self.assertEqual(print_module(parse(text)), text)
+        self.assertEqual(codes(text), [])
+
+    THROWER = """
+func Check(x: i32) -> (r: i32) {
+  node entry = Entry
+  node after = Call host.Log
+    .message <- "after"
+  node big = Gt::<i32>
+    .a <- entry.x
+    .b <- 10
+  node boom = Throw
+    .message <- "too big"
+    .code <- 42
+  node chk = Branch
+    .cond <- big.result
+  node logit = Call host.Log
+    .message <- t.message
+  node ret = Return
+    .r <- t.code
+  node t = Try
+
+  flow {
+    after -> ret
+    chk.then -> boom
+    entry -> t
+    t.body -> chk
+    t.fault -> logit
+    t.then -> after
+  }
+}
+"""
+
+    def test_then_runs_after_the_body_or_the_fault_chain(self):
+        text = module(self.THROWER, macros=False)
+        self.assertEqual(run(text, "Check", 3), ([0], ["after"]))
+        self.assertEqual(run(text, "Check", 30), ([42], ["too big", "after"]))
+
+    def test_handler_marker_sits_above_then_on_the_stack(self):
+        text = module(self.THROWER, macros=False)
+        trace = []
+        run(text, "Check", 30, trace=trace)
+        self.assertEqual(trace, [("entry", ()), ("t", ()), ("chk", ("after", "t!fault")),
+                                 ("boom", ("after", "t!fault")), ("logit", ("after",)),
+                                 ("after", ()), ("ret", ())])
+
+    def test_uncaught_throw_reports_message_code_and_node(self):
+        text = module("""
+func Fail() {
+  node entry = Entry
+  node boom = Throw
+    .message <- "no"
+    .code <- 7
+
+  flow {
+    entry -> boom
+  }
+}
+""", macros=False)
+        with self.assertRaises(WiretError) as cm:
+            run(text, "Fail")
+        e = cm.exception
+        self.assertEqual((e.status, e.message, e.code), ("WR_ERR_FAULT", "no", 7))
+        self.assertEqual(e.traceback, [("t.Fail", "boom")])
+
+    def test_fault_in_a_callee_unwinds_to_the_callers_try(self):
+        text = module("""
+func Inner(x: i32) -> (r: i32) {
+  node entry = Entry
+  node div = Div::<i32>
+    .a <- 1
+    .b <- entry.x
+  node log = Call host.Log
+    .message <- "inner done"
+  node ret = Return
+    .r <- div.result
+  node seq = Sequence
+
+  flow {
+    entry -> seq
+    seq.then0 -> ret
+    seq.then1 -> log
+  }
+}
+
+func Outer(x: i32) -> (r: i32) {
+  node entry = Entry
+  node call = Call Inner
+    .x <- entry.x
+  node caught = Return
+    .r <- t.code
+  node ok = Return
+    .r <- call.r
+  node t = Try
+
+  flow {
+    call -> ok
+    entry -> t
+    t.body -> call
+    t.fault -> caught
+  }
+}
+""", macros=False)
+        self.assertEqual(run(text, "Outer", 1), ([1], []))
+        self.assertEqual(run(text, "Outer", 0), ([-1], []))
+
+    def test_fault_in_loop_body_with_try_outside_pops_the_pending_bump(self):
+        # Required macro test 5, first half (section 4.2).
+        text = module("""
+func F() -> (n: i32) {
+  local c: i32
+  node entry = Entry
+  node boom = Throw
+    .message <- "stop"
+  node bump = SetLocal c
+    .value <- inc.result
+  node chk = Branch
+    .cond <- two.result
+  node cur = GetLocal c
+  node inc = Add::<i32>
+    .a <- cur.value
+    .b <- 1
+  node loop = Macro ForRange
+    .first <- 1
+    .last <- 5
+  node ret = Return
+    .n <- cur.value
+  node t = Try
+  node two = Eq::<i32>
+    .a <- loop.index
+    .b <- 2
+
+  flow {
+    chk.then -> boom
+    chk.else -> bump
+    entry -> t
+    loop.each -> chk
+    t.body -> loop
+    t.fault -> ret
+  }
+}
+""")
+        trace = []
+        res, _ = run(text, "F", trace=trace)
+        self.assertEqual(res, [1])
+        self.assertIn(("boom", ("t!fault", "loop/bump")), trace)
+        self.assertIn(("ret", ()), trace)
+
+    def test_try_inside_the_loop_body_leaves_the_macro_continuation(self):
+        # Required macro test 5, second half: the loop goes on after each caught fault.
+        text = module("""
+func F() -> (n: i32) {
+  local c: i32
+  node entry = Entry
+  node boom = Throw
+    .message <- "odd"
+  node bump = SetLocal c
+    .value <- inc.result
+  node chk = Branch
+    .cond <- odd.result
+  node cur = GetLocal c
+  node done = Return
+    .n <- cur.value
+  node inc = Add::<i32>
+    .a <- cur.value
+    .b <- 1
+  node loop = Macro ForRange
+    .first <- 1
+    .last <- 5
+  node odd = Eq::<i32>
+    .a <- rem.result
+    .b <- 1
+  node rem = Rem::<i32>
+    .a <- loop.index
+    .b <- 2
+  node t = Try
+
+  flow {
+    chk.then -> boom
+    entry -> loop
+    loop.done -> done
+    loop.each -> t
+    t.body -> chk
+    t.fault -> bump
+  }
+}
+""")
+        trace = []
+        res, _ = run(text, "F", trace=trace)
+        self.assertEqual(res, [3])     # indices 1, 3 and 5 threw and were caught
+        self.assertIn(("bump", ("loop/bump",)), trace)
+
+    def test_nested_try_rethrow_reaches_the_outer_handler(self):
+        text = module("""
+func F() -> (msg: string) {
+  node entry = Entry
+  node again = Throw
+    .message <- inner.message
+    .code <- 2
+  node boom = Throw
+    .message <- "first"
+    .code <- 1
+  node inner = Try
+  node outer = Try
+  node ret = Return
+    .msg <- outer.message
+
+  flow {
+    entry -> outer
+    inner.body -> boom
+    inner.fault -> again
+    outer.body -> inner
+    outer.fault -> ret
+  }
+}
+""", macros=False)
+        self.assertEqual(run(text, "F")[0], ["first"])
+
+    def test_fuel_exhaustion_is_not_catchable(self):
+        text = module("""
+func Spin() {
+  node entry = Entry
+  node again = Sequence
+  node t = Try
+
+  flow {
+    again.then0 -> again
+    entry -> t
+    t.body -> again
+  }
+}
+""", macros=False)
+        _, r = build(text)
+        vm = VM(fuel=500)
+        with self.assertRaises(WiretError) as cm:
+            vm.call(vm.load(r.wbc), "Spin", [])
+        self.assertEqual(cm.exception.status, "WR_ERR_FUEL")
+
+    def test_throw_ends_a_chain_without_w0302(self):
+        text = module("""
+func F(x: i32) -> (r: i32) {
+  node entry = Entry
+  node boom = Throw
+    .message <- "negative"
+  node chk = Branch
+    .cond <- neg.result
+  node neg = Lt::<i32>
+    .a <- entry.x
+    .b <- 0
+  node ret = Return
+    .r <- entry.x
+
+  flow {
+    chk.then -> boom
+    chk.else -> ret
+    entry -> chk
+  }
+}
+""", macros=False)
+        _, r = build(text)
+        self.assertNotIn("W0302", [d.code for d in r.diags])
+
+    def test_e0412_body_reached_from_outside(self):
+        text = module("""
+func F(x: bool) {
+  node entry = Entry
+  node chk = Branch
+    .cond <- entry.x
+  node log = Call host.Log
+    .message <- "shared"
+  node t = Try
+
+  flow {
+    chk.then -> t
+    chk.else -> log
+    entry -> chk
+    t.body -> log
+  }
+}
+""", macros=False)
+        self.assertIn("E0412", codes(text))
+
+    def test_e0412_body_loops_back_to_its_try(self):
+        text = module("""
+func F() {
+  node entry = Entry
+  node log = Call host.Log
+    .message <- "again"
+  node t = Try
+
+  flow {
+    entry -> t
+    log -> t
+    t.body -> log
+  }
+}
+""", macros=False)
+        self.assertIn("E0412", codes(text))
+
+    def test_e0412_exit_inside_a_try_body(self):
+        text = module("""
+macro Guard(in: exec) -> (each: exec) {
+  node entry = Entry
+  node out = Exit each
+  node t = Try
+
+  flow {
+    entry -> t
+    t.body -> out
+  }
+}
+""", macros=False)
+        self.assertIn("E0412", codes(text))
+
+    def test_loops_and_joins_inside_the_body_are_allowed(self):
+        text = module("""
+func F() {
+  node entry = Entry
+  node a = Call host.Log
+    .message <- "a"
+  node b = Call host.Log
+    .message <- "b"
+  node chk = Branch
+  node join = Call host.Log
+    .message <- "join"
+  node loop = Macro ForRange
+    .first <- 1
+    .last <- 2
+  node t = Try
+
+  flow {
+    a -> join
+    b -> join
+    chk.then -> a
+    chk.else -> b
+    entry -> t
+    join -> loop
+    t.body -> chk
+  }
+}
+""")
+        self.assertNotIn("E0412", codes(text))
+
+    def test_bytecode_and_verifier(self):
+        _, r = build(module(SAFE_DIV, macros=False))
+        text = disassemble(r.wbc)
+        self.assertIn("try.push", text)
+        self.assertIn("; t.$fault", text)
+
+        def mutate(fn):
+            m = wbc.decode_module(r.wbc)
+            fn(m)
+            with self.assertRaises(WiretError) as cm:
+                VM().load(wbc.encode_module(m))
+            return cm.exception
+
+        def try_push_on_i32_local(m):      # local 0 is the i32 parameter a
+            m.bodies[-1].code = bytes([0x0C, 0x80, 0x80, 0x80, 0x80, 0x00, 0x00,
+                                       0x20, 0x00, 0x05])
+        def throw_an_i32(m):
+            m.bodies[-1].code = bytes([0x20, 0x00, 0x0E])
+        for fn in (try_push_on_i32_local, throw_an_i32):
+            with self.subTest(fn.__name__):
+                self.assertEqual(mutate(fn).status, "WR_ERR_VERIFY")
+
+    def test_fuzzed_try_modules_never_crash_the_loader(self):
+        _, r = build(module(self.THROWER, macros=False))
+        rng = random.Random(4120)
+        data = bytes(r.wbc)
+        for _ in range(800):
+            d = bytearray(data)
+            for _ in range(rng.randint(1, 4)):
+                d[rng.randrange(len(d))] = rng.randrange(256)
+            vm = VM(output=lambda _s: None, fuel=10_000)
+            try:
+                mod = vm.load(bytes(d))
+                if "Check" in mod.exports:
+                    vm.call(mod, "Check", [30])
+            except WiretError:
+                pass
+
+
 class BytecodeTests(unittest.TestCase):
     def test_disassembly_names_nodes(self):
         _, r = build(demo())

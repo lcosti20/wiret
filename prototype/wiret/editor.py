@@ -1404,6 +1404,8 @@ class EditorApp:
         flow = tk.Menu(menu, tearoff=0)
         add(flow, "Branch", "Branch")
         add(flow, "Sequence", "Sequence")
+        add(flow, "Try", "Try")
+        add(flow, "Throw", "Throw")
         if g.kind != "macro":
             add(flow, "Return", "Return")
         if not any(n.kind == "Entry" for n in g.nodes):

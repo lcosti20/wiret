@@ -404,7 +404,50 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
 
     check_pure_cycles(info, G, D)
     check_flow(info, G, D)
+    check_try_nesting(info, G, D)
     check_layout(g, ids, G, D)
+
+
+def check_try_nesting(info: GraphInfo, G, D):
+    """E0412 (section 4.6): a `Try` body is the set of nodes reachable from its `body` output,
+    and nothing outside it may reach into it. Otherwise a path into the body would run without
+    the handler marker, or the marker would outlive the region. The body may not lead back to
+    its own `Try`, and may not contain an `Exit`: that would carry the marker into the
+    caller's chain, which the macro cannot see."""
+    edges = {}                                   # target -> [(source, exec pin)]
+    for nid, n in info.nodes.items():
+        for e in n.execs:
+            if e.target in info.nodes:
+                edges.setdefault(e.target, []).append((nid, info.exec_pin(n, e)))
+    for tid, t in sorted(info.nodes.items()):
+        if t.kind != "Try" or info.sigs[tid].error:
+            continue
+        starts = [e.target for e in t.execs
+                  if info.exec_pin(t, e) == "body" and e.target in info.nodes]
+        body, todo = set(starts), list(starts)
+        while todo:
+            for s in info.successors(todo.pop()):
+                if s not in body:
+                    body.add(s)
+                    todo.append(s)
+        if tid in body:
+            D("E0412", f"the body of Try '{tid}' leads back to '{tid}' itself; loop inside the "
+                       f"body, or around the whole Try from its 'then'", G, tid)
+            continue
+        exits = sorted(nid for nid in body if info.nodes[nid].kind == "Exit")
+        if exits:
+            D("E0412", f"the body of Try '{tid}' reaches Exit '{exits[0]}', which would leave "
+                       f"the macro with the fault handler still active", G, tid)
+            continue
+        for nid in sorted(body):
+            outside = [(p, pin) for p, pin in edges.get(nid, [])
+                       if p not in body and not (p == tid and pin == "body")]
+            if outside:
+                p, pin = outside[0]
+                D("E0412", f"'{nid}' is inside the body of Try '{tid}' but is also reached from "
+                           f"'{p}.{pin}' outside it; the body must be entered only through "
+                           f"'{tid}.body'", G, tid)
+                break
 
 
 def pure_deps(info: GraphInfo, nid: str) -> list:

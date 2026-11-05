@@ -242,7 +242,7 @@ typedef struct wr_Frame {
 typedef struct wr_FaultInfo {
   size_t      struct_size;   /* set by the caller before the call */
   wr_Status   status;     /* WR_ERR_FAULT, WR_ERR_FUEL, ... */
-  int32_t     code;       /* from Throw, or a built-in fault code */
+  int32_t     code;       /* from Throw, or a built-in fault code (negative, section 4.6) */
   const char *message;    /* valid until the fiber's next call */
   int         nframes;
 } wr_FaultInfo;

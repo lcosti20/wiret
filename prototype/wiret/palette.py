@@ -26,6 +26,11 @@ DESCRIBE = {
     "Select": ("Picks value a when the condition is true, otherwise value b.",
                "choose pick ternary if"),
     "Reroute": ("A bend point that tidies up wires. It does nothing else.", "tidy bend"),
+    "Try": ("Runs 'body'. If something goes wrong inside it, such as dividing by zero, runs "
+            "'fault' instead of stopping the program. Afterwards, runs 'then'.",
+            "catch error fault exception handle recover"),
+    "Throw": ("Stops with an error that a Try around it can catch, with your message and code.",
+              "raise error fault exception fail"),
     "Convert": ("Turns a value into another type, for example a number into text.",
                 "cast change type to string text number"),
     "Add": ("Adds two numbers: a + b.", "+ plus sum total"),

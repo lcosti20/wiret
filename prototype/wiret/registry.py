@@ -279,6 +279,14 @@ STATIC_KINDS = {
     "Convert": ("Math", "pure", ["convertible", "convertible"],
                 [("value", "in", "T0", None), ("result", "out", "T1", None)]),
     "Not": ("Logic", "pure", [], [("value", "in", "bool", None), ("result", "out", "bool", None)]),
+    # Catchable faults (section 4.6). Try runs `body`; a fault inside it runs `fault`, with
+    # the fault's message and code; when either chain ends, `then` runs.
+    "Try": ("Flow", "impure", [], [("in", "in", "exec", None), ("body", "out", "exec", None),
+                                   ("fault", "out", "exec", None), ("then", "out", "exec", None),
+                                   ("message", "out", "string", None),
+                                   ("code", "out", "i32", None)]),
+    "Throw": ("Flow", "impure", [], [("in", "in", "exec", None), ("message", "in", "string", None),
+                                     ("code", "in", "i32", ZERO)]),
     "BitNot": ("Bits", "pure", ["int"], _UN),
 }
 for _k in ("Add", "Sub", "Mul", "Div", "Rem", "Min", "Max"):
@@ -317,7 +325,7 @@ STRUCT_KINDS = {"MakeStruct": "struct", "BreakStruct": "struct", "GetField": "fi
 
 # Kinds from the specification that later tiers add (section 1.6).
 LATER_TIER_KINDS = {
-    "Try", "Throw", "Delay", "Yield", "Await", "SetField", "New", "Cast", "IsValid",
+    "Delay", "Yield", "Await", "SetField", "New", "Cast", "IsValid",
     "CreateDelegate", "Invoke", "Bind", "Unbind", "Broadcast",
 }
 
