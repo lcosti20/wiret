@@ -6,6 +6,7 @@ from __future__ import annotations
 from collections import Counter
 
 from .explain import type_words
+from .palette import describe
 from .model import Graph, Lit, PinRef, note_detached, note_text
 from .printer import fmt_lit
 from .registry import FLOAT_TYPES, INT_TYPES
@@ -200,7 +201,7 @@ def graph_json(g: Graph, info, idx, diags=(), remembered=None, module=None) -> d
             "id": n.id, "title": display_title(g, n), "x": x, "y": y,
             "header": header_color(g, n, sig), "pure": sig.pure,
             "disabled": n.attr("disabled") is not None, "diag": marks.get(n.id),
-            "opens": opens(module, n),
+            "opens": opens(module, n), "description": describe(n.kind, n.symbol, idx, n.targs),
             "ins": [{"name": p.name, "exec": p.is_exec, "type": type_words(p.type),
                      "color": type_color(p.type, idx),
                      "label": input_label(n, p), "bound": n.binding(p.name) is not None,

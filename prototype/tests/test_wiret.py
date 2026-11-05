@@ -6327,7 +6327,8 @@ class WebApiTests(unittest.TestCase):
         self.assertIn("wiret/webapi.py", names)
         self.assertIn("wiret/std/flow.wiret", names)
         self.assertIn("lessons/01_hello.wiret", names)
-        self.assertFalse(names & {"wiret/editor.py", "wiret/graphview.py", "wiret/palette.py"})
+        self.assertFalse(names & {"wiret/editor.py", "wiret/graphview.py", "wiret/palettepopup.py"})
+        self.assertIn("wiret/palette.py", names)
         self.assertIn("wiret/debugstate.py", names)
 
     def test_check_maps_nodes_to_lines(self):
@@ -6500,6 +6501,45 @@ class WebApiTests(unittest.TestCase):
         from wiret import editor
         for method in ("connect", "connect_to_node", "disconnect", "edit_literal"):
             self.assertIn("canvasedit.", inspect.getsource(getattr(editor.EditorApp, method)))
+
+    def test_palette_search_and_add(self):
+        from wiret import palette, webapi
+        from wiret.registry import ModuleIndex
+        text = lesson("02_variables.wiret")
+        r = json.loads(webapi.palette(text, "Main", "mul"))
+        self.assertEqual(r["items"][0]["label"], "Mul::<i32>")
+        self.assertEqual(r["items"][0]["description"], "Multiplies: a × b.")
+        # the same ranking as the desktop palette
+        m = parse(text)
+        idx = ModuleIndex(m)
+        desktop = [it.label for it in palette.rank(palette.items(m.graph("Main"), idx), "mul")]
+        self.assertEqual([it["label"] for it in r["items"]], desktop[:200])
+        self.assertEqual(r["total"], len(palette.items(m.graph("Main"), idx)))
+        # from a dragged pin: only what fits it
+        r = json.loads(webapi.palette(text, "Main", "", json.dumps(["show", "in", "message"])))
+        self.assertEqual(r["title"], "Add a node for show.message (text (string))")
+        self.assertIn("Call std.string.Concat", [it["label"] for it in r["items"]])
+        self.assertNotIn("Mul::<i32>", [it["label"] for it in r["items"]])
+        self.assertEqual(webapi.palette(text, "Main", "", json.dumps(["show", "in", "nope"])), "null")
+        self.assertEqual(webapi.palette(text + "(", "Main"), "null")
+        # adding: at the point given, and wired to the dragged pin (a producer goes to its left)
+        r = self.edit(text, "Main", op="add", kind="Mul", symbol=None, targs=["i32"], x=10, y=20)
+        self.assertEqual(r["message"], f"Added {r['select']}")
+        self.assertIn(f"node {r['select']} = Mul::<i32>", r["text"])
+        self.assertIn(f"{r['select']} at (10, 20)", r["text"])
+        r = self.edit(text, "Main", op="add", kind="Call", symbol="std.string.Concat", targs=[],
+                      x=500, y=300, context=["show", "in", "message"])
+        new = r["select"]
+        self.assertEqual(r["message"], f"Bound show.message = {new}.result")
+        self.assertIn(f"{new} at (300, 300)", r["text"])
+        r = self.edit(text, "Main", op="add", kind="Branch", symbol=None, targs=[], x=300, y=200,
+                      context=["start", "out", "then"])
+        self.assertIn(f"start -> {r['select']}", r["text"])
+
+    def test_graph_nodes_carry_descriptions(self):
+        from wiret import webapi
+        nodes = {n["id"]: n for n in json.loads(webapi.check(lesson("02_variables.wiret")))["graphs"][0]["nodes"]}
+        self.assertEqual(nodes["plus"]["description"], "Adds two numbers: a + b.")
 
     def test_web_stepping_matches_desktop(self):
         """web/debugger.js, stepping through a recording, pauses where the desktop editor's

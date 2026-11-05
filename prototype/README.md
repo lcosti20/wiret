@@ -44,8 +44,9 @@ Gatekeeper warning on first launch.
 (pan, zoom, double-click a call to open it) and the Source, Debugger and Problems tabs on the
 right. On the canvas you can drag nodes and box titles to move them, drag from a pin to another
 pin (or onto a node) to wire them, click a wire or node and press Delete to remove it, and
-double-click an input to type its value; Ctrl+Z and Ctrl+Y undo and redo. Adding new nodes is
-done in the source text for now. You can debug with Step (F11),
+double-click an input to type its value, and add nodes from the palette (Tab, a double click
+on empty canvas, a wire dropped on empty canvas, or the Add node button); Ctrl+Z and Ctrl+Y undo
+and redo. You can debug with Step (F11),
 Over (F10), Back (Shift+F11), Run/Continue (F5), Animate and breakpoints (click the circle at a
 node's top-left corner or beside its line number, or press F9). The Tkinter modules, the Git
 commands and file watching are left out.

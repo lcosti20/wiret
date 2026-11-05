@@ -19,7 +19,7 @@ from collections import Counter, deque
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Optional
 
-from . import canvasedit, ops, palette, viewmodel
+from . import canvasedit, ops, palette, palettepopup, viewmodel
 from .checker import GraphInfo, check
 from .compiler import compile_module
 from .debugstate import DebugState
@@ -831,34 +831,23 @@ class EditorApp:
         and the new node is wired to that pin."""
         if not self.can_edit():
             return
-        g = self.graph
-        candidates = palette.items(g, self.idx)
-        title = "Add node — type to search (↑↓, Enter)"
-        if context:
-            nid, d, pin = context
-            sig = self.info.sigs.get(nid)
-            p = (sig.output(pin) if d == "out" else sig.input(pin)) if sig else None
-            if p is None:
-                return
-            candidates = [it for it in candidates
-                          if palette.compatible(it, g, self.idx, d, p.type) is not None]
-            title = f"Add a node for {nid}.{pin} ({type_words(p.type)})"
-            if d == "in":
-                wx -= 200     # place the producer to the left of the pin it feeds
+        found = canvasedit.palette(self.graph, self.info, self.idx, context)
+        if found is None:
+            return
+        title, candidates = found
 
         def pick(it):
-            n = ops.create_node(g, it.kind, it.symbol, it.targs, wx, wy)
-            self.view.selected = ("node", n.id)
-            if context:
-                nid, d, pin = context
-                other = palette.compatible(it, g, self.idx, d, p.type)
-                self.info = GraphInfo(g, self.idx)
-                self.connect(context, (n.id, "in" if d == "out" else "out", other))
-            else:
-                self.commit(f"Added {n.id}")
+            try:
+                nid, reason = canvasedit.add_node(self.graph, self.idx, it, wx, wy, context,
+                                                  self.geom)
+            except canvasedit.Refused as e:
+                self.status(str(e))
+                return
+            self.view.selected = ("node", nid)
+            self.commit(reason)
             self.view.focus_set()
 
-        return palette.PalettePopup(self.root, rx, ry, candidates, pick, title)
+        return palettepopup.PalettePopup(self.root, rx, ry, candidates, pick, title)
 
     def connect_to_node(self, a, nid):
         if not self.can_edit():

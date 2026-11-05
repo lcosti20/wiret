@@ -15,7 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 OUT = os.path.join(HERE, "wiret_bundle.zip")
 
-TKINTER_MODULES = {"editor.py", "graphview.py", "palette.py"}
+TKINTER_MODULES = {"editor.py", "graphview.py", "palettepopup.py"}
 
 
 def files():
