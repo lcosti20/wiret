@@ -10,6 +10,8 @@
   wiretc hash FILE                     semantic and layout hashes
   wiretc view --flow FILE              reading view in flow order
   wiretc schema --json                 the node registry
+  wiretc edit FILE REQUEST.json|- [--dry-run]
+                                       apply JSON edit operations (section 7.2)
   wiretc ids --check BASE[..HEAD] [--record] [--project DIR]
                                        every deleted id retired in wiret.ids, none reused
 """
@@ -92,6 +94,10 @@ def main(argv=None):
     p.add_argument("file")
     p = sub.add_parser("schema")
     p.add_argument("--json", action="store_true", required=True)
+    p = sub.add_parser("edit")
+    p.add_argument("file")
+    p.add_argument("request", help="a JSON request file, or - for standard input")
+    p.add_argument("--dry-run", action="store_true", help="reply, but do not write the file")
     p = sub.add_parser("ids")
     p.add_argument("--check", metavar="BASE[..HEAD]", required=True,
                    help="compare two revisions; without ..HEAD, BASE and the working tree")
@@ -134,6 +140,27 @@ def main(argv=None):
             with open(a.file, "w", encoding="utf-8", newline="\n") as f:
                 f.write(out)
         return 0
+    if a.cmd == "edit":
+        from wiret.edit import apply_request
+        if a.request == "-":
+            req_text = sys.stdin.read()
+        else:
+            with open(a.request, encoding="utf-8") as f:
+                req_text = f.read()
+        try:
+            request = json.loads(req_text)
+        except json.JSONDecodeError as e:
+            print(json.dumps({"ok": False, "error": {"code": "request",
+                                                     "message": f"not JSON: {e}"}}))
+            return 2
+        with open(a.file, encoding="utf-8") as f:
+            text = f.read()
+        r = apply_request(text, request, None if a.dry_run else find_project(a.file))
+        if r.ok and not a.dry_run and r.text != text:
+            with open(a.file, "w", encoding="utf-8", newline="\n") as f:
+                f.write(r.text)
+        print(json.dumps(r.to_json(), indent=2))
+        return 0 if r.ok else 1
     if a.cmd == "ids":
         from wiret.gitids import GitError, check_range
         proj = find_project(os.path.join(a.project, "x.wiret"))
