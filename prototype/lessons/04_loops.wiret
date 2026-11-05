@@ -44,15 +44,15 @@ func Main() {
   layout {
     count at (200, 0)
     entry at (0, 0)
-    final at (560, 600)
+    final at (564, 361)
     keep at (1160, 0)
-    line at (560, 190)
-    num_text at (380, 230)
-    old at (820, 290)
-    plus at (1000, 130)
-    report at (1240, 480)
-    report_line at (980, 560)
+    line at (541, 240)
+    num_text at (302, 260)
+    old at (844, 115)
+    plus at (1021, 155)
+    report at (1200, 268)
+    report_line at (986, 341)
     say at (820, 0)
-    total_text at (740, 600)
+    total_text at (760, 361)
   }
 }

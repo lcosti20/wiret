@@ -25,6 +25,6 @@ func Main() {
     entry at (0, 0)
     say_arrows at (820, 0)
     say_hello at (220, 0)
-    say_steps at (520, 0)
+    say_steps at (489, 0)
   }
 }
