@@ -2,8 +2,10 @@
 // wiret/viewmodel.py), the way wiret/graphview.py draws it on the desktop, and turns pointer
 // input into edits as the desktop canvas does: drag a node or a box title to move it, drag
 // from a pin to a pin (or onto a node) to wire them, click a wire and press Delete to remove
-// it, double-click an input to type its value. The page makes the edits (on.move, on.connect,
-// ...); this file only reports them. Also: pan, zoom, select, open a call, breakpoints.
+// it, double-click an input to type its value, and add nodes from the palette (Tab, a double
+// click on empty canvas, or a wire dropped on empty canvas). The page makes the edits (on.move,
+// on.connect, ...); this file only reports them. Also: pan, zoom, select, open a call,
+// breakpoints.
 //
 // Everything is in graph units inside one "world" element that a CSS transform pans and zooms.
 // Boxes, nodes, notes and value tags are HTML, so the browser measures text; wires and pins
@@ -33,7 +35,9 @@ export class GraphView {
   /** host: an empty element to fill. on: {select(nodeId|null), open(graphName),
    *  toggleBreakpoint(nodeId), canEdit() -> true or the reason not, message(text),
    *  move(id, x, y), connect(a, b), connectToNode(a, nodeId), disconnect(node, dir, pin),
-   *  deleteNode(id), editPin(node, pin, [screenX, screenY])}. A pin is [node, "in"/"out", pin]. */
+   *  deleteNode(id), editPin(node, pin, [screenX, screenY]),
+   *  palette([worldX, worldY], [screenX, screenY], pin or null)}. A pin is [node, "in"/"out", pin];
+   *  screen points are relative to the canvas. */
   constructor(host, on) {
     this.host = host;
     this.on = on;
@@ -48,6 +52,7 @@ export class GraphView {
     this.notesOpen = null;      // null: open unless the view is narrow
     this.selWire = null;        // "d|node|pin" (data wire into that input) or "e|node|pin"
     this.temp = s("svg", { class: "gv-svg" });   // the wire being dragged out of a pin
+    this.pointer = null;        // the last pointer position over the canvas (for Tab)
     host.tabIndex = 0;
     host.append(this.world, this.notesBox);
     this.#bindInput();
@@ -312,6 +317,7 @@ export class GraphView {
 
   #nodeTip(n) {
     const lines = [`${n.id}: ${n.title}`];
+    if (n.description) lines.push(n.description);
     if (n.opens) lines.push(`Double-click to open ${n.opens}.`);
     return lines.join("\n");
   }
@@ -386,6 +392,94 @@ export class GraphView {
     });
   }
 
+  /** The point at the middle of the view: [world, screen], for adding a node there. */
+  middle() {
+    const sx = this.host.clientWidth / 2, sy = this.host.clientHeight / 3;
+    return [[(sx - this.ox) / this.scale, (sy - this.oy) / this.scale], [sx, sy]];
+  }
+
+  /** The node palette over the canvas at [x, y]: a search box and the best matches.
+   *  search(query) -> {items: [{label, category, description, ...}], total}. Resolves to the
+   *  item picked, or null when closed (Escape, or a click elsewhere). */
+  pick([x, y], { title, search }) {
+    this.askBox?.remove();
+    const box = h("div", "gv-palette");
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-label", title);
+    const input = h("input");
+    input.placeholder = "Type to search";
+    input.setAttribute("aria-label", "Search nodes");
+    input.setAttribute("role", "combobox");
+    input.setAttribute("aria-expanded", "true");
+    const list = h("ul");
+    list.id = "gv-palette-list";
+    list.setAttribute("role", "listbox");
+    input.setAttribute("aria-controls", list.id);
+    const desc = h("div", "gv-palette-desc");
+    box.append(h("div", "gv-ask-label", title), input, list, desc);
+    const w = Math.min(360, this.host.clientWidth - 8);
+    box.style.width = `${w}px`;
+    box.style.left = `${Math.max(4, Math.min(x, this.host.clientWidth - w - 4))}px`;
+    box.addEventListener("pointerdown", (e) => e.stopPropagation());
+    box.addEventListener("wheel", (e) => e.stopPropagation());
+    this.host.append(box);
+    this.askBox = box;
+    let shown = [], sel = 0;
+    const place = () => {             // keep it inside the canvas as its contents change
+      box.style.top = `${Math.max(4, Math.min(y, this.host.clientHeight - box.offsetHeight - 4))}px`;
+    };
+    const show = (i) => {
+      sel = Math.max(0, Math.min(shown.length - 1, i));
+      [...list.children].forEach((li, k) => {
+        li.setAttribute("aria-selected", k === sel);
+        if (k === sel) li.scrollIntoView({ block: "nearest" });
+      });
+      const it = shown[sel];
+      desc.textContent = it ? (it.description ? `${it.category}: ${it.description}` : it.category)
+                            : input.value ? "No matching nodes." : "";
+      if (it) input.setAttribute("aria-activedescendant", `gv-pal-${sel}`);
+      place();
+    };
+    const refilter = () => {
+      const r = search(input.value);
+      shown = r.items;
+      list.replaceChildren(...shown.map((it, k) => {
+        const li = h("li", "", it.label);
+        li.id = `gv-pal-${k}`;
+        li.setAttribute("role", "option");
+        li.append(h("span", "gv-palette-cat", it.category));
+        li.addEventListener("pointerenter", () => show(k));
+        li.addEventListener("click", () => finish(shown[k]));
+        return li;
+      }));
+      show(0);
+    };
+    let done = false, resolveIt;
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      box.remove();
+      if (this.askBox === box) this.askBox = null;
+      this.host.focus({ preventScroll: true });
+      resolveIt(v);
+    };
+    input.addEventListener("input", refilter);
+    input.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "ArrowDown") { e.preventDefault(); show(sel + 1); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); show(sel - 1); }
+      else if (e.key === "Enter") { e.preventDefault(); if (shown[sel]) finish(shown[sel]); }
+      else if (e.key === "Escape") finish(null);
+    });
+    box.addEventListener("focusout", (e) => { if (!box.contains(e.relatedTarget)) setTimeout(() => {
+      if (!box.contains(document.activeElement)) finish(null);
+    }, 0); });
+    list.tabIndex = -1;
+    refilter();
+    input.focus();
+    return new Promise((resolve) => { resolveIt = resolve; });
+  }
+
   #bindInput() {
     const host = this.host;
     const pointers = new Map();
@@ -425,6 +519,7 @@ export class GraphView {
     });
 
     host.addEventListener("pointermove", (e) => {
+      this.pointer = local(e);
       if (!pointers.has(e.pointerId)) return;
       pointers.set(e.pointerId, local(e));
       if (pinch && pointers.size === 2) {
@@ -484,7 +579,8 @@ export class GraphView {
         const nodeEl = under?.closest?.(".gv-node");
         if (pin) this.on.connect(d.from, [pin.dataset.node, pin.dataset.dir, pin.dataset.pin]);
         else if (nodeEl && nodeEl.dataset.id !== d.from[0]) this.on.connectToNode(d.from, nodeEl.dataset.id);
-        else this.on.message("Drop the wire on a pin, or on a node to use its first pin that fits.");
+        else if (!under?.closest?.(".gv-wirehit, .gv-box")) this.on.palette(world(local(e)), local(e), d.from);
+        else this.on.message("Drop the wire on a pin, on a node, or on empty canvas to add a node for it.");
       }
     };
     host.addEventListener("pointerup", end);
@@ -506,6 +602,10 @@ export class GraphView {
       } else if (e.key === "Escape") {
         this.selWire = null;
         this.on.select(null);
+      } else if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        const at = this.pointer ?? this.middle()[1];
+        this.on.palette(world(at), at, null);
       }
     });
   }
@@ -523,8 +623,11 @@ export class GraphView {
     const key = `${id}|${inPin}`;
     const now = performance.now(), last = this.lastClick;
     this.lastClick = { key, at: now };
-    if (id && last?.key === key && now - last.at < 400) {
+    if (last?.key === key && now - last.at < 400) {
       this.lastClick = null;
+      if (!id && !wire && !target.closest?.(".gv-box-title")) {
+        return this.on.palette([(at[0] - this.ox) / this.scale, (at[1] - this.oy) / this.scale], at, null);
+      }
       if (inPin) return this.on.editPin(id, inPin, at);
       const n = this.graph?.nodes.find((x) => x.id === id);
       if (n?.opens) return this.on.open(n.opens);

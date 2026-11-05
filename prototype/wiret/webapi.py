@@ -16,6 +16,7 @@ from collections import Counter
 from typing import Optional
 
 from . import canvasedit, ops
+from . import palette as pal
 from .checker import GraphInfo
 from .compiler import compile_module
 from .explain import explain, explain_runtime
@@ -124,6 +125,31 @@ def literal_prompt(source: str, graph: str, node: str, pin: str) -> str:
     return json.dumps(canvasedit.literal_prompt(g, GraphInfo(g, idx), idx, node, pin))
 
 
+def palette(source: str, graph: str, query: str = "", context: str = "null") -> str:
+    """The node palette for `graph`, best matches for `query` first (as the desktop palette
+    ranks them): {"title", "items": [{"label", "kind", "symbol", "targs", "category",
+    "description"}], "total"}. `context` is JSON: null, or the pin a wire was dragged from,
+    [node, "in"/"out", pin], to list only the nodes that fit it. null when there is nothing to
+    offer (a parse error, or no such pin)."""
+    try:
+        m = Parser(source).parse_module()
+    except ParseError:
+        return "null"
+    g = m.graph(graph)
+    if g is None:
+        return "null"
+    idx = ModuleIndex(m)
+    ctx = json.loads(context)
+    found = canvasedit.palette(g, GraphInfo(g, idx), idx, tuple(ctx) if ctx else None)
+    if found is None:
+        return "null"
+    title, candidates = found
+    shown = pal.rank(candidates, query)[:200]
+    return json.dumps({"title": title, "total": len(candidates), "items": [
+        {"label": it.label, "kind": it.kind, "symbol": it.symbol, "targs": it.targs,
+         "category": it.category, "description": it.description} for it in shown]})
+
+
 def edit(source: str, graph: str, request: str) -> str:
     """Make one canvas edit on `graph` (through canvasedit, as the desktop editor does) and
     return the new text in canonical form. `request` is JSON with an "op":
@@ -134,6 +160,8 @@ def edit(source: str, graph: str, request: str) -> str:
       delete           "node": a node (with its wires) or a box
       literal          "node", "pin", "text": the value typed for an input (empty unbinds it)
       toggle           "node", "pin": flip a bool input
+      add              "kind", "symbol", "targs" (a palette item), "x", "y", and optionally
+                       "context": the pin a wire was dragged from, to wire the new node to
     and optionally "geoms": {node: [x, y, width]} as drawn (to place an inserted Convert node)
     and "comments": "convert". The result is {"ok", "text", "message", "select"} (`select`: a
     node the edit added). When the edit is refused, `ok` is false and `message` says why. The
@@ -188,6 +216,11 @@ def edit(source: str, graph: str, request: str) -> str:
             reason = canvasedit.set_literal(g, info, idx, req["node"], req["pin"], req["text"])
         elif op == "toggle":
             reason = canvasedit.toggle_bool(g, req["node"], req["pin"])
+        elif op == "add":
+            item = pal.Item("", req["kind"], req.get("symbol"), list(req.get("targs") or []))
+            ctx = req.get("context")
+            _nid, reason = canvasedit.add_node(g, idx, item, req.get("x", 0), req.get("y", 0),
+                                               tuple(ctx) if ctx else None, geom)
         else:
             return json.dumps({"ok": False, "message": f"unknown edit '{op}'"})
     except canvasedit.Refused as e:

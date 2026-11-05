@@ -59,7 +59,8 @@
               background: var(--g-bar); border-bottom: 1px solid #111214; }
   #graphbar select, #graphbar button { background: #2b2e35; color: var(--g-text); border-color: #3a3e46;
               padding: 2px 9px; font-size: 13px; }
-  #graphbar .hint { color: var(--g-dim); font-size: 12px; margin-left: auto; }
+  #graphbar .hint { color: var(--g-dim); font-size: 12px; margin-left: auto; flex: 1 1 0; min-width: 0;
+                    text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .gv { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: none;
         user-select: none; cursor: grab; color: var(--g-text);
         background-color: var(--g-bg);
@@ -80,6 +81,18 @@
   .gv-ask { position: absolute; z-index: 2; width: 240px; padding: 6px 8px; border-radius: 6px;
             background: #2b2e35; border: 1px solid #f5b041; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
   .gv-ask-label { color: var(--g-dim); font-size: 12px; margin-bottom: 4px; }
+  .gv-palette { position: absolute; z-index: 2; padding: 6px 8px; border-radius: 6px;
+                background: #1d1f23; border: 1px solid #3a3e46; box-shadow: 0 8px 28px rgba(0,0,0,.6);
+                color: var(--g-text); cursor: default; }
+  .gv-palette input { width: 100%; font: 14px system-ui, sans-serif; padding: 5px 8px; border-radius: 4px;
+                      border: 1px solid #3a3e46; background: #15171a; color: #fff; }
+  .gv-palette ul { list-style: none; margin: 6px 0 0; padding: 0; max-height: 240px; overflow: auto; }
+  .gv-palette li { display: flex; justify-content: space-between; gap: 8px; padding: 3px 8px;
+                   border-radius: 4px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+  .gv-palette li[aria-selected=true] { background: #2471a3; color: #fff; }
+  .gv-palette-cat { color: var(--g-dim); font-size: 11px; }
+  .gv-palette li[aria-selected=true] .gv-palette-cat { color: #d6e6f5; }
+  .gv-palette-desc { color: #f7dc6f; font-size: 12px; margin-top: 6px; min-height: 1.4em; }
   .gv-ask input { width: 100%; font: 13px var(--mono); padding: 3px 6px; border-radius: 4px;
                   border: 1px solid #3a3e46; background: #1d1f23; color: var(--g-text); }
   .gv-head { height: 24px; line-height: 24px; padding: 0 20px 0 8px; color: #fff;
@@ -212,9 +225,10 @@
       <button id="fit" title="Fit the graph to the view">Fit</button>
       <button id="zoomout" title="Zoom out" aria-label="Zoom out">−</button>
       <button id="zoomin" title="Zoom in" aria-label="Zoom in">+</button>
+      <button id="addnode" title="Add a node (Tab on the canvas, or double-click empty canvas)">+ Add node</button>
       <button id="undo" title="Undo the last graph edit (Ctrl+Z)" disabled>↶ Undo</button>
       <button id="redo" title="Redo (Ctrl+Y)" disabled>↷ Redo</button>
-      <span class="hint">Drag nodes to move · drag from a pin to wire · double-click an input to set it</span>
+      <span class="hint">Drag nodes to move · drag from a pin to wire · Tab to add a node</span>
     </div>
     <div id="graph"></div>
   </section>
@@ -287,6 +301,7 @@ const gv = new GraphView($("graph"), {
     if (applyEdit({ op: "delete", node: id })) selected = null;
   },
   editPin: (node, pin, at) => editPin(node, pin, at),
+  palette: (world, at, context) => openPalette(world, at, context),
 });
 
 // ---------- editing on the canvas ----------
@@ -356,6 +371,25 @@ function redo() {
   undoStack.push($("src").value);
   setText(redoStack.pop());
   say("Redone.");
+}
+
+/** The node palette: search, pick, and add the node at `world` (wired to `context`, the pin
+ *  a wire was dragged from, if any). */
+async function openPalette(world, at, context) {
+  const ok = canEdit();
+  if (ok !== true) return say(ok, true);
+  const text = $("src").value, ctx = JSON.stringify(context ?? null);
+  const first = JSON.parse(api.palette(text, graphName, "", ctx));
+  if (!first) return;
+  if (!first.total) return say(`No node has a pin that fits ${context[0]}.${context[2]}.`, true);
+  const item = await gv.pick(at, {
+    title: first.title,
+    search: (q) => (q ? JSON.parse(api.palette(text, graphName, q, ctx)) : first),
+  });
+  if (!item) return;
+  applyEdit({ op: "add", kind: item.kind, symbol: item.symbol, targs: item.targs,
+              x: Math.round(world[0]), y: Math.round(world[1]), context,
+              geoms: context ? gv.geomsFor([context[0]]) : {} });
 }
 
 /** Double-click on an input: flip a bool, or type a value in a box over the canvas. */
@@ -472,8 +506,9 @@ function selectNode(id, from) {
   const n = graph()?.nodes.find((x) => x.id === id);
   const issues = problems.filter((d) => d.graph === graphName && d.node === id).map((d) => d.explain || d.message);
   const opens = n?.opens ? ` Double-click it to open ${n.opens}.` : "";
+  const what = n?.description ? ` ${n.description}` : "";
   say(issues.length ? `${id}: ${issues.join(" ")}` :
-      `${id}${info?.what ? ` (${info.what})` : ""}${info ? `, line ${info.line}` : ""}.${opens}`, issues.length > 0);
+      `${id}${info?.what ? ` (${info.what})` : ""}${info ? `, line ${info.line}` : ""}.${what}${opens}`, issues.length > 0);
 }
 
 $("graphsel").onchange = () => showGraph($("graphsel").value);
@@ -481,6 +516,7 @@ $("fit").onclick = () => gv.fit(true);
 $("zoomin").onclick = () => gv.zoom(1.25);
 $("zoomout").onclick = () => gv.zoom(1 / 1.25);
 $("undo").onclick = undo;
+$("addnode").onclick = () => { const [w, a] = gv.middle(); openPalette(w, a, null); };
 $("redo").onclick = redo;
 
 // ---------- tabs ----------

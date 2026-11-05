@@ -11,6 +11,9 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 from . import ops
+from . import palette as pal
+from .checker import GraphInfo
+from .explain import type_words
 from .model import Graph, Lit, PinRef
 from .parser import ParseError, parse_literal
 from .registry import can_convert, enum_values, lit_fits
@@ -159,6 +162,43 @@ def set_literal(g: Graph, info, idx, nid: str, pin: str, text: str) -> str:
         raise Refused(f"{text} is not a valid {p.type}")
     ops.bind(g, nid, pin, lit)
     return f"Set {nid}.{pin} = {text}"
+
+
+def palette(g: Graph, info, idx, context: Optional[tuple] = None) -> Optional[tuple]:
+    """The node palette: (title, items, ranked by palette.rank). With a pin `context`
+    (node, "in"/"out", pin), only nodes with a pin that fits are listed. None when the
+    context pin does not exist."""
+    candidates = pal.items(g, idx)
+    title = "Add node — type to search (↑↓, Enter)"
+    if context:
+        nid, d, pin = context
+        sig = info.sigs.get(nid)
+        p = (sig.output(pin) if d == "out" else sig.input(pin)) if sig else None
+        if p is None:
+            return None
+        candidates = [it for it in candidates
+                      if pal.compatible(it, g, idx, d, p.type) is not None]
+        title = f"Add a node for {nid}.{pin} ({type_words(p.type)})"
+    return title, candidates
+
+
+def add_node(g: Graph, idx, item, x: float, y: float, context: Optional[tuple] = None,
+             geom: Optional[Geom] = None) -> tuple:
+    """Add the palette item at (x, y): (its id, a description of the edit). With a pin
+    `context`, the new node is wired to that pin; a producer for an input goes to its left."""
+    if context and context[1] == "in":
+        x -= 200
+    n = ops.create_node(g, item.kind, item.symbol, item.targs, x, y)
+    if not context:
+        return n.id, f"Added {n.id}"
+    info = GraphInfo(g, idx)
+    nid, d, pin = context
+    sig = info.sigs[nid]
+    p = sig.output(pin) if d == "out" else sig.input(pin)
+    other = pal.compatible(item, g, idx, d, p.type)
+    reason = connect(g, info, idx, context, (n.id, "in" if d == "out" else "out", other),
+                     geom or (lambda _nid: None))
+    return n.id, reason or f"Added {n.id}"
 
 
 def place_unplaced(g: Graph, remembered: dict) -> None:
