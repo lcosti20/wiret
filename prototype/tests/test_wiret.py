@@ -5353,6 +5353,165 @@ class CopyOnWriteTests(unittest.TestCase):
         self.assertEqual(cm.exception.status, "WR_ERR_VERIFY")
 
 
+CAPS = """
+extern func host.Beep() @capability("audio.play")
+extern func host.Log(message: string) @capability("console.write")
+
+func Hello() {
+  node beep = Call host.Beep
+  node entry = Entry
+  node log = Call host.Log
+    .message <- "hi"
+
+  flow {
+    entry -> log
+    log -> beep
+  }
+}
+"""
+
+
+class CapabilityTests(unittest.TestCase):
+    """Capabilities (sections 2.4, 5.4, 6.5 and 7.3)."""
+
+    def caps_module(self, body=CAPS):
+        return "wiret 1\nmodule t\n" + body
+
+    def beep_vm(self, capabilities=None):
+        from wiret.natives import NativeSpec
+        vm = VM(output=lambda s: None, capabilities=capabilities)
+        vm.register("host.Beep", NativeSpec([], [], "impure", lambda _vm: (),
+                                            capability="audio.play"))
+        return vm
+
+    def test_wr_caps_lists_what_the_module_declares(self):
+        from wiret.vm import module_capabilities
+        _, r = build(self.caps_module())
+        self.assertEqual(module_capabilities(r.wbc), ["audio.play", "console.write"])
+        self.assertIn("capability audio.play", disassemble(r.wbc))
+
+    def test_a_sandbox_grants_nothing(self):
+        _, r = build(self.caps_module())
+        vm = self.beep_vm(capabilities=[])
+        with self.assertRaises(WiretError) as cm:
+            vm.load(r.wbc)
+        self.assertEqual(cm.exception.status, "WR_ERR_LINK")
+        self.assertIn("'audio.play'", cm.exception.message)
+        vm.grant("audio.play")
+        vm.grant("console.write")
+        mod = vm.load(r.wbc)
+        self.assertEqual(mod.capabilities, ["audio.play", "console.write"])
+
+    def test_the_reference_host_grants_what_its_natives_need(self):
+        _, r = build(self.caps_module())
+        vm = self.beep_vm()            # grants console.write, not the newly registered one
+        with self.assertRaises(WiretError) as cm:
+            vm.load(r.wbc)
+        self.assertIn("'audio.play'", cm.exception.message)
+        vm.grant("audio.play")
+        vm.call(vm.load(r.wbc), "Hello", [])
+
+    def test_leaving_the_attribute_off_does_not_get_around_a_grant(self):
+        text = module("""
+func Hello() {
+  node entry = Entry
+  node log = Call host.Log
+    .message <- "hi"
+
+  flow {
+    entry -> log
+  }
+}
+""", macros=False)                     # host.Log declared without @capability
+        _, r = build(text)
+        with self.assertRaises(WiretError) as cm:
+            VM(capabilities=[]).load(r.wbc)
+        self.assertIn("import host.Log needs capability 'console.write'", cm.exception.message)
+
+    def test_e0104_misplaced_or_malformed(self):
+        text = self.caps_module("""
+extern func host.A() @capability
+extern func host.B() @capability(3)
+extern func host.C() @capability("x", "y")
+
+func F() @capability("x") {
+  node entry = Entry
+}
+""")
+        diags = [d for d in check(parse(text)) if d.code == "E0104"]
+        self.assertEqual(len(diags), 4)
+
+    def test_e0160_when_the_project_does_not_allow_it(self):
+        d = tempfile.mkdtemp()
+        try:
+            path = os.path.join(d, "t.wiret")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(self.caps_module())
+            from wiret.ids import find_project
+            m = parse(self.caps_module())
+            with open(os.path.join(d, "wiret.toml"), "w", encoding="utf-8") as f:
+                f.write('[project]\nname = "t"\n')
+            self.assertEqual([x for x in check(m, project=find_project(path))
+                              if x.code == "E0160"], [])         # no table: no check
+            with open(os.path.join(d, "wiret.toml"), "w", encoding="utf-8") as f:
+                f.write('[project]\nname = "t"\n\n[capabilities]\nallow = ["console.write"]\n')
+            bad = [x for x in check(m, project=find_project(path)) if x.code == "E0160"]
+            self.assertEqual([(x.graph, x.data["capability"]) for x in bad],
+                             [("host.Beep", "audio.play")])
+            r = compile_module(m, None, project=find_project(path))
+            self.assertFalse(r.ok)
+        finally:
+            shutil.rmtree(d)
+
+    def test_manifest_allow_list_without_tomllib(self):
+        from wiret.ids import read_allowed_capabilities
+        text = ('[project]\nname = "x"  # a comment\n\n[capabilities]\n'
+                'allow = ["console.write", "audio.play"]\n')
+        self.assertEqual(read_allowed_capabilities(text), {"console.write", "audio.play"})
+        self.assertIsNone(read_allowed_capabilities('[project]\nname = "x"\n'))
+        import builtins
+        real = builtins.__import__
+
+        def no_tomllib(name, *args, **kw):
+            if name == "tomllib":
+                raise ImportError
+            return real(name, *args, **kw)
+        builtins.__import__ = no_tomllib
+        try:
+            self.assertEqual(read_allowed_capabilities(text), {"console.write", "audio.play"})
+            self.assertIsNone(read_allowed_capabilities('[project]\nname = "x"\n'))
+        finally:
+            builtins.__import__ = real
+
+    def test_cli_sandbox_and_grant(self):
+        d = tempfile.mkdtemp()
+        try:
+            path = os.path.join(d, "t.wiret")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(module("""
+func Hello() {
+  node entry = Entry
+  node log = Call host.Log
+    .message <- "hi"
+
+  flow {
+    entry -> log
+  }
+}
+""", macros=False))
+            wiretc = os.path.join(os.path.dirname(HERE), "wiretc.py")
+            refused = subprocess.run([sys.executable, wiretc, "run", "--sandbox", path, "Hello"],
+                                     capture_output=True, text=True)
+            self.assertEqual(refused.returncode, 1)
+            self.assertIn("console.write", refused.stderr)
+            ok = subprocess.run([sys.executable, wiretc, "run", "--sandbox", "--grant",
+                                 "console.write", path, "Hello"], capture_output=True, text=True)
+            self.assertEqual(ok.returncode, 0, ok.stderr)
+            self.assertIn("hi", ok.stdout)
+        finally:
+            shutil.rmtree(d)
+
+
 class BytecodeTests(unittest.TestCase):
     def test_disassembly_names_nodes(self):
         _, r = build(demo())

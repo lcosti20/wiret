@@ -84,7 +84,7 @@ allow = ["console.write"]
 - Import cycles between modules are rejected at build time.
 - `wiret.lock` records the semantic hash of every dependency and the registry version. `wiretc build` fails if a dependency's hash no longer matches, so a build is reproducible.
 - `wiret.ids` is the project's **id registry**, committed next to the manifest: one line per retired id, `module graph kind id` separated by spaces. A node or box is `game.demo TakeDamage node set_new`; an `@id` is `game.demo - id fn_k3f9`, where `-` says it belongs to no single graph. It is append-only and merges by set union, so two branches that retire different ids never conflict. Editors and `wiretc edit` append to it when they delete an element, and `wiretc ids --check` verifies it in CI (section 2.4). It is what turns "ids are never reused" from a convention into something checkable; a single `.wiret` file cannot offer that on its own.
-- `[capabilities] allow` lists what the build permits modules to request. It is a build-time check; the host's `wr_grant` calls are the runtime authority.
+- `[capabilities] allow` lists what the build permits modules to request. It is a build-time check: a capability not in the list is `E0160`. A manifest without a `[capabilities]` table does not restrict the build. The host's `wr_grant` calls are the runtime authority.
 
 ### 7.4 Conformance
 

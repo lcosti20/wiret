@@ -172,6 +172,7 @@ Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber
 | `E0503` | A struct holds itself by value, directly or through other structs (section 2.2). |
 | `E0150` | A method overrides a `@final` method, or its parameters, results or latency differ from the method it overrides (section 2.2). |
 | `E0151` | A class extends something that is not a class of the module, or its base classes form a cycle; or `impl` names something that is not an interface. |
+| `E0160` | An `extern` needs a capability that the project's `wiret.toml` `[capabilities] allow` list does not permit (section 7.3). |
 | `E0152` | A class does not implement a method of an interface it names, or implements it with another signature, as an `event`, or as a `@latent` func. |
 | `W0201` | Input left unbound and no declared default. |
 | `W0301` | Node unreachable from any entry. |

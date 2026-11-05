@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass
 from typing import Optional
 
 from .model import Enum, Graph, Lit, Module, Node, PinRef, SEMANTIC_ATTRS, Struct, note_detached, notes
-from .model import Const, Var
+from .model import Const, Extern, Var
 
 # Names that are metadata, not semantic attributes: `@doc` is `#[doc]` (section 2.4).
 META_NAMES = {"doc", "category", "keywords", "note"}
@@ -122,6 +122,7 @@ def check(module: Module, comments_ok=False, project=None) -> list:
                       dst=ty)
     check_type_decls(module, idx, D)
     check_attr_names(module, D)
+    check_capabilities(module, project, D)
     if project is not None:
         from .ids import check_ids
         check_ids(module, project, D)
@@ -777,6 +778,31 @@ def _pure_closure(info: GraphInfo, nid: str) -> set:
         out.add(d)
         todo += pure_deps(info, d)
     return out
+
+
+def check_capabilities(module: Module, project, D):
+    """`@capability("name")` (section 2.4): only on an `extern func`, with one string. In a
+    project whose wiret.toml has a `[capabilities]` table, E0160 for a capability that its
+    `allow` list does not permit (section 7.3); the host's grants decide at run time."""
+    for it in module.items:
+        for a in getattr(it, "attrs", []):
+            if a.name != "capability":
+                continue
+            name = it.name if hasattr(it, "name") else None
+            if not (isinstance(it, Extern) and it.kind == "func"):
+                D("E0104", "@capability belongs on an extern func: it says what that host "
+                           "function needs to be granted", name)
+                continue
+            arg = a.arg()
+            if arg is None or arg.kind != "string" or len(a.args or []) != 1:
+                D("E0104", '@capability takes the capability name as one string, as in '
+                           '@capability("console.write")', name)
+                continue
+            allowed = getattr(project, "capabilities", None) if project is not None else None
+            if allowed is not None and arg.value not in allowed:
+                D("E0160", f"'{it.name}' needs capability '{arg.value}', which wiret.toml does "
+                           f"not allow; add it to [capabilities] allow", name,
+                  capability=arg.value)
 
 
 def check_attr_names(module: Module, D):

@@ -128,7 +128,7 @@ void      wr_module_each_capability(wr_Module *m, void (*fn)(const char *cap, vo
 wr_Status wr_link(wr_Vm *vm);     /* resolve imports left pending by WR_LOAD_LAZY_LINK */
 ```
 
-An import whose capability is not granted fails the load with `WR_ERR_LINK`, naming the capability. Imports between Wiret modules are resolved against the exports of modules already loaded, then against natives (section 7.3). To load modules that depend on each other in any order, pass `WR_LOAD_LAZY_LINK` to each and call `wr_link` once.
+An import whose capability is not granted fails the load with `WR_ERR_LINK`, naming the capability. `wr.caps` lists the capabilities of the imports the module uses, not those of `extern` declarations it never calls. A host may also register a native together with the capability it requires; an import of that native then needs the grant whether or not its source declares the capability, so a module cannot reach it by leaving the attribute off. Imports between Wiret modules are resolved against the exports of modules already loaded, then against natives (section 7.3). To load modules that depend on each other in any order, pass `WR_LOAD_LAZY_LINK` to each and call `wr_link` once.
 
 ### 6.6 Natives and host types
 

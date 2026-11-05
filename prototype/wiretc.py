@@ -6,7 +6,8 @@
   wiretc build FILE [-o OUT.wbc] [--no-source]
   wiretc dis FILE.wbc                  disassemble with node ids
   wiretc verify FILE.wbc               run only the verifier
-  wiretc run FILE.wiret|FILE.wbc FUNC [ARGS...]
+  wiretc run [--grant CAP]... [--sandbox] FILE.wiret|FILE.wbc FUNC [ARGS...]
+  wiretc caps FILE.wiret|FILE.wbc      the capabilities a module needs (wr.caps)
   wiretc hash FILE                     semantic and layout hashes
   wiretc view --flow FILE              reading view in flow order
   wiretc schema --json                 the node registry
@@ -38,7 +39,7 @@ from wiret.parser import ParseError, parse  # noqa: E402
 from wiret.printer import layout_hash, print_module, semantic_hash  # noqa: E402
 from wiret.registry import registry_json  # noqa: E402
 from wiret.runner import format_results, parse_args_for, run_function  # noqa: E402
-from wiret.vm import VM, WiretError  # noqa: E402
+from wiret.vm import VM, WiretError, module_capabilities  # noqa: E402
 
 
 def load(path):
@@ -53,7 +54,7 @@ def load(path):
 
 def build(path, out=None, embed=True):
     m, text = load(path)
-    r = compile_module(m, text, embed)
+    r = compile_module(m, text, embed, project=find_project(path))
     for d in r.diags:
         print(d, file=sys.stderr)
     if not r.ok:
@@ -123,6 +124,12 @@ def main(argv=None):
     p.add_argument("func")
     p.add_argument("args", nargs="*")
     p.add_argument("--fuel", type=int, default=50_000_000)
+    p.add_argument("--grant", action="append", default=[], metavar="CAP",
+                   help="grant a capability (section 6.5); repeat for more")
+    p.add_argument("--sandbox", action="store_true",
+                   help="grant nothing but the --grant ones, not even console.write")
+    p = sub.add_parser("caps")
+    p.add_argument("file")
     p = sub.add_parser("hash")
     p.add_argument("file")
     p = sub.add_parser("view")
@@ -269,7 +276,9 @@ def main(argv=None):
             data, m = open(a.file, "rb").read(), None
         else:
             m, _, data = build(a.file)
-        vm = VM(fuel=a.fuel)
+        vm = VM(fuel=a.fuel, capabilities=[] if a.sandbox else None)
+        for cap in a.grant:
+            vm.grant(cap)
         try:
             lm = vm.load(data)
             args = parse_args_for(m, a.func, a.args) if m else [int(x) for x in a.args]
@@ -280,6 +289,18 @@ def main(argv=None):
         print(format_results(m, a.func, res))
         if vm.time:
             print(f"(finished at {vm.time:g} s of virtual time)")
+        return 0
+    if a.cmd == "caps":
+        if a.file.endswith(".wbc"):
+            data = open(a.file, "rb").read()
+        else:
+            _, _, data = build(a.file)
+        try:
+            for cap in module_capabilities(data):
+                print(cap)
+        except WiretError as e:
+            print(e, file=sys.stderr)
+            return 1
         return 0
     if a.cmd == "hash":
         m, _ = load(a.file)
