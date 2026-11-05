@@ -1,7 +1,7 @@
 # Wiret prototype
 
 A Python prototype of the Wiret graph editor, compiler and runtime, built against
-[`docs/reference.md`](../docs/reference.md) (Draft 0.7). It implements **Tier 0** and **Tier 1**
+[`docs/reference.md`](../docs/reference.md) (Draft 0.8). It implements **Tier 0** and **Tier 1**
 of the spec (section 1.6). It uses only the Python standard library; the editor uses Tkinter, and the Git
 commands need `git`.
 
@@ -292,8 +292,8 @@ Struct and enum declarations are edited in the Source pane; there is no dialog f
 ### Maps and sets
 
 `map::<K, V>` and `set::<T>` are value types that keep insertion order (section 3.1). Keys and
-set items are primitives, enums, or structs of those (`E0501` otherwise). The pins, which the
-draft leaves open, follow the array kinds:
+set items are primitives, enums, or structs of those (`E0501` otherwise). The pins follow the
+array kinds (section 3.3):
 
 | Node | Pins |
 | --- | --- |
@@ -307,7 +307,7 @@ draft leaves open, follow the array kinds:
 - They lower to the `5D` and `5C` type entries and the `map.*` and `set.*` opcodes (`E0` to
   `EF`). In the VM a map is an insertion-ordered dict and a set one with no values; a change
   copies it, the eager copy that Tier 1 allows. Updating a key keeps its position.
-- Every NaN key is the same key, so a NaN can be looked up again. The draft does not say.
+- Every NaN key is the same key, so a NaN can be looked up again (section 3.1).
 - `std.flow.ForEachMap::<K, V>` loops over a map in key order with outputs `key`, `value` and
   `index`. The palette offers map and set nodes for the map and set types the module uses.
 - `wiretc run` takes a map as `{"a": 1}` and a set as `[1, 2]`.
@@ -315,7 +315,7 @@ draft leaves open, follow the array kinds:
   ignore insertion order (the same keys, and for a map equal values under each). Each element
   uses its own type's equality, so a container holding NaN is not equal to itself, but keys
   match as they do in a lookup, so two sets that each hold NaN are equal. Structs that hold
-  containers compare field by field as before. The draft does not say how NaN keys compare.
+  containers compare field by field as before.
 - Container equality calls `std.array.Equals`, `std.set.Equals` or `std.map.Equals`. Each takes
   two `anyref` (`6D`), so one native signature serves every element type; the verifier accepts
   any reference where `anyref` is expected, and allows `anyref` only in function types. The
@@ -331,8 +331,8 @@ retired id, one `module graph kind id` line each (`game.demo TakeDamage node set
   member, local and state slot that has none, and never changes an existing one.
 - Inside a project, `wiretc check` and the editor also report `E0140` (a retired node, box or
   `@id` used again), `E0102` (an `@id` used twice among siblings) and `W0202` (an element without
-  an `@id`). A lone file, such as a lesson, gets none of these: the draft wants `W0202` there
-  too ("non-reuse cannot be checked"), but on every lone file that would be noise.
+  an `@id`). A lone file, such as a lesson, gets none of these and needs no `@id`s (section
+  2.4).
 - Inside a project the editor writes `@id`s on every graph save (section 7.5) and appends each id
   a save removes to `wiret.ids`. An undo keeps the ids assigned since, and takes back an id the
   same session retired, so undoing a delete is not `E0140`.
@@ -381,8 +381,7 @@ pins for results, and flow wires for a macro's exec parameters and results.
 - A rename by `@id` is carried into the other side: references it added under the old name are
   rewritten, so a function renamed on one branch and called on another merges cleanly.
 - Layout never blocks: positions and properties merge one by one, box `members` as a set, and
-  when both sides changed the same property, theirs is kept and a notice is printed. (The draft
-  says "the later commit wins", which a merge driver cannot know.)
+  when both sides changed the same property, theirs is kept and a notice is printed.
 - `doc`, `category` and `keywords` are one field each; notes merge as a list keyed by text, and
   both sides replacing the same note differently is a conflict.
 - Conflicts are written as markers around the lines where the two sides differ: one line each
