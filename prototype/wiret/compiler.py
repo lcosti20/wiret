@@ -19,9 +19,17 @@ from .checker import Diag, check, has_errors
 from .model import Const, Extern, Graph, Lit, Module, Node, PinRef, Var
 from .natives import INTERNAL, STD
 from .printer import layout_hash, print_module, semantic_hash
-from .registry import (ARRAY_MUTATORS, FLOAT_TYPES, INT_TYPES, REGISTRY_NAME, REGISTRY_VERSION,
+from .registry import (ARRAY_MUTATORS, FLOAT_TYPES, INT_TYPES, MAP_PURE, PLACE_MUTATORS,
+                       REGISTRY_NAME, REGISTRY_VERSION, SET_PURE,
                        SIGNED_TYPES, ModuleIndex, Pin, Sig, array_elem, attr_int, enum_values,
-                       signature, zero_lit)
+                       is_container, map_types, set_elem, signature, zero_lit)
+
+# map and set kinds -> their instruction (section 5.6)
+CONTAINER_OPS = {"MapFind": "map.find", "MapHas": "map.has", "MapLength": "map.len",
+                 "MapKeyAt": "map.key_at", "MapValueAt": "map.value_at", "MapSet": "map.set",
+                 "MapRemove": "map.remove", "MapClear": "map.clear", "SetHas": "set.has",
+                 "SetLength": "set.len", "SetAt": "set.at", "SetAdd": "set.add",
+                 "SetRemove": "set.remove", "SetClear": "set.clear"}
 from .wbc import F32, F64, I32, I64, STRING
 
 COMPILER_VERSION = "wiretc-proto 0.1"
@@ -125,6 +133,12 @@ class Compiler:
         elem = array_elem(ty)
         if elem is not None:
             return wbc.Ref(self.array_type(elem))
+        kv = map_types(ty)
+        if kv is not None:
+            return wbc.Ref(self.map_type(*kv))
+        elem = set_elem(ty)
+        if elem is not None:
+            return wbc.Ref(self.set_type(elem))
         if ty in self.idx.structs:
             return wbc.Ref(self.struct_type(ty))
         return VT[self.base(ty)]
@@ -178,6 +192,28 @@ class Compiler:
             self.types.append(entry)
         return self.type_keys[key]
 
+    def map_type(self, k: str, v: str) -> int:
+        """Index of the `map<k, v>` type entry."""
+        key = ("map", k, v)
+        if key not in self.type_keys:
+            entry = wbc.MapType(self.vt(k), self.vt(v))
+            self.type_keys[key] = len(self.types)
+            self.types.append(entry)
+        return self.type_keys[key]
+
+    def set_type(self, elem: str) -> int:
+        """Index of the `set<elem>` type entry."""
+        key = ("set", elem)
+        if key not in self.type_keys:
+            entry = wbc.SetType(self.vt(elem))
+            self.type_keys[key] = len(self.types)
+            self.types.append(entry)
+        return self.type_keys[key]
+
+    def container_type(self, kind: str, targs: list) -> int:
+        """The type entry a map or set node works on."""
+        return self.map_type(*targs) if kind.startswith("Map") else self.set_type(targs[0])
+
     def func_type(self, params: list, results: list) -> int:
         key = ("func", tuple(params), tuple(results))
         if key not in self.type_keys:
@@ -195,7 +231,7 @@ class Compiler:
         if name in self.global_index:
             return self.global_index[name]
         lit = init if init is not None else zero_lit(ty)
-        if array_elem(ty) is not None or ty in self.idx.structs:
+        if is_container(ty) or ty in self.idx.structs:
             value = None                 # the VM builds the default array or struct
         else:
             value = self.const_value(lit, ty)
@@ -521,7 +557,7 @@ class FuncLowerer:
                     ir.extra["const"] = self.c.idx.consts[n.symbol].value
                 else:
                     ir.extra["global"] = self.c.global_index[n.symbol]
-            elif n.kind in ARRAY_MUTATORS:
+            elif n.kind in PLACE_MUTATORS:
                 if n.symbol in ctx.locals:
                     ir.extra["place"] = ("local", ctx.locals[n.symbol])
                 else:
@@ -651,7 +687,7 @@ class FuncLowerer:
         if self.c.debug:   # every impure output gets a slot, read or not
             for nid in sorted(self.ir):
                 n = self.ir[nid]
-                if not n.pure and n.kind == "Call":
+                if not n.pure and (n.kind == "Call" or n.kind in PLACE_MUTATORS):
                     for p in n.data_outs:
                         key = (nid, p.name)
                         if key not in self.slots:
@@ -773,15 +809,26 @@ class FuncLowerer:
                 self.emit_eq(ty)
                 self.E("br_if", self.L(targets.get(f"case{i}")))
             self.transfer(targets.get("default"), nxt)
-        elif k in ARRAY_MUTATORS:
-            # read the place, apply the mutator (which yields the changed array), store it back
+        elif k in PLACE_MUTATORS:
+            # read the place, apply the mutator (which yields the changed container), store it
+            # back; MapRemove, SetAdd and SetRemove also yield whether anything changed
             kind, where = n.extra["place"]
             idx = self.local_index[where] if kind == "local" else where
             self.E(f"{kind}.get", idx)
             self.emit_inputs(n)
-            op = {"ArraySet": "array.set", "ArrayAdd": "array.push", "ArrayInsert": "array.insert",
-                  "ArrayRemove": "array.remove", "ArrayClear": "array.clear"}[k]
-            self.E(op, self.c.array_type(n.targs[0]))
+            if k in ARRAY_MUTATORS:
+                op = {"ArraySet": "array.set", "ArrayAdd": "array.push",
+                      "ArrayInsert": "array.insert", "ArrayRemove": "array.remove",
+                      "ArrayClear": "array.clear"}[k]
+                self.E(op, self.c.array_type(n.targs[0]))
+            else:
+                self.E(CONTAINER_OPS[k], self.c.container_type(k, n.targs))
+            for p in reversed(n.sig.data_outs):
+                slot = self.slots.get((n.id, p.name))
+                if slot is None:
+                    self.E("drop")
+                else:
+                    self.E("local.set", slot)
             self.E(f"{kind}.set", idx)
             self.transfer(then, nxt)
         else:
@@ -858,6 +905,14 @@ class FuncLowerer:
         if elem is not None:          # the only array constant is the empty array
             self.E("i32.const", 0)
             self.E("array.new", self.c.array_type(elem))
+            return
+        kv = map_types(ty)
+        if kv is not None:            # likewise the empty map and the empty set
+            self.E("map.new", self.c.map_type(*kv))
+            return
+        elem = set_elem(ty)
+        if elem is not None:
+            self.E("set.new", self.c.set_type(elem))
             return
         if ty in self.c.idx.structs:  # structs have no literal: this is the default struct
             for f in self.c.idx.structs[ty].fields:
@@ -954,6 +1009,11 @@ class FuncLowerer:
                 self.emit_const(n.extra["const"], n.sig.outputs[0].type)
             else:
                 self.E("global.get", n.extra["global"])
+            return
+        if k in MAP_PURE or k in SET_PURE:
+            for _, _, src in n.inputs:     # the container, then the key, item or index
+                self.eval(src, ep)
+            self.E(CONTAINER_OPS[k], self.c.container_type(k, n.targs))
             return
         if k == "MakeArray":
             t = self.c.array_type(n.targs[0])

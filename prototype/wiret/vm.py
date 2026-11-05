@@ -14,7 +14,8 @@ from typing import Callable, Optional
 from . import wbc
 from .natives import NativeFault, NativeSpec, _f32, all_natives
 from .verifier import VerifyError, verify
-from .wbc import F32, F64, I32, I64, STRING, OPS, ArrayType, Ref, StructType, WbcError
+from .wbc import (F32, F64, I32, I64, STRING, OPS, ArrayType, MapType, Ref, SetType,
+                  StructType, WbcError)
 
 STATUS_OK = "WR_OK"
 STATUS_FAULT = "WR_ERR_FAULT"
@@ -251,6 +252,11 @@ def normalise(vt, v, types=None):
         entry = types[vt.type] if types is not None else None
         if isinstance(entry, StructType):
             return tuple(normalise(fvt, x, types) for (fvt, _), x in zip(entry.fields, v))
+        if isinstance(entry, MapType):
+            return {_key(normalise(entry.key, k, types)): normalise(entry.value, x, types)
+                    for k, x in dict(v).items()}
+        if isinstance(entry, SetType):
+            return {_key(normalise(entry.elem, k, types)): None for k in v}
         elem = entry.elem if isinstance(entry, ArrayType) else None
         return tuple(normalise(elem, x, types) if elem is not None else x for x in v)
     if vt == I32:
@@ -272,6 +278,87 @@ def zero(vt):
     return () if isinstance(vt, Ref) else ZERO[vt]
 
 
+NAN_KEY = float("nan")
+
+
+def _key(k):
+    """A map key or set item as stored. Every NaN is the same key (one canonical NaN object,
+    so lookups find it), also inside a struct key; any other key is used as it is."""
+    if isinstance(k, float) and k != k:
+        return NAN_KEY
+    if isinstance(k, tuple):
+        return tuple(_key(x) for x in k)
+    return k
+
+
+def _container_ops(default) -> dict:
+    """Map and set instructions (section 5.6) as (function, operand count). A map is a dict
+    and a set a dict of None values; both keep insertion order. A dict is never changed in
+    place: every change makes a new one, the eager copy that Tier 1 allows."""
+    def at(c, i):
+        if not 0 <= i < len(c):
+            raise Fault(f"index {i} is out of range (length {len(c)})")
+        return i
+
+    def map_ops(entry):
+        zero_v = default(entry.value)
+
+        def find(m, k):
+            k = _key(k)
+            return [m[k], 1] if k in m else [zero_v, 0]
+
+        def set_(m, k, v):
+            n = dict(m)
+            n[_key(k)] = v
+            return [n]
+
+        def remove(m, k):
+            k = _key(k)
+            if k not in m:
+                return [m, 0]
+            n = dict(m)
+            del n[k]
+            return [n, 1]
+        return {"map.new": (lambda: [{}], 0), "map.find": (find, 2), "map.set": (set_, 3),
+                "map.remove": (remove, 2), "map.has": (lambda m, k: [int(_key(k) in m)], 2),
+                "map.len": (lambda m: [len(m)], 1),
+                "map.key_at": (lambda m, i: [list(m)[at(m, i)]], 2),
+                "map.value_at": (lambda m, i: [list(m.values())[at(m, i)]], 2),
+                "map.clear": (lambda m: [{}], 1)}
+
+    def set_ops(entry):
+        def add(st, v):
+            v = _key(v)
+            if v in st:
+                return [st, 0]
+            n = dict(st)
+            n[v] = None
+            return [n, 1]
+
+        def remove(st, v):
+            v = _key(v)
+            if v not in st:
+                return [st, 0]
+            n = dict(st)
+            del n[v]
+            return [n, 1]
+        return {"set.new": (lambda: [{}], 0), "set.add": (add, 2), "set.remove": (remove, 2),
+                "set.has": (lambda st, v: [int(_key(v) in st)], 2),
+                "set.len": (lambda st: [len(st)], 1),
+                "set.at": (lambda st, i: [list(st)[at(st, i)]], 2),
+                "set.clear": (lambda st: [{}], 1)}
+
+    cache = {}
+
+    def ops(entry, name):
+        """(function, operand count, whether it makes a new container)."""
+        if id(entry) not in cache:
+            cache[id(entry)] = map_ops(entry) if isinstance(entry, MapType) else set_ops(entry)
+        fn, nin = cache[id(entry)][name]
+        return fn, nin, name.split(".")[1] in ("new", "set", "remove", "add", "clear")
+    return ops
+
+
 def default_values(types: list, data: list):
     """The default value of each value type, for locals, globals and new array elements.
 
@@ -284,6 +371,8 @@ def default_values(types: list, data: list):
         if not isinstance(vt, Ref):
             return ZERO[vt]
         entry = types[vt.type]
+        if isinstance(entry, (MapType, SetType)):
+            return {}                  # never changed in place, so one empty dict is shared
         if not isinstance(entry, StructType):
             return ()
         if vt.type not in cache:
@@ -528,6 +617,7 @@ class VM:
         funcs = []
         defaults = default_values(m.types, m.data)
         arrays = _array_ops(m.types, defaults)
+        containers = _container_ops(defaults)
         for i, (mod, fld, t, flags) in enumerate(m.imports):
             q = f"{mod}.{fld}"
             spec = self.natives.get(q)
@@ -560,6 +650,8 @@ class VM:
                     arg = len
                 elif ins.name.startswith("array."):
                     arg = arrays[ins.name[6:]]
+                elif ins.name.startswith(("map.", "set.")):
+                    arg = containers(m.types[ins.imms[0]], ins.name)
                 elif ins.name == "struct.new":
                     arg = len(m.types[ins.imms[0]].fields)
                 elif ins.name in ("struct.get", "struct.with"):
@@ -748,6 +840,17 @@ class VM:
                         stack[-1] = arg(stack[-1], b, c)
                     if op != 0xD7 and op != 0xD8:     # allocation: 1 fuel per 8 elements
                         fuel -= len(stack[-1]) >> 3
+                elif 0xE0 <= op <= 0xEF:               # map.* and set.*
+                    fn, nin, allocates = arg
+                    if nin:
+                        operands = stack[len(stack) - nin:]
+                        del stack[len(stack) - nin:]
+                        res = fn(*operands)
+                    else:
+                        res = fn()
+                    stack.extend(res)
+                    if allocates:                      # allocation: 1 fuel per 8 entries
+                        fuel -= len(res[0]) >> 3
                 elif op == 0xD0:                       # struct.new
                     vals = tuple(stack[len(stack) - arg:]) if arg else ()
                     del stack[len(stack) - arg:]

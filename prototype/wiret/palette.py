@@ -9,7 +9,8 @@ from typing import Callable, Optional
 
 from .model import Graph, Node, meta_value
 from .natives import STD
-from .registry import (STATIC_KINDS, ModuleIndex, array_elem, can_convert, signature,
+from .registry import (MAP_MUTATORS, MAP_PURE, SET_MUTATORS, SET_PURE, STATIC_KINDS,
+                       ModuleIndex, array_elem, can_convert, map_types, set_elem, signature,
                        type_choices)
 
 # kind or symbol -> (description, extra search words)
@@ -80,7 +81,29 @@ DESCRIBE = {
     "GetField": ("Reads one field of a struct.", "struct field get read part member ."),
     "WithField": ("A copy of a struct with one field changed. The original stays as it was.",
                   "struct field set change update with copy"),
+    "MapFind": ("Looks a key up in a map: its value, and whether it was there.",
+                "map dictionary lookup find get key value"),
+    "MapHas": ("True when the map has the key.", "map dictionary contains has key"),
+    "MapLength": ("How many entries the map holds.", "map dictionary size count length"),
+    "MapKeyAt": ("The key at a position, in the order keys were first added.",
+                 "map dictionary key index at"),
+    "MapValueAt": ("The value at a position, in the order keys were first added.",
+                   "map dictionary value index at"),
+    "MapSet": ("Stores a value under a key in a map variable, adding the key if it is new.",
+               "map dictionary set put store add key value"),
+    "MapRemove": ("Removes a key from a map variable. 'removed' says whether it was there.",
+                  "map dictionary remove delete key"),
+    "MapClear": ("Empties a map variable.", "map dictionary clear empty reset"),
+    "SetHas": ("True when the set holds the item.", "set contains has member"),
+    "SetLength": ("How many items the set holds.", "set size count length"),
+    "SetAt": ("The item at a position, in the order items were added.", "set item index at"),
+    "SetAdd": ("Adds an item to a set variable. 'added' is false when it was already there.",
+               "set add insert unique"),
+    "SetRemove": ("Removes an item from a set variable. 'removed' says whether it was there.",
+                  "set remove delete"),
+    "SetClear": ("Empties a set variable.", "set clear empty reset"),
     "std.flow.ForEach": (None, "each every item list array for"),
+    "std.flow.ForEachMap": (None, "each every entry key value map dictionary for loop"),
     "host.Log": ("Prints a line of text in the console.", "print output say write console show"),
     "std.string.Concat": ("Joins two texts together.", "join append combine + text string"),
     "std.string.Length": ("How many bytes a text has.", "size count text string"),
@@ -111,8 +134,8 @@ DESCRIBE = {
     "std.flow.FlipFlop": (None, "toggle alternate switch"),
 }
 
-CATEGORY_ORDER = ["Flow", "Call", "Variables", "Structs", "Arrays", "Macro", "Math", "Compare",
-                  "Logic", "Bits"]
+CATEGORY_ORDER = ["Flow", "Call", "Variables", "Structs", "Arrays", "Maps", "Sets", "Macro",
+                  "Math", "Compare", "Logic", "Bits"]
 
 
 @dataclass
@@ -168,6 +191,34 @@ def _item(kind, label, cat, symbol=None, targs=None, idx=None) -> Item:
     key =symbol if symbol in DESCRIBE else kind
     words = DESCRIBE.get(key, ("", ""))[1]
     return Item(label, kind, symbol, list(targs or []), cat, describe(kind, symbol, idx), words)
+
+
+def container_types(g: Graph, idx: ModuleIndex) -> tuple:
+    """The map and set types the module uses (in signatures, locals, state, variables and
+    struct fields, also inside other types): ([(K, V)], [T]). The palette offers map and
+    set nodes for these rather than for every possible key and value type."""
+    seen = []
+    tys = [p.type for x in [g] + list(idx.graphs.values())
+           for p in x.params + x.result_list + x.locals + x.states]
+    tys += [v.type for v in idx.vars.values()]
+    tys += [f.type for st in idx.structs.values() for f in st.fields]
+    maps, sets = [], []
+
+    def walk(ty):
+        if ty in seen:
+            return
+        seen.append(ty)
+        kv, el, ar = map_types(ty), set_elem(ty), array_elem(ty)
+        if kv is not None:
+            maps.append(kv)
+            walk(kv[1])
+        elif el is not None:
+            sets.append(el)
+        elif ar is not None:
+            walk(ar)
+    for ty in tys:
+        walk(ty)
+    return sorted(set(maps)), sorted(set(sets))
 
 
 def items(g: Graph, idx: ModuleIndex) -> list:
@@ -237,10 +288,30 @@ def items(g: Graph, idx: ModuleIndex) -> list:
             continue
         for kind in ("ArrayAdd", "ArraySet", "ArrayInsert", "ArrayRemove", "ArrayClear"):
             out.append(_item(kind, f"{kind} {name}", "Arrays", name, [elem]))
+    maps, sets = container_types(g, idx)
+    for k, v in maps:
+        for kind in MAP_PURE:
+            out.append(_item(kind, f"{kind}::<{k}, {v}>", "Maps", targs=[k, v]))
+        if "std.flow.ForEachMap" in idx.macros:
+            out.append(_item("Macro", f"Macro std.flow.ForEachMap::<{k}, {v}>", "Macro",
+                             "std.flow.ForEachMap", [k, v], idx=idx))
+    for t in sets:
+        for kind in SET_PURE:
+            out.append(_item(kind, f"{kind}::<{t}>", "Sets", targs=[t]))
+    for name, ty in sorted(places):
+        kv, el = map_types(ty), set_elem(ty)
+        if kv is not None:
+            for kind in MAP_MUTATORS:
+                out.append(_item(kind, f"{kind} {name}", "Maps", name, list(kv)))
+        elif el is not None:
+            for kind in SET_MUTATORS:
+                out.append(_item(kind, f"{kind} {name}", "Sets", name, [el]))
     for name in sorted(idx.macros):
         if name == g.name:
             continue
         tps = idx.macros[name].tparams
+        if len(tps) > 1:
+            continue        # ForEachMap::<K, V> is offered above, for the maps in use
         if tps:
             for t in values:
                 out.append(_item("Macro", f"Macro {name}::<{t}>", "Macro", name, [t] * len(tps),

@@ -1230,6 +1230,356 @@ class StructEditorTests(unittest.TestCase):
         self.assertNotEqual(type_color("Mode", self.idx), type_color("Vec2", self.idx))
 
 
+CONTAINERS = """
+var seen: set::<i32>
+
+struct Cell {
+  x: i32
+  y: i32
+}
+
+struct Grid {
+  cells: map::<Cell, string>
+}
+
+func Count(words: array::<string>) -> (counts: map::<string, i32>, n: i32, first: string, firstn: i32) {
+  local m: map::<string, i32>
+  node add = MapSet::<string, i32> m
+    .key <- w.item
+    .value <- plus.result
+  node cur = GetLocal m
+  node entry = Entry
+  node find = MapFind::<string, i32>
+    .map <- cur.value
+    .key <- w.item
+  node k0 = MapKeyAt::<string, i32>
+    .map <- cur.value
+    .index <- 0
+  node len = MapLength::<string, i32>
+    .map <- cur.value
+  node plus = Add::<i32>
+    .a <- find.value
+    .b <- 1
+  node r = Return
+    .counts <- cur.value
+    .n <- len.length
+    .first <- k0.key
+    .firstn <- v0.value
+  node v0 = MapValueAt::<string, i32>
+    .map <- cur.value
+    .index <- 0
+  node w = Macro std.flow.ForEach::<string>
+    .array <- entry.words
+
+  flow {
+    entry -> w
+    w.each -> add
+    w.done -> r
+  }
+}
+
+func Describe(m: map::<string, i32>) -> (text: string) {
+  local acc: string
+  node add = SetLocal acc
+    .value <- line.result
+  node entry = Entry
+  node eq = Call std.string.Concat
+    .a <- loop.key
+    .b <- "="
+  node kv = Call std.string.Concat
+    .a <- eq.result
+    .b <- num.result
+  node line = Call std.string.Concat
+    .a <- old.value
+    .b <- kv.result
+  node loop = Macro std.flow.ForEachMap::<string, i32>
+    .map <- entry.m
+  node num = Convert::<i32, string>
+    .value <- loop.value
+  node old = GetLocal acc
+  node r = Return
+    .text <- old.value
+
+  flow {
+    entry -> loop
+    loop.done -> r
+    loop.each -> add
+  }
+}
+
+func Remember(x: i32) -> (added: bool, size: i32, has: bool, removed: bool) {
+  node add = SetAdd::<i32> seen
+    .item <- entry.x
+  node entry = Entry
+  node has = SetHas::<i32>
+    .set <- now.value
+    .item <- entry.x
+  node now = GetVar seen
+  node r = Return
+    .added <- add.added
+    .size <- size.length
+    .has <- has.result
+    .removed <- rm.removed
+  node rm = SetRemove::<i32> seen
+    .item <- 999
+  node size = SetLength::<i32>
+    .set <- now.value
+
+  flow {
+    add -> rm
+    entry -> add
+    rm -> r
+  }
+}
+
+func Missing(m: map::<string, i32>, key: string) -> (value: i32, found: bool, removed: bool, left: i32) {
+  local copy: map::<string, i32>
+  node entry = Entry
+  node find = MapFind::<string, i32>
+    .map <- entry.m
+    .key <- entry.key
+  node keep = SetLocal copy
+    .value <- entry.m
+  node left = MapLength::<string, i32>
+    .map <- now.value
+  node now = GetLocal copy
+  node r = Return
+    .value <- find.value
+    .found <- find.found
+    .removed <- rm.removed
+    .left <- left.length
+  node rm = MapRemove::<string, i32> copy
+    .key <- entry.key
+
+  flow {
+    entry -> keep
+    keep -> rm
+    rm -> r
+  }
+}
+
+func Place(g: Grid, x: i32, y: i32) -> (g2: Grid, what: string, found: bool) {
+  local cells: map::<Cell, string>
+  node at = MakeStruct Cell
+    .x <- entry.x
+    .y <- entry.y
+  node entry = Entry
+  node find = MapFind::<Cell, string>
+    .map <- now.value
+    .key <- at.result
+  node get = GetField Grid.cells
+    .obj <- entry.g
+  node load = SetLocal cells
+    .value <- get.value
+  node now = GetLocal cells
+  node put = MapSet::<Cell, string> cells
+    .key <- at.result
+    .value <- "tree"
+  node r = Return
+    .g2 <- out.result
+    .what <- find.value
+    .found <- find.found
+  node out = WithField Grid.cells
+    .obj <- entry.g
+    .value <- now.value
+
+  flow {
+    entry -> load
+    load -> put
+    put -> r
+  }
+}
+
+func Nans() -> (size: i32) {
+  local s: set::<f64>
+  node a = SetAdd::<f64> s
+    .item <- nan.result
+  node b = SetAdd::<f64> s
+    .item <- nan.result
+  node entry = Entry
+  node nan = Div::<f64>
+    .a <- 0.0
+    .b <- 0.0
+  node now = GetLocal s
+  node r = Return
+    .size <- size.length
+  node size = SetLength::<f64>
+    .set <- now.value
+
+  flow {
+    a -> b
+    b -> r
+    entry -> a
+  }
+}
+
+func OutOfRange(m: map::<string, i32>) -> (k: string) {
+  node at = MapKeyAt::<string, i32>
+    .map <- entry.m
+    .index <- 5
+  node entry = Entry
+  node r = Return
+    .k <- at.key
+
+  flow {
+    entry -> r
+  }
+}
+"""
+
+
+class ContainerTests(unittest.TestCase):
+    """set::<T> and map::<K, V>: insertion-ordered value types (sections 3.1, 3.3, 5.6)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = print_module(parse(module(CONTAINERS)))
+        _, cls.r = build(cls.text)
+
+    def setUp(self):
+        self.vm = VM()
+        self.mod = self.vm.load(self.r.wbc)
+
+    def call(self, func, *args):
+        return self.vm.call(self.mod, func, list(args))
+
+    def test_canonical_and_clean(self):
+        self.assertEqual(print_module(parse(self.text)), self.text)
+        self.assertEqual(codes(self.text), [])
+        self.assertIn("  node add = MapSet::<string, i32> m\n", self.text)
+
+    def test_maps_keep_insertion_order(self):
+        counts, n, first, firstn = self.call("Count", ("b", "a", "b", "c", "b"))
+        self.assertEqual(list(counts.items()), [("b", 3), ("a", 1), ("c", 1)])
+        self.assertEqual((n, first, firstn), (3, "b", 3))
+        self.assertEqual(self.call("Describe", {"z": 1, "a": 2}), ["z=1a=2"])
+
+    def test_sets(self):
+        self.assertEqual(self.call("Remember", 5), [1, 1, 1, 0])
+        self.assertEqual(self.call("Remember", 7), [1, 2, 1, 0])
+        self.assertEqual(self.call("Remember", 5), [0, 2, 1, 0])   # already there
+
+    def test_value_semantics_and_missing_keys(self):
+        m = {"a": 1, "b": 2}
+        self.assertEqual(self.call("Missing", m, "a"), [1, 1, 1, 1])
+        self.assertEqual(self.call("Missing", m, "zz"), [0, 0, 0, 2])
+        self.assertEqual(m, {"a": 1, "b": 2})             # the caller's map is unchanged
+
+    def test_struct_keys(self):
+        # find is pure, so it is evaluated at the Return, after the MapSet (section 4.3)
+        g, what, found = self.call("Place", ({},), 1, 2)
+        self.assertEqual((g, what, found), (({(1, 2): "tree"},), "tree", 1))
+        g2 = self.call("Place", g, 3, 4)[0]
+        self.assertEqual(list(g2[0]), [(1, 2), (3, 4)])
+
+    def test_nan_is_one_key(self):
+        self.assertEqual(self.call("Nans"), [1])
+
+    def test_out_of_range_is_a_fault(self):
+        with self.assertRaises(WiretError) as cm:
+            self.call("OutOfRange", {"a": 1})
+        self.assertEqual(cm.exception.status, "WR_ERR_FAULT")
+        self.assertIn("out of range", str(cm.exception))
+
+    def test_errors(self):
+        bad = module("""
+struct Tree {
+  label: string
+  kids: array::<Tree>
+}
+
+var s: set::<i32>
+
+func F(a: map::<array::<i32>, i32>, b: set::<Tree>, c: map::<string, Tree>) -> (y: i32) @pure {
+  local m: map::<string, i32>
+  node entry = Entry
+  node f1 = MapFind::<i32>
+    .key <- 1
+  node m1 = MapSet::<string, i32>
+    .key <- "a"
+    .value <- 1
+  node m2 = MapSet::<string, f32> m
+    .key <- "a"
+  node s1 = SetAdd::<i32> s
+    .item <- 1
+  node s2 = SetHas::<Tree>
+}
+""", macros=False)
+        found = sorted((d.code, d.graph, d.node or "") for d in check(parse(bad))
+                       if d.severity == "error")
+        self.assertEqual(found, [("E0110", "F", "m2"), ("E0130", "F", "m1"), ("E0302", "F", "s1"),
+                                 ("E0501", "F", ""), ("E0501", "F", ""), ("E0501", "F", "s2"),
+                                 ("E0502", "F", "f1")])
+
+    def test_verifier(self):
+        good = wbc.decode_module(self.r.wbc)
+        mt = next(i for i, t in enumerate(good.types) if isinstance(t, wbc.MapType))
+        st = next(i for i, t in enumerate(good.types) if isinstance(t, wbc.SetType))
+        at = next(i for i, t in enumerate(good.types) if isinstance(t, wbc.ArrayType))
+        fn = next(i for i, b in enumerate(good.bodies) if b.code)
+
+        def status(fn_):
+            m = wbc.decode_module(self.r.wbc)
+            fn_(m)
+            with self.assertRaises(WiretError) as cm:
+                VM().load(wbc.encode_module(m))
+            return cm.exception.status
+
+        def code(*b):
+            def f(m):
+                m.bodies[fn].code = bytes(b)
+            return f
+
+        def array_key(m):
+            m.types[mt] = wbc.MapType(wbc.Ref(at), wbc.I32)
+
+        cases = {"array key": array_key,
+                 "map op on a set": code(0xE0, st, 0x10, 0x05),
+                 "wrong key type": code(0xE0, mt, 0x22, 0, 0, 0, 0, 0xE4, mt, 0x10, 0x05),
+                 "set.len on a number": code(0x20, 1, 0xED, st, 0x10, 0x05)}
+        for name, fn_ in cases.items():
+            with self.subTest(name):
+                self.assertEqual(status(fn_), "WR_ERR_VERIFY")
+
+    def test_fuzzed_container_modules_never_crash_the_loader(self):
+        rng = random.Random(777)
+        data = bytearray(self.r.wbc)
+        for _ in range(1500):
+            d = bytearray(data)
+            for _ in range(rng.randint(1, 4)):
+                d[rng.randrange(len(d))] = rng.randrange(256)
+            if rng.random() < 0.2:
+                d = d[:rng.randrange(len(d))]
+            try:
+                VM().load(bytes(d))
+            except WiretError:
+                pass
+
+    def test_cli_values(self):
+        from wiret.runner import format_results, parse_args_for
+        m = parse(self.text)
+        self.assertEqual(parse_args_for(m, "Missing", ['{"a": 1, "b": 2}', "a"]),
+                         [{"a": 1, "b": 2}, "a"])
+        res = self.call("Count", ("x", "y", "x"))
+        self.assertEqual(format_results(m, "Count", res),
+                         "counts = {'x': 2, 'y': 1}, n = 2, first = 'x', firstn = 2")
+        with self.assertRaises(ValueError):
+            parse_args_for(m, "Missing", ["[1, 2]", "a"])
+
+    def test_palette(self):
+        from wiret import palette
+        from wiret.registry import ModuleIndex
+        m = parse(self.text)
+        idx = ModuleIndex(m)
+        labels = {it.label for it in palette.items(m.graph("Count"), idx)}
+        for label in ("MapFind::<string, i32>", "MapSet m", "MapRemove m", "SetAdd seen",
+                      "SetHas::<i32>", "MapFind::<Cell, string>",
+                      "Macro std.flow.ForEachMap::<string, i32>"):
+            with self.subTest(label):
+                self.assertIn(label, labels)
+        self.assertFalse(any("ForEachMap::<i32, i32>" in x for x in labels))
+
+
 class HashTests(unittest.TestCase):
     def test_reorder_and_layout_removal_do_not_change_semantics(self):
         text = demo()

@@ -128,6 +128,10 @@ def explain(d: Diag) -> str:
             return f"There is no function called '{_quoted(m)}'. Check the spelling or create it."
         if "unresolved macro" in m:
             return f"There is no macro called '{_quoted(m)}'. Built-in ones start with std.flow."
+        if "cannot be a map key" in m or "cannot be a set item" in m:
+            return (f"'{_quoted(m)}' can't be used to look things up. Map keys and set items "
+                    f"must be simple values: numbers, text, true/false, enums, or structs made "
+                    f"only of those.")
         if "names the struct" in m:
             kind = m.split()[0]
             example = f"{kind} Vec2.x" if "and the field" in m else f"{kind} Vec2"
@@ -197,9 +201,9 @@ def explain(d: Diag) -> str:
                 f"may see a different value. If they should all see the same value, store it in "
                 f"a local variable first.")
     if c == "E0130":
-        return ("Array nodes that change an array need to know which array to change: the name "
-                "of a local variable or module variable that holds it, written after the type, "
-                "as in ArrayAdd::<i32> scores.")
+        return ("Nodes that change an array, map or set need to know which one to change: the "
+                "name of a local variable or module variable that holds it, written after the "
+                "type, as in ArrayAdd::<i32> scores or MapSet::<string, i32> ages.")
     if c == "W0601":
         return f"This box lists '{_quoted(m, 1)}' as a member, but nothing has that name."
     if c == "W0602":

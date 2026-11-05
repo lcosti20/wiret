@@ -23,6 +23,8 @@ VT_NAMES = {I32: "i32", I64: "i64", F32: "f32", F64: "f64", STRING: "string"}
 FUNC_TYPE = 0x60
 ARRAY_TYPE = 0x5E
 STRUCT_TYPE = 0x5F
+MAP_TYPE = 0x5D
+SET_TYPE = 0x5C
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,19 @@ class StructType:
     fields: tuple
 
 
+@dataclass(frozen=True)
+class MapType:
+    """Type entry `5D key:valtype value:valtype`."""
+    key: object
+    value: object
+
+
+@dataclass(frozen=True)
+class SetType:
+    """Type entry `5C elem:valtype`."""
+    elem: object
+
+
 def vt_name(vt, types=None, depth=0) -> str:
     if isinstance(vt, Ref):
         entry = types[vt.type] if types is not None and vt.type < len(types) else None
@@ -52,6 +67,11 @@ def vt_name(vt, types=None, depth=0) -> str:
             return f"array::<{vt_name(entry.elem, types, depth + 1)}>"
         if isinstance(entry, StructType):
             return f"struct {vt.type}"
+        if isinstance(entry, MapType) and depth < 8:
+            return (f"map::<{vt_name(entry.key, types, depth + 1)}, "
+                    f"{vt_name(entry.value, types, depth + 1)}>")
+        if isinstance(entry, SetType) and depth < 8:
+            return f"set::<{vt_name(entry.elem, types, depth + 1)}>"
         return f"ref {vt.type}"
     return VT_NAMES.get(vt, f"0x{vt:02X}")
 
@@ -84,6 +104,12 @@ OPS: dict[str, tuple] = {
     "array.set": (0xD9, "u"), "array.push": (0xDA, "u"), "array.insert": (0xDB, "u"),
     "array.remove": (0xDC, "u"), "array.clear": (0xDD, "u"), "array.clone": (0xDE, "u"),
     "struct.new": (0xD0, "u"), "struct.get": (0xD1, "uu"), "struct.with": (0xD2, "uu"),
+    "map.new": (0xE0, "u"), "map.find": (0xE1, "u"), "map.set": (0xE2, "u"),
+    "map.remove": (0xE3, "u"), "map.has": (0xE4, "u"), "map.len": (0xE5, "u"),
+    "map.key_at": (0xE6, "u"), "map.value_at": (0xE7, "u"), "map.clear": (0xE8, "u"),
+    "set.new": (0xE9, "u"), "set.add": (0xEA, "u"), "set.remove": (0xEB, "u"),
+    "set.has": (0xEC, "u"), "set.len": (0xED, "u"), "set.at": (0xEE, "u"),
+    "set.clear": (0xEF, "u"),
 }
 INT_OPS = ["eqz", "eq", "ne", "lt_s", "lt_u", "gt_s", "gt_u", "le_s", "le_u", "ge_s", "ge_u",
            "add", "sub", "mul", "div_s", "div_u", "rem_s", "rem_u", "and", "or", "xor", "shl",
@@ -115,7 +141,7 @@ LATER_TIER_OPS = {0x07: "call_virtual", 0x08: "call_interface", 0x09: "call_dele
                   0x0C: "try.push", 0x0D: "suspend", 0x0E: "throw", 0x25: "ref.null",
                   0x26: "ref.is_null", 0x27: "ref.eq", 0x28: "ref.cast", 0x29: "ref.test",
                   0x2A: "ref.valid", 0x2B: "ref.share"}
-for _c in list(range(0xD3, 0xD6)) + list(range(0xE0, 0xF0)):
+for _c in range(0xD3, 0xD6):
     LATER_TIER_OPS.setdefault(_c, f"object.0x{_c:02X}")
 for _c in (0xF4, 0xF5, 0xF6, 0xF7):
     LATER_TIER_OPS[_c] = f"object.0x{_c:02X}"
@@ -353,7 +379,7 @@ class Body:
 @dataclass
 class WbcModule:
     flags: int = 0
-    types: list = field(default_factory=list)      # [(params, results) | ArrayType | StructType]
+    types: list = field(default_factory=list)      # [(params, results) | ArrayType | StructType | MapType | SetType]
     imports: list = field(default_factory=list)    # [(module, field, typeidx, flags)]
     funcs: list = field(default_factory=list)      # [(typeidx, flags)]
     globals: list = field(default_factory=list)    # [(vt, mut, init)]
@@ -423,6 +449,15 @@ def encode_module(m: WbcModule) -> bytes:
     for entry in m.types:
         if isinstance(entry, ArrayType):
             w.u8(ARRAY_TYPE)
+            write_vt(w, entry.elem)
+            continue
+        if isinstance(entry, MapType):
+            w.u8(MAP_TYPE)
+            write_vt(w, entry.key)
+            write_vt(w, entry.value)
+            continue
+        if isinstance(entry, SetType):
+            w.u8(SET_TYPE)
             write_vt(w, entry.elem)
             continue
         if isinstance(entry, StructType):
@@ -543,6 +578,12 @@ def decode_module(data: bytes) -> WbcModule:
                 code = s.u8()
                 if code == ARRAY_TYPE:
                     m.types.append(ArrayType(s.vt()))
+                    continue
+                if code == MAP_TYPE:
+                    m.types.append(MapType(s.vt(), s.vt()))
+                    continue
+                if code == SET_TYPE:
+                    m.types.append(SetType(s.vt()))
                     continue
                 if code == STRUCT_TYPE:
                     fields = []
