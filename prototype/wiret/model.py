@@ -324,11 +324,45 @@ class Class:
     fields: list = field(default_factory=list)     # [Field]
     attrs: list = field(default_factory=list)
     meta: list = field(default_factory=list)
+    impls: list = field(default_factory=list)      # interface names after `impl`
 
     def field(self, name: str) -> Optional[Field]:
         for f in self.fields:
             if f.name == name:
                 return f
+        return None
+
+
+@dataclass
+class IfaceMethod:
+    """`func Name(params) -> (results) @attrs` inside an interface: a signature, no body."""
+    name: str
+    params: list = field(default_factory=list)     # [Param]
+    results: Optional[list] = None
+    attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
+
+    @property
+    def result_list(self) -> list:
+        return self.results or []
+
+    def has_attr(self, name: str) -> bool:
+        return any(a.name == name for a in self.attrs)
+
+
+@dataclass
+class Interface:
+    """`interface Name { func ... }` (section 2.2). Method order is the order written: each
+    method's position is its dispatch slot (section 5.3), so it is never sorted."""
+    name: str
+    methods: list = field(default_factory=list)    # [IfaceMethod]
+    attrs: list = field(default_factory=list)
+    meta: list = field(default_factory=list)
+
+    def method(self, name: str) -> Optional[IfaceMethod]:
+        for m in self.methods:
+            if m.name == name:
+                return m
         return None
 
 
@@ -403,6 +437,8 @@ def item_kind(item) -> str:
         return "struct"
     if isinstance(item, Class):
         return "class"
+    if isinstance(item, Interface):
+        return "interface"
     if isinstance(item, Graph):
         return item.kind
     raise TypeError(item)

@@ -14,7 +14,7 @@ from typing import Callable, Optional
 from . import wbc
 from .natives import NO_FAULT, FaultValue, NativeFault, NativeSpec, Signal, _f32, all_natives
 from .verifier import VerifyError, verify
-from .wbc import (F32, F64, FAULT, I32, I64, SIGNAL, STRING, OPS, ArrayType, ClassType, MapType,
+from .wbc import (F32, F64, FAULT, I32, I64, SIGNAL, STRING, OPS, ArrayType, ClassType, InterfaceType, MapType,
                   Ref, SetType, StructType, WbcError)
 
 STATUS_OK = "WR_OK"
@@ -268,7 +268,7 @@ NUMERIC = _build_numeric()
  OP_DROP, OP_SELECT, OP_LGET, OP_LSET, OP_LTEE, OP_GGET, OP_GSET, OP_CONST) = (
     0x00, 0x01, 0x02, 0x03, 0x05, 0x06, 0x0A, 0x0B, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x20)
 OP_TRY_PUSH, OP_SUSPEND, OP_THROW = 0x0C, 0x0D, 0x0E
-OP_CALL_VIRTUAL = 0x07
+OP_CALL_VIRTUAL, OP_CALL_INTERFACE = 0x07, 0x08
 OP_REF_NULL, OP_REF_IS_NULL, OP_REF_EQ, OP_REF_CAST, OP_REF_TEST, OP_REF_VALID = range(0x25, 0x2B)
 OP_CLASS_NEW, OP_CLASS_GET, OP_CLASS_SET = 0xD3, 0xD4, 0xD5
 _CONST_OPS = {0x20, 0x21, 0x22, 0x23}
@@ -276,11 +276,12 @@ _CONST_OPS = {0x20, 0x21, 0x22, 0x23}
 
 class ClassInfo:
     """A loaded class type: its name, field layout and defaults, vtable and ancestors."""
-    __slots__ = ("index", "name", "field_names", "defaults", "vtable", "ancestors")
+    __slots__ = ("index", "name", "field_names", "defaults", "vtable", "ancestors", "itables")
 
-    def __init__(self, index, name, field_names, defaults, vtable, ancestors):
+    def __init__(self, index, name, field_names, defaults, vtable, ancestors, itables=None):
         self.index, self.name, self.field_names = index, name, field_names
         self.defaults, self.vtable, self.ancestors = defaults, vtable, ancestors
+        self.itables = itables or {}     # interface type index -> [function index per method]
 
 
 class Obj:
@@ -304,7 +305,7 @@ class Obj:
 def normalise(vt, v, types=None):
     if isinstance(vt, Ref):
         entry = types[vt.type] if types is not None else None
-        if isinstance(entry, ClassType) or isinstance(v, Obj) or v is None:
+        if isinstance(entry, (ClassType, InterfaceType)) or isinstance(v, Obj) or v is None:
             return v
         if isinstance(entry, StructType):
             return tuple(normalise(fvt, x, types) for (fvt, _), x in zip(entry.fields, v))
@@ -430,8 +431,8 @@ def default_values(types: list, data: list):
         if not isinstance(vt, Ref):
             return ZERO[vt]
         entry = types[vt.type]
-        if isinstance(entry, ClassType):
-            return None                # a class reference starts null
+        if isinstance(entry, (ClassType, InterfaceType)):
+            return None                # a class or interface reference starts null
         if isinstance(entry, (MapType, SetType)):
             return {}                  # never changed in place, so one empty dict is shared
         if not isinstance(entry, StructType):
@@ -729,7 +730,10 @@ class VM:
                 fnames = [f"field{i}" for i in range(len(layout))]
             vals = [defaults(vt) if d is None else m.data[d] if vt == STRING else d
                     for vt, d in layout]
-            classes[ti] = ClassInfo(ti, cname, fnames, vals, list(entry.vtable), set(chain))
+            itables = {i: list(impl) for i, impl in entry.interfaces}
+            # ref.test and ref.cast against an interface see the interfaces as ancestors too
+            classes[ti] = ClassInfo(ti, cname, fnames, vals, list(entry.vtable),
+                                    set(chain) | set(itables), itables)
         arrays = _array_ops(m.types, defaults)
         containers = _container_ops(defaults)
         for i, (mod, fld, t, flags) in enumerate(m.imports):
@@ -778,6 +782,9 @@ class VM:
                 elif ins.name == "call_virtual":
                     t, slot = ins.imms
                     arg = (slot, len(m.func_type(m.types[t].vtable[slot])[0]))
+                elif ins.name == "call_interface":
+                    t, k = ins.imms
+                    arg = (t, k, 1 + len(m.types[m.types[t].methods[k]][0]))
                 else:
                     arg = ins.imms[0] if ins.imms else None
                 f.code.append((ins.op, arg))
@@ -1041,14 +1048,19 @@ class VM:
                                 stack[-1] = b
                         elif op == OP_DROP:
                             stack.pop()
-                        elif op == OP_CALL or op == OP_CALL_VIRTUAL:
+                        elif op == OP_CALL or op == OP_CALL_VIRTUAL or op == OP_CALL_INTERFACE:
                             if op == OP_CALL:
                                 callee = funcs[arg]
-                            else:                   # dispatch on the receiver's class
+                            elif op == OP_CALL_VIRTUAL:   # dispatch on the receiver's class
                                 recv = stack[len(stack) - arg[1]]
                                 if recv is None:
                                     raise Fault("method call on a null object", FAULT_NULL)
                                 callee = funcs[recv.cls.vtable[arg[0]]]
+                            else:                   # through the receiver's interface table
+                                recv = stack[len(stack) - arg[2]]
+                                if recv is None:
+                                    raise Fault("method call on a null object", FAULT_NULL)
+                                callee = funcs[recv.cls.itables[arg[0]][arg[1]]]
                             fuel -= 4
                             self.stats["calls"] += 1
                             np = len(callee.params)

@@ -146,6 +146,8 @@ class Compiler:
             return wbc.Ref(self.struct_type(ty))
         if ty in self.idx.classes:
             return wbc.Ref(self.class_type(ty))
+        if ty in self.idx.interfaces:
+            return wbc.Ref(self.interface_type(ty))
         return VT[self.base(ty)]
 
     def base(self, ty: str) -> str:
@@ -187,6 +189,18 @@ class Compiler:
                     default = self.const_value(f.default, f.type)
                 fields.append((vt, default))
             self.types[self.type_keys[key]] = wbc.ClassType(sup, tuple(fields), ())
+        return self.type_keys[key]
+
+    def interface_type(self, name: str) -> int:
+        """Index of an interface's `5A` entry: one function type per method, no receiver."""
+        key = ("interface", name)
+        if key not in self.type_keys:
+            self.type_keys[key] = len(self.types)
+            self.types.append(None)
+            it = self.idx.interfaces[name]
+            self.types[self.type_keys[key]] = wbc.InterfaceType(tuple(
+                self.func_type([self.vt(p.type) for p in m.params],
+                               [self.vt(r.type) for r in m.result_list]) for m in it.methods))
         return self.type_keys[key]
 
     def slots(self, cls: str) -> list:
@@ -274,7 +288,7 @@ class Compiler:
             return self.global_index[name]
         lit = init if init is not None else zero_lit(ty)
         if is_container(ty) or ty in self.idx.structs or ty in self.idx.classes or \
-                ty == "std.Signal":
+                ty in self.idx.interfaces or ty == "std.Signal":
             value = None                 # the VM builds the default array or struct
         else:
             value = self.const_value(lit, ty)
@@ -358,8 +372,13 @@ class Compiler:
         for key, ti in list(self.type_keys.items()):
             if key[0] == "class":               # fill each vtable with function indices
                 e = self.types[ti]
+                ifaces = tuple(
+                    (self.interface_type(i), tuple(
+                        self.func_index(("func", self.idx.find_method(key[1], m.name).name))
+                        for m in self.idx.interfaces[i].methods))
+                    for i in self.idx.class_interfaces(key[1]))
                 self.types[ti] = wbc.ClassType(e.super, e.fields, tuple(
-                    self.func_index(("func", impl)) for _, impl in self.slots(key[1])))
+                    self.func_index(("func", impl)) for _, impl in self.slots(key[1])), ifaces)
         mod.types = self.types
         assembled = [fl.assemble() for fl in lowered]
         mod.bodies = [wbc.Body([self.vt(t) for t in fl.local_types[fl.nparams:]], 0xFFFF, 0, code)
@@ -396,12 +415,12 @@ class Compiler:
             w.u32(gi)
             w.name(name)
         classes = sorted((ti, key[1]) for key, ti in self.type_keys.items()
-                         if key[0] == "class")
+                         if key[0] in ("class", "interface"))
         w.u32(len(classes))
         for ti, name in classes:
             w.u32(ti)
             w.name(name)
-            fields = self.idx.class_fields(name)
+            fields = self.idx.class_fields(name) if name in self.idx.classes else []
             w.u32(len(fields))
             for _, f in fields:
                 w.name(f.name)
@@ -630,10 +649,15 @@ class FuncLowerer:
                 callee = self.c.idx.callee(n.symbol)
                 if callee.kind in ("func", "event"):
                     ir.extra["func"] = ("func", callee.name)
-                else:
+                elif callee.kind != "interface":
                     ir.extra["func"] = self.c.import_ref(callee.name)
                 ir.extra["nresults"] = len(callee.results)
-                if callee.method_of and not callee.final:
+                if callee.kind == "interface":
+                    it = self.c.idx.interfaces[callee.method_of]
+                    short = callee.name.rpartition(".")[2]
+                    ir.extra["interface"] = (self.c.interface_type(callee.method_of),
+                                             [m.name for m in it.methods].index(short))
+                elif callee.method_of and not callee.final:
                     short = callee.name.rpartition(".")[2]
                     names = [s for s, _ in self.c.slots(callee.method_of)]
                     ir.extra["virtual"] = (self.c.class_type(callee.method_of),
@@ -1035,7 +1059,9 @@ class FuncLowerer:
 
     def emit_call(self, n: IRNode):
         """A direct call, or call_virtual for a method that is not @final (section 3.3)."""
-        if "virtual" in n.extra:
+        if "interface" in n.extra:
+            self.E("call_interface", *n.extra["interface"])
+        elif "virtual" in n.extra:
             self.E("call_virtual", *n.extra["virtual"])
         else:
             self.E("call", n.extra["func"])
@@ -1047,8 +1073,8 @@ class FuncLowerer:
         if ty == "anyref":
             self.E("local.get", self.add_local("$null.anyref", ty))
             return
-        if ty in self.c.idx.classes:  # the only class literal is null
-            self.E("ref.null", self.c.class_type(ty))
+        if ty in self.c.idx.classes or ty in self.c.idx.interfaces:   # the only literal is null
+            self.E("ref.null", self.c.vt(ty).type)
             return
         elem = array_elem(ty)
         if elem is not None:          # the only array constant is the empty array
@@ -1133,7 +1159,7 @@ class FuncLowerer:
                     "map" if map_types(ty) is not None else "set")
             self.E("call", self.c.import_ref(f"std.{kind}.Equals"))
             return
-        if ty in self.c.idx.classes:   # identity (section 3.1)
+        if ty in self.c.idx.classes or ty in self.c.idx.interfaces:   # identity (3.1)
             self.E("ref.eq")
             return
         if ty in self.c.idx.structs:
@@ -1205,7 +1231,7 @@ class FuncLowerer:
         if k == "Cast":
             # result is obj when it is an instance of the class, else null; ok says which.
             # ref.cast cannot fault here: it sees either an instance or null.
-            t = self.c.class_type(n.symbol)
+            t = self.c.vt(n.symbol).type           # a class or an interface
             self.eval(n.inputs[0][2], ep)
             obj, ok = self.temp("anyref"), self.temp("bool")
             self.E("local.tee", obj)
@@ -1244,7 +1270,8 @@ class FuncLowerer:
             self.E(f"i32.{k.lower()}")
             return
         T = n.targs[0]
-        if T in self.c.idx.structs or T in self.c.idx.classes or is_container(T):
+        if T in self.c.idx.structs or T in self.c.idx.classes or T in self.c.idx.interfaces \
+                or is_container(T):
             # only Eq and Ne take these
             self.emit_eq(T)
             if k == "Ne":

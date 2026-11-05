@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 from .wbc import (ANYREF, F32, F64, FAULT, FN_LATENT, SIGNAL, FN_PURE, I32, I64, STRING, ArrayType, MapType,
-                  ClassType, Ref,
+                  ClassType, InterfaceType, Ref,
                   SetType, StructType, WbcError, WbcModule, decode_code, vt_name)
 
-REF_TYPES = (ArrayType, StructType, MapType, SetType, ClassType)
+REF_TYPES = (ArrayType, StructType, MapType, SetType, ClassType, InterfaceType)
 
 VALTYPES = {I32, I64, F32, F64, STRING}
 # Types allowed in locals, globals and function types but not in struct fields or containers:
@@ -100,10 +100,15 @@ def is_sub(m: WbcModule, got, expected) -> bool:
         return True
     if expected == ANYREF:
         return isinstance(got, Ref)
-    return (isinstance(got, Ref) and isinstance(expected, Ref)
-            and isinstance(m.types[got.type], ClassType)
-            and isinstance(m.types[expected.type], ClassType)
-            and expected.type in class_chain(m, got.type))
+    if not (isinstance(got, Ref) and isinstance(expected, Ref)
+            and isinstance(m.types[got.type], ClassType)):
+        return False
+    target = m.types[expected.type]
+    if isinstance(target, ClassType):
+        return expected.type in class_chain(m, got.type)
+    if isinstance(target, InterfaceType):    # a class is a subtype of its interfaces
+        return any(i == expected.type for i, _ in m.types[got.type].interfaces)
+    return False
 
 
 def common_ref(m: WbcModule, a, b):
@@ -140,6 +145,31 @@ def check_classes(m: WbcModule, nfuncs: int):
         sup = m.types[entry.super] if entry.super is not None else None
         if sup is not None and len(entry.vtable) < len(sup.vtable):
             raise VerifyError(f"class type {t} drops slots of its superclass's vtable")
+        mine = [i for i, _ in entry.interfaces]
+        if len(set(mine)) != len(mine):
+            raise VerifyError(f"class type {t} lists an interface twice")
+        if sup is not None and not {i for i, _ in sup.interfaces} <= set(mine):
+            raise VerifyError(f"class type {t} drops an interface of its superclass")
+        for iface, impl in entry.interfaces:
+            if iface >= len(m.types) or not isinstance(m.types[iface], InterfaceType):
+                raise VerifyError(f"class type {t} implements type {iface}, not an interface")
+            methods = m.types[iface].methods
+            if len(impl) != len(methods):
+                raise VerifyError(f"class type {t} gives {len(impl)} methods for interface "
+                                  f"{iface}, which has {len(methods)}")
+            for k, (fi, ft) in enumerate(zip(impl, methods)):
+                if fi >= nfuncs or ft >= len(m.types) or not isinstance(m.types[ft], tuple):
+                    raise VerifyError(f"class type {t}: interface {iface} method {k} is out "
+                                      f"of range")
+                params, results, flags = m.func_type(fi)
+                if not params or not isinstance(params[0], Ref) or params[0].type not in chain:
+                    raise VerifyError(f"class type {t}: interface {iface} method {k} does not "
+                                      f"take this class or a superclass as its receiver")
+                if list(params[1:]) != list(m.types[ft][0]) or list(results) != list(m.types[ft][1]):
+                    raise VerifyError(f"class type {t}: interface {iface} method {k} does not "
+                                      f"have the interface's signature")
+                if flags & FN_LATENT:
+                    raise VerifyError(f"class type {t}: interface {iface} method {k} is latent")
         for slot, fi in enumerate(entry.vtable):
             if fi >= nfuncs:
                 raise VerifyError(f"class type {t} slot {slot} names function {fi}, out of range")
@@ -194,6 +224,11 @@ def verify(m: WbcModule) -> list:
             vts = [entry.elem]
         elif isinstance(entry, (MapType, SetType)):
             vts = [entry.key, entry.value] if isinstance(entry, MapType) else [entry.elem]
+        elif isinstance(entry, InterfaceType):
+            vts = []
+            for ft in entry.methods:
+                if not is_func_type(m, ft):
+                    raise VerifyError(f"interface type {i} names {ft}, not a function type")
         elif isinstance(entry, (StructType, ClassType)):
             vts = [vt for vt, _ in entry.fields]
             for vt, default in entry.fields:
@@ -360,8 +395,23 @@ def verify_function(m: WbcModule, i: int):
                                   fidx, ins.pc)
             stack.clear()
             reachable = False
-        elif n in ("call", "call_virtual"):
-            if n == "call":
+        elif n in ("call", "call_virtual", "call_interface"):
+            if n == "call_interface":
+                t, k = ins.imms
+                if t >= len(m.types) or not isinstance(m.types[t], InterfaceType):
+                    raise VerifyError(f"call_interface: type {t} is not an interface", fidx,
+                                      ins.pc)
+                if k >= len(m.types[t].methods):
+                    raise VerifyError(f"call_interface: interface {t} has no method {k}", fidx,
+                                      ins.pc)
+                ft = m.types[t].methods[k]
+                if ft >= len(m.types) or not isinstance(m.types[ft], tuple):
+                    raise VerifyError(f"call_interface: bad function type {ft}", fidx, ins.pc)
+                for vt in reversed(m.types[ft][0]):
+                    pop(vt, ins)
+                pop(Ref(t), ins)
+                stack.extend(m.types[ft][1])
+            elif n == "call":
                 callee = ins.imms[0]
                 if callee >= len(m.imports) + len(m.funcs):
                     raise VerifyError(f"call to unknown function {callee}", fidx, ins.pc)
@@ -373,7 +423,10 @@ def verify_function(m: WbcModule, i: int):
                     raise VerifyError(f"call_virtual: class type {t} has no slot {slot}",
                                       fidx, ins.pc)
                 callee = m.types[t].vtable[slot]
-            cp, cr, cflags = m.func_type(callee)
+            if n != "call_interface":
+                cp, cr, cflags = m.func_type(callee)
+            else:
+                cp, cr, cflags = [], [], 0         # done above; implementations are not latent
             if n == "call_virtual":
                 cp = [Ref(t)] + list(cp[1:])      # the receiver is typed by the class named
             if cflags & FN_LATENT and not flags & FN_LATENT and callee >= len(m.imports):
@@ -479,7 +532,8 @@ def verify_function(m: WbcModule, i: int):
             stack.extend(outs)
         elif n.startswith("class.") or n in ("ref.null", "ref.cast", "ref.test"):
             t = ins.imms[0]
-            if t >= len(m.types) or not isinstance(m.types[t], ClassType):
+            kinds = (ClassType,) if n.startswith("class.") else (ClassType, InterfaceType)
+            if t >= len(m.types) or not isinstance(m.types[t], kinds):
                 raise VerifyError(f"{n}: type {t} is not a class type", fidx, ins.pc)
             if n == "class.new":
                 stack.append(Ref(t))

@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from .model import (Attr, Binding, Box, Class, Comment, Const, Enum, EnumMember, ExecOut, Extern,
+from .model import (Attr, Binding, Box, Class, Comment, IfaceMethod, Interface, Const, Enum, EnumMember, ExecOut, Extern,
                     Field, Graph, Lit, Local, Module, Node, Param, PinRef, Place, Struct, Use,
                     Var)
 
@@ -14,7 +14,7 @@ KEYWORDS = set("wiret module use extern const var local enum struct interface cl
 MARKUP_HINT = ("the 'markup' block was removed: write each note as #[note(\"...\")] on its own "
                "line directly above the node, box or graph it explains")
 
-UNSUPPORTED_ITEMS = {"interface"}
+UNSUPPORTED_ITEMS = set()
 
 INT_TYPES = {"i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64"}
 
@@ -289,6 +289,8 @@ class Parser:
             return self.enum()
         if kw == "class":
             return self.class_decl()
+        if kw == "interface":
+            return self.interface()
         if kw in ("func", "event", "macro"):
             return self.graph(kw, start)
         self.error("expected a declaration")
@@ -321,7 +323,11 @@ class Parser:
             self.next()
             c.base = self.qname()
         if self.at_kw("impl"):
-            self.error("'impl' needs interfaces, which this prototype does not support yet")
+            self.next()
+            c.impls.append(self.qname())
+            while self.at_p(","):
+                self.next()
+                c.impls.append(self.qname())
         c.attrs = self.attrs()
         self.expect_p("{")
         self.skip_nl()
@@ -390,6 +396,31 @@ class Parser:
 
         st.fields = self.members("a field ('name: type')", field)
         return st
+
+    def interface(self) -> Interface:
+        """`interface Name @attrs { func Name(params) [-> (results)] @attrs ... }` (2.2)."""
+        it = Interface(self.ident("interface name"))
+        if self.at_p("::") or self.at_p("<"):
+            self.error("interfaces take no type parameters")
+        it.attrs = self.attrs()
+
+        def method():
+            if not self.at_kw("func"):
+                self.error("an interface lists methods, written 'func Name(params) -> (results)'")
+            self.next()
+            m = IfaceMethod(self.ident("method name"))
+            m.params = self.params()
+            if self.at_p("->"):
+                self.next()
+                m.results = self.params()
+            m.attrs = self.attrs()
+            if self.at_p("{"):
+                self.error("an interface method has no body; the classes that implement the "
+                           "interface give one")
+            return m
+
+        it.methods = self.members("an interface method", method)
+        return it
 
     def enum(self) -> Enum:
         """`enum Name [: inttype] @attrs { Member [= INT] @attrs ... }` (section 2.2)."""

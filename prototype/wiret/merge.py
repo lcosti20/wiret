@@ -18,9 +18,10 @@ from typing import Callable, Optional
 from .checker import check
 from .ids import get_id
 from .model import (Binding, Box, Const, Enum, EnumMember, ExecOut, Extern, Field, Graph, Lit,
-                    Local, Module, Node, Param, PinRef, Place, Struct, Use, Var, Class)
+                    Local, Module, Node, Param, PinRef, Place, Struct, Use, Var, Class,
+                    IfaceMethod, Interface)
 from .parser import ParseError, parse
-from .printer import fmt_args, fmt_attr, fmt_lit, print_module
+from .printer import fmt_args, fmt_attr, fmt_lit, fmt_params, print_module
 from .registry import ModuleIndex, signature
 
 
@@ -102,6 +103,10 @@ def sub_fields(x) -> dict:
         out["default"] = (fmt_lit(d), d)
     if isinstance(x, EnumMember) and x.value is not None:
         out["value"] = (str(x.value), x.value)
+    if isinstance(x, IfaceMethod):         # the signature merges as one field
+        text = fmt_params(x.params) + (" -> " + fmt_params(x.results) if x.results is not None
+                                       else "")
+        out["sig"] = (text, (x.params, x.results))
     out.update(attr_fields(x.attrs))
     return out
 
@@ -115,6 +120,8 @@ def build_sub(proto, fields: dict):
         x.default = fields["default"][1] if "default" in fields else None
     if isinstance(x, EnumMember):
         x.value = fields["value"][1] if "value" in fields else None
+    if isinstance(x, IfaceMethod):
+        x.params, x.results = copy.deepcopy(fields["sig"][1])
     x.attrs = [a for k, v in sorted(fields.items()) if k.startswith("attr:") for a in v[1]]
     return x
 
@@ -129,7 +136,7 @@ def decl_kind(it) -> str:
     if isinstance(it, Graph):
         return it.kind
     return {Use: "use", Extern: "extern", Const: "const", Var: "var", Enum: "enum",
-            Struct: "struct", Class: "class"}[type(it)]
+            Struct: "struct", Class: "class", Interface: "interface"}[type(it)]
 
 
 def decl_fields(it) -> dict:
@@ -147,6 +154,8 @@ def decl_fields(it) -> dict:
             out["value"] = (fmt_lit(v), v)
     if isinstance(it, (Enum, Class)):
         out["base"] = (it.base or "", it.base)
+    if isinstance(it, Class):
+        out["impls"] = (", ".join(it.impls), list(it.impls))
     if isinstance(it, Graph):
         out["tparams"] = (",".join(it.tparams), list(it.tparams))
         out["arrow"] = (str(it.results is not None), it.results is not None)
@@ -168,6 +177,8 @@ def build_decl(proto, fields: dict):
             it.default = v
     if isinstance(it, (Enum, Class)):
         it.base = fields["base"][1]
+    if isinstance(it, Class):
+        it.impls = list(fields["impls"][1])
     if isinstance(it, Graph):
         it.tparams = fields["tparams"][1]
     return it
@@ -380,6 +391,8 @@ class Merger:
             subs += [("locals", "local"), ("states", "state")]
         if isinstance(it, (Struct, Class)):
             subs.append(("fields", "field"))
+        if isinstance(it, Interface):
+            subs.append(("methods", "method"))
         if isinstance(it, Enum):
             subs.append(("members", "member"))
         for attr, kind in subs:

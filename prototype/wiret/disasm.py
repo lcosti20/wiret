@@ -77,6 +77,10 @@ def disassemble(data: bytes) -> str:
                 if slot < len(vt):
                     comment = f"{classes.get(t, ('class ' + str(t),))[0]} slot {slot}: " \
                               f"{names.get(vt[slot], vt[slot])}"
+            elif ins.name == "call_interface":
+                t, k = ins.imms
+                text += f" {t} {k}"
+                comment = f"{classes.get(t, ('interface ' + str(t),))[0]} method {k}"
             elif ins.name.startswith(("class.", "ref.")) and ins.imms:
                 t = ins.imms[0]
                 text += " " + " ".join(str(x) for x in ins.imms)

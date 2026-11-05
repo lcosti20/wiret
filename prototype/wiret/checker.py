@@ -197,7 +197,57 @@ def check_type_decls(module: Module, idx: ModuleIndex, D):
                                f"type {base} ({lo} to {hi})", it.name, pin=name, literal=True,
                       dst=base)
     check_struct_cycles(idx, D)
+    check_interfaces(module, idx, D)
     check_classes(module, idx, D)
+
+
+def check_interfaces(module: Module, idx: ModuleIndex, D):
+    """Interface declarations (section 2.2): a name that is not a built-in type, unique method
+    names, supported parameter and result types. A @latent interface method is E0501 in this
+    prototype: WBC has no place to record it, so a non-latent caller could suspend."""
+    for it in idx.interfaces.values():
+        if it.name in BUILTIN_TYPE_NAMES:
+            D("E0102", f"interface '{it.name}' has the name of a built-in type; choose another "
+                       f"name", it.name)
+        seen = set()
+        for m in it.methods:
+            if m.name in seen:
+                D("E0102", f"duplicate method '{m.name}' in interface '{it.name}'", it.name,
+                  pin=m.name)
+            seen.add(m.name)
+            for p in m.params + m.result_list:
+                if p.type == "exec" or not handle_ok(p.type, idx):
+                    D("E0501", unknown_type_message(p.type, module.name), it.name, pin=m.name,
+                      type=p.type)
+            if m.has_attr("latent"):
+                D("E0501", f"'{it.name}.{m.name}' is @latent; interface methods that can wait "
+                           f"are not supported by this prototype yet", it.name, pin=m.name)
+
+
+def check_implementations(c, idx: ModuleIndex, D):
+    """E0151 for an `impl` name that is not an interface; E0152 for an interface method the
+    class (or a base) does not implement, or implements with another signature."""
+    for name in c.impls:
+        if name not in idx.interfaces:
+            what = "a class" if name in idx.classes else "not declared in this module"
+            D("E0151", f"class '{c.name}' implements '{name}', which is {what}, not an "
+                       f"interface", c.name)
+    for name in c.impls:
+        it = idx.interfaces.get(name)
+        if it is None:
+            continue
+        for m in it.methods:
+            g = idx.find_method(c.name, m.name)
+            want = (f"func {m.name}({', '.join(p.type for p in m.params)}) -> "
+                    f"({', '.join(r.type for r in m.result_list)})")
+            if g is None:
+                D("E0152", f"class '{c.name}' implements '{name}' but has no method "
+                           f"'{m.name}'; add {want}", c.name, pin=m.name)
+            elif (g.kind != "func" or g.has_attr("latent")
+                  or [p.type for p in g.params] != [p.type for p in m.params]
+                  or [r.type for r in g.result_list] != [r.type for r in m.result_list]):
+                D("E0152", f"'{g.name}' does not match '{name}.{m.name}': an implementation is "
+                           f"a func that does not wait, written {want}", c.name, pin=m.name)
 
 
 def check_classes(module: Module, idx: ModuleIndex, D):
@@ -217,6 +267,7 @@ def check_classes(module: Module, idx: ModuleIndex, D):
             D("E0151", f"class '{c.name}' inherits from itself: {' -> '.join(chain + [last.base])}",
               c.name)
             continue
+        check_implementations(c, idx, D)
         inherited = {f.name: owner for owner, f in idx.class_fields(c.base)} if c.base else {}
         seen = set()
         for f in c.fields:

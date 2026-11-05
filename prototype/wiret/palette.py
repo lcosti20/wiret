@@ -182,6 +182,9 @@ def describe(kind: str, symbol: Optional[str] = None, idx: Optional[ModuleIndex]
     if kind in ("New", "GetField", "SetField", "Cast") and idx is not None:
         cls, _, fname = (symbol or (targs[0] if targs else "")).rpartition(".")
         cls = cls or symbol or (targs[0] if targs else "")
+        if cls in idx.interfaces and kind == "Cast":
+            return (f"Checks whether an object implements {cls}: 'ok' says if it does, and "
+                    f"'result' is the object as a {cls} (null when it does not).")
         if cls in idx.classes:
             a = "an" if cls[:1].lower() in "aeiou" else "a"
             return {"New": f"Makes a new {cls} object, with every field at its starting value.",
@@ -194,6 +197,10 @@ def describe(kind: str, symbol: Optional[str] = None, idx: Optional[ModuleIndex]
         return describe_struct_node(kind, symbol, idx)
     if symbol and symbol in DESCRIBE and DESCRIBE[symbol][0]:
         return DESCRIBE[symbol][0]
+    if kind == "Call" and symbol and idx is not None and \
+            symbol.rpartition(".")[0] in idx.interfaces:
+        return (f"Calls {symbol} on any object that implements "
+                f"{symbol.rpartition('.')[0]}; the object's own class decides what runs.")
     if kind == "Call" and symbol:
         return f"Calls {symbol}."
     return DESCRIBE.get(kind, ("", ""))[0]
@@ -307,6 +314,11 @@ def items(g: Graph, idx: ModuleIndex) -> list:
             sym = f"{name}.{f.name}"
             out.append(_item("GetField", f"Get {sym}", "Classes", sym, idx=idx))
             out.append(_item("SetField", f"Set {sym}", "Classes", sym, idx=idx))
+    for name in sorted(idx.interfaces):
+        out.append(_item("Cast", f"Cast to {name}", "Classes", name, idx=idx))
+        for m in idx.interfaces[name].methods:
+            sym = f"{name}.{m.name}"
+            out.append(_item("Call", f"Call {sym}", "Call", sym, idx=idx))
     if idx.classes:
         out.append(_item("IsValid", "IsValid (not null)", "Classes", idx=idx))
     for name in sorted(idx.structs):

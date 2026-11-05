@@ -6,7 +6,7 @@ import hashlib
 import math
 import unicodedata
 
-from .model import (Attr, Binding, Box, Class, Const, Enum, ExecOut, Extern, Graph, ITEM_ORDER, Lit,
+from .model import (Attr, Binding, Box, Class, Const, Enum, Interface, ExecOut, Extern, Graph, ITEM_ORDER, Lit,
                     META_ORDER, Module, Node, PinRef, SEMANTIC_ATTRS, Struct, Use, Var,
                     item_kind)
 from .registry import PLACE_MUTATORS, ModuleIndex, Sig, lit_equal, lit_fits, signature
@@ -260,7 +260,8 @@ def fmt_type_decl(it, semantic=False) -> list:
 def fmt_class(c: Class, methods: list, idx: ModuleIndex, semantic=False) -> list:
     """A class: fields in the order written (their layout), then its methods, funcs before
     events, each by name, with a blank line before each method."""
-    head = f"class {c.name}" + (f" : {c.base}" if c.base else "") + fmt_attrs(c.attrs)
+    head = (f"class {c.name}" + (f" : {c.base}" if c.base else "")
+            + (f" impl {', '.join(c.impls)}" if c.impls else "") + fmt_attrs(c.attrs))
     if not c.fields and not methods:
         return [head + " {}"]
     lines = [head + " {"]
@@ -278,7 +279,24 @@ def fmt_class(c: Class, methods: list, idx: ModuleIndex, semantic=False) -> list
     return lines + ["}"]
 
 
+def fmt_interface(it: Interface, semantic=False) -> list:
+    """An interface: its method signatures in the order written (their dispatch slots)."""
+    head = f"interface {it.name}{fmt_attrs(it.attrs)}"
+    if not it.methods:
+        return [head + " {}"]
+    lines = [head + " {"]
+    for m in it.methods:
+        s = f"{IND}func {m.name}{fmt_params(m.params)}"
+        if m.results is not None:
+            s += " -> " + fmt_params(m.results)
+        lines.extend(fmt_meta(m.meta, IND, semantic))
+        lines.append(s + fmt_attrs(m.attrs))
+    return lines + ["}"]
+
+
 def fmt_item(it, idx: ModuleIndex, semantic=False, methods=None) -> list:
+    if isinstance(it, Interface):
+        return fmt_meta(it.meta, "", semantic) + fmt_interface(it, semantic)
     if isinstance(it, Class):
         return fmt_meta(it.meta, "", semantic) + fmt_class(it, methods or [], idx, semantic)
     if isinstance(it, Graph):
@@ -319,7 +337,7 @@ def print_module(m: Module, semantic=False) -> str:
     prev_kind = None
     for it in items:
         k = item_kind(it)
-        block = isinstance(it, (Graph, Struct, Enum, Class))
+        block = isinstance(it, (Graph, Struct, Enum, Class, Interface))
         if block or k != prev_kind:
             lines.append("")
         lines.extend(fmt_item(it, idx, semantic, owned.get(it.name)))
