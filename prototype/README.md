@@ -1,7 +1,7 @@
 # Wiret prototype
 
 A Python prototype of the Wiret graph editor, compiler and runtime, built against
-[`docs/reference.md`](../docs/reference.md) (Draft 0.4). It targets **Tier 0** of the spec
+[`docs/reference.md`](../docs/reference.md) (Draft 0.7). It targets **Tier 0** of the spec
 (section 1.6) plus a few Tier 1 conveniences. It uses only the Python standard library; the
 editor uses Tkinter.
 
@@ -186,7 +186,7 @@ The editor also follows the graph-editor contract in section 7.5:
 | Canonical form and hashes (2.5) | Sorted items (struct fields and enum members keep the order written), nodes, `flow` wires (by source node id, then exec pin order) and layout lines, each with its metadata lines above it (`doc`, `category`, `keywords`, then notes as written); registry pin order; default-valued bindings omitted; 100-column wrapping; attribute ordering. Semantic hash (ignores layout, every `#[...]` line and `Reroute`) and layout hash. |
 | Node kinds (3.3) | `Entry`, `Return`, `Branch`, `Sequence`, `Switch`, `Select`, `Macro`, `Exit`, `Reroute`, `Get/SetLocal`, `Get/SetVar` (and `const`s), `Get/SetState`, `Call`, `Convert`, all arithmetic, comparison, logic and bit kinds, and the array kinds `MakeArray`, `ArrayGet`, `ArrayLength`, `ArraySet`, `ArrayAdd`, `ArrayInsert`, `ArrayRemove`, `ArrayClear`. Types: `bool`, all integer widths, `f32`, `f64`, `string`, `array::<T>`. |
 | Execution model (4.2–4.3) | Continuation stack, `Sequence` push/pop, macro inlining with path-style ids (`loop/test`, `loop!in`), `Exit` as a jump, joins, evaluation points with per-point sharing, impure output slots, `@pure` and `@reads` calls as pure nodes, per-expansion `state`. The §4.2 `SumTo(2)` trace is reproduced exactly (see tests). |
-| Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0201, E0301, E0302, E0304, E0401, E0501, E0502, E0503 (not in the draft: a struct that contains itself by value), W0201, W0301, W0302, W0310, W0320, W0601, W0602, W0603, W0604. |
+| Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0201, E0301, E0302, E0304, E0401, E0501, E0502, E0503, W0201, W0301, W0302, W0310, W0320, W0601, W0602, W0603, W0604. |
 | Lowering (4.8) | `-O0`: one labelled block per impure node, `local.tee` for shared values, `cont.push`/`cont.pop` kept. Output closely matches the §5.8 listings. |
 | WBC (5.2–5.4) | Type (function, `5E` array and `5F` struct entries), Import, Function, Global, Export, Data and Code sections, plus custom sections `name`, `wr.debug`, `wr.pins`, `wr.pure`, `wr.meta` (hashes), `wr.caps` and `wr.graph` (deflated canonical source). |
 | Verifier (5.5) | One linear pass: decoding, branch targets, empty stack at labels, operand typing (including `struct.new`/`get`/`with`), returns, `max_stack`, latency/purity flags. Type references may point forward, but a struct may not hold itself by value. Fuzz-tested. |
@@ -244,8 +244,8 @@ Struct nodes name their struct, and the field nodes name the field too:
 | `WithField Vec2.x` | in `obj`, `value`; out `result`, a copy with that field replaced |
 
 All four are pure, also in a `@pure` function: a struct is a value, so reading one cannot see a
-change. The draft makes `GetField` a `reads` node, but that is for class fields. `SetField` on a
-struct is `E0501` with a pointer to `WithField`.
+change (Draft 0.7; `reads` purity is for `GetField` on a class). `SetField` on a struct is `E0501`
+with a pointer to `WithField`.
 
 `Eq`/`Ne` take enums and structs, `Lt`/`Le`/`Gt`/`Ge` take enums, `Select` takes either, and
 `Switch` takes enums. `Convert` turns an enum into its own underlying type and back, and nothing

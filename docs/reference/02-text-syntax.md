@@ -16,6 +16,7 @@ A `.wiret` file is UTF-8 (no BOM) with LF line endings and holds exactly one mod
 | Integer | `42`, `-7`, `0xFF`, `1_000`; optional suffix `i8 u8 i16 u16 i32 u32 i64 u64` |
 | Float | `1.5`, `2e-3`; optional suffix `f32` or `f64` |
 | Other literals | `true`, `false`, `null` |
+| Enum value | `Mode.Chase`: the enum's name, a dot and one of its members (section 2.3) |
 | String | `"text"` with escapes `\\n`, `\\t`, `\\"`, `\\\\` and `\\u{1F600}` |
 | Tuple / list / map | `(1, 2)`, `[a, b]`, `{k: v}`; used only inside attributes |
 | Semantic attribute | `@pure`, `@count(2)`; at the end of the line it modifies (section 2.4) |
@@ -73,6 +74,9 @@ Notes on the declarations:
 - A `macro` is inlined at every use, so it may contain `exec` pins as parameters and results. Everything else exposes `exec` pins implicitly.
 - `extern func host.Log(message: string)` imports a host native. The import module is every segment but the last (`host`), the import name is the last (`Log`).
 - `exec` is a type only for macro parameters and for the type arguments of `Reroute`.
+- An enum member without `= INT` is one more than the member before it, and the first member is 0. Every value must fit the underlying type, `i32` unless one is written (`E0110`).
+- Struct fields and enum members keep the order they are written in (section 2.5). Field names, and member names, are unique within their declaration (`E0102`), and a struct or enum may not take the name of a built-in type (`E0102`).
+- A struct may not hold itself by value, directly or through other structs (`E0503`): it would have no finite default value. Holding it in an array is allowed, since an array starts empty, so `struct Tree` may have a field `children: array::<Tree>`.
 
 ### 2.3 Graph bodies: nodes, bindings, exec wiring
 
@@ -100,9 +104,9 @@ Rules:
 
 1. **Node ids** are identifiers, unique within the graph. They are the identity of a node for diffs and merges. Display names are not ids; they live in the layout (`label`). Editors generate a readable slug plus a short random suffix, such as `branch_k3m9`; humans and LLMs may choose descriptive ones such as `check_energy`. **Non-reuse is a project-level guarantee, not a file-level one.** A single file can only prove that its present ids are unique; it cannot know which ids were deleted earlier. Non-reuse is therefore enforced by the project's id registry `wiret.ids` (section 7.3), which records every retired node id: an editor save or `wiretc edit` that deletes a node appends its id, and a node that reuses a retired id is `E0140`. Without a project (a lone file) editors still generate fresh random suffixes, which makes accidental reuse improbable but not impossible, and `wiretc check` says so (`W0202`).
 2. **Kind** is a PascalCase built-in (`Add`, `Branch`, `SetLocal`, ...; section 3.3). Calling a declared function is always `Call`, so the closed set of built-in kinds never collides with user names.
-3. **Symbol** (optional) names the thing the node acts on: `Call std.math.Sqrt`, `GetField health`, `SetLocal acc`, `GetState done`, `New Player`, `Cast Player`, `Macro ForRange`, `Exit done`.
+3. **Symbol** (optional) names the thing the node acts on: `Call std.math.Sqrt`, `GetField health`, `SetLocal acc`, `GetState done`, `New Player`, `Cast Player`, `Macro ForRange`, `Exit done`. A struct node names its struct, and a field node the struct and the field, since nothing else on the node says which struct it is: `MakeStruct Vec2`, `BreakStruct Vec2`, `GetField Vec2.x`, `WithField Vec2.x`. A class field keeps the bare form, `GetField health`.
 4. **Type arguments** follow the symbol: `Add::<i32>`, `Convert::<i32, string>`, `Call std.array.Get::<f32>`. They are always written out, never inferred. Every generic argument list in Wiret, on a node, a declaration (`macro ForEach::<T>`) or a type (`array::<i32>`), is introduced by `::`. A node line binds an id to a kind (`node plus = Add::<i32>`), and with a bare `<` a node such as `NodeType<a, b> variable` would read like a comparison; the `::` removes that ambiguity.
-5. **Bindings** connect input pins. Each binding is its own line below the node line, written `.pin <- value` and indented one level further than the node. `<-` mirrors the `->` of exec wires: data flows *into* the pin. The right-hand side is either a pin reference (`other_node.pin`, a data wire) or a literal. Blank lines may separate a node line from its bindings; the next line that does not start with `.` ends the node. An input that is not listed takes the pin's default value (the declared default, otherwise the zero value of its type); the compiler warns (`W0201`) about unlisted inputs that have no declared default.
+5. **Bindings** connect input pins. Each binding is its own line below the node line, written `.pin <- value` and indented one level further than the node. `<-` mirrors the `->` of exec wires: data flows *into* the pin. The right-hand side is either a pin reference (`other_node.pin`, a data wire) or a literal. An enum value such as `Mode.Chase` has the same shape as a pin reference: it is the enum value when the graph has no node with the id `Mode` and the module declares an enum `Mode`. A node id that is also the name of an enum is `E0102`, so the reading never depends on which one was meant. Blank lines may separate a node line from its bindings; the next line that does not start with `.` ends the node. An input that is not listed takes the pin's default value (the declared default, otherwise the zero value of its type); the compiler warns (`W0201`) about unlisted inputs that have no declared default.
 6. **Exec wiring** is written in the graph's `flow` block, one wire per line, never on node lines (see *The flow block* below). `source -> target` is shorthand for a source node with exactly one exec output; otherwise the output is named, `source.pin -> target`. An exec output with no wire is unconnected, which means "this chain ends here" (section 4.2).
 7. **Targets** are exec inputs. The default exec input is `in`; write `node.pin` to target another one. Any number of producers may target the same exec input (merging flow).
 8. **Data wires** may fan out freely: any number of nodes may reference the same output pin.
@@ -188,7 +192,7 @@ A metadata line attaches to the next statement that is not itself a metadata lin
 | `@inline` | `func` | Hint to inline at call sites. |
 | `@deprecated("msg")` | declaration | Warning at every use. |
 | `@count(n)` | `Sequence`, `MakeArray`, ... | Number of dynamic pins. |
-| `@cases(v0, v1, ...)` | `Switch` | Case values. Pins are `case0`, `case1`, ... and `default`. |
+| `@cases(v0, v1, ...)` | `Switch` | Case values. Pins are `case0`, `case1`, ... and `default`. Each value must be a value of the `Switch`'s type (`E0110`); on an enum `Switch` they are members, `@cases(Mode.Idle, Mode.Chase)`. |
 | `@disabled` | node | Node is skipped: a one-exec-out node passes control straight to its target; data outputs read as zero. |
 | @capability("name") | extern func | The import needs this host capability. Listed in the wr.caps section; the load fails unless the host granted it (section 6.5). |
 | @latent | func | The function may suspend. Required when it contains a latent node or calls a latent function or event (E0201). Events are implicitly latent. A latent function is never @pure or @reads. |
@@ -236,7 +240,7 @@ Wires refer to pins by name, so renaming a parameter or result would otherwise b
 The canonical form is a function of the model alone, so two tools always write identical bytes for the same graph. The formatter (`wiretc fmt`) and every editor save produce it.
 
 1. UTF-8 NFC, LF, two-space indentation, one trailing newline.
-2. Items ordered by kind (`use`, `extern`, `const`, `var`, `enum`, `struct`, `interface`, `class`, `macro`, `func`, `event`), then by name.
+2. Items ordered by kind (`use`, `extern`, `const`, `var`, `enum`, `struct`, `interface`, `class`, `macro`, `func`, `event`), then by name. Inside a `struct` or `enum`, fields and members keep the order they are written in: field order is the struct's layout, and member order gives the value of a member written without `= INT`, so reordering them changes the program and its semantic hash.
 3. Inside a body: `local` statements by name, then `state` statements by name, then `node` statements sorted by **node id** (ASCII order), then the `flow` block, then the `layout` block last. Each block is preceded by one blank line, and an empty block is omitted. Wiring never reorders node statements; it only adds or removes `flow` lines.
 4. Inside the layout block: `place` lines sorted by node id, then `box` lines sorted by box id. Inside a box, `members` are sorted by id. Moving a node changes only its own `place` line; moving a box changes only its own `box` line. Inside the flow block, wires are sorted by source node id, then by the source's exec-output order from the registry; the bare `source -> target` form is used exactly when the source has one exec output.
 5. Bindings are written one per line below their node line, indented two spaces further, as `.pin <- value`, in the node kind's pin order (from the registry); bindings equal to the pin default are omitted.
