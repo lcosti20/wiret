@@ -1,0 +1,204 @@
+wiret 1
+module lessons.interfaces
+
+extern func host.Log(message: string)
+
+#[doc("Anything with an area and a name.")]
+interface Shape {
+  func Area() -> (area: i32)
+  func Name() -> (name: string)
+}
+
+#[doc("A rectangle, width by height.")]
+class Rectangle impl Shape {
+  width: i32 = 3
+  height: i32 = 4
+
+  #[note("A rectangle's area is width times height.")]
+  func Area() -> (area: i32) {
+    node entry = Entry
+    node h = GetField height
+      .obj <- entry.self
+    node ret = Return
+      .area <- times.result
+    node times = Mul::<i32>
+      .a <- w.value
+      .b <- h.value
+    node w = GetField width
+      .obj <- entry.self
+
+    flow {
+      entry -> ret
+    }
+
+    layout {
+      entry at (0, 0)
+      h at (-150, 310)
+      ret at (250, 0)
+      times at (50, 110)
+      w at (-150, 220)
+    }
+  }
+
+  #[note("Square inherits this, but gives its own Name.")]
+  func Name() -> (name: string) {
+    node entry = Entry
+    node ret = Return
+      .name <- "Rectangle"
+
+    flow {
+      entry -> ret
+    }
+
+    layout {
+      entry at (0, 0)
+      ret at (250, 0)
+    }
+  }
+}
+
+#[doc("A square: a rectangle with equal sides.")]
+class Square : Rectangle {
+  #[note("Square gets Area from Rectangle and only renames itself, so it is a Shape too.")]
+  func Name() -> (name: string) {
+    node entry = Entry
+    node ret = Return
+      .name <- "Square"
+
+    flow {
+      entry -> ret
+    }
+
+    layout {
+      entry at (0, 0)
+      ret at (250, 0)
+    }
+  }
+}
+
+#[doc("A triangle with a base and a height.")]
+class Triangle impl Shape {
+  base: i32 = 4
+  height: i32 = 3
+
+  #[note("Half of base times height.")]
+  func Area() -> (area: i32) {
+    node b = GetField base
+      .obj <- entry.self
+    node entry = Entry
+    node h = GetField height
+      .obj <- entry.self
+    node half = Div::<i32>
+      .a <- times.result
+      .b <- 2
+    node ret = Return
+      .area <- half.result
+    node times = Mul::<i32>
+      .a <- b.value
+      .b <- h.value
+
+    flow {
+      entry -> ret
+    }
+
+    layout {
+      b at (-350, 330)
+      entry at (0, 0)
+      h at (-350, 420)
+      half at (50, 110)
+      ret at (250, 0)
+      times at (-150, 220)
+    }
+  }
+
+  #[note("Its name.")]
+  func Name() -> (name: string) {
+    node entry = Entry
+    node ret = Return
+      .name <- "Triangle"
+
+    flow {
+      entry -> ret
+    }
+
+    layout {
+      entry at (0, 0)
+      ret at (250, 0)
+    }
+  }
+}
+
+#[note("Lesson 13: Interfaces. An interface is a promise: any class that says 'impl Shape' has an Area and a Name. Rectangle and Triangle are not related, but both keep the promise, so one array can hold both and ask each for its area.")]
+#[note("Try it: (1) Add a Circle class that implements Shape (the Source pane is easiest). (2) Remove Name from Triangle: Wiret says which method the promise is missing. (3) Make the square's sides 6.")]
+func Main() {
+  local shapes: array::<Shape>
+  node add_r = ArrayAdd::<Shape> shapes
+    .item <- rect.result
+  node add_s = ArrayAdd::<Shape> shapes
+    .item <- square.result
+  node add_t = ArrayAdd::<Shape> shapes
+    .item <- tri.result
+  node all = GetLocal shapes
+  #[note("Calling through the interface: each shape's own class decides what runs.")]
+  node area = Call Shape.Area
+    .self <- loop.item
+  node area_text = Convert::<i32, string>
+    .value <- area.area
+  node entry = Entry
+  node label = Call std.string.Concat
+    .a <- name.name
+    .b <- ": area "
+  node line = Call std.string.Concat
+    .a <- label.result
+    .b <- area_text.result
+  node loop = Macro std.flow.ForEach::<Shape>
+    .array <- all.value
+  node name = Call Shape.Name
+    .self <- loop.item
+  node rect = New Rectangle
+  node say = Call host.Log
+    .message <- line.result
+  node side_h = SetField Rectangle.height
+    .obj <- square.result
+    .value <- 5
+  node side_w = SetField Rectangle.width
+    .obj <- square.result
+    .value <- 5
+  node square = New Square
+  node tri = New Triangle
+
+  flow {
+    add_r -> square
+    add_s -> tri
+    add_t -> loop
+    area -> name
+    entry -> rect
+    loop.each -> area
+    name -> say
+    rect -> add_r
+    side_h -> add_s
+    side_w -> side_h
+    square -> side_w
+    tri -> add_t
+  }
+
+  layout {
+    add_r at (500, 0)
+    add_s at (1500, 0)
+    add_t at (2000, 0)
+    all at (2050, 110)
+    area at (2500, 0)
+    area_text at (2600, 310)
+    entry at (0, 0)
+    label at (2600, 220)
+    line at (2800, 110)
+    loop at (2250, 0)
+    name at (2750, 0)
+    rect at (250, 0)
+    say at (3000, 0)
+    side_h at (1250, 0)
+    side_w at (1000, 0)
+    square at (750, 0)
+    tri at (1750, 0)
+  }
+}
