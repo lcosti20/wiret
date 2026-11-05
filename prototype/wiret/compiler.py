@@ -893,6 +893,34 @@ class FuncLowerer:
             self.E("i32.const", 0xFFFF)
             self.E("i32.and")
 
+    NARROW_RANGES = {"i8": (-128, 127), "u8": (0, 255), "i16": (-32768, 32767),
+                     "u16": (0, 65535)}
+
+    def clamp_narrow(self, ty: str):
+        """Saturate an i32 from a float conversion to a narrow type's range (section 3.2).
+        `trunc` already saturates to i32 (or u32), and maps NaN to 0."""
+        rng = self.NARROW_RANGES.get(ty)
+        if rng is None:
+            return
+        lo, hi = rng
+        signed = ty in SIGNED_TYPES
+        t = self.temp("i32")
+        self.E("local.set", t)
+        if signed:                       # max(v, lo); the unsigned trunc never goes below 0
+            self.E("local.get", t)
+            self.E("i32.const", lo)
+            self.E("local.get", t)
+            self.E("i32.const", lo)
+            self.E("i32.gt_s")
+            self.E("select")
+            self.E("local.set", t)
+        self.E("local.get", t)           # min(v, hi)
+        self.E("i32.const", hi)
+        self.E("local.get", t)
+        self.E("i32.const", hi)
+        self.E("i32.lt_s" if signed else "i32.lt_u")
+        self.E("select")
+
     def emit_eq(self, ty: str):
         """[a, b] -> [i32]. Structs compare field by field (section 3.1)."""
         if ty in self.c.idx.structs:
@@ -1102,8 +1130,8 @@ class FuncLowerer:
             self.E(f"{PFX[vt]}.convert_{PFX[vf]}_{fs}")
         elif f in FLOAT_TYPES and t in INT_TYPES:
             ts = "s" if t in SIGNED_TYPES else "u"
-            self.E(f"{PFX[vt]}.trunc_{PFX[vf]}_{ts}")
-            self.narrow(t)
+            self.E(f"{PFX[vt]}.trunc_{PFX[vf]}_{ts}")   # saturates to the 32/64-bit range
+            self.clamp_narrow(t)
         elif f == "f32" and t == "f64":
             self.E("f64.promote_f32")
         elif f == "f64" and t == "f32":
