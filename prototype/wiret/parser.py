@@ -135,6 +135,7 @@ class Parser:
         self.i = 0
         self.anchors = []  # (token index, anchor tuple)
         self.pending_methods = []  # methods of the class just parsed
+        self.graph_name = None     # the graph whose body is being parsed
 
     # -- token helpers -------------------------------------------------------
     def peek(self, k=0) -> Tok:
@@ -649,16 +650,21 @@ class Parser:
 
     # -- graph bodies --------------------------------------------------------
     def body(self, g: Graph):
+        self.graph_name = g.name
         self.expect_p("{")
         self.skip_nl()
         wires = []
+        metas = []      # (token, node id, metadata lines) from the layout block
         while not self.at_p("}"):
             mt = self.peek()
             meta = self.meta_lines()
             t = self.peek()
-            if meta and not (self.at_kw("local") or self.at_kw("state") or self.at_kw("node")):
+            if meta and self.at_kw("node"):
+                raise ParseError("a node's metadata lines go in the graph's layout block, "
+                                 "directly above the node's line there", mt.line, mt.col)
+            if meta and not (self.at_kw("local") or self.at_kw("state")):
                 raise ParseError("in a graph body, a metadata line may only stand above a "
-                                 "'local', 'state' or 'node' statement", mt.line, mt.col)
+                                 "'local' or 'state' statement", mt.line, mt.col)
             if self.at_kw("local") or self.at_kw("state"):
                 self.next()
                 name = self.ident()
@@ -672,12 +678,12 @@ class Parser:
                     Local(name, ty, default, self.attrs(), meta))
                 self.end_stmt()
             elif self.at_kw("node"):
+                at = len(self.anchors)
                 self.anchors.append((self.i, None))
                 self.next()
-                n = self.node()
-                n.meta = meta
-                self.anchors[-1] = (self.anchors[-1][0], ("node", g.name, n.id))
-                g.nodes.append(n)
+                ns = self.node()           # adds the anchors of its inline nodes after this one
+                self.anchors[at] = (self.anchors[at][0], ("node", g.name, ns[0].id))
+                g.nodes.extend(ns)
                 self.end_stmt()
             elif self.at_kw("flow"):
                 self.next()
@@ -686,22 +692,41 @@ class Parser:
                 self.error(MARKUP_HINT)
             elif self.at_kw("layout"):
                 self.next()
-                self.layout(g)
+                self.layout(g, metas)
             else:
                 self.error("expected 'local', 'state', 'node', 'flow' or 'layout'")
         self.next()
         self.end_stmt()
         nodes = {n.id: n for n in g.nodes}
+        for tok, nid, meta in metas:
+            if nid not in nodes:
+                raise ParseError(f"metadata above '{nid}', which is not a node of '{g.name}'",
+                                 tok.line, tok.col)
+            nodes[nid].meta.extend(meta)
         for tok, src, pin, e in wires:
             if src not in nodes:
                 raise ParseError(f"flow wire starts at '{src}', which is not a node of "
                                  f"'{g.name}'", tok.line, tok.col)
             nodes[src].execs.append(ExecOut(pin, *e))
 
-    def node(self) -> Node:
-        """`node id = Kind[::<targs>] [symbol] @attrs`, then one `.pin <- value` line per input."""
+    def node(self) -> list:
+        """`node id = Kind[::<targs>] [symbol](.pin <- value, ...) @attrs` (section 2.3).
+        Returns the node, then the nodes written inline in its inputs."""
         nid = self.ident("node id")
+        if self.at_p("."):
+            self.error("a declared node's id is an identifier; a dotted name such as "
+                       "'show.message' belongs to a node written inline in an input")
         self.expect_p("=")
+        out = self.node_expr(nid)
+        n = out[0]
+        n.attrs.extend(self.attrs())
+        if self.at_p("->") or self.at_p("{"):
+            self.error("exec wires go in the graph's 'flow' block, not on the node line "
+                       f"(write '{nid} -> target' there)")
+        return out
+
+    def node_expr(self, nid: str) -> list:
+        """`Kind [symbol][::<targs>](inputs)`: a node with the given id, then its inline nodes."""
         kind = self.ident("node kind")
         n = Node(nid, kind)
         if self.at("id"):
@@ -713,30 +738,54 @@ class Parser:
             # `ArrayAdd::<i32> acc` (section 3.3) writes the symbol after the type arguments
             if n.symbol is None and self.at("id"):
                 n.symbol = self.qname()
-        if self.at_p("("):
-            self.error("node inputs go on their own lines below the node, one per line, "
-                       "as in '.pin <- value'")
-        n.attrs.extend(self.attrs())
-        if self.at_p("->") or self.at_p("{"):
-            self.error("exec wires go in the graph's 'flow' block, not on the node line "
-                       f"(write '{nid} -> target' there)")
-        while self.at("nl"):
+        if not self.at_p("("):
             j = self.i
             while self.toks[j].kind == "nl":
                 j += 1
-            if not (self.toks[j].kind == "punct" and self.toks[j].value == "."):
-                break
-            self.i = j + 1
+            if self.toks[j].kind == "punct" and self.toks[j].value == ".":
+                self.error("a node's inputs are written in parentheses after it, separated "
+                           "by commas: 'Kind(.pin <- value, ...)'")
+            self.error(f"expected '(' after the node; a node without inputs is written "
+                       f"'{kind}()'")
+        self.next()
+        out = [n]
+        self.skip_nl()
+        while not self.at_p(")"):
+            if not self.at_p("."):
+                self.error("expected an input, '.pin <- value', or ')'")
+            self.next()
             pin = self.ident("pin name")
             self.expect_p("<-")
-            if self.at("id") and self.at_p(".", 1):
-                node = self.ident()
-                self.next()
-                val = PinRef(node, self.ident("pin name"))
-            else:
-                val = self.literal()
+            self.skip_nl()
+            val, inline = self.input_value(f"{nid}.{pin}")
             n.bindings.append(Binding(pin, val))
-        return n
+            out.extend(inline)
+            self.skip_nl()
+            if self.at_p(","):
+                self.next()
+                self.skip_nl()
+            elif not self.at_p(")"):
+                self.error("expected ',' or ')' after an input")
+        self.next()
+        return out
+
+    def input_value(self, path: str):
+        """The value bound to an input: a literal, a pin reference `node.pin` (the node may be
+        an inline node's dotted name), or a node written inline, `Kind(...).pin`, which gets
+        the id `path`. Returns (value, inline nodes)."""
+        t = self.peek()
+        if t.kind == "id" and t.value not in ("true", "false", "null"):
+            if self.at_p(".", 1):
+                parts = self.qname().split(".")
+                return PinRef(".".join(parts[:-1]), parts[-1]), []
+            self.anchors.append((self.i, ("node", self.graph_name, path)))
+            inline = self.node_expr(path)
+            if not self.at_p("."):
+                self.error(f"a node written inline is followed by the output it feeds in, "
+                           f"as in '{inline[0].kind}(...).result'")
+            self.next()
+            return PinRef(path, self.ident("pin name")), inline
+        return self.literal(), []
 
     def endpoint(self, what):
         node = self.ident(what)
@@ -763,15 +812,14 @@ class Parser:
         self.end_stmt()
         return out
 
-    def layout(self, g: Graph):
+    def layout(self, g: Graph, metas: list):
+        """`layout { [meta] name [at (x, y) [props]] ... box ... }`: a line per node, by the
+        name it is written with, carrying its metadata lines, and its position if it has one."""
         self.expect_p("{")
         self.skip_nl()
         while not self.at_p("}"):
             mt = self.peek()
             meta = self.meta_lines()
-            if meta and not self.at_kw("box"):
-                raise ParseError("in a layout block, a metadata line may only stand above a "
-                                 "'box' line", mt.line, mt.col)
             if self.at_kw("box"):
                 self.next()
                 bid = self.ident("box id")
@@ -782,10 +830,18 @@ class Parser:
                 w, h = self.int_pair()
                 g.boxes.append(Box(bid, x, y, self.props(), title=title, w=w, h=h, meta=meta))
             else:
-                nid = self.ident("node id")
-                self.expect("id", "at")
-                x, y = self.int_pair()
-                g.places.append(Place(nid, x, y, self.props()))
+                t = self.peek()
+                nid = self.qname() if self.at("id") else self.ident("node id")
+                if meta:
+                    metas.append((mt, nid, meta))
+                if self.at_kw("at"):
+                    self.next()
+                    x, y = self.int_pair()
+                    g.places.append(Place(nid, x, y, self.props()))
+                elif not meta:
+                    raise ParseError(f"expected 'at (x, y)' after '{nid}'; a line with only a "
+                                     f"node's name carries the metadata lines above it",
+                                     t.line, t.col)
             self.end_stmt()
         self.next()
         self.end_stmt()

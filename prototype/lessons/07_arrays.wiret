@@ -8,56 +8,59 @@ extern func host.Log(message: string)
 func Main() {
   local scores: array::<i32>
   local total: i32
-  #[note("ArrayAdd puts one more item on the end of the array. scores now holds 4 items.")]
-  node add = ArrayAdd::<i32> scores
-    .item <- 25
-  node count = ArrayLength::<i32>
-    .array <- list.value
-  node count_text = Convert::<i32, string>
-    .value <- count.length
-  node entry = Entry
-  node final = GetLocal total
-  node item_text = Convert::<i32, string>
-    .value <- loop.item
-  node keep = SetLocal total
-    .value <- plus.result
-  node line = Call std.string.Concat
-    .a <- part2.result
-    .b <- item_text.result
-  node list = GetLocal scores
-  #[note("ForEach runs 'each' once for every item. item is the value, index is its position. After the last item it follows 'done'.")]
-  node loop = Macro std.flow.ForEach::<i32>
-    .array <- list.value
-  node make = MakeArray::<i32> @count(3)
-    .item0 <- 12
-    .item1 <- 30
-    .item2 <- 7
-  node old = GetLocal total
-  node part1 = Call std.string.Concat
-    .a <- "Item "
-    .b <- pos_text.result
-  node part2 = Call std.string.Concat
-    .a <- part1.result
-    .b <- " is "
-  node plus = Add::<i32>
-    .a <- old.value
-    .b <- loop.item
-  node pos_text = Convert::<i32, string>
-    .value <- loop.index
-  node report = Call host.Log
-    .message <- report_line.result
-  node report_line = Call std.string.Concat
-    .a <- report_start.result
-    .b <- total_text.result
-  node report_start = Call std.string.Concat
-    .a <- count_text.result
-    .b <- " scores, total "
-  node say = Call host.Log
-    .message <- line.result
-  node start = SetLocal scores
-    .value <- make.result
-  node total_text = Convert::<i32, string>
-    .value <- final.value
+  node add = ArrayAdd::<i32> scores(
+    .item <- 25,
+  )
+  node entry = Entry()
+  node keep = SetLocal total(
+    .value <- Add::<i32>(
+      .a <- GetLocal total().value,
+      .b <- loop.item,
+    ).result,
+  )
+  node list = GetLocal scores()
+  node loop = Macro std.flow.ForEach::<i32>(
+    .array <- list.value,
+  )
+  node make = MakeArray::<i32>(
+    .item0 <- 12,
+    .item1 <- 30,
+    .item2 <- 7,
+  ) @count(3)
+  node report = Call host.Log(
+    .message <- Call std.string.Concat(
+      .a <- Call std.string.Concat(
+        .a <- Convert::<i32, string>(
+          .value <- ArrayLength::<i32>(
+            .array <- list.value,
+          ).length,
+        ).result,
+        .b <- " scores, total ",
+      ).result,
+      .b <- Convert::<i32, string>(
+        .value <- GetLocal total().value,
+      ).result,
+    ).result,
+  )
+  node say = Call host.Log(
+    .message <- Call std.string.Concat(
+      .a <- Call std.string.Concat(
+        .a <- Call std.string.Concat(
+          .a <- "Item ",
+          .b <- Convert::<i32, string>(
+            .value <- loop.index,
+          ).result,
+        ).result,
+        .b <- " is ",
+      ).result,
+      .b <- Convert::<i32, string>(
+        .value <- loop.item,
+      ).result,
+    ).result,
+  )
+  node start = SetLocal scores(
+    .value <- make.result,
+  )
 
   flow {
     add -> loop
@@ -69,27 +72,29 @@ func Main() {
   }
 
   layout {
+    #[note("ArrayAdd puts one more item on the end of the array. scores now holds 4 items.")]
     add at (420, 0)
-    count at (729, 284)
-    count_text at (968, 284)
     entry at (0, 0)
-    final at (1026, 376)
-    item_text at (1330, -86)
     keep at (2004, -1)
-    line at (1616, -191)
+    keep.value at (1831, 98)
+    keep.value.a at (1620, 74)
     list at (467, 124)
+    #[note("ForEach runs 'each' once for every item. item is the value, index is its position. After the last item it follows 'done'.")]
     loop at (715, 0)
     make at (-51, 75)
-    old at (1620, 74)
-    part1 at (1241, -191)
-    part2 at (1427, -191)
-    plus at (1831, 98)
-    pos_text at (1036, -99)
     report at (1666, 224)
-    report_line at (1482, 306)
-    report_start at (1212, 284)
+    report.message at (1482, 306)
+    report.message.a at (1212, 284)
+    report.message.a.a at (968, 284)
+    report.message.a.a.value at (729, 284)
+    report.message.b at (1216, 376)
+    report.message.b.value at (1026, 376)
     say at (1802, -1)
+    say.message at (1616, -191)
+    say.message.a at (1427, -191)
+    say.message.a.a at (1241, -191)
+    say.message.a.a.b at (1036, -99)
+    say.message.b at (1330, -86)
     start at (200, 0)
-    total_text at (1216, 376)
   }
 }

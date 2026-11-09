@@ -10,17 +10,17 @@ class Button {
   #[note("Click counts its clicks in a state slot, which every button keeps for itself, then tells every listener with Broadcast.")]
   func Click() {
     state clicks: i32
-    node count = GetState clicks
-    node entry = Entry
-    node inc = Add::<i32>
-      .a <- count.value
-      .b <- 1
-    node now = GetState clicks
-    node save = SetState clicks
-      .value <- inc.result
-    node tell = Broadcast OnClick
-      .obj <- entry.self
-      .times <- now.value
+    node entry = Entry()
+    node save = SetState clicks(
+      .value <- Add::<i32>(
+        .a <- GetState clicks().value,
+        .b <- 1,
+      ).result,
+    )
+    node tell = Broadcast OnClick(
+      .obj <- entry.self,
+      .times <- GetState clicks().value,
+    )
 
     flow {
       entry -> save
@@ -28,12 +28,12 @@ class Button {
     }
 
     layout {
-      count at (-141, 110)
       entry at (0, 0)
-      inc at (50, 110)
-      now at (300, 110)
       save at (250, 0)
+      save.value at (50, 110)
+      save.value.a at (-141, 110)
       tell at (500, 0)
+      tell.times at (300, 110)
     }
   }
 }
@@ -44,39 +44,41 @@ class Counter {
 
   #[note("Heard is a handler: its inputs match OnClick, so it can listen to a button.")]
   func Heard(times: i32) {
-    node cur = GetField heard
-      .obj <- entry.self
-    node entry = Entry
-    node inc = Add::<i32>
-      .a <- cur.value
-      .b <- 1
-    node save = SetField heard
-      .obj <- entry.self
-      .value <- inc.result
+    node entry = Entry()
+    node save = SetField heard(
+      .obj <- entry.self,
+      .value <- Add::<i32>(
+        .a <- GetField heard(
+          .obj <- entry.self,
+        ).value,
+        .b <- 1,
+      ).result,
+    )
 
     flow {
       entry -> save
     }
 
     layout {
-      cur at (213, 78)
       entry at (0, 0)
-      inc at (393, 78)
       save at (581, 0)
+      save.value at (393, 78)
+      save.value.a at (213, 78)
     }
   }
 }
 
 #[note("Announce is another handler, a plain function this time.")]
 func Announce(times: i32) {
-  node entry = Entry
-  node line = Call std.string.Concat
-    .a <- "Click number "
-    .b <- number.result
-  node number = Convert::<i32, string>
-    .value <- entry.times
-  node say = Call host.Log
-    .message <- line.result
+  node entry = Entry()
+  node say = Call host.Log(
+    .message <- Call std.string.Concat(
+      .a <- "Click number ",
+      .b <- Convert::<i32, string>(
+        .value <- entry.times,
+      ).result,
+    ).result,
+  )
 
   flow {
     entry -> say
@@ -84,49 +86,55 @@ func Announce(times: i32) {
 
   layout {
     entry at (0, 0)
-    line at (452, 53)
-    number at (185, 73)
     say at (719, 0)
+    say.message at (452, 53)
+    say.message.b at (185, 73)
   }
 }
 
 #[note("Lesson 14: Events. A dispatcher is a list of listeners on an object: Bind adds one, Unbind removes one, and Broadcast calls them all. A listener is a delegate, made with CreateDelegate from a function, or from a method plus the object to call it on.")]
 #[note("Try it: (1) Move the Unbind to the end: Announce hears all three clicks. (2) Make a second Counter and bind it too. (3) Change Heard to an event with a Delay: a delegate starts an event on its own, so Click does not wait.")]
 func Main() {
-  node announce = CreateDelegate Announce
-  node b = New Button
-  node bind_a = Bind Button.OnClick
-    .obj <- b.result
-    .handler <- announce.result
-  node bind_c = Bind Button.OnClick
-    .obj <- b.result
-    .handler <- heard.result
-  node c = New Counter
-  node click1 = Call Button.Click
-    .self <- b.result
-  node click2 = Call Button.Click
-    .self <- b.result
-  node click3 = Call Button.Click
-    .self <- b.result
-  node entry = Entry
-  node heard = CreateDelegate Counter.Heard
-    .target <- c.result
-  node how_many = GetField Counter.heard
-    .obj <- c.result
-  node line = Call std.string.Concat
-    .a <- "The counter heard "
-    .b <- tail.result
-  node number = Convert::<i32, string>
-    .value <- how_many.value
-  node say = Call host.Log
-    .message <- line.result
-  node tail = Call std.string.Concat
-    .a <- number.result
-    .b <- " clicks"
-  #[note("After this, Announce stops listening, but the counter goes on.")]
-  node unbind_a = Unbind Button.OnClick
-    .obj <- b.result
-    .handler <- announce.result
+  node announce = CreateDelegate Announce()
+  node b = New Button()
+  node bind_a = Bind Button.OnClick(
+    .obj <- b.result,
+    .handler <- announce.result,
+  )
+  node bind_c = Bind Button.OnClick(
+    .obj <- b.result,
+    .handler <- CreateDelegate Counter.Heard(
+      .target <- c.result,
+    ).result,
+  )
+  node c = New Counter()
+  node click1 = Call Button.Click(
+    .self <- b.result,
+  )
+  node click2 = Call Button.Click(
+    .self <- b.result,
+  )
+  node click3 = Call Button.Click(
+    .self <- b.result,
+  )
+  node entry = Entry()
+  node say = Call host.Log(
+    .message <- Call std.string.Concat(
+      .a <- "The counter heard ",
+      .b <- Call std.string.Concat(
+        .a <- Convert::<i32, string>(
+          .value <- GetField Counter.heard(
+            .obj <- c.result,
+          ).value,
+        ).result,
+        .b <- " clicks",
+      ).result,
+    ).result,
+  )
+  node unbind_a = Unbind Button.OnClick(
+    .obj <- b.result,
+    .handler <- announce.result,
+  )
 
   flow {
     b -> c
@@ -145,17 +153,18 @@ func Main() {
     b at (250, 0)
     bind_a at (750, 0)
     bind_c at (1000, 0)
+    bind_c.handler at (698, 154)
     c at (500, 0)
     click1 at (1250, 0)
     click2 at (1500, 0)
     click3 at (2000, 0)
     entry at (0, 0)
-    heard at (698, 154)
-    how_many at (1276, 161)
-    line at (1981, 141)
-    number at (1522, 161)
     say at (2250, 0)
-    tail at (1764, 161)
+    say.message at (1981, 141)
+    say.message.b at (1764, 161)
+    say.message.b.a at (1522, 161)
+    say.message.b.a.value at (1276, 161)
+    #[note("After this, Announce stops listening, but the counter goes on.")]
     unbind_a at (1750, 0)
   }
 }

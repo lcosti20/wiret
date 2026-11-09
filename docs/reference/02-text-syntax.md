@@ -2,15 +2,15 @@
 
 ### 2.1 Files and lexical structure
 
-A `.wiret` file is UTF-8 (no BOM) with LF line endings and holds exactly one module. Statements end at a newline. Newlines are ignored inside `( )`, so long signatures can wrap. A node's inputs are not written in parentheses: each one is its own line below the node line (section 2.3).
+A `.wiret` file is UTF-8 (no BOM) with LF line endings and holds exactly one module. Statements end at a newline. Newlines are ignored inside `( )`, so long signatures can wrap, and so can a node's inputs, which are written in parentheses after the node, one per line in canonical form (section 2.3).
 
-`//` starts a line comment. Line comments are *trivia* and are not part of the model, so the canonical writer cannot keep them. It never drops one silently: `wiretc fmt` reports `W0603` for each comment it would lose and exits non-zero, unless told what to do with them: `--convert-comments` turns each comment into a `#[note("...")]` line above the next node, declaration or box (section 2.4), so the text stays where it was written, and `--drop-comments` discards them. An editor that opens a file containing comments offers the same choice. Anything that must survive a round trip is written as a `#[note]` (an explanation of a graph, node or box), a `#[doc]` (the short tooltip text of a declaration or node), or a `box` (visual grouping).
+`//` starts a line comment. Line comments are *trivia* and are not part of the model, so the canonical writer cannot keep them. It never drops one silently: `wiretc fmt` reports `W0603` for each comment it would lose and exits non-zero, unless told what to do with them: `--convert-comments` turns each comment into a `#[note("...")]` on the next node, declaration or box (section 2.4; a node's notes stand above its line in the layout block), so the text stays with what it was written beside, and `--drop-comments` discards them. An editor that opens a file containing comments offers the same choice. Anything that must survive a round trip is written as a `#[note]` (an explanation of a graph, node or box), a `#[doc]` (the short tooltip text of a declaration or node), or a `box` (visual grouping).
 
 | Token | Form |
 | --- | --- |
 | Identifier | `[A-Za-z_][A-Za-z0-9_]*` |
 | Qualified name | `std.math.Sqrt` |
-| Pin reference | `node_id.pin_name` |
+| Pin reference | `node_id.pin_name`; an inline node's name has dots of its own, as in `show.message.result` (section 2.3) |
 | Type arguments | `::<i32>`, `::<i32, string>`; always introduced by `::` |
 | Arrows | `->` (exec wire, results), `<-` (input binding) |
 | Integer | `42`, `-7`, `0xFF`, `1_000`; optional suffix `i8 u8 i16 u16 i32 u32 i64 u64` |
@@ -33,7 +33,7 @@ wiret 1
 module game.demo @id("mod_k3f9")
 ```
 
-The module name is the namespace prefix of everything declared in the file (`game.demo.Player`). The grammar below uses `NL` for a newline and `attrs` for zero or more trailing semantic attributes (section 2.4). Metadata lines (`#[...]`, section 2.4) may precede the module line, any item, any member of an `enum`, `struct`, `interface` or `class`, and, inside a body, any `local`, `state` or `node` statement or `box` line; they are left out of the productions to keep them readable.
+The module name is the namespace prefix of everything declared in the file (`game.demo.Player`). The grammar below uses `NL` for a newline and `attrs` for zero or more trailing semantic attributes (section 2.4). Metadata lines (`#[...]`, section 2.4) may precede the module line, any item, any member of an `enum`, `struct`, `interface` or `class`, and, inside a body, any `local` or `state` statement and, in the layout block, any node's line or `box` line; they are left out of the productions to keep them readable.
 
 ```
 file       = "wiret" INT NL "module" qname attrs NL { item } ;
@@ -83,39 +83,62 @@ Notes on the declarations:
 
 ### 2.3 Graph bodies: nodes, bindings, exec wiring
 
-The body of a `func`, `event` or `macro` is a list of `local` and `state` declarations and `node` statements, followed by at most one `flow` block and at most one `layout` block. Everything that decides behaviour is in the node statements and the flow block: node statements say *what* each node does and where its data comes from, the flow block says *in which order* nodes run. Explanations for humans are `#[note]` lines directly above the node, box or graph they explain (section 2.4). Everything about where things are drawn is in the layout block.
+The body of a `func`, `event` or `macro` is a list of `local` and `state` declarations and `node` statements, followed by at most one `flow` block and at most one `layout` block. Everything that decides behaviour is in the node statements and the flow block: node statements say *what* each node does and where its data comes from, the flow block says *in which order* nodes run. Everything else about a node is in the layout block: where it is drawn, and the `#[note]` and other metadata lines that explain it (section 2.4). A graph's own notes stand above the graph.
 
 ```
 body      = { local | state | node } [ flow ] [ layout ] ;
 local     = "local" IDENT ":" type [ "=" literal ] NL ;
 state     = "state" IDENT ":" type [ "=" literal ] NL ;
-node      = "node" IDENT "=" KIND [ symbol ] [ targs ] attrs NL { binding } ;
+node      = "node" IDENT "=" expr attrs NL ;
+expr      = KIND [ symbol ] [ targs ] "(" [ binding { "," binding } [ "," ] ] ")" ;
 targs     = "::" "<" type { "," type } ">" ;
-binding   = "." IDENT "<-" ( pinref | literal ) NL ;   (* one input per line *)
-pinref    = IDENT "." IDENT ;
+binding   = "." IDENT "<-" ( pinref | literal | expr "." IDENT ) ;   (* expr: an inline node *)
+pinref    = name "." IDENT ;
+name      = IDENT { "." IDENT } ;            (* a node id, or an inline node's dotted name *)
 flow      = "flow" "{" { wire } "}" NL ;
 wire      = source "->" target NL ;
 source    = IDENT [ "." IDENT ] ;             (* node, or node.exec_output *)
 target    = IDENT [ "." IDENT ] ;             (* node, or node.exec_input *)
 layout    = "layout" "{" { place | box } "}" NL ;
-place   = IDENT "at" "(" INT "," INT ")" [ props ] NL ;
+place   = name [ "at" "(" INT "," INT ")" [ props ] ] NL ;   (* the name alone carries metadata *)
 box     = "box" IDENT STRING "at" "(" INT "," INT ")" "size" "(" INT "," INT ")" props NL ;
 props   = "[" IDENT "=" value { "," IDENT "=" value } "]" ;
 ```
 
 Rules:
 
-1. **Node ids** are identifiers, unique within the graph. They are the identity of a node for diffs and merges. Display names are not ids; they live in the layout (`label`). Editors generate a readable slug plus a short random suffix, such as `branch_k3m9`; humans and LLMs may choose descriptive ones such as `check_energy`. **Non-reuse is a project-level guarantee, not a file-level one.** A single file can only prove that its present ids are unique; it cannot know which ids were deleted earlier. Non-reuse is therefore enforced by the project's id registry `wiret.ids` (section 7.3), which records every retired node id: an editor save or `wiretc edit` that deletes a node appends its id, and a node that reuses a retired id is `E0140`. Without a project (a lone file) editors still generate fresh random suffixes, which makes accidental reuse improbable but not impossible, and `wiretc check` says so (`W0202`).
+1. **Node ids** are identifiers, unique within the graph. They are the identity of a node for diffs and merges. A node written inline in another node's input has no id of its own: its name is the path to where it is written, such as `show.message` (see *Inline nodes* below). Display names are not ids; they live in the layout (`label`). Editors generate a readable slug plus a short random suffix, such as `branch_k3m9`; humans and LLMs may choose descriptive ones such as `check_energy`. **Non-reuse is a project-level guarantee, not a file-level one.** A single file can only prove that its present ids are unique; it cannot know which ids were deleted earlier. Non-reuse is therefore enforced by the project's id registry `wiret.ids` (section 7.3), which records every retired node id: an editor save or `wiretc edit` that deletes a node appends its id, and a node that reuses a retired id is `E0140`. Without a project (a lone file) editors still generate fresh random suffixes, which makes accidental reuse improbable but not impossible, and `wiretc check` says so (`W0202`).
 2. **Kind** is a PascalCase built-in (`Add`, `Branch`, `SetLocal`, ...; section 3.3). Calling a declared function is always `Call`, so the closed set of built-in kinds never collides with user names.
 3. **Symbol** (optional) names the thing the node acts on: `Call std.math.Sqrt`, `GetField health`, `SetLocal acc`, `GetState done`, `New Player`, `Cast Player`, `Macro ForRange`, `Exit done`. A struct node names its struct, and a field node the struct and the field, since nothing else on the node says which struct it is: `MakeStruct Vec2`, `BreakStruct Vec2`, `GetField Vec2.x`, `WithField Vec2.x`. A class field keeps the bare form inside its own class's methods, `GetField health`, and is written `GetField Player.health` elsewhere, where nothing else would say which class it belongs to.
-4. **Type arguments** follow the symbol: `Add::<i32>`, `Convert::<i32, string>`, `Call std.array.Get::<f32>`. They are always written out, never inferred. Every generic argument list in Wiret, on a node, a declaration (`macro ForEach::<T>`) or a type (`array::<i32>`), is introduced by `::`. A node line binds an id to a kind (`node plus = Add::<i32>`), and with a bare `<` a node such as `NodeType<a, b> variable` would read like a comparison; the `::` removes that ambiguity.
-5. **Bindings** connect input pins. Each binding is its own line below the node line, written `.pin <- value` and indented one level further than the node. `<-` mirrors the `->` of exec wires: data flows *into* the pin. The right-hand side is either a pin reference (`other_node.pin`, a data wire) or a literal. An enum value such as `Mode.Chase` has the same shape as a pin reference: it is the enum value when the graph has no node with the id `Mode` and the module declares an enum `Mode`. A node id that is also the name of an enum is `E0102`, so the reading never depends on which one was meant. Blank lines may separate a node line from its bindings; the next line that does not start with `.` ends the node. An input that is not listed takes the pin's default value (the declared default, otherwise the zero value of its type); the compiler warns (`W0201`) about unlisted inputs that have no declared default.
+4. **Type arguments** follow the symbol: `Add::<i32>`, `Convert::<i32, string>`, `Call std.array.Get::<f32>`. They are always written out, never inferred. Every generic argument list in Wiret, on a node, a declaration (`macro ForEach::<T>`) or a type (`array::<i32>`), is introduced by `::`. A node statement binds an id to a kind (`node plus = Add::<i32>(...)`), and with a bare `<` a node such as `NodeType<a, b> variable` would read like a comparison; the `::` removes that ambiguity.
+5. **Bindings** connect input pins. They are written in parentheses after the node, `.pin <- value`, separated by commas, and a trailing comma is allowed: `Call host.Log(.message <- "hi")`. Newlines inside the parentheses are ignored, and the canonical form puts each binding on its own line, indented one level further than the node, with a trailing comma (section 2.5). A node with no bound inputs is written with empty parentheses, `Entry()`, so every node reads the same way. `<-` mirrors the `->` of exec wires: data flows *into* the pin. The right-hand side is a pin reference (`other_node.pin`, a data wire), a literal, or a node written inline (see *Inline nodes* below). An enum value such as `Mode.Chase` has the same shape as a pin reference: it is the enum value when the graph has no node with the id `Mode` and the module declares an enum `Mode`. A node id that is also the name of an enum is `E0102`, so the reading never depends on which one was meant. An input that is not listed takes the pin's default value (the declared default, otherwise the zero value of its type); the compiler warns (`W0201`) about unlisted inputs that have no declared default.
 6. **Exec wiring** is written in the graph's `flow` block, one wire per line, never on node lines (see *The flow block* below). `source -> target` is shorthand for a source node with exactly one exec output; otherwise the output is named, `source.pin -> target`. An exec output with no wire is unconnected, which means "this chain ends here" (section 4.2).
 7. **Targets** are exec inputs. The default exec input is `in`; write `node.pin` to target another one. Any number of producers may target the same exec input (merging flow).
 8. **Data wires** may fan out freely: any number of nodes may reference the same output pin.
 9. A pin reference must name an output pin of a node in the same graph. Function and event parameters appear as output pins of the `Entry` node (`entry.amount`, and `entry.self` for methods).
 10. **`state`** declares a slot that keeps its value between executions of the graph. In a macro there is one slot per expansion site, which is what `DoOnce` and `FlipFlop` need. In a method it lives on the object, in a free function on the module instance. On an object, each class's state slots follow its fields and dispatchers: for each method by name, its own `state` by name, then that of each macro it expands, node by node. The compiler allocates hidden fields or globals for it, named after the expansion path. Read and write it with `GetState` and `SetState`.
 11. `Reroute::<T>` is a visual-only node that passes a wire through a bend point. It is erased by the compiler. `Reroute::<exec>` reroutes control flow.
+
+#### Inline nodes
+
+An input has exactly one source, so read backwards from the inputs the data wires of a graph form a tree, and only a shared output breaks it. The text uses this: a node whose output feeds a single input is written inside that input instead of being declared and named, followed by the output it feeds in:
+
+```
+node show = Call host.Log(
+  .message <- Call std.string.Concat(
+    .a <- "Your score is ",
+    .b <- Convert::<i32, string>(
+      .value <- GetLocal score().value,
+    ).result,
+  ).result,
+)
+```
+
+- **Names.** An inline node's name is its consumer's name, a dot and the input it feeds: above, the `Concat` is `show.message`, the `Convert` is `show.message.b` and the `GetLocal` is `show.message.b.value`. The name is used wherever the node must be named: in the layout block, in a box's `members`, in diagnostics, in the debugger, in `wiretc edit` requests and in pin references (`show.message.b.result`).
+- **Which nodes are inline.** In canonical form a node is written inline exactly when one input in the graph reads it, it has no exec pins (it is pure or `reads`) and it carries no semantic attribute (an attribute ends a node's statement, and an inline node has none of its own). Every other node is declared with a `node` statement: a node with exec pins, an unread node, and a node whose outputs feed several inputs. A shared output is the one place where the data graph is not a tree, and the declared node's id is the name it is shared under.
+- **Either form is read.** The reader accepts a single-use node declared by name, and the formatter writes it inline. When an edit makes an inline node feed a second input, it is declared, under its dotted name with the dots turned into underscores (`show_message_b`); when a declared node comes to feed a single input, it moves inline and takes the name of where it is.
+- **Notation only.** Writing a node inline changes nothing about when or how often it is evaluated (section 4.3): the model has the same nodes and wires, and the compiled instructions are the same.
+- **Positions, not identities.** Because an inline node's name says where it is written, it changes when the node moves to another input, and another node may be written there later. Inline names are therefore never retired in `wiret.ids` and are never `E0140` (section 7.3), and a merge matches inline nodes by their position.
 
 #### The flow block
 
@@ -140,12 +163,15 @@ flow {
 
 #### The layout block
 
-Positions and appearance are not written on node lines. They live in the graph's `layout` block, one line per node:
+Positions, appearance and explanations are not written in node statements. They live in the graph's `layout` block, one line per node, named the way the node is written, with the node's metadata lines (section 2.4) directly above its line:
 
 ```
 layout {
   chk at (800, 0)
+  chk.cond at (640, 120)
   log_dead at (960, -40) [label = "Log death", color = "#C0392B"]
+  #[note("Store the new health once: pure nodes are re-evaluated per consumer (section 4.3).")]
+  set_new at (160, 0)
   box death "Death handling" at (940, -90) size (330, 120) [members = [log_dead, ret_dead], color = "#C0392B"]
 }
 ```
@@ -153,18 +179,19 @@ layout {
 - A `place` line gives a node's position, and optionally `label`, `color`, `size`, `collapsed` and `hidden` (a list of pin names). Coordinates are integers, so there is no floating-point noise in diffs.
 - A `box` is a visual group with its own id (unique among node ids and box ids in the graph), a title, a position and a size. **Membership is explicit and authoritative:** `members = [id, ...]` is required and lists node ids and box ids. Position and size only say where the box is drawn; a node lying inside a box's rectangle is not thereby a member, and a member lying outside it is still a member. An editor may offer to add a node dragged into a box to `members`, but the list is what is saved. A box with `collapsed = true` is drawn as one node whose pins are the wires crossing its edge (the compiler still sees the flat graph).
 - **Nesting and overlap.** A box may list another box as a member, which nests it; the nesting must be acyclic. A node or box is a member of at most one box. If it appears in several, the box with the smallest id keeps it and `W0602` reports the rest. Rectangles may overlap freely, since they have no effect on membership. A member id that names nothing is `W0601` and is removed on the next editor save.
-- A node with no `place` line is auto-placed by the editor, and gets a line when first saved. This makes LLM-generated graphs valid without layout.
+- A node with no `place` line is auto-placed by the editor, and gets a line when first saved. This makes LLM-generated graphs valid without layout. A node that has metadata but no position yet is listed by its name alone, with its metadata lines above it.
+- Metadata above a name that is not a node of the graph is a syntax error.
 - Unknown properties are preserved. The block never affects the semantic hash.
 - Personal view state (zoom, scroll, selection, open panels) is never written to the file (section 7.5).
 
-This split is what makes collaboration work: one person moving a node and another rewiring it edit different lines, and they merge without a conflict.
+This split is what makes collaboration work: one person moving a node or rewording its note and another rewiring it edit different lines, and they merge without a conflict. It also keeps a node statement to what changes compiled output.
 
 ### 2.4 Attributes and metadata
 
 There are two kinds of attribute, and they are written differently so that a reader can tell at a glance which ones affect the program:
 
 - A **semantic attribute** (`@pure`, `@count(2)`, `@id("...")`) is part of the program. It is written at the end of the line it modifies (for blocks, before the `{`), it is short, and only the attributes in the first table below exist. It is covered by the semantic hash.
-- A **metadata attribute** (`#[doc("...")]`, `#[note("...")]`) is information *about* the program and never changes compiled output. It is written on its own line, directly above the statement it describes and at the same indentation, so it can be as long as it needs to be without crowding that statement. It is outside the semantic hash and inside the layout hash (section 2.5).
+- A **metadata attribute** (`#[doc("...")]`, `#[note("...")]`) is information *about* the program and never changes compiled output. It is written on its own line, directly above the statement it describes and at the same indentation, so it can be as long as it needs to be without crowding that statement. A node's metadata stands above the node's line in the layout block (section 2.3), not above the node statement. It is outside the semantic hash and inside the layout hash (section 2.5).
 
 ```
 attr  = "@" IDENT [ "(" [ arg { "," arg } ] ")" ] ;
@@ -180,7 +207,7 @@ value = literal | IDENT | tuple | list | map ;
 func Clamp01(v: f32) -> (result: f32) @pure {
 ```
 
-A metadata line attaches to the next statement that is not itself a metadata line. Section 2.2 lists the statements that may carry one; parameters, bindings, flow wires and `place` lines may not. A metadata line followed by a blank line, a closing `}` or the end of the file is a syntax error, so metadata can never float free in the text.
+A metadata line attaches to the next statement that is not itself a metadata line. Section 2.2 lists the statements that may carry one; parameters, bindings, flow wires and node statements may not (a node's metadata goes above its line in the layout block). A metadata line followed by a blank line, a closing `}` or the end of the file is a syntax error, so metadata can never float free in the text.
 
 **Semantic attributes** may change compiled output. Only the attributes in this table exist: an unknown `@` name is `E0104`, and when the name is a metadata attribute (`@doc`, `@category`, `@keywords`) the message shows the `#[...]` form instead.
 
@@ -211,13 +238,18 @@ A metadata line attaches to the next statement that is not itself a metadata lin
 #### Notes
 
 ```
-#[note("Store the new health once: pure nodes are re-evaluated per consumer (section 4.3).")]
-node set_new = SetLocal new_hp
-  .value <- sub.result
+node set_new = SetLocal new_hp(
+  .value <- sub.result,
+)
+
+layout {
+  #[note("Store the new health once: pure nodes are re-evaluated per consumer (section 4.3).")]
+  set_new at (160, 0)
+}
 ```
 
 - A target may carry any number of notes. They keep the order they were written in.
-- The text is a string and may contain `\n`. A long note is written as one long line, since line diffs of prose are no worse than for any other line. Because a note is a line of its own, rewording it never touches the line of the statement it describes, so it cannot conflict with an edit to that statement (section 7.1).
+- The text is a string and may contain `\n`. A long note is written as one long line, since line diffs of prose are no worse than for any other line. Because a note is a line of its own, in the layout block for a node, rewording it never touches the statement it describes, so it cannot conflict with an edit to that statement (section 7.1).
 - A note on a box is written above the `box` line in the layout block.
 - **Notes are never deleted as a side effect.** A tool that deletes a node or box moves its notes up to the enclosing graph and records where they came from, as in `#[note("...", detached: "set_new")]`. A note on a deleted declaration moves to the enclosing declaration (the class, for a method), or to the module line for a top-level item. A detached note is reported as `W0604` until someone re-homes it (moves it above another target and removes `detached`) or deletes it.
 
@@ -244,11 +276,11 @@ The canonical form is a function of the model alone, so two tools always write i
 
 1. UTF-8 NFC, LF, two-space indentation, one trailing newline.
 2. Items ordered by kind (`use`, `extern`, `const`, `var`, `enum`, `struct`, `interface`, `class`, `macro`, `func`, `event`), then by name. Inside a `struct` or `enum`, fields and members keep the order they are written in: field order is the struct's layout, and member order gives the value of a member written without `= INT`, so reordering them changes the program and its semantic hash. Inside a `class`, fields likewise keep their written order (the object layout), followed by the methods: `func`s, then `event`s, each sorted by name. Inside an `interface`, methods keep their written order, since a method's position is its dispatch slot. A class's `dispatcher` lines come after its fields, in their written order, and before its methods.
-3. Inside a body: `local` statements by name, then `state` statements by name, then `node` statements sorted by **node id** (ASCII order), then the `flow` block, then the `layout` block last. Each block is preceded by one blank line, and an empty block is omitted. Wiring never reorders node statements; it only adds or removes `flow` lines.
-4. Inside the layout block: `place` lines sorted by node id, then `box` lines sorted by box id. Inside a box, `members` are sorted by id. Moving a node changes only its own `place` line; moving a box changes only its own `box` line. Inside the flow block, wires are sorted by source node id, then by the source's exec-output order from the registry; the bare `source -> target` form is used exactly when the source has one exec output.
-5. Bindings are written one per line below their node line, indented two spaces further, as `.pin <- value`, in the node kind's pin order (from the registry); bindings equal to the pin default are omitted.
-6. Semantic attributes are sorted alphabetically and end the line they modify (on a node, before the bindings). Metadata lines stand directly above their statement, with no blank line between, in this order: `doc`, `category`, `keywords`, then `note` lines in the order they were written, then any other metadata in the order it was written. A metadata line moves with its statement when statements are sorted.
-7. Nothing wraps: a node line, each binding line and each metadata line are always single lines, and so are flow wires.
+3. Inside a body: `local` statements by name, then `state` statements by name, then the declared `node` statements sorted by **node id** (ASCII order), then the `flow` block, then the `layout` block last. Each block is preceded by one blank line, and an empty block is omitted. Wiring an exec pin never reorders node statements; it only adds or removes `flow` lines.
+4. Inside the layout block: a line per node sorted by the node's name (so an inline node's line follows its consumer's), each with the node's metadata lines directly above it, then `box` lines sorted by box id. Inside a box, `members` are sorted by id. Moving a node changes only its own `place` line; moving a box changes only its own `box` line. Inside the flow block, wires are sorted by source node id, then by the source's exec-output order from the registry; the bare `source -> target` form is used exactly when the source has one exec output.
+5. A node statement is `node <id> = <Kind>(`, then its bindings, one per line, indented two spaces further than the node, each written `.pin <- value,` with a trailing comma, in the node kind's pin order (from the registry), then `)` at the node's indentation. Bindings equal to the pin default are omitted, and a node with no bindings left is written `<Kind>()` on its line. A node that only one input reads, and that has no exec pins and no semantic attribute, is written inline as that input's value, laid out the same way one level deeper and followed by `.output` (section 2.3).
+6. Semantic attributes are sorted alphabetically and end the line they modify (on a node, the line with its closing parenthesis). Metadata lines stand directly above their statement, or for a node above its line in the layout block, with no blank line between, in this order: `doc`, `category`, `keywords`, then `note` lines in the order they were written, then any other metadata in the order it was written. A metadata line moves with its statement when statements are sorted.
+7. Nothing else wraps: each binding line, each metadata line and each flow wire is a single line.
 8. Numbers and strings are written in their shortest unambiguous form.
 9. Line comments are not representable. The formatter refuses to lose one silently (`W0603`, section 2.1); durable annotations are `#[note]` lines.
 10. **No alignment padding.** A node statement is written `node <id> = <Kind> ...` with exactly one space on each side of `=`, and a `place` line is `<id> at (x, y)` with one space before `at`. Nothing is padded to line up with its neighbours. Aligning would put the `=` of every node at the column of the longest id, so adding one long id would change every line of the graph and break the one-line-diff rule (section 1.2, principle 1); the same holds for `at` in the layout block. The reader accepts extra spaces and the formatter removes them. An editor may align in its own display, but never in the saved text.
@@ -258,11 +290,11 @@ Two hashes are defined over the canonical form, both SHA-256:
 - **Semantic hash**: computed after removing the `layout` block, every metadata line (`#[...]`), and `Reroute` nodes, and after sorting declarations by name and nodes by id. Because every metadata attribute is written with `#[` and nothing else is, a tool can strip them without knowing their names. The hash is embedded in the `.wbc`, so CI can prove that a commit changed behaviour or did not. Two properties must hold and should be tested: reversing the order of the nodes in a graph, or deleting its layout block and all metadata lines, changes neither the semantic hash nor a single byte of the instruction stream.
 - **Layout hash**: computed over the entire canonical file. If two collaborators have the same layout hash, they see the identical graph.
 
-Because each node is one node line plus one line per input, lines are sorted by id, and layout lives in its own block, plain line-based Git merges succeed whenever two people touch different nodes, and a move never collides with a rewire. Two people adding nodes also rarely collide, because ids are random slugs and sort into different places. The full merge algorithm, which works on the parsed model rather than on text, is in section 7.1. The examples in this document are shown in *flow order* for readability (both node statements and `flow` wires), which `wiretc view --flow` produces; the compiler accepts any order. They follow rule 10 (no alignment), so apart from their order they are in canonical form.
+Because each input is one line, declared nodes are sorted by id, and layout and notes live in their own block, plain line-based Git merges succeed whenever two people touch different nodes, and a move never collides with a rewire. Inline nodes trade some of this for readability: a single-use node sits where its value is used, so wiring it into a second input (or unwiring it) moves its lines, and such an edit shows as a larger diff than a rewire of a declared node. Two people adding nodes also rarely collide, because ids are random slugs and sort into different places. The full merge algorithm, which works on the parsed model rather than on text, is in section 7.1. The examples in this document are shown in *flow order* for readability (both node statements and `flow` wires), which `wiretc view --flow` produces; the compiler accepts any order. They follow rule 10 (no alignment), so apart from their order they are in canonical form.
 
 **Storage order is not review order.** Sorting by id gives the best merges but scatters a function's execution order across the file. So the id-sorted file is the storage format, and reviewers are not expected to read it raw. The Git setup in section 7 attaches a `textconv` filter that runs `wiretc view --flow` before Git computes a diff, so `git diff`, `git log -p` and hosting-site pull requests that honour the attribute show nodes in flow order. `wiretc diff` goes further and prints a node-aware semantic diff (added, removed and rewired nodes, with layout-only changes separate). Flow order is defined in section 7 so that it is itself deterministic. Whether id-sorted storage should stay the default is decided by the review trial in section 9.1, not assumed here.
 
-Guidance for LLM authors: choose descriptive snake\_case node ids, always write type arguments, never rely on inference, read pin names from the registry (section 3.5) instead of guessing, omit the layout block, and run `wiretc check --json` and `wiretc fmt` on the output (section 7.2).
+Guidance for LLM authors: write a node that feeds a single input inline in that input, declare only nodes with exec pins or shared outputs, choose descriptive snake\_case ids for them, always write type arguments, never rely on inference, read pin names from the registry (section 3.5) instead of guessing, omit the layout block, and run `wiretc check --json` and `wiretc fmt` on the output (section 7.2).
 
 ### 2.6 A complete example
 
@@ -279,30 +311,35 @@ class Player {
 
   func TakeDamage(amount: i32) -> (died: bool) {
     local new_hp: i32
-    node entry = Entry
-    node cur = GetField health
-      .obj <- entry.self
-    node sub = Sub::<i32>
-      .a <- cur.value
-      .b <- entry.amount
-    #[note("Store the new health once: pure nodes are re-evaluated per consumer (section 4.3).")]
-    node set_new = SetLocal new_hp
-      .value <- sub.result
-    node hp = GetLocal new_hp
-    node store = SetField health
-      .obj <- entry.self
-      .value <- hp.value
-    node is_dead = Le::<i32>
-      .a <- hp.value
-      .b <- 0
-    node chk = Branch
-      .cond <- is_dead.result
-    node log_dead = Call host.Log
-      .message <- "Player died"
-    node ret_dead = Return
-      .died <- true
-    node ret_alive = Return
-      .died <- false
+    node entry = Entry()
+    node set_new = SetLocal new_hp(
+      .value <- Sub::<i32>(
+        .a <- GetField health(
+          .obj <- entry.self,
+        ).value,
+        .b <- entry.amount,
+      ).result,
+    )
+    node hp = GetLocal new_hp()
+    node store = SetField health(
+      .obj <- entry.self,
+      .value <- hp.value,
+    )
+    node chk = Branch(
+      .cond <- Le::<i32>(
+        .a <- hp.value,
+        .b <- 0,
+      ).result,
+    )
+    node log_dead = Call host.Log(
+      .message <- "Player died",
+    )
+    node ret_dead = Return(
+      .died <- true,
+    )
+    node ret_alive = Return(
+      .died <- false,
+    )
 
     flow {
       entry -> set_new
@@ -314,28 +351,31 @@ class Player {
     }
 
     layout {
-      entry at (0, 0)
-      set_new at (160, 0)
-      cur at (160, 120)
-      sub at (320, 120)
-      store at (480, 0)
-      hp at (480, 120)
-      is_dead at (640, 120)
       chk at (800, 0)
+      chk.cond at (640, 120)
+      entry at (0, 0)
+      hp at (480, 120)
       log_dead at (960, -40) [label = "Log death"]
-      ret_dead at (1120, -40)
       ret_alive at (960, 60)
-      box death "Death handling" at (940, -90) size (330, 120) [members = [log_dead, ret_dead], color = "#C0392B"]
+      ret_dead at (1120, -40)
+      #[note("Store the new health once: pure nodes are re-evaluated per consumer (section 4.3).")]
+      set_new at (160, 0)
+      set_new.value at (320, 120)
+      set_new.value.a at (160, 120)
+      store at (480, 0)
+      box death "Death handling" at (940, -90) size (330, 120) [color = "#C0392B", members = [log_dead, ret_dead]]
     }
   }
 
   event Respawn() {
-    node entry = Entry
-    node wait = Delay
-      .seconds <- 2.0
-    node reset = SetField health
-      .obj <- entry.self
-      .value <- 100
+    node entry = Entry()
+    node wait = Delay(
+      .seconds <- 2.0,
+    )
+    node reset = SetField health(
+      .obj <- entry.self,
+      .value <- 100,
+    )
 
     flow {
       entry -> wait
@@ -344,76 +384,52 @@ class Player {
   }
 }
 
-#[doc("Clamps a value to the range 0 to 1.")]
-#[category("Math")]
-func Clamp01(v: f32) -> (result: f32) @pure {
-  node entry = Entry
-  node lo = Max::<f32>
-    .a <- entry.v
-    .b <- 0.0
-  node hi = Min::<f32>
-    .a <- lo.result
-    .b <- 1.0
-  node ret = Return
-    .result <- hi.result
+macro DoOnce(in: exec, reset: exec) -> (out: exec) {
+  state fired: bool
+  node entry = Entry()
+  node check = Branch(
+    .cond <- GetState fired().value,
+  )
+  node mark = SetState fired(
+    .value <- true,
+  )
+  node fire = Exit out()
+  node clear = SetState fired(
+    .value <- false,
+  )
 
   flow {
-    entry -> ret
-  }
-}
-
-func Fib(n: i32) -> (result: i32) @pure {
-  node entry = Entry
-  node lt = Lt::<i32>
-    .a <- entry.n
-    .b <- 2
-  node is_base = Branch
-    .cond <- lt.result
-  node ret_n = Return
-    .result <- entry.n
-  node n1 = Sub::<i32>
-    .a <- entry.n
-    .b <- 1
-  node n2 = Sub::<i32>
-    .a <- entry.n
-    .b <- 2
-  node f1 = Call Fib
-    .n <- n1.result
-  node f2 = Call Fib
-    .n <- n2.result
-  node sum = Add::<i32>
-    .a <- f1.result
-    .b <- f2.result
-  node ret_sum = Return
-    .result <- sum.result
-
-  flow {
-    entry -> is_base
-    is_base.then -> ret_n
-    is_base.else -> ret_sum
+    entry.in -> check
+    entry.reset -> clear
+    check.else -> mark
+    mark -> fire
   }
 }
 
 macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, index: i32) {
   local i: i32
-  node entry = Entry
-  node init = SetLocal i
-    .value <- entry.first
-  node cur = GetLocal i
-  node cmp = Le::<i32>
-    .a <- cur.value
-    .b <- entry.last
-  node test = Branch
-    .cond <- cmp.result
-  node seq = Sequence @count(2)
-  node each_out = Exit each
-    .index <- cur.value
-  node nxt = Add::<i32>
-    .a <- cur.value
-    .b <- 1
-  node bump = SetLocal i
-    .value <- nxt.result
-  node finish = Exit done
+  node entry = Entry()
+  node init = SetLocal i(
+    .value <- entry.first,
+  )
+  node cur = GetLocal i()
+  node test = Branch(
+    .cond <- Le::<i32>(
+      .a <- cur.value,
+      .b <- entry.last,
+    ).result,
+  )
+  node seq = Sequence() @count(2)
+  node each_out = Exit each(
+    .index <- cur.value,
+  )
+  node bump = SetLocal i(
+    .value <- Add::<i32>(
+      .a <- cur.value,
+      .b <- 1,
+    ).result,
+  )
+  node finish = Exit done()
 
   flow {
     entry -> init
@@ -426,41 +442,76 @@ macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, inde
   }
 }
 
-macro DoOnce(in: exec, reset: exec) -> (out: exec) {
-  state fired: bool
-  node entry = Entry
-  node flag = GetState fired
-  node check = Branch
-    .cond <- flag.value
-  node mark = SetState fired
-    .value <- true
-  node fire = Exit out
-  node clear = SetState fired
-    .value <- false
+#[doc("Clamps a value to the range 0 to 1.")]
+#[category("Math")]
+func Clamp01(v: f32) -> (result: f32) @pure {
+  node entry = Entry()
+  node ret = Return(
+    .result <- Min::<f32>(
+      .a <- Max::<f32>(
+        .a <- entry.v,
+        .b <- 0.0,
+      ).result,
+      .b <- 1.0,
+    ).result,
+  )
 
   flow {
-    entry.in -> check
-    entry.reset -> clear
-    check.else -> mark
-    mark -> fire
+    entry -> ret
+  }
+}
+
+func Fib(n: i32) -> (result: i32) @pure {
+  node entry = Entry()
+  node is_base = Branch(
+    .cond <- Lt::<i32>(
+      .a <- entry.n,
+      .b <- 2,
+    ).result,
+  )
+  node ret_n = Return(
+    .result <- entry.n,
+  )
+  node ret_sum = Return(
+    .result <- Add::<i32>(
+      .a <- Call Fib(
+        .n <- Sub::<i32>(
+          .a <- entry.n,
+          .b <- 1,
+        ).result,
+      ).result,
+      .b <- Call Fib(
+        .n <- Sub::<i32>(
+          .a <- entry.n,
+          .b <- 2,
+        ).result,
+      ).result,
+    ).result,
+  )
+
+  flow {
+    entry -> is_base
+    is_base.then -> ret_n
+    is_base.else -> ret_sum
   }
 }
 
 func SumTo(n: i32) -> (total: i32) {
   local acc: i32
-  node entry = Entry
-  node loop = Macro ForRange
-    .first <- 1
-    .last <- entry.n
-  node cur = GetLocal acc
-  node sum = Add::<i32>
-    .a <- cur.value
-    .b <- loop.index
-  node add = SetLocal acc
-    .value <- sum.result
-  node total = GetLocal acc
-  node ret = Return
-    .total <- total.value
+  node entry = Entry()
+  node loop = Macro ForRange(
+    .first <- 1,
+    .last <- entry.n,
+  )
+  node add = SetLocal acc(
+    .value <- Add::<i32>(
+      .a <- GetLocal acc().value,
+      .b <- loop.index,
+    ).result,
+  )
+  node ret = Return(
+    .total <- GetLocal acc().value,
+  )
 
   flow {
     entry -> loop
@@ -472,9 +523,10 @@ func SumTo(n: i32) -> (total: i32) {
 
 Things to notice:
 
-- `TakeDamage` stores the new health in a local before using it twice. `cur` is pure, so it would be re-evaluated by every impure consumer; reading `health` again after `store` would subtract the damage a second time (section 4.3).
-- Node lines carry no positions and no exec wires. Moving `chk` edits one line of the `layout` block, and rewiring it edits lines of the `flow` block, so neither can conflict with someone changing `chk`'s bindings. Each input is its own line, so rewiring one input of a node changes exactly one line.
-- `@capability`, `@pure` and `@count(2)` end the line they modify and change what is compiled. `#[doc]`, `#[category]` and the `#[note]` on `set_new` sit on their own lines above what they describe; deleting all of them changes neither the semantic hash nor the bytecode.
+- Most data nodes are written inline, where their value is used: `Clamp01` and `Fib` are each one expression per `Return`. Only nodes with exec pins and nodes whose output feeds several inputs are declared: `hp` feeds both `store` and the comparison in `chk`, and `cur` in `ForRange` feeds three inputs.
+- `TakeDamage` stores the new health in a local before using it twice. The `GetField` written inline in `set_new` is pure, so it would be re-evaluated by every impure consumer; reading `health` again after `store` would subtract the damage a second time (section 4.3).
+- Node statements carry no positions, notes or exec wires. Moving `chk` edits one line of the `layout` block, and rewiring it edits lines of the `flow` block, so neither can conflict with someone changing `chk`'s bindings. Each input is its own line, so changing one literal input changes exactly one line. Inline nodes appear in the layout block under their dotted names: `chk.cond` is the `Le` written inside `chk`.
+- `@capability`, `@pure` and `@count(2)` end the line they modify and change what is compiled. `#[doc]` and `#[category]` sit on their own lines above `Clamp01`, and the `#[note]` on `set_new` above its line in the layout block; deleting all of them changes neither the semantic hash nor the bytecode.
 - Nodes with several exec outputs name the one each wire leaves from: `chk.then`, `loop.each`, `seq.then0`. `DoOnce`'s macro `Entry` has two exec parameters, so its wires start at `entry.in` and `entry.reset`.
 - `Respawn` is an `event`, which is implicitly latent, so it may contain `Delay`. `TakeDamage` has no latent nodes and is not latent, so a host can call it with `wr_call` and rely on getting a result (section 4.5).
 - `add` has no wire in the flow block. A chain that ends returns control to whatever pushed it, here the macro (section 4.2), which is what makes the loop continue.

@@ -6,14 +6,16 @@ extern func host.Log(message: string)
 #[note("Lesson 1: Hello. Press ▶ Run (F5). Each Log node prints one line in the console below, in the order the white arrows connect them.")]
 #[note("Try it: (1) Press ⤵ Step (F11) to run one node at a time. (2) Add a fourth line: press Tab, type 'print', pick host.Log, then drag a white arrow from say_arrows to it. (3) Double-click its message pin to type your own text.")]
 func Main() {
-  #[note("Every function starts at its Entry node.")]
-  node entry = Entry
-  node say_arrows = Call host.Log
-    .message <- "The white arrows decide the order."
-  node say_hello = Call host.Log
-    .message <- "Hello!"
-  node say_steps = Call host.Log
-    .message <- "Programs run one step at a time."
+  node entry = Entry()
+  node say_arrows = Call host.Log(
+    .message <- "The white arrows decide the order.",
+  )
+  node say_hello = Call host.Log(
+    .message <- "Hello!",
+  )
+  node say_steps = Call host.Log(
+    .message <- "Programs run one step at a time.",
+  )
 
   flow {
     entry -> say_hello
@@ -22,6 +24,7 @@ func Main() {
   }
 
   layout {
+    #[note("Every function starts at its Entry node.")]
     entry at (0, 0)
     say_arrows at (820, 0)
     say_hello at (220, 0)

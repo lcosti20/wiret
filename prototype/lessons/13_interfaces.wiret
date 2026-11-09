@@ -16,16 +16,17 @@ class Rectangle impl Shape {
 
   #[note("A rectangle's area is width times height.")]
   func Area() -> (area: i32) {
-    node entry = Entry
-    node h = GetField height
-      .obj <- entry.self
-    node ret = Return
-      .area <- times.result
-    node times = Mul::<i32>
-      .a <- w.value
-      .b <- h.value
-    node w = GetField width
-      .obj <- entry.self
+    node entry = Entry()
+    node ret = Return(
+      .area <- Mul::<i32>(
+        .a <- GetField width(
+          .obj <- entry.self,
+        ).value,
+        .b <- GetField height(
+          .obj <- entry.self,
+        ).value,
+      ).result,
+    )
 
     flow {
       entry -> ret
@@ -33,18 +34,19 @@ class Rectangle impl Shape {
 
     layout {
       entry at (0, 0)
-      h at (283, 125)
       ret at (757, 0)
-      times at (559, 68)
-      w at (282, 68)
+      ret.area at (559, 68)
+      ret.area.a at (282, 68)
+      ret.area.b at (283, 125)
     }
   }
 
   #[note("Square inherits this, but gives its own Name.")]
   func Name() -> (name: string) {
-    node entry = Entry
-    node ret = Return
-      .name <- "Rectangle"
+    node entry = Entry()
+    node ret = Return(
+      .name <- "Rectangle",
+    )
 
     flow {
       entry -> ret
@@ -61,9 +63,10 @@ class Rectangle impl Shape {
 class Square : Rectangle {
   #[note("Square gets Area from Rectangle and only renames itself, so it is a Shape too.")]
   func Name() -> (name: string) {
-    node entry = Entry
-    node ret = Return
-      .name <- "Square"
+    node entry = Entry()
+    node ret = Return(
+      .name <- "Square",
+    )
 
     flow {
       entry -> ret
@@ -83,39 +86,41 @@ class Triangle impl Shape {
 
   #[note("Half of base times height.")]
   func Area() -> (area: i32) {
-    node b = GetField base
-      .obj <- entry.self
-    node entry = Entry
-    node h = GetField height
-      .obj <- entry.self
-    node half = Div::<i32>
-      .a <- times.result
-      .b <- 2
-    node ret = Return
-      .area <- half.result
-    node times = Mul::<i32>
-      .a <- b.value
-      .b <- h.value
+    node entry = Entry()
+    node ret = Return(
+      .area <- Div::<i32>(
+        .a <- Mul::<i32>(
+          .a <- GetField base(
+            .obj <- entry.self,
+          ).value,
+          .b <- GetField height(
+            .obj <- entry.self,
+          ).value,
+        ).result,
+        .b <- 2,
+      ).result,
+    )
 
     flow {
       entry -> ret
     }
 
     layout {
-      b at (338, 71)
       entry at (0, 0)
-      h at (338, 142)
-      half at (787, 71)
       ret at (1010, -2)
-      times at (632, 71)
+      ret.area at (787, 71)
+      ret.area.a at (632, 71)
+      ret.area.a.a at (338, 71)
+      ret.area.a.b at (338, 142)
     }
   }
 
   #[note("Its name.")]
   func Name() -> (name: string) {
-    node entry = Entry
-    node ret = Return
-      .name <- "Triangle"
+    node entry = Entry()
+    node ret = Return(
+      .name <- "Triangle",
+    )
 
     flow {
       entry -> ret
@@ -132,40 +137,47 @@ class Triangle impl Shape {
 #[note("Try it: (1) Add a Circle class that implements Shape (the Source pane is easiest). (2) Remove Name from Triangle: Wiret says which method the promise is missing. (3) Make the square's sides 6.")]
 func Main() {
   local shapes: array::<Shape>
-  node add_r = ArrayAdd::<Shape> shapes
-    .item <- rect.result
-  node add_s = ArrayAdd::<Shape> shapes
-    .item <- square.result
-  node add_t = ArrayAdd::<Shape> shapes
-    .item <- tri.result
-  node all = GetLocal shapes
-  #[note("Calling through the interface: each shape's own class decides what runs.")]
-  node area = Call Shape.Area
-    .self <- loop.item
-  node area_text = Convert::<i32, string>
-    .value <- area.area
-  node entry = Entry
-  node label = Call std.string.Concat
-    .a <- name.name
-    .b <- ": area "
-  node line = Call std.string.Concat
-    .a <- label.result
-    .b <- area_text.result
-  node loop = Macro std.flow.ForEach::<Shape>
-    .array <- all.value
-  node name = Call Shape.Name
-    .self <- loop.item
-  node rect = New Rectangle
-  node say = Call host.Log
-    .message <- line.result
-  node side_h = SetField Rectangle.height
-    .obj <- square.result
-    .value <- 5
-  node side_w = SetField Rectangle.width
-    .obj <- square.result
-    .value <- 5
-  node square = New Square
-  node tri = New Triangle
+  node add_r = ArrayAdd::<Shape> shapes(
+    .item <- rect.result,
+  )
+  node add_s = ArrayAdd::<Shape> shapes(
+    .item <- square.result,
+  )
+  node add_t = ArrayAdd::<Shape> shapes(
+    .item <- tri.result,
+  )
+  node area = Call Shape.Area(
+    .self <- loop.item,
+  )
+  node entry = Entry()
+  node loop = Macro std.flow.ForEach::<Shape>(
+    .array <- GetLocal shapes().value,
+  )
+  node name = Call Shape.Name(
+    .self <- loop.item,
+  )
+  node rect = New Rectangle()
+  node say = Call host.Log(
+    .message <- Call std.string.Concat(
+      .a <- Call std.string.Concat(
+        .a <- name.name,
+        .b <- ": area ",
+      ).result,
+      .b <- Convert::<i32, string>(
+        .value <- area.area,
+      ).result,
+    ).result,
+  )
+  node side_h = SetField Rectangle.height(
+    .obj <- square.result,
+    .value <- 5,
+  )
+  node side_w = SetField Rectangle.width(
+    .obj <- square.result,
+    .value <- 5,
+  )
+  node square = New Square()
+  node tri = New Triangle()
 
   flow {
     add_r -> square
@@ -186,16 +198,17 @@ func Main() {
     add_r at (500, 0)
     add_s at (1500, 0)
     add_t at (1949, 0)
-    all at (2023, 98)
+    #[note("Calling through the interface: each shape's own class decides what runs.")]
     area at (2656, -3)
-    area_text at (3054, 177)
     entry at (0, 0)
-    label at (3185, 76)
-    line at (3445, 76)
     loop at (2250, 0)
+    loop.array at (2023, 98)
     name at (2921, 20)
     rect at (250, 0)
     say at (3649, 20)
+    say.message at (3445, 76)
+    say.message.a at (3185, 76)
+    say.message.b at (3054, 177)
     side_h at (1250, 0)
     side_w at (1000, 0)
     square at (803, 0)

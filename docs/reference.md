@@ -1,6 +1,6 @@
 # Wiret Language Specification
 
-*Draft 0.8: text syntax, bytecode (WBC) and embedding API for a text-based visual scripting language*
+*Draft 0.9: text syntax, bytecode (WBC) and embedding API for a text-based visual scripting language*
 
 > **Status.** This is a design draft, not an implementation. Nothing here has been run through a real parser, verifier or VM, so treat the grammar and opcode tables as a starting point to test, not a frozen standard. Where I went beyond your reference documents (mainly Blueprint runtime behaviour that the supplied documentation does not spell out), the text says so.
 
@@ -17,6 +17,8 @@
 **Draft 0.7.** Records decisions made while adding structs and enums to the prototype (Appendix F). An enum value is written `Mode.Chase`, on pins, as defaults and in `@cases` (2.1, 2.3). Struct nodes name their struct, and field nodes the field too: `MakeStruct Vec2`, `GetField Vec2.x` (2.3, 3.3). Reading a struct is `pure`, also in a `@pure` function, since a struct is a value (3.3, 4.3). Struct fields and enum members keep their written order in the canonical form (2.5). A struct's default value comes from its field defaults, stored in its type entry (3.1, 5.3), and struct equality compares field by field (4.9). A struct may not hold itself by value (`E0503`; 2.2, 4.7, 5.5).
 
 **Draft 0.8.** Records decisions made while adding maps, sets, container equality, ids and merging to the prototype (Appendix G). Map and set nodes have fixed pins, and the mutators that may change nothing say whether they did (3.3). Every NaN is the same map key or set item (3.1). Container equality calls one native per container kind, which takes `anyref` and declares its fuel cost (3.4, 4.9, 5.7). `@id`s and `W0202` are required only in a project (2.4, 4.7), and `wiret.ids` has a fixed line format (7.3). A merge matches an element to the same element after it gains an `@id`, carries renames across, lets the incoming side win layout disagreements, and marks a deleted-versus-modified node as a whole block (7.1).
+
+**Draft 0.9.** Node statements change shape, following the research note on text syntax for a Blueprint-style language (Appendix H). A node's inputs are written in parentheses, comma separated with a trailing comma allowed, and a node without inputs is written `Entry()` (2.3). A node's metadata lines move to its line in the layout block (2.3, 2.4). A node that exactly one input reads, with no exec pins and no semantic attribute, is written inline in that input and named by its position, `show.message` (2.3, 2.5); such names are never retired (7.3). The verifier rejects unknown function flags and an event with results (5.2).
 
 **Implementation status.** Nothing in this document is implemented. Parts expected to change after prototyping are marked **Provisional**: catchable faults (4.6), the copy-on-write rules for containers (4.9), the deterministic-mode floating-point rules (4.10), and the choice of a stack rather than a register machine (9.1). Guarantees about exact diagnostics and cross-platform determinism are targets until the tier in section 1.6 that contains them has passed its tests.
 
@@ -38,3 +40,4 @@
 - [Appendix E. Changes in Draft 0.6](reference/appendix-e.md)
 - [Appendix F. Changes in Draft 0.7](reference/appendix-f.md)
 - [Appendix G. Changes in Draft 0.8](reference/appendix-g.md)
+- [Appendix H. Changes in Draft 0.9](reference/appendix-h.md)

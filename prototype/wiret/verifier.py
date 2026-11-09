@@ -262,8 +262,12 @@ def verify(m: WbcModule) -> list:
     for i, (t, flags) in enumerate(m.funcs):
         if not is_func_type(m, t):
             raise VerifyError(f"function has bad type index {t}", i)
+        if flags & ~(FN_PURE | FN_LATENT | FN_EVENT):
+            raise VerifyError(f"function has unknown flag bits {flags:#04x}", i)
         if flags & FN_PURE and flags & FN_LATENT:
             raise VerifyError("a pure function is never latent", i)
+        if flags & FN_EVENT and (m.types[t][1] or not flags & FN_LATENT):
+            raise VerifyError("an event is latent and has no results", i)
     if len(m.bodies) != len(m.funcs):
         raise VerifyError("function and code section counts differ")
     check_classes(m, len(m.imports) + len(m.funcs))

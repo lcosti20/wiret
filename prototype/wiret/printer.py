@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import math
+import re
 import unicodedata
 
 from .model import (Attr, Binding, Box, Class, Const, Enum, Interface, ExecOut, Extern, Graph, ITEM_ORDER, Lit,
@@ -136,21 +137,22 @@ def _ordered_execs(node: Node, sig: Sig) -> list:
     return sorted(node.execs, key=lambda e: order.get(e.pin, len(order)) if e.pin else -1)
 
 
-def fmt_target(e: ExecOut) -> str:
-    return e.target + (f".{e.target_pin}" if e.target_pin else "")
+def fmt_target(e: ExecOut, names: "GraphNames" = None) -> str:
+    return (names.name(e.target) if names else e.target) + (f".{e.target_pin}" if e.target_pin else "")
 
 
-def fmt_wires(node: Node, sig: Sig) -> list:
+def fmt_wires(node: Node, sig: Sig, names: "GraphNames" = None) -> list:
     """The node's exec wires as `flow` lines (without indentation)."""
     execs = _ordered_execs(node, sig)
     single = len(sig.exec_outs) == 1 or (not sig.exec_outs and len(execs) == 1 and execs[0].pin is None)
+    nid = names.name(node.id) if names else node.id
     out = []
     for e in execs:
         if single and len(execs) == 1:
-            src = node.id                                     # shorthand
+            src = nid                                         # shorthand
         else:
-            src = f"{node.id}.{e.pin or (sig.exec_outs[0].name if sig.exec_outs else 'then')}"
-        out.append(f"{src} -> {fmt_target(e)}")
+            src = f"{nid}.{e.pin or (sig.exec_outs[0].name if sig.exec_outs else 'then')}"
+        out.append(f"{src} -> {fmt_target(e, names)}")
     return out
 
 
@@ -158,20 +160,128 @@ def fmt_targs(targs: list) -> str:
     return "::<" + ", ".join(targs) + ">" if targs else ""
 
 
-def fmt_node(node: Node, sig: Sig, indent: str, semantic=False) -> str:
-    """The node line, then one `.pin <- value` line per bound input."""
-    head = f"{indent}node {node.id} = {node.kind}"
+def fmt_head(node: Node) -> str:
+    """`Kind symbol::<targs>`, or `ArrayAdd::<i32> acc` for a place mutator (section 3.3)."""
     targs = fmt_targs(node.targs)
-    if node.kind in PLACE_MUTATORS:      # `ArrayAdd::<i32> acc`, as in section 3.3
-        head += targs + (f" {node.symbol}" if node.symbol else "")
-    else:
-        head += (f" {node.symbol}" if node.symbol else "") + targs
-    lines = fmt_meta(node.meta, indent, semantic) + [head + fmt_attrs(node.attrs)]
-    for b in _ordered_bindings(node, sig):
-        val = (f"{b.value.node}.{b.value.pin}" if isinstance(b.value, PinRef)
-               else fmt_lit(b.value))
-        lines.append(f"{indent}{IND}.{b.pin} <- {val}")
+    if node.kind in PLACE_MUTATORS:
+        return node.kind + targs + (f" {node.symbol}" if node.symbol else "")
+    return node.kind + (f" {node.symbol}" if node.symbol else "") + targs
+
+
+_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*$")
+
+
+class GraphNames:
+    """How a graph's nodes are written (section 2.3): which nodes are written inline, inside
+    the one input they feed, and the name each node is written with.
+
+    A node is written inline when it has no exec pins, carries no semantic attribute, and
+    exactly one input in the graph reads it. Its name is then its consumer's name, a dot and
+    the input's name (`show.message`). Every other node is declared with a `node` statement
+    under its id; an id that is not an identifier (a node that was inline and now feeds
+    several inputs) is declared with its dots turned into underscores."""
+
+    def __init__(self, g: Graph, idx: ModuleIndex, sigs: dict = None):
+        self.sigs = sigs if sigs is not None else {n.id: signature(n, g, idx) for n in g.nodes}
+        nodes = {}
+        for n in g.nodes:
+            nodes.setdefault(n.id, n)
+        refs = {}                   # node id -> [(consumer id, pin)]
+        for n in g.nodes:
+            for b in n.bindings:
+                if isinstance(b.value, PinRef) and b.value.node in nodes:
+                    refs.setdefault(b.value.node, []).append((n.id, b.pin))
+        targets = {e.target for n in g.nodes for e in n.execs}
+        ids = [n.id for n in g.nodes]
+        self.parent = {}            # inline node id -> (consumer id, pin)
+        for n in g.nodes:
+            sig = self.sigs.get(n.id)
+            r = refs.get(n.id, [])
+            if (sig is not None and len(r) == 1 and r[0][0] != n.id and ids.count(n.id) == 1
+                    and ids.count(r[0][0]) == 1 and not n.attrs and not n.execs
+                    and n.id not in targets and not sig.error and not sig.exec_ins
+                    and not sig.exec_outs and n.kind not in ("Entry", "Return", "Exit")
+                    and sum(1 for b in nodes[r[0][0]].bindings if b.pin == r[0][1]) == 1):
+                self.parent[n.id] = r[0]
+        # a ring of nodes that each feed the next has no node to write it under (E0301)
+        for nid in list(self.parent):
+            seen, cur = [], nid
+            while cur in self.parent and cur not in seen:
+                seen.append(cur)
+                cur = self.parent[cur][0]
+            if cur in seen:
+                for x in seen[seen.index(cur):]:
+                    self.parent.pop(x, None)
+        self.children = {}          # consumer id -> {pin: inline node}
+        for nid, (c, pin) in self.parent.items():
+            self.children.setdefault(c, {})[pin] = nodes[nid]
+        self.names = {}
+        taken = {i for i in ids if _IDENT_RE.match(i)}
+        for nid in sorted(set(ids)):
+            if nid in self.parent:
+                continue
+            if _IDENT_RE.match(nid):
+                self.names[nid] = nid
+                continue
+            base = re.sub(r"[^A-Za-z0-9_]", "_", nid)
+            base = base if _IDENT_RE.match(base) else "n_" + base
+            name, k = base, 2
+            while name in taken:
+                name, k = f"{base}_{k}", k + 1
+            taken.add(name)
+            self.names[nid] = name
+
+        def name(nid):
+            if nid not in self.names:
+                c, pin = self.parent[nid]
+                self.names[nid] = f"{name(c)}.{pin}"
+            return self.names[nid]
+
+        for nid in self.parent:
+            name(nid)
+
+    def name(self, nid: str) -> str:
+        return self.names.get(nid, nid)
+
+    def inline(self, nid: str) -> bool:
+        return nid in self.parent
+
+    def declared(self, nodes: list) -> list:
+        """The nodes written as `node` statements, sorted by the name they are written with."""
+        return sorted((n for n in nodes if n.id not in self.parent), key=lambda n: self.name(n.id))
+
+
+def fmt_value(b: Binding, names: GraphNames = None) -> str:
+    if isinstance(b.value, PinRef):
+        return f"{names.name(b.value.node) if names else b.value.node}.{b.value.pin}"
+    return fmt_lit(b.value)
+
+
+def fmt_expr(node: Node, sig: Sig, indent: str, names: GraphNames = None) -> str:
+    """`Kind symbol::<targs>(`, one `.pin <- value,` line per bound input and `)`, or
+    `Kind()` when no input is bound. An inline node is written in place of the value it
+    feeds, followed by the pin it is read from: `.message <- Call F(...).result`."""
+    bindings = _ordered_bindings(node, sig)
+    if not bindings:
+        return fmt_head(node) + "()"
+    kids = names.children.get(node.id, {}) if names else {}
+    lines = [fmt_head(node) + "("]
+    for b in bindings:
+        kid = kids.get(b.pin)
+        if kid is not None and isinstance(b.value, PinRef) and b.value.node == kid.id:
+            val = fmt_expr(kid, names.sigs[kid.id], indent + IND, names) + "." + b.value.pin
+        else:
+            val = fmt_value(b, names)
+        lines.append(f"{indent}{IND}.{b.pin} <- {val},")
+    lines.append(f"{indent})")
     return "\n".join(lines)
+
+
+def fmt_node(node: Node, sig: Sig, indent: str, semantic=False, names: GraphNames = None) -> str:
+    """The node statement `node id = Kind(...) @attrs`, with its inputs one per line and its
+    inline nodes written in place (section 2.3). Its metadata lines are in the layout block."""
+    nid = names.name(node.id) if names else node.id
+    return f"{indent}node {nid} = {fmt_expr(node, sig, indent, names)}{fmt_attrs(node.attrs)}"
 
 
 # -- graphs and module -----------------------------------------------------------
@@ -208,26 +318,53 @@ def fmt_graph(g: Graph, idx: ModuleIndex, indent: str = "", semantic=False) -> l
         lines.extend(fmt_local("local", l, inner, semantic))
     for l in sorted(g.states, key=lambda l: l.name):
         lines.extend(fmt_local("state", l, inner, semantic))
+    names = GraphNames(g, idx)
     wires = []
-    for n in sorted(g.nodes, key=lambda n: n.id):
-        sig = signature(n, g, idx)
-        wires.extend(fmt_wires(n, sig))
-        lines.append(fmt_node(n, sig, inner, semantic))
+    for n in names.declared(g.nodes):
+        sig = names.sigs[n.id]
+        wires.extend(fmt_wires(n, sig, names))
+        lines.append(fmt_node(n, sig, inner, semantic, names))
     if wires:
         lines.extend(["", f"{inner}flow {{"])
         lines.extend(f"{inner}{IND}{w}" for w in wires)
         lines.append(f"{inner}}}")
-    if not semantic and (g.places or g.boxes):
-        lines.extend(["", f"{inner}layout {{"])
-        for p in sorted(g.places, key=lambda p: p.id):
-            lines.append(f"{inner}{IND}{p.id} at ({p.x}, {p.y}){fmt_props(p.props)}")
-        for b in sorted(g.boxes, key=lambda b: b.id):
-            lines.extend(fmt_meta(b.meta, inner + IND))
-            lines.append(f"{inner}{IND}box {b.id} {fmt_string(b.title)} at ({b.x}, {b.y}) "
-                         f"size ({b.w}, {b.h}){fmt_props(b.props)}")
-        lines.append(f"{inner}}}")
+    if not semantic:
+        lines.extend(fmt_layout(g, names, inner))
     lines.append(indent + "}")
     return lines
+
+
+def fmt_layout(g: Graph, names: GraphNames, inner: str) -> list:
+    """The layout block: for each node, by the name it is written with, its metadata lines
+    and its `place` line (just the name when it has no position), then the boxes."""
+    places = {}
+    for p in g.places:
+        places.setdefault(p.id, p)
+    metas = {}
+    for n in g.nodes:
+        if n.meta:
+            metas.setdefault(n.id, n.meta)
+    ids = sorted(set(places) | set(metas), key=lambda i: names.name(i))
+    if not ids and not g.boxes:
+        return []
+    out = ["", f"{inner}layout {{"]
+    for nid in ids:
+        out.extend(fmt_meta(metas.get(nid, []), inner + IND))
+        p = places.get(nid)
+        pos = f" at ({p.x}, {p.y}){fmt_props(p.props)}" if p else ""
+        out.append(f"{inner}{IND}{names.name(nid)}{pos}")
+    for b in sorted(g.boxes, key=lambda b: b.id):
+        out.extend(fmt_meta(b.meta, inner + IND))
+        props = b.props
+        m = b.prop("members")
+        if m is not None and m.kind == "list":
+            props = [(k, Lit("list", [Lit("ident", names.name(x.value)) if x.kind == "ident" else x
+                                      for x in v.value]) if k == "members" else v)
+                     for k, v in b.props]
+        out.append(f"{inner}{IND}box {b.id} {fmt_string(b.title)} at ({b.x}, {b.y}) "
+                   f"size ({b.w}, {b.h}){fmt_props(props)}")
+    out.append(f"{inner}}}")
+    return out
 
 
 def fmt_type_decl(it, semantic=False) -> list:

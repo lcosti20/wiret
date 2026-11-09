@@ -244,6 +244,9 @@ def rename_node(g: Graph, nid: str, new: str) -> Optional[str]:
     from .parser import KEYWORDS
     if not new or new == nid:
         return None
+    if "." in nid:
+        raise Refused(f"'{nid}' is written inside the input it feeds, so its name says where it "
+                      f"is. Wire its output into a second input to give it a name of its own.")
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", new) or new in KEYWORDS:
         raise Refused("Not a valid identifier.")
     if g.node(new) or g.box(new):
