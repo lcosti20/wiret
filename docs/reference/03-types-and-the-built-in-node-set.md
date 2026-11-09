@@ -50,7 +50,7 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 | `Branch` | in `cond: bool`; exec out `then`, `else` | Two-way choice. |
 | `Sequence` | `@count(n)`; exec out `then0` .. `then{n-1}` | Runs `then0`'s chain to its end, then `then1`'s, and so on. |
 | `Switch::<T>` | in `value: T`; `@cases(...)`; exec out `case0`.., `default` | `T` is an integer, enum, string or bool. |
-| `Select::<T>` | pure; in `cond`, `a`, `b`; out `result` | Both `a` and `b` are evaluated (they are pure). |
+| `Select::<T>` | pure; in `cond`, `a`, `b`; out `result` | Lazy: evaluates `cond`, then only the input it chooses (`a` when `cond` is true), so a fault in the other is never raised (section 4.3). |
 | `Try` | exec out `body`, `fault`, `then`; out `message: string`, `code: i32` | Runs `body`. A catchable fault inside it goes to `fault`, with `message` and `code` set from the fault. When the body's chain or the fault chain ends, `then` runs, as code after a try/catch would. Section 4.6. |
 | `Throw` | in `message: string`, `code: i32` (default 0) | Raises a catchable fault. No exec out. Use non-negative codes; the built-in faults use negative ones (section 4.6). |
 | `Delay` | in `seconds: f64`; exec out `then` | **Latent.** Suspends the fiber for virtual time. |
@@ -66,7 +66,7 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 | --- | --- | --- |
 | `GetLocal` / `SetLocal` | `value` | Locals declared with `local`. `SetLocal` is impure. |
 | `GetVar` / `SetVar` | `value` | Module-level `var`. |
-| `GetField` | symbol: `Vec2.x` on a struct, the field name on a class; in `obj`; out `value` | On a struct, `pure`: a struct is a value and cannot change under the reader. On a class reference, a pure node with `reads` purity (section 4.3): re-evaluated at each consumer and sees the state at that consumer's evaluation point. Faults on a null class reference. Not allowed in a `@pure` function (`E0304`). |
+| `GetField` | symbol: `Vec2.x` on a struct, `Player.health` on a class (section 2.3, rule 3); in `obj`; out `value` | On a struct, `pure`: a struct is a value and cannot change under the reader. On a class reference, a pure node with `reads` purity (section 4.3): re-evaluated at each consumer and sees the state at that consumer's evaluation point. Faults on a null class reference. Not allowed in a `@pure` function (`E0304`). |
 | `SetField` | in `obj`, `value` | Impure; classes only. On a struct it is `E0501`: use `WithField`. |
 | `WithField` | pure; symbol `Vec2.x`; in `obj`, `value`; out `result` | Returns a copy of a struct with one field replaced. |
 | `MakeStruct` | pure; symbol: the struct; in: one pin per field, in declaration order; out `result` | An unbound input takes the field's declared default, else its type's default, so it never warns `W0201`. |
@@ -75,7 +75,7 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 | `Cast` | pure; symbol: the class to cast to (`Cast Boss`); in `obj: anyref` (any object); out `result` of that class, `ok: bool` | `result` is null when the cast fails. |
 | `IsValid` | pure; in `obj: anyref`; out `result: bool` | Non-null and, for host handles, still alive. |
 | `Convert::<From, To>` | pure; in `value`; out `result` | See section 3.2. |
-| GetState / SetState | value | Persistent slots declared with state (section 2.3). SetState is impure. |
+| `GetState` / `SetState` | `value` | Persistent slots declared with `state` (section 2.3). `SetState` is impure. |
 
 **Arithmetic, comparison, logic** (all pure)
 
@@ -85,7 +85,7 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 | `Neg Abs` | `<T>` any signed number or float | Input `value`. |
 | `Eq Ne` | `<T>` number, bool, string, enum, struct, class, array, set, map (compared element-wise) | Output `bool`. |
 | `Lt Le Gt Ge` | `<T>` number, string (ordinal), enum | Output `bool`. |
-| `And Or Xor Not` | bool | Not short-circuiting. |
+| `And Or Xor Not` | bool | `And` and `Or` short-circuit: `b` is evaluated only when `a` does not decide the result (section 4.3). |
 | `BitAnd BitOr BitXor BitNot Shl Shr` | `<T>` integer | Shift counts are masked to the type's width. |
 
 **Containers**
@@ -110,7 +110,7 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 | `Call` | symbol: function, method or extern; its parameters and results | Pure node if the callee is `@pure`, `@reads`, or a native flagged effect-free; otherwise impure. A method call has `self` as its first input; dispatch is virtual unless `@final`, and via the interface when the symbol names an interface method. |
 | `CreateDelegate` | pure; symbol: function, method or event; in `target` for a method; out `result` | Binds a function (and receiver) into a delegate, whose type is the function's signature without the receiver. A method delegate calls the target's own override. A `@latent` func, a native or an extern cannot be bound (`E0501`); an event can (see `Invoke`). |
 | `Invoke::<D>` | `D` is a delegate type; in `delegate`, `arg0`, `arg1`, ...; out `result0`, ... | Impure. Never suspends: a delegate of an event starts it on a new fiber, queued for the next `wr_advance`. A null delegate faults. |
-| `Bind`, `Unbind` | symbol: dispatcher (bare in its class's methods, else `Class.Name`); in `obj`, `handler: delegate` | Impure. Binding a handler that is already bound (same function and receiver) does nothing; `Unbind` removes it. |
+| `Bind`, `Unbind` | symbol: the dispatcher, `Class.Name`; in `obj`, `handler: delegate` | Impure. Binding a handler that is already bound (same function and receiver) does nothing; `Unbind` removes it. |
 | `Broadcast` | symbol: dispatcher; in `obj` plus the arguments, named as in the dispatcher | Impure. Handlers bound when the broadcast starts run in bind order; an event handler starts on a new fiber. A fault in one handler is reported to the host and does not stop the others. |
 
 ### 3.4 The standard library

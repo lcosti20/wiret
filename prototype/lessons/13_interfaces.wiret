@@ -19,10 +19,10 @@ class Rectangle impl Shape {
     node entry = Entry()
     node ret = Return(
       .area <- Mul::<i32>(
-        .a <- GetField width(
+        .a <- GetField Rectangle.width(
           .obj <- entry.self,
         ).value,
-        .b <- GetField height(
+        .b <- GetField Rectangle.height(
           .obj <- entry.self,
         ).value,
       ).result,
@@ -90,10 +90,10 @@ class Triangle impl Shape {
     node ret = Return(
       .area <- Div::<i32>(
         .a <- Mul::<i32>(
-          .a <- GetField base(
+          .a <- GetField Triangle.base(
             .obj <- entry.self,
           ).value,
-          .b <- GetField height(
+          .b <- GetField Triangle.height(
             .obj <- entry.self,
           ).value,
         ).result,

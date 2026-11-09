@@ -36,7 +36,7 @@ from wiret.checker import check, has_errors  # noqa: E402
 from wiret.compiler import compile_module  # noqa: E402
 from wiret.disasm import disassemble  # noqa: E402
 from wiret.flow import view_flow  # noqa: E402
-from wiret.ids import assign_ids, find_project  # noqa: E402
+from wiret.ids import assign_ids, attach_retired, find_project  # noqa: E402
 from wiret.ops import convert_comments  # noqa: E402
 from wiret.parser import ParseError, parse  # noqa: E402
 from wiret.printer import layout_hash, print_module, semantic_hash  # noqa: E402
@@ -189,8 +189,9 @@ def main(argv=None):
                     print(f"{a.file}:{c.line}: warning W0603: formatting would drop this comment; "
                           f"use --convert-comments or --drop-comments", file=sys.stderr)
                 return 1
+        proj = find_project(a.file)
+        attach_retired(m, proj)
         if a.assign_ids:
-            proj = find_project(a.file)
             retired = {r.id for r in proj.retired} if proj else set()
             for e in assign_ids(m, retired=retired):
                 print(f"{e.kind} '{e.name}': @id(\"{e.id}\")", file=sys.stderr)

@@ -301,14 +301,92 @@ func F() @pure {
                            ('node entry = Entry()\n  flow {\n    #[note("x")]\n    entry -> entry\n  }',
                             "flow wires"),
                            ('#[note("x")]\n  node entry = Entry()', "layout block"),
-                           ('node entry = Entry()\n  layout {\n    #[note("x")]\n    other at (0, 0)\n  }',
-                            "not a node"),
                            ('node entry = Entry()\n  layout {\n    entry\n  }', "at (x, y)"),
                            ('#[note("x")] local x: i32', "next line")):
             with self.subTest(body):
                 with self.assertRaises(ParseError) as cm:
                     parse(module(f"\nfunc F() {{\n  {body}\n}}\n", macros=False))
                 self.assertIn(hint, cm.exception.msg)
+
+    def test_stale_layout_line_is_kept_with_W0605(self):
+        # an inline node's name is its position, so an edit that moves it leaves its layout
+        # line and notes naming nothing; that is a warning and the text is kept, not an error
+        text = module("""
+func F() {
+  node entry = Entry()
+  node log = Call host.Log(
+    .message <- "hi",
+  )
+
+  flow {
+    entry -> log
+  }
+
+  layout {
+    entry at (0, 0)
+    log at (200, 0)
+    #[note("Says hi.")]
+    log.message at (100, 120)
+    #[note("Only a note, no position.")]
+    log.message.value
+  }
+}
+""", macros=False)
+        m = parse(text)
+        diags = [d for d in check(m) if d.code == "W0605"]
+        self.assertEqual(sorted(d.node for d in diags), ["log.message", "log.message.value"])
+        self.assertEqual(print_module(m), text)          # nothing is dropped or moved
+        self.assertTrue(compile_module(m, text).ok)
+        # a merge keeps the stale lines too
+        from wiret.merge import merge_texts
+        merged = merge_texts(text, text, text)
+        self.assertIn('#[note("Says hi.")]\n    log.message at (100, 120)', merged.text)
+
+    def test_promoted_inline_node_skips_taken_and_retired_ids(self):
+        # an inline node that comes to feed a second input is declared under its dotted
+        # name with underscores, then _2, _3, ... past live ids and ids retired in wiret.ids
+        from wiret.model import Binding, PinRef
+        text = module("""
+func F() {
+  node entry = Entry()
+  node log = Call host.Log(
+    .message <- Call std.string.Concat(
+      .a <- "a",
+      .b <- "b",
+    ).result,
+  )
+  node log_message = Call host.Log(
+    .message <- "taken",
+  )
+  node again = Call host.Log()
+
+  flow {
+    entry -> log
+    log -> log_message
+    log_message -> again
+  }
+}
+""", macros=False)
+
+        def promoted(retired):
+            m = parse(text)
+            g = m.graph("F")
+            g.node("again").bindings.append(Binding("message", PinRef("log.message", "result")))
+            m.retired_nodes = {("F", r) for r in retired}
+            out = print_module(m)
+            return re.findall(r"node (log_message\w*) = Call std.string.Concat", out), out
+
+        self.assertEqual(promoted(())[0], ["log_message_2"])     # log_message is live
+        names, out = promoted(("log_message_2", "log_message_3"))
+        self.assertEqual(names, ["log_message_4"])
+        self.assertIn(".message <- log_message_4.result", out)
+        # a retired id in another graph does not count
+        self.assertEqual(promoted(())[0], ["log_message_2"])
+        m = parse(text)
+        m.retired_nodes = {("G", "log_message_2")}
+        m.graph("F").node("again").bindings.append(
+            Binding("message", PinRef("log.message", "result")))
+        self.assertIn("node log_message_2 = Call std.string.Concat", print_module(m))
 
     def test_markup_block_is_rejected_with_a_hint(self):
         with self.assertRaises(ParseError) as cm:
@@ -2923,7 +3001,7 @@ func F() {
 """)
         self.assertEqual(run(text, "F")[1], ["body", "body", "after"])
 
-    def test_join_and_W0310(self):
+    def test_join_and_E0310(self):
         text = module("""
 func F(c: bool) -> (r: string) {
   node entry = Entry()
@@ -2954,9 +3032,52 @@ func Make() -> (s: string) {
   }
 }
 """, macros=False)
-        self.assertIn("W0310", codes(text))
-        self.assertEqual(run(text, "F", 1)[0], ["made"])
-        self.assertEqual(run(text, "F", 0)[0], [""])
+        # reading make.s at the join, where make may not have run, is rejected
+        self.assertIn("E0310", codes(text))
+        self.assertFalse(compile_module(parse(text), text).ok)
+        # the fix: every path into the join stores the value in a local
+        fixed = module("""
+func F(c: bool) -> (r: string) {
+  local s: string
+  node entry = Entry()
+  node br = Branch(
+    .cond <- entry.c,
+  )
+  node make = Call Make()
+  node keep = SetLocal s(
+    .value <- make.s,
+  )
+  node none = SetLocal s(
+    .value <- "",
+  )
+  node join = Return(
+    .r <- GetLocal s().value,
+  )
+
+  flow {
+    entry -> br
+    br.then -> make
+    br.else -> none
+    make -> keep
+    keep -> join
+    none -> join
+  }
+}
+
+func Make() -> (s: string) {
+  node entry = Entry()
+  node ret = Return(
+    .s <- "made",
+  )
+
+  flow {
+    entry -> ret
+  }
+}
+""", macros=False)
+        self.assertNotIn("E0310", codes(fixed))
+        self.assertEqual(run(fixed, "F", 1)[0], ["made"])
+        self.assertEqual(run(fixed, "F", 0)[0], [""])
 
     def test_pure_nodes_are_reevaluated_per_evaluation_point(self):
         text = module("""
@@ -3112,6 +3233,170 @@ func Conv(x: f64) -> (i: i32, b: u8, s: string, back: f32) {
         self.assertEqual(run(text, "Conv", 300.75)[0][:3], [300, 44, "300.75"])
         self.assertEqual(run(text, "Conv", 1e20)[0][0], 2**31 - 1)        # saturating
         self.assertEqual(run(text, "Conv", float("nan"))[0][0], 0)
+
+
+LAZY = """
+class Box {
+  items: array::<i32>
+
+  func Pick(i: i32) {
+    state last: i32
+    node entry = Entry()
+    node save = SetState last(
+      .value <- Select::<i32>(
+        .cond <- Lt::<i32>(
+          .a <- entry.i,
+          .b <- 0,
+        ).result,
+        .a <- -1,
+        .b <- ArrayGet::<i32>(
+          .array <- GetField items(
+            .obj <- entry.self,
+          ).value,
+          .index <- entry.i,
+        ).item,
+      ).result,
+    )
+    node log = Call host.Log(
+      .message <- Convert::<i32, string>(
+        .value <- GetState last().value,
+      ).result,
+    )
+
+    flow {
+      entry -> save
+      save -> log
+    }
+  }
+}
+
+func Guard(i: i32) -> (r: i32) {
+  node entry = Entry()
+  node arr = MakeArray::<i32>(
+    .item0 <- 10,
+    .item1 <- 20,
+  ) @count(2)
+  node ok = And(
+    .a <- Ge::<i32>(
+      .a <- entry.i,
+      .b <- 0,
+    ).result,
+    .b <- Lt::<i32>(
+      .a <- entry.i,
+      .b <- ArrayLength::<i32>(
+        .array <- arr.result,
+      ).length,
+    ).result,
+  )
+  node ret = Return(
+    .r <- Add::<i32>(
+      .a <- 1000,
+      .b <- Select::<i32>(
+        .cond <- ok.result,
+        .a <- ArrayGet::<i32>(
+          .array <- arr.result,
+          .index <- entry.i,
+        ).item,
+        .b <- Select::<i32>(
+          .cond <- Or(
+            .a <- ok.result,
+            .b <- Eq::<i32>(
+              .a <- Div::<i32>(
+                .a <- 1,
+                .b <- entry.i,
+              ).result,
+              .b <- 0,
+            ).result,
+          ).result,
+          .a <- 1,
+          .b <- -1,
+        ).result,
+      ).result,
+    ).result,
+  )
+
+  flow {
+    entry -> ret
+  }
+}
+
+func Main() {
+  node entry = Entry()
+  node b = New Box()
+  node add = ArrayAdd::<i32> Box.items(
+    .obj <- b.result,
+    .item <- 42,
+  )
+  node low = Call Box.Pick(
+    .self <- b.result,
+    .i <- -5,
+  )
+  node high = Call Box.Pick(
+    .self <- b.result,
+    .i <- 0,
+  )
+
+  flow {
+    add -> low
+    b -> add
+    entry -> b
+    low -> high
+  }
+}
+"""
+
+
+class LazyTests(unittest.TestCase):
+    """Select evaluates only the input it chooses, and And and Or skip `b` when `a` decides
+    the result, so a fault in the untaken side is never raised (section 4.3)."""
+
+    def test_untaken_side_never_faults(self):
+        text = module(LAZY, macros=False)
+        # in range: the ArrayGet; out of range: the Or runs its Div, and 1 / i is 0 unless
+        # i is 1, so the result is 1; And skips Lt and Or skips Div whenever they would fault
+        for i, want in ((0, 1010), (1, 1020), (5, 1001), (-3, 1001)):
+            self.assertEqual(run(text, "Guard", i)[0], [want], i)
+
+    def test_the_taken_side_still_faults(self):
+        text = module("""
+func F(c: bool) -> (r: i32) {
+  node entry = Entry()
+  node ret = Return(
+    .r <- Select::<i32>(
+      .cond <- entry.c,
+      .a <- Div::<i32>(
+        .a <- 1,
+        .b <- 0,
+      ).result,
+      .b <- 7,
+    ).result,
+  )
+
+  flow {
+    entry -> ret
+  }
+}
+""", macros=False)
+        self.assertEqual(run(text, "F", 0)[0], [7])
+        with self.assertRaises(WiretError):
+            run(text, "F", 1)
+
+    def test_lazy_input_of_a_state_slot_on_an_object(self):
+        # SetState on an object pushes self before its value; the Select's branches must
+        # still start on an empty operand stack, and the untaken ArrayGet (index -5) is skipped
+        text = module(LAZY, macros=False)
+        self.assertEqual(run(text, "Main")[1], ["-1", "42"])
+
+    def test_debug_build_verifies_and_runs(self):
+        text = module(LAZY, macros=False)
+        r = compile_module(parse(text), text, debug=True)
+        self.assertTrue(r.ok, [str(d) for d in r.diags])
+        out = []
+        vm = VM(output=out.append)
+        mod = vm.load(r.wbc)
+        self.assertEqual(vm.call(mod, "Guard", [7]), [1001])
+        vm.call(mod, "Main", [])
+        self.assertEqual(out, ["-1", "42"])
 
 
 class SaturationTests(unittest.TestCase):
@@ -4438,13 +4723,13 @@ class Player {
     )
     node set_new = SetLocal new_hp(
       .value <- Sub::<i32>(
-        .a <- GetField health(
+        .a <- GetField Player.health(
           .obj <- entry.self,
         ).value,
         .b <- entry.amount,
       ).result,
     )
-    node store = SetField health(
+    node store = SetField Player.health(
       .obj <- entry.self,
       .value <- hp.value,
     )
@@ -4502,6 +4787,22 @@ class ClassTests(unittest.TestCase):
         text = classes_text()
         self.assertEqual(print_module(parse(text)), text)
         self.assertEqual(codes(text), [])
+
+    def test_bare_members_are_read_and_written_qualified(self):
+        # inside a method the reader accepts a member of its class by its bare name; the
+        # canonical form always qualifies it, and the program is the same
+        for full, bare in (("GetField Player.health", "GetField health"),
+                           ("SetField Player.health", "SetField health")):
+            text = classes_text()
+            self.assertIn(full, text)
+            loose = text.replace(full, bare)
+            self.assertEqual(print_module(parse(loose)), text)
+            self.assertEqual(instruction_bytes(build(loose)[1].wbc),
+                             instruction_bytes(build(text)[1].wbc))
+        text = delegates_text()
+        loose = text.replace("Broadcast Player.OnHit", "Broadcast OnHit")
+        self.assertNotEqual(loose, text)
+        self.assertEqual(print_module(parse(loose)), text)
 
     def test_a_note_on_a_method_round_trips_once(self):
         text = module("""
@@ -4895,12 +5196,12 @@ class Barrel impl Damageable {
     node ret = Return(
       .left <- sub.result,
     )
-    node set = SetField hp(
+    node set = SetField Barrel.hp(
       .obj <- entry.self,
       .value <- sub.result,
     )
     node sub = Sub::<i32>(
-      .a <- GetField hp(
+      .a <- GetField Barrel.hp(
         .obj <- entry.self,
       ).value,
       .b <- entry.amount,
@@ -5273,10 +5574,10 @@ class Counter {
 
   func Add(amount: i32) {
     node entry = Entry()
-    node set = SetField hits(
+    node set = SetField Counter.hits(
       .obj <- entry.self,
       .value <- Add::<i32>(
-        .a <- GetField hits(
+        .a <- GetField Counter.hits(
           .obj <- entry.self,
         ).value,
         .b <- entry.amount,
@@ -5306,7 +5607,7 @@ class Player {
   dispatcher OnHit(amount: i32)
 
   func Hit(amount: i32) {
-    node b = Broadcast OnHit(
+    node b = Broadcast Player.OnHit(
       .obj <- entry.self,
       .amount <- entry.amount,
     )
@@ -6068,7 +6369,7 @@ class Ticker {
   }
 
   func Keep(x: i32) {
-    node add = ArrayAdd::<i32> items(
+    node add = ArrayAdd::<i32> Ticker.items(
       .obj <- entry.self,
       .item <- entry.x,
     )

@@ -17,7 +17,7 @@ class Button {
         .b <- 1,
       ).result,
     )
-    node tell = Broadcast OnClick(
+    node tell = Broadcast Button.OnClick(
       .obj <- entry.self,
       .times <- GetState clicks().value,
     )
@@ -45,10 +45,10 @@ class Counter {
   #[note("Heard is a handler: its inputs match OnClick, so it can listen to a button.")]
   func Heard(times: i32) {
     node entry = Entry()
-    node save = SetField heard(
+    node save = SetField Counter.heard(
       .obj <- entry.self,
       .value <- Add::<i32>(
-        .a <- GetField heard(
+        .a <- GetField Counter.heard(
           .obj <- entry.self,
         ).value,
         .b <- 1,

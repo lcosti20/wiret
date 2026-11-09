@@ -109,7 +109,7 @@ Rules:
 
 1. **Node ids** are identifiers, unique within the graph. They are the identity of a node for diffs and merges. A node written inline in another node's input has no id of its own: its name is the path to where it is written, such as `show.message` (see *Inline nodes* below). Display names are not ids; they live in the layout (`label`). Editors generate a readable slug plus a short random suffix, such as `branch_k3m9`; humans and LLMs may choose descriptive ones such as `check_energy`. **Non-reuse is a project-level guarantee, not a file-level one.** A single file can only prove that its present ids are unique; it cannot know which ids were deleted earlier. Non-reuse is therefore enforced by the project's id registry `wiret.ids` (section 7.3), which records every retired node id: an editor save or `wiretc edit` that deletes a node appends its id, and a node that reuses a retired id is `E0140`. Without a project (a lone file) editors still generate fresh random suffixes, which makes accidental reuse improbable but not impossible, and `wiretc check` says so (`W0202`).
 2. **Kind** is a PascalCase built-in (`Add`, `Branch`, `SetLocal`, ...; section 3.3). Calling a declared function is always `Call`, so the closed set of built-in kinds never collides with user names.
-3. **Symbol** (optional) names the thing the node acts on: `Call std.math.Sqrt`, `GetField health`, `SetLocal acc`, `GetState done`, `New Player`, `Cast Player`, `Macro ForRange`, `Exit done`. A struct node names its struct, and a field node the struct and the field, since nothing else on the node says which struct it is: `MakeStruct Vec2`, `BreakStruct Vec2`, `GetField Vec2.x`, `WithField Vec2.x`. A class field keeps the bare form inside its own class's methods, `GetField health`, and is written `GetField Player.health` elsewhere, where nothing else would say which class it belongs to.
+3. **Symbol** (optional) names the thing the node acts on: `Call std.math.Sqrt`, `GetField Player.health`, `SetLocal acc`, `GetState done`, `New Player`, `Cast Player`, `Macro ForRange`, `Exit done`. A struct node names its struct, and a field node the struct and the field, since nothing else on the node says which struct it is: `MakeStruct Vec2`, `BreakStruct Vec2`, `GetField Vec2.x`, `WithField Vec2.x`. A member of a class (a field, a dispatcher, or a field that a container node changes) is always written with its class: `GetField Player.health`, `Broadcast Player.OnHit`, `ArrayAdd::<i32> Player.items`. A node therefore reads the same in a method and anywhere else, and moving it between them never changes its text. Inside a method the reader also accepts a member of the method's own class by its bare name, `GetField health`, and the formatter writes it qualified with that class. A member inherited from a base class resolves through the chain, so in a method of `Boss` the bare `health` is written `GetField Boss.health` and names the `health` declared in `Player`.
 4. **Type arguments** follow the symbol: `Add::<i32>`, `Convert::<i32, string>`, `Call std.array.Get::<f32>`. They are always written out, never inferred. Every generic argument list in Wiret, on a node, a declaration (`macro ForEach::<T>`) or a type (`array::<i32>`), is introduced by `::`. A node statement binds an id to a kind (`node plus = Add::<i32>(...)`), and with a bare `<` a node such as `NodeType<a, b> variable` would read like a comparison; the `::` removes that ambiguity.
 5. **Bindings** connect input pins. They are written in parentheses after the node, `.pin <- value`, separated by commas, and a trailing comma is allowed: `Call host.Log(.message <- "hi")`. Newlines inside the parentheses are ignored, and the canonical form puts each binding on its own line, indented one level further than the node, with a trailing comma (section 2.5). A node with no bound inputs is written with empty parentheses, `Entry()`, so every node reads the same way. `<-` mirrors the `->` of exec wires: data flows *into* the pin. The right-hand side is a pin reference (`other_node.pin`, a data wire), a literal, or a node written inline (see *Inline nodes* below). An enum value such as `Mode.Chase` has the same shape as a pin reference: it is the enum value when the graph has no node with the id `Mode` and the module declares an enum `Mode`. A node id that is also the name of an enum is `E0102`, so the reading never depends on which one was meant. An input that is not listed takes the pin's default value (the declared default, otherwise the zero value of its type); the compiler warns (`W0201`) about unlisted inputs that have no declared default.
 6. **Exec wiring** is written in the graph's `flow` block, one wire per line, never on node lines (see *The flow block* below). `source -> target` is shorthand for a source node with exactly one exec output; otherwise the output is named, `source.pin -> target`. An exec output with no wire is unconnected, which means "this chain ends here" (section 4.2).
@@ -136,7 +136,7 @@ node show = Call host.Log(
 
 - **Names.** An inline node's name is its consumer's name, a dot and the input it feeds: above, the `Concat` is `show.message`, the `Convert` is `show.message.b` and the `GetLocal` is `show.message.b.value`. The name is used wherever the node must be named: in the layout block, in a box's `members`, in diagnostics, in the debugger, in `wiretc edit` requests and in pin references (`show.message.b.result`).
 - **Which nodes are inline.** In canonical form a node is written inline exactly when one input in the graph reads it, it has no exec pins (it is pure or `reads`) and it carries no semantic attribute (an attribute ends a node's statement, and an inline node has none of its own). Every other node is declared with a `node` statement: a node with exec pins, an unread node, and a node whose outputs feed several inputs. A shared output is the one place where the data graph is not a tree, and the declared node's id is the name it is shared under.
-- **Either form is read.** The reader accepts a single-use node declared by name, and the formatter writes it inline. When an edit makes an inline node feed a second input, it is declared, under its dotted name with the dots turned into underscores (`show_message_b`); when a declared node comes to feed a single input, it moves inline and takes the name of where it is.
+- **Either form is read.** The reader accepts a single-use node declared by name, and the formatter writes it inline. When an edit makes an inline node feed a second input, it is declared, under its dotted name with the dots turned into underscores (`show_message_b`), followed by `_2`, `_3`, ... when that name is already the id of another node of the graph or, in a project, a node id of the graph retired in `wiret.ids` (section 7.3), so a promotion never produces a duplicate or an `E0140`; when a declared node comes to feed a single input, it moves inline and takes the name of where it is.
 - **Notation only.** Writing a node inline changes nothing about when or how often it is evaluated (section 4.3): the model has the same nodes and wires, and the compiled instructions are the same.
 - **Positions, not identities.** Because an inline node's name says where it is written, it changes when the node moves to another input, and another node may be written there later. Inline names are therefore never retired in `wiret.ids` and are never `E0140` (section 7.3), and a merge matches inline nodes by their position.
 
@@ -180,7 +180,7 @@ layout {
 - A `box` is a visual group with its own id (unique among node ids and box ids in the graph), a title, a position and a size. **Membership is explicit and authoritative:** `members = [id, ...]` is required and lists node ids and box ids. Position and size only say where the box is drawn; a node lying inside a box's rectangle is not thereby a member, and a member lying outside it is still a member. An editor may offer to add a node dragged into a box to `members`, but the list is what is saved. A box with `collapsed = true` is drawn as one node whose pins are the wires crossing its edge (the compiler still sees the flat graph).
 - **Nesting and overlap.** A box may list another box as a member, which nests it; the nesting must be acyclic. A node or box is a member of at most one box. If it appears in several, the box with the smallest id keeps it and `W0602` reports the rest. Rectangles may overlap freely, since they have no effect on membership. A member id that names nothing is `W0601` and is removed on the next editor save.
 - A node with no `place` line is auto-placed by the editor, and gets a line when first saved. This makes LLM-generated graphs valid without layout. A node that has metadata but no position yet is listed by its name alone, with its metadata lines above it.
-- Metadata above a name that is not a node of the graph is a syntax error.
+- A layout line, or metadata above one, whose name is not a node of the graph is kept as written and reported as `W0605`. This is what a hand edit leaves behind when it moves an inline node, since that changes the node's dotted name (section 2.3). The stale line and its notes stay, in the editor, in `wiretc fmt` and through a merge, until someone renames the line to the node's new name or deletes it, so an edit to a node statement can never make the layout block unreadable or lose a note.
 - Unknown properties are preserved. The block never affects the semantic hash.
 - Personal view state (zoom, scroll, selection, open panels) is never written to the file (section 7.5).
 
@@ -224,8 +224,8 @@ A metadata line attaches to the next statement that is not itself a metadata lin
 | `@count(n)` | `Sequence`, `MakeArray`, ... | Number of dynamic pins. |
 | `@cases(v0, v1, ...)` | `Switch` | Case values. Pins are `case0`, `case1`, ... and `default`. Each value must be a value of the `Switch`'s type (`E0110`); on an enum `Switch` they are members, `@cases(Mode.Idle, Mode.Chase)`. |
 | `@disabled` | node | Node is skipped: a one-exec-out node passes control straight to its target; data outputs read as zero. |
-| @capability("name") | extern func | The import needs this host capability. Listed in the wr.caps section; the load fails unless the host granted it (section 6.5). |
-| @latent | func | The function may suspend. Required when it contains a latent node or calls a latent function or event (E0201). Events are implicitly latent. A latent function is never @pure or @reads. |
+| `@capability("name")` | `extern func` | The import needs this host capability. Listed in the `wr.caps` section; the load fails unless the host granted it (section 6.5). |
+| `@latent` | `func` | The function may suspend. Required when it contains a latent node or calls a latent function or event (`E0201`). Events are implicitly latent. A latent function is never `@pure` or `@reads`. |
 
 **Metadata attributes** never change bytecode. They are stored and diffed, and they are covered by the layout hash but not the semantic hash (section 2.5). Node positions, labels, colours and sizes are not attributes; they live in the layout block (section 2.3).
 
@@ -314,14 +314,14 @@ class Player {
     node entry = Entry()
     node set_new = SetLocal new_hp(
       .value <- Sub::<i32>(
-        .a <- GetField health(
+        .a <- GetField Player.health(
           .obj <- entry.self,
         ).value,
         .b <- entry.amount,
       ).result,
     )
     node hp = GetLocal new_hp()
-    node store = SetField health(
+    node store = SetField Player.health(
       .obj <- entry.self,
       .value <- hp.value,
     )
@@ -372,7 +372,7 @@ class Player {
     node wait = Delay(
       .seconds <- 2.0,
     )
-    node reset = SetField health(
+    node reset = SetField Player.health(
       .obj <- entry.self,
       .value <- 100,
     )

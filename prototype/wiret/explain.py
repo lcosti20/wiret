@@ -216,9 +216,9 @@ def explain(d: Diag) -> str:
     if c == "W0302":
         return ("The function can stop here without reaching a Return node, so it would return "
                 "zero. Connect this path to a Return.")
-    if c == "W0310":
+    if c == "E0310":
         return (f"This uses a result from '{_quoted(m)}', but '{_quoted(m)}' doesn't run on every "
-                f"path before this node. When it hasn't run, the value is zero. Store the value "
+                f"path before this node, so there might be no value to use. Store the value "
                 f"in a local variable on every path instead.")
     if c == "W0320":
         return (f"'{_quoted(m)}' reads a variable and is used by more than one step, and each step "
@@ -235,6 +235,11 @@ def explain(d: Diag) -> str:
     if c == "W0603":
         return ("This '//' comment isn't saved with the graph. Use File → Convert // comments to "
                 "notes to keep it.")
+    if c == "W0605":
+        return ("A line in the layout block names a node that is no longer in this graph, "
+                "usually because a node written inside another one moved, which changes its "
+                "dotted name. The line and its notes are kept. Rename the line to the node's "
+                "new name, or delete it.")
     if c == "W0604":
         return "This note was attached to something that has been deleted."
     return m

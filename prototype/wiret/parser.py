@@ -700,8 +700,10 @@ class Parser:
         nodes = {n.id: n for n in g.nodes}
         for tok, nid, meta in metas:
             if nid not in nodes:
-                raise ParseError(f"metadata above '{nid}', which is not a node of '{g.name}'",
-                                 tok.line, tok.col)
+                # a stale name, usually an inline node whose position in the text changed:
+                # kept as written and reported (W0605), never a reason to reject the file
+                g.orphan_meta.setdefault(nid, []).extend(meta)
+                continue
             nodes[nid].meta.extend(meta)
         for tok, src, pin, e in wires:
             if src not in nodes:

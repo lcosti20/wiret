@@ -192,6 +192,9 @@ class Graph:
     nodes: list = field(default_factory=list)      # [Node]
     meta: list = field(default_factory=list)       # [Attr]: doc, graph-level notes, ...
     places: list = field(default_factory=list)     # [Place]
+    # layout-block metadata above a name that is no node of the graph (W0605): kept as
+    # written until someone moves it above a node's line or deletes it
+    orphan_meta: dict = field(default_factory=dict)    # {name: [Attr]}
     boxes: list = field(default_factory=list)      # [Box]
     owner: Optional[str] = None                    # the class of a method
 
@@ -426,6 +429,10 @@ class Module:
     items: list = field(default_factory=list)
     meta: list = field(default_factory=list)
     comments: list = field(default_factory=list)
+    # (graph name, node id) pairs retired in the project's wiret.ids (section 7.3). Not part
+    # of the text: set by a tool that has the project, so that a node declared under a new
+    # name (an inline node that came to feed several inputs) never takes a retired id
+    retired_nodes: set = field(default_factory=set, repr=False, compare=False)
 
     def graphs(self, kinds=("func", "event", "macro")) -> list:
         return [i for i in self.items if isinstance(i, Graph) and i.kind in kinds]

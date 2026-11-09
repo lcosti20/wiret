@@ -41,7 +41,7 @@ An exec input with several producers is a **join**. There is no merge of state a
 
 - Its pure inputs are evaluated at the join node's own evaluation point (section 4.3), not at the producers. Which producer was taken is not visible to it.
 - `S` is whatever the arriving path had. Paths with different stack depths may join; the verifier only requires that every label be a valid jump target (section 5.5).
-- Data outputs of impure nodes that sit on only some of the paths into a join are read as "the last value stored, else the zero value". `W0310` fires when the producer does not dominate the reader, which is exactly the situation a join creates; a reader after a join should read a local that every path assigned.
+- A data output of an impure node that sits on only some of the paths into a join may have no value there, so reading it after the join is `E0310`: a producer must dominate every reader of its outputs. A reader after a join reads a local that every path assigned. (The bytecode still gives such a read a meaning, the last value stored, else the zero value, because the verifier does not check dominance; the compiler never emits one.)
 - A back-edge to a join (a loop) re-runs the join and everything after it with the current stored values. Nothing is reset.
 
 #### Worked trace: one `ForRange` iteration
@@ -74,15 +74,15 @@ Section 7.4 requires each of these as a trace test (expected `S` after every ste
 3. **Early exit.** A `Return` inside the `each` chain discards the pending `bump` with the frame. A caller chain cannot leave a macro any other way; a loop macro that offers `break` as an input does so with a `state` flag the `bump` step checks (**Provisional**: revisit if this proves awkward).
 4. **Unwired `Exit`.** `Exit` to an unwired caller output behaves as a chain end and pops a pending continuation if one exists.
 5. **Faults.** A fault in the `each` chain with a `Try` outside the loop pops the pending `bump` and everything above the marker; a `Try` entirely inside the `each` chain leaves the macro's continuation untouched.
-6. **Join.** Two producers wired to one exec input, and a read of an impure output on a path where its producer did not run (zero value, `W0310`).
+6. **Join.** Two producers wired to one exec input, each storing a value in a local that the join reads; a read of an impure output whose producer is on only one of the paths is rejected (`E0310`).
 
 ### 4.3 Pure nodes and data persistence
 
 - **Evaluation point.** Each time an impure node is about to run, the pure nodes feeding its inputs are evaluated, all at that moment and before the impure node's own effect. Evaluating them performs no writes, so every read of mutable state by those pure nodes sees the same state: the state at the evaluation point. A shared sub-expression is computed once per evaluation point. A pure node feeding two different impure nodes is evaluated at each one, and the two results differ if state changed in between. This is the familiar Blueprint behaviour and it is why `TakeDamage` stores its intermediate result in a local.
 - **Order.** Within one evaluation point, inputs are evaluated depth-first in the consumer's pin order from the registry, left to right. A node already evaluated at this point is reused. An implementation may reorder or share work only if no one can tell: results, the choice of fault, and fuel accounting must be as if this order were followed.
-- **Faults in pure nodes.** A fault in a pure node is raised at the consumer's evaluation point, before the consumer runs, and it is the first fault in the order above. A pure node whose result nobody demands is not evaluated and cannot fault. `Select`, `And` and `Or` demand all their inputs, so a fault in the untaken side of a `Select` is raised.
-- **Impure outputs persist.** A data output of an impure node (a call result, `loop.index`) is stored in a frame slot when the node runs. Any later node may read it. Reading it on a path where the node has not run yet gives the zero value; the compiler warns (`W0310`) when a read is not dominated by the producing node.
-- **No short-circuiting.** `And`, `Or` and `Select` evaluate every input. Use `Branch` for conditional evaluation.
+- **Faults in pure nodes.** A fault in a pure node is raised at the consumer's evaluation point, before the consumer runs, and it is the first fault in the order above. A pure node whose result nobody demands is not evaluated and cannot fault. `Select` demands `cond` and then only the input it chooses, and `And` and `Or` demand `b` only when `a` does not decide the result, so a fault in an input they do not demand is never raised.
+- **Impure outputs persist.** A data output of an impure node (a call result, `loop.index`) is stored in a frame slot when the node runs. Any later node may read it. A read that the producing node does not dominate is rejected (`E0310`), since on some path to it the node has not run.
+- **Lazy choice.** `Select`, `And` and `Or` are the only kinds that evaluate some inputs conditionally, as above; the order rule applies to the inputs they do demand, and a node they skip is neither evaluated nor charged fuel. Blueprints evaluate every input of these nodes; Wiret does not, so that `Select(cond: i < length, a: ArrayGet(arr, i), b: 0)` cannot fault. Use `Branch` when the choice should also decide which impure nodes run.
 - **Macro inputs** are evaluated once, at macro entry, and captured in locals.
 - **Cycles** among pure nodes are rejected (`E0301`). Cycles through exec wires are loops and are allowed.
 
@@ -159,37 +159,38 @@ Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber
 | --- | --- |
 | `E0101` / `E0102` | Binding or exec target names an unknown node / a duplicate: node id, declaration, struct field or enum member; also a struct or enum named like a built-in type, and a node id that is also an enum's name (section 2.3). |
 | `E0103` | Unknown pin on a node. |
+| `E0104` | Unknown `@` attribute. For a metadata name such as `@doc`, the message shows the `#[...]` form (section 2.4). |
 | `E0110` | Wire type mismatch (and no supertype relation); also a literal, field default, enum member value or `@cases` value that does not fit its type. |
 | `E0111` | The same input pin is bound twice. |
 | `E0120` | Exec output wired to a data pin, or a data wire to an exec pin. |
 | `E0121` | An exec output has more than one wire in the `flow` block. |
+| `E0130` | Container mutation node does not target a place (local, variable or field). |
+| `E0140` | A node, box or `@id` reuses an id recorded as retired in `wiret.ids` (section 7.3). |
+| `E0150` | A method overrides a `@final` method, or its parameters, results or latency differ from the method it overrides (section 2.2). |
+| `E0151` | A class extends something that is not a class of the module, or its base classes form a cycle; or `impl` names something that is not an interface. |
+| `E0152` | A class does not implement a method of an interface it names, or implements it with another signature, as an `event`, or as a `@latent` func. |
+| `E0160` | An `extern` needs a capability that the project's `wiret.toml` `[capabilities] allow` list does not permit (section 7.3). |
+| `E0201` | A function that is not latent contains a latent node or calls a latent function or event. |
 | `E0301` | Cycle among pure nodes. |
 | `E0302` | `@pure` or `@reads` function writes variables, fields or state, contains a latent node, or (`@reads`) calls a function that is neither `@reads` nor `@pure`. |
+| `E0303` | A path provably ends, with no pending continuation, in a function that declares results and has not returned. |
 | `E0304` | `@pure` function reads variables, fields or state, dereferences a class reference or host handle, or calls anything that is not `@pure`. |
+| `E0310` | Read of an impure output whose producer does not dominate the reader: on some path to the reader the producer has not run (sections 4.2, 4.3). |
 | `E0401` | Macro expands itself. |
 | `E0412` | `Try` body is not properly nested. |
 | `E0501` / `E0502` | Unresolved symbol / missing type argument. |
 | `E0503` | A struct holds itself by value, directly or through other structs (section 2.2). |
-| `E0150` | A method overrides a `@final` method, or its parameters, results or latency differ from the method it overrides (section 2.2). |
-| `E0151` | A class extends something that is not a class of the module, or its base classes form a cycle; or `impl` names something that is not an interface. |
-| `E0160` | An `extern` needs a capability that the project's `wiret.toml` `[capabilities] allow` list does not permit (section 7.3). |
-| `E0152` | A class does not implement a method of an interface it names, or implements it with another signature, as an `event`, or as a `@latent` func. |
+| `E0900` | Edit rejected: the document changed since the hash the edit was based on (section 7.2). |
 | `W0201` | Input left unbound and no declared default. |
+| `W0202` | Element in a project has no `@id` (section 2.4). A file outside a project gets no `W0202`. |
 | `W0301` | Node unreachable from any entry. |
 | `W0302` | Chain can end in a function that declares results. |
-| `W0310` | Read of an impure output not dominated by its producer. |
-| E0130 | Container mutation node does not target a place (local, variable or field). |
-| E0104 | Unknown `@` attribute. For a metadata name such as `@doc`, the message shows the `#[...]` form (section 2.4). |
-| E0900 | Edit rejected: the document changed since the hash the edit was based on (section 7.2). |
-| E0201 | A function that is not latent contains a latent node or calls a latent function or event. |
-| E0303 | A path provably ends, with no pending continuation, in a function that declares results and has not returned. |
-| E0140 | A node, box or `@id` reuses an id recorded as retired in `wiret.ids` (section 7.3). |
-| W0202 | Element in a project has no `@id` (section 2.4). A file outside a project gets no `W0202`. |
-| W0320 | A `reads` node feeds more than one impure consumer (section 4.3). |
-| W0601 | A box lists a member id that names no node or box. |
-| W0602 | A node or box is listed as a member of more than one box. |
-| W0603 | `wiretc fmt` would drop a `//` comment (section 2.1). |
-| W0604 | A `#[note]` is detached: its target was deleted and the note was moved to the enclosing graph (section 2.4). |
+| `W0320` | A `reads` node feeds more than one impure consumer (section 4.3). |
+| `W0601` | A box lists a member id that names no node or box. |
+| `W0602` | A node or box is listed as a member of more than one box. |
+| `W0603` | `wiretc fmt` would drop a `//` comment (section 2.1). |
+| `W0604` | A `#[note]` is detached: its target was deleted and the note was moved to the enclosing graph (section 2.4). |
+| `W0605` | A layout line, or its metadata, names no node of the graph. It is kept as written (section 2.3). |
 
 Diagnostics are structured records, not only text: `code`, `severity`, `message`, `module`, `graph`, `node` and `pin`. `wiretc check --json` prints one record per line. An editor uses `node` and `pin` to highlight the exact place on the graph, and an LLM agent feeds the records back to itself until the check is clean (section 7.2). Diagnostics that arise inside an expanded macro carry the path-style node id (section 4.4).
 

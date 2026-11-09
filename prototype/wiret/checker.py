@@ -735,8 +735,8 @@ def check_flow(info: GraphInfo, G, D):
             if kind == "Entry":
                 continue
             if prod not in dom[nid] or prod == nid:
-                D("W0310", f"reads '{prod}.{pin}', but '{prod}' does not run on every path to "
-                           f"this node (zero value if it has not run)", G, nid, cpin)
+                D("E0310", f"reads '{prod}.{pin}', but '{prod}' does not run on every path to "
+                           f"this node (store it in a local on every path instead)", G, nid, cpin)
 
     # W0320: a node reading mutable state feeds several impure consumers
     for rid, sig in info.sigs.items():
@@ -817,6 +817,12 @@ def check_attr_names(module: Module, D):
 
 
 def check_layout(g: Graph, ids: set, G, D):
+    nodes = {n.id for n in g.nodes}
+    for name in sorted({p.id for p in g.places} | set(g.orphan_meta)):
+        if name not in nodes:
+            D("W0605", f"the layout block has a line for '{name}', which is not a node of "
+                       f"this graph; move its position and notes to the node they belong to, "
+                       f"or delete the line", G, name)
     owner = {}
     for b in sorted(g.boxes, key=lambda b: b.id):
         for m in b.members():
