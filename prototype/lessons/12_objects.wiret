@@ -9,19 +9,19 @@ class Animal {
 
   #[note("What any animal says, unless its own class says otherwise. GetField reads this animal's name: self is the animal Speak was called on.")]
   func Speak() -> (line: string) {
+    flow {
+      entry -> ret
+    }
+
     node entry = Entry()
     node ret = Return(
       .line <- Call std.string.Concat(
         .a <- GetField Animal.name(
           .obj <- entry.self,
-        ).value,
+        ),
         .b <- " makes a sound.",
-      ).result,
+      ),
     )
-
-    flow {
-      entry -> ret
-    }
 
     layout {
       entry at (0, 0)
@@ -36,19 +36,19 @@ class Animal {
 class Cat : Animal {
   #[note("Cat replaces Speak completely: an override. A Cat still has a name, inherited from Animal.")]
   func Speak() -> (line: string) {
+    flow {
+      entry -> ret
+    }
+
     node entry = Entry()
     node ret = Return(
       .line <- Call std.string.Concat(
         .a <- GetField Cat.name(
           .obj <- entry.self,
-        ).value,
+        ),
         .b <- " says Meow.",
-      ).result,
+      ),
     )
-
-    flow {
-      entry -> ret
-    }
 
     layout {
       entry at (0, 0)
@@ -63,19 +63,19 @@ class Cat : Animal {
 class Dog : Animal {
   #[note("Dog keeps what Animal says and adds to it: CallParent runs Animal's Speak on this same dog.")]
   func Speak() -> (line: string) {
+    flow {
+      entry -> parent
+      parent -> ret
+    }
+
     node entry = Entry()
     node parent = CallParent Speak()
     node ret = Return(
       .line <- Call std.string.Concat(
         .a <- parent.line,
         .b <- " Woof!",
-      ).result,
+      ),
     )
-
-    flow {
-      entry -> parent
-      parent -> ret
-    }
 
     layout {
       entry at (0, 0)
@@ -90,6 +90,21 @@ class Dog : Animal {
 #[note("Try it: (1) Step (F11) into Speak and look at self in the Variables panel. (2) Give Animal a second field, 'legs: i32 = 4', and use it in Speak. (3) Delete Cat's Speak: Tom now speaks like any animal.")]
 func Main() {
   local pets: array::<Animal>
+
+  flow {
+    add_cat -> other
+    add_dog -> cat
+    add_other -> loop
+    cat -> name_cat
+    dog -> name_dog
+    entry -> dog
+    loop.each -> speak
+    name_cat -> add_cat
+    name_dog -> add_dog
+    other -> add_other
+    speak -> say
+  }
+
   node add_cat = ArrayAdd::<Animal> pets(
     .item <- cat.result,
   )
@@ -103,7 +118,7 @@ func Main() {
   node dog = New Dog()
   node entry = Entry()
   node loop = Macro std.flow.ForEach::<Animal>(
-    .array <- GetLocal pets().value,
+    .array <- GetLocal pets(),
   )
   node name_cat = SetField Animal.name(
     .obj <- cat.result,
@@ -120,20 +135,6 @@ func Main() {
   node speak = Call Animal.Speak(
     .self <- loop.item,
   )
-
-  flow {
-    add_cat -> other
-    add_dog -> cat
-    add_other -> loop
-    cat -> name_cat
-    dog -> name_dog
-    entry -> dog
-    loop.each -> speak
-    name_cat -> add_cat
-    name_dog -> add_dog
-    other -> add_other
-    speak -> say
-  }
 
   layout {
     add_cat at (1500, 0)

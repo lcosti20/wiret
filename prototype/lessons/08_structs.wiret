@@ -20,24 +20,6 @@ struct Pet {
 #[note("Try it: (1) Step (F11) into Show and look at p in the Variables panel. (2) Right-click the value pin of 'hungry' and set it to Mood.Sleepy. (3) In the Source pane, add a field 'age: i32 = 1' to Pet and watch 'Make Pet' grow a pin. (4) Right-click an output pin that carries a Pet and choose 'Break into fields'.")]
 func Main() {
   local pet: Pet
-  node entry = Entry()
-  node save = SetLocal pet(
-    .value <- WithField Pet.mood(
-      .obj <- GetLocal pet().value,
-      .value <- Mood.Hungry,
-    ).result,
-  )
-  node show_after = Call Show(
-    .p <- GetLocal pet().value,
-  )
-  node show_before = Call Show(
-    .p <- GetLocal pet().value,
-  )
-  node start = SetLocal pet(
-    .value <- MakeStruct Pet(
-      .name <- "Rex",
-    ).result,
-  )
 
   flow {
     entry -> start
@@ -45,6 +27,25 @@ func Main() {
     show_before -> save
     start -> show_before
   }
+
+  node entry = Entry()
+  node save = SetLocal pet(
+    .value <- WithField Pet.mood(
+      .obj <- GetLocal pet(),
+      .value <- Mood.Hungry,
+    ),
+  )
+  node show_after = Call Show(
+    .p <- GetLocal pet(),
+  )
+  node show_before = Call Show(
+    .p <- GetLocal pet(),
+  )
+  node start = SetLocal pet(
+    .value <- MakeStruct Pet(
+      .name <- "Rex",
+    ),
+  )
 
   layout {
     entry at (0, 0)
@@ -64,18 +65,25 @@ func Main() {
 
 #[note("Show prints one line about a pet. Break Pet splits the pet into its fields, and the Switch picks a line by its mood.")]
 func Show(p: Pet) {
+  flow {
+    entry -> which
+    which.case0 -> happy
+    which.case1 -> hungry
+    which.default -> sleepy
+  }
+
   node entry = Entry()
   node happy = Call host.Log(
     .message <- Call std.string.Concat(
       .a <- parts.name,
       .b <- " is happy.",
-    ).result,
+    ),
   )
   node hungry = Call host.Log(
     .message <- Call std.string.Concat(
       .a <- parts.name,
       .b <- " is hungry.",
-    ).result,
+    ),
   )
   node parts = BreakStruct Pet(
     .obj <- entry.p,
@@ -84,18 +92,11 @@ func Show(p: Pet) {
     .message <- Call std.string.Concat(
       .a <- parts.name,
       .b <- " is sleepy.",
-    ).result,
+    ),
   )
   node which = Switch::<Mood>(
     .value <- parts.mood,
   ) @cases(Mood.Happy, Mood.Hungry)
-
-  flow {
-    entry -> which
-    which.case0 -> happy
-    which.case1 -> hungry
-    which.default -> sleepy
-  }
 
   layout {
     entry at (0, 0)

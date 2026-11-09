@@ -66,7 +66,13 @@ def attr_fields(attrs: list, prefix="attr") -> dict:
     return out
 
 
-def node_fields(n: Node, single_out: Optional[str]) -> dict:
+def comment_field(out: dict, key: str, lines: list) -> None:
+    """An attached `//` comment as a field, so it merges like any other (section 7.1)."""
+    if lines:
+        out[key] = ("\n".join(lines), list(lines))
+
+
+def node_fields(n: Node, single_out: Optional[str], comments=False) -> dict:
     out = {"kind": (n.kind, n.kind), "symbol": (n.symbol or "", n.symbol)}
     for i, t in enumerate(n.targs):
         out[f"targ:{i}"] = (t, t)
@@ -77,6 +83,12 @@ def node_fields(n: Node, single_out: Optional[str]) -> dict:
         pin = x.pin or single_out or "then"
         target = x.target + (f".{x.target_pin}" if x.target_pin else "")
         out[f"exec:{pin}"] = (target, ExecOut(pin, x.target, x.target_pin))
+        if comments:
+            comment_field(out, f"cmt:exec:{pin}", x.comment)
+    if comments:
+        comment_field(out, "cmt", n.comment)
+        for b in n.bindings:
+            comment_field(out, f"cmt:bind:{b.pin}", b.comment)
     return out
 
 
@@ -88,14 +100,21 @@ def build_node(proto: Node, fields: dict) -> Node:
                    if k.startswith("targ:"))
     n.targs = [t for _, t in targs]
     n.attrs = [a for k, v in sorted(fields.items()) if k.startswith("attr:") for a in v[1]]
-    n.bindings = [v[1] for k, v in sorted(fields.items()) if k.startswith("bind:")]
-    n.execs = [v[1] for k, v in sorted(fields.items()) if k.startswith("exec:")]
+    n.bindings = [copy.deepcopy(v[1]) for k, v in sorted(fields.items()) if k.startswith("bind:")]
+    n.execs = [copy.deepcopy(v[1]) for k, v in sorted(fields.items()) if k.startswith("exec:")]
+    n.comment = list(fields.get("cmt", ("", []))[1])
+    for b in n.bindings:
+        b.comment = list(fields.get(f"cmt:bind:{b.pin}", ("", []))[1])
+    for e in n.execs:
+        e.comment = list(fields.get(f"cmt:exec:{e.pin}", ("", []))[1])
     return n
 
 
-def sub_fields(x) -> dict:
+def sub_fields(x, comments=False) -> dict:
     """A parameter, result, field, enum member, local or state slot."""
     out = {"name": (x.name, x.name)}
+    if comments:
+        comment_field(out, "cmt", getattr(x, "comment", []))
     if hasattr(x, "type"):
         out["type"] = (x.type, x.type)
     d = getattr(x, "default", None)
@@ -125,6 +144,8 @@ def build_sub(proto, fields: dict):
     if isinstance(x, Dispatcher):
         x.params = copy.deepcopy(fields["sig"][1][0])
     x.attrs = [a for k, v in sorted(fields.items()) if k.startswith("attr:") for a in v[1]]
+    if hasattr(x, "comment"):
+        x.comment = list(fields.get("cmt", ("", []))[1])
     return x
 
 
@@ -141,8 +162,10 @@ def decl_kind(it) -> str:
             Struct: "struct", Class: "class", Interface: "interface"}[type(it)]
 
 
-def decl_fields(it) -> dict:
+def decl_fields(it, comments=False) -> dict:
     out = {"name": (it.name, it.name)}
+    if comments:
+        comment_field(out, "cmt", it.comment)
     out.update(attr_fields(it.attrs))
     if isinstance(it, Use):
         out["alias"] = (it.alias or "", it.alias)
@@ -183,6 +206,7 @@ def build_decl(proto, fields: dict):
         it.impls = list(fields["impls"][1])
     if isinstance(it, Graph):
         it.tparams = fields["tparams"][1]
+    it.comment = list(fields.get("cmt", ("", []))[1])
     return it
 
 
@@ -330,6 +354,7 @@ class Merger:
         m.name = fields["name"][1]
         m.attrs = [a for k, v in sorted(fields.items()) if k.startswith("attr:") for a in v[1]]
         m.meta = self.merge_meta(b.meta, o.meta, t.meta, "module", lambda mm: mm)
+        m.comment = list(t.comment if o.comment == b.comment else o.comment)
         m.comments = []
 
         def changed(x, y):
@@ -372,15 +397,15 @@ class Merger:
             it = self.find_decl(m, kref[0])
             if it is None:
                 return
-            fields = decl_fields(it)
+            fields = decl_fields(it, comments=True)
             if theirs is None:
                 fields.pop(fk, None)
             else:
                 fields[fk] = theirs
             new = build_decl(it, fields)
             m.items[m.items.index(it)] = new
-        fields = self.merge_fields(decl_fields(b) if b else None, decl_fields(o), decl_fields(t),
-                                   where, setter)
+        df = lambda x: decl_fields(x, comments=True) if x is not None else None
+        fields = self.merge_fields(df(b), df(o), df(t), where, setter)
         it = build_decl(o, fields)
         kref[0] = key_of(it, decl_kind(it))
         k = kref[0]
@@ -420,14 +445,14 @@ class Merger:
                 x = next((y for y in lst or [] if key_of(y) == sk), None)
                 if x is None:
                     return
-                f = sub_fields(x)
+                f = sub_fields(x, comments=True)
                 if theirs is None:
                     f.pop(fk, None)
                 else:
                     f[fk] = theirs
                 lst[lst.index(x)] = build_sub(x, f)
-            f = self.merge_fields(sub_fields(xb) if xb else None, sub_fields(xo), sub_fields(xt),
-                                  f"{where}.{xo.name}", setter)
+            sf = lambda x: sub_fields(x, comments=True) if x is not None else None
+            f = self.merge_fields(sf(xb), sf(xo), sf(xt), f"{where}.{xo.name}", setter)
             x = build_sub(xo, f)
             if hasattr(x, "meta"):
                 x.meta = self.merge_meta(getattr(xb, "meta", []) if xb else [], xo.meta, xt.meta,
@@ -435,7 +460,7 @@ class Merger:
             return x
 
         def changed(x, y):
-            return sub_fields(x) != sub_fields(y)
+            return sub_fields(x, comments=True) != sub_fields(y, comments=True)
 
         def conflict(kept, side, k, deleter):
             name = (kept or side).name
@@ -468,7 +493,7 @@ class Merger:
             return it if isinstance(it, Graph) else None
 
         def nf(n, singles):
-            return node_fields(n, singles.get(n.id))
+            return node_fields(n, singles.get(n.id), comments=True)
 
         def merge_one(nb, no, nt):
             nid = no.id
@@ -478,7 +503,7 @@ class Merger:
                 n = gg.node(nid) if gg else None
                 if n is None:
                     return
-                f = node_fields(n, None)
+                f = node_fields(n, None, comments=True)
                 if theirs is None:
                     f.pop(fk, None)
                 else:

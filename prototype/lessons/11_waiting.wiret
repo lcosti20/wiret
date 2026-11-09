@@ -6,6 +6,13 @@ extern func host.Log(message: string)
 #[note("Lesson 11: Waiting. An event can pause partway and carry on later: Delay waits a number of seconds of game time. Main is an event here, not a func, because it waits. While one event waits, a game keeps running everything else.")]
 #[note("Try it: (1) Change the wait to 0.5 and run: the countdown takes half as long in game time (see the time printed in the Output). (2) Count down from 5. (3) Try putting a Delay in a func: Wiret asks you to mark it @latent, because whatever calls it will have to wait too.")]
 event Main() {
+  flow {
+    entry -> loop
+    loop.each -> say
+    loop.done -> go
+    say -> wait
+  }
+
   node entry = Entry()
   node go = Call host.Log(
     .message <- "Go!",
@@ -20,21 +27,14 @@ event Main() {
         .value <- Sub::<i32>(
           .a <- 4,
           .b <- loop.index,
-        ).result,
-      ).result,
+        ),
+      ),
       .b <- "...",
-    ).result,
+    ),
   )
   node wait = Delay(
     .seconds <- 1.0,
   )
-
-  flow {
-    entry -> loop
-    loop.each -> say
-    loop.done -> go
-    say -> wait
-  }
 
   layout {
     entry at (0, 0)

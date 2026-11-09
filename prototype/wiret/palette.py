@@ -53,6 +53,9 @@ DESCRIBE = {
               "wait signal event until notify"),
     "std.signal.New": ("Makes a new signal for Await to wait on.", "signal create make"),
     "std.signal.Fire": ("Wakes everything waiting on a signal.", "signal fire notify wake"),
+    "Format": ("Builds text from a template: each {name} in it becomes an input, and a "
+               "number or true/false given to it is written as text.",
+               "string text template concat join interpolate message number to text"),
     "Convert": ("Turns a value into another type, for example a number into text.",
                 "cast change type to string text number"),
     "Add": ("Adds two numbers: a + b.", "+ plus sum total"),
@@ -300,6 +303,7 @@ def items(g: Graph, idx: ModuleIndex) -> list:
                       else "true/false" if t == "bool" else f"a {t}" if t in idx.enums
                       else "whole number")
                 out.append(_item("Convert", f"Convert::<{f}, {t}> (to {to})", "Math", targs=[f, t]))
+    out.append(_item("Format", 'Format "{value}" (text from a template)', "Text", "{value}"))
     for l in sorted(g.locals, key=lambda l: l.name):
         out.append(_item("GetLocal", f"Get {l.name}", "Variables", l.name))
         out.append(_item("SetLocal", f"Set {l.name}", "Variables", l.name))

@@ -63,7 +63,10 @@ def lex(text: str):
         elif text.startswith("//", i):
             j = text.find("\n", i)
             j = n if j < 0 else j
-            comments.append((line, col, text[i + 2:j].strip(), len(toks)))
+            raw = text[i + 2:j].rstrip()
+            own = not toks or toks[-1].kind == "nl"      # nothing before it on its line
+            comments.append((line, col, raw.strip(), len(toks), own,
+                             raw[1:] if raw.startswith(" ") else raw))
             i = j
         elif c == '"':
             i, s = _lex_string(text, i, line, col)
@@ -136,6 +139,11 @@ class Parser:
         self.anchors = []  # (token index, anchor tuple)
         self.pending_methods = []  # methods of the class just parsed
         self.graph_name = None     # the graph whose body is being parsed
+        # own-line `//` comments by line, and those attached to an element so far (2.1)
+        self.own = {c[0]: k for k, c in enumerate(self.raw_comments) if c[4]}
+        self.taken = set()
+        self.defaults = []         # (graph, PinRef, inline node, token): outputs left implicit
+        self.bare = None           # the parameters an expression body names bare
 
     # -- token helpers -------------------------------------------------------
     def peek(self, k=0) -> Tok:
@@ -182,6 +190,19 @@ class Parser:
         self.expect("nl", None, "end of line")
         self.skip_nl()
 
+    def lead_comments(self, top: int, stmt: int) -> list:
+        """The `//` lines attached to a statement on line `stmt` whose metadata lines start
+        on line `top`: the comment lines among its metadata lines, and the run of comment
+        lines directly above, with no blank line between (section 2.1)."""
+        free = lambda l: l in self.own and self.own[l] not in self.taken
+        above, l = [], top - 1
+        while free(l):
+            above.append(self.own[l])
+            l -= 1
+        ks = above[::-1] + [self.own[l] for l in range(top, stmt) if free(l)]
+        self.taken.update(ks)
+        return [self.raw_comments[k][5] for k in ks]
+
     def qname(self) -> str:
         parts = [self.ident()]
         while self.at_p(".") and self.at("id", k=1):
@@ -199,16 +220,21 @@ class Parser:
         if version > 1:
             raise ParseError(f"unsupported wiret version {version}", self.peek().line, 0)
         self.end_stmt()
+        t0 = self.peek()
         meta = self.meta_lines()
         if not self.at_kw("module"):
             self.error("expected 'module'")
-        self.next()
+        mt = self.next()
         mod = Module(version, self.qname(), self.attrs(), meta=meta)
+        mod.comment = self.lead_comments(t0.line, mt.line)
         self.end_stmt()
         while not self.at("eof"):
+            t0 = self.peek()
             meta = self.meta_lines()
+            st = self.peek()
             it = self.item()
             it.meta = meta
+            it.comment = self.lead_comments(t0.line, st.line)
             mod.items.append(it)
             if isinstance(it, Class):     # its methods are items of their own (model.Graph)
                 mod.items.extend(self.pending_methods)
@@ -216,11 +242,39 @@ class Parser:
             self.skip_nl()
         mod.comments = self.attach_comments()
         resolve_enum_values(mod)
+        self.resolve_defaults(mod)
         return mod
+
+    def resolve_defaults(self, mod: Module):
+        """An inline node written without `.pin` feeds in its one data output (section 2.3,
+        rule 4). Which output that is depends on the node's signature, known once the whole
+        module is read."""
+        if not self.defaults:
+            return
+        from .registry import ModuleIndex, signature
+        idx = ModuleIndex(mod)
+        graphs = {g.name: g for g in mod.graphs()}
+        for gname, ref, n, tok in self.defaults:
+            sig = signature(n, graphs[gname], idx)
+            outs = sig.data_outs
+            if len(outs) == 1:
+                ref.pin = outs[0].name
+            elif sig.error:
+                ref.pin = "result"      # the checker reports the node itself
+            elif not outs:
+                raise ParseError(f"'{n.kind}' has no output to feed into this input",
+                                 tok.line, tok.col)
+            else:
+                names = ", ".join(o.name for o in outs)
+                raise ParseError(f"'{n.kind}' has several outputs ({names}); name the one this "
+                                 f"input reads, as in '{n.kind}(...).{outs[0].name}'",
+                                 tok.line, tok.col)
 
     def attach_comments(self):
         out = []
-        for line, _col, text, tok_index in self.raw_comments:
+        for k, (line, _col, text, tok_index, _own, _raw) in enumerate(self.raw_comments):
+            if k in self.taken:
+                continue
             anchor = None
             for idx, a in self.anchors:
                 if idx >= tok_index:
@@ -311,8 +365,31 @@ class Parser:
             self.next()
             g.results = self.params()
         g.attrs = self.attrs()
-        self.body(g)
+        if self.at_p("="):
+            self.expr_body(g)
+        else:
+            self.body(g)
         return g
+
+    def expr_body(self, g: Graph):
+        """`func F(x: T) -> (r: U) @attrs = value` (section 2.3): an Entry wired to a Return
+        whose one input is the value, in which the parameters are named bare (`x`)."""
+        t = self.next()
+        if g.kind != "func" or g.owner or g.results is None or len(g.results) != 1:
+            raise ParseError("only a function with exactly one result, outside a class, is "
+                             "written '= value'; give this one a body in braces", t.line, t.col)
+        self.graph_name = g.name
+        res = g.results[0].name
+        self.skip_nl()
+        self.bare = {p.name for p in g.params}
+        try:
+            self.anchors.append((self.i, ("node", g.name, "ret")))
+            val, inline = self.input_value(f"ret.{res}")
+        finally:
+            self.bare = None
+        g.nodes = [Node("entry", "Entry", execs=[ExecOut(None, "ret")]),
+                   Node("ret", "Return", bindings=[Binding(res, val)])] + inline
+        self.end_stmt()
 
     def class_decl(self) -> Class:
         """`class Name [: Base] @attrs { field | func | event ... }` (section 2.2). The methods
@@ -333,18 +410,20 @@ class Parser:
         self.expect_p("{")
         self.skip_nl()
         while not self.at_p("}"):
+            t0 = self.peek()
             meta = self.meta_lines()
+            cm = self.lead_comments(t0.line, self.peek().line)
             if self.at_kw("func") or self.at_kw("event"):
                 start = self.i
                 kw = self.next().value
                 g = self.graph(kw, start, owner=c.name)
-                g.meta = meta
+                g.meta, g.comment = meta, cm
                 self.pending_methods.append(g)
                 self.skip_nl()
                 continue
             if self.at_kw("dispatcher"):
                 self.next()
-                d = Dispatcher(self.ident("dispatcher name"), meta=meta)
+                d = Dispatcher(self.ident("dispatcher name"), meta=meta, comment=cm)
                 d.params = self.params()
                 if self.at_p("->"):
                     self.error("a dispatcher has no results: its handlers' results would have "
@@ -364,7 +443,7 @@ class Parser:
             if self.at_p("="):
                 self.next()
                 default = self.literal()
-            c.fields.append(Field(name, ty, default, self.attrs(), meta))
+            c.fields.append(Field(name, ty, default, self.attrs(), meta, cm))
             self.end_stmt()
         self.next()
         self.end_stmt()
@@ -376,11 +455,13 @@ class Parser:
         self.skip_nl()
         out = []
         while not self.at_p("}"):
+            t0 = self.peek()
             meta = self.meta_lines()
             if not self.at("id"):
                 self.error(f"expected {what}")
+            cm = self.lead_comments(t0.line, self.peek().line)
             m = member()
-            m.meta = meta
+            m.meta, m.comment = meta, cm
             out.append(m)
             self.end_stmt()
         self.next()
@@ -665,6 +746,8 @@ class Parser:
             if meta and not (self.at_kw("local") or self.at_kw("state")):
                 raise ParseError("in a graph body, a metadata line may only stand above a "
                                  "'local' or 'state' statement", mt.line, mt.col)
+            cm = self.lead_comments(mt.line, t.line) if t.kind == "id" and t.value in (
+                "local", "state", "node") else []
             if self.at_kw("local") or self.at_kw("state"):
                 self.next()
                 name = self.ident()
@@ -675,7 +758,7 @@ class Parser:
                     self.next()
                     default = self.literal()
                 (g.locals if t.value == "local" else g.states).append(
-                    Local(name, ty, default, self.attrs(), meta))
+                    Local(name, ty, default, self.attrs(), meta, cm))
                 self.end_stmt()
             elif self.at_kw("node"):
                 at = len(self.anchors)
@@ -683,6 +766,7 @@ class Parser:
                 self.next()
                 ns = self.node()           # adds the anchors of its inline nodes after this one
                 self.anchors[at] = (self.anchors[at][0], ("node", g.name, ns[0].id))
+                ns[0].comment = cm
                 g.nodes.extend(ns)
                 self.end_stmt()
             elif self.at_kw("flow"):
@@ -705,11 +789,11 @@ class Parser:
                 g.orphan_meta.setdefault(nid, []).extend(meta)
                 continue
             nodes[nid].meta.extend(meta)
-        for tok, src, pin, e in wires:
+        for tok, src, pin, e, cm in wires:
             if src not in nodes:
                 raise ParseError(f"flow wire starts at '{src}', which is not a node of "
                                  f"'{g.name}'", tok.line, tok.col)
-            nodes[src].execs.append(ExecOut(pin, *e))
+            nodes[src].execs.append(ExecOut(pin, *e, comment=cm))
 
     def node(self) -> list:
         """`node id = Kind[::<targs>] [symbol](.pin <- value, ...) @attrs` (section 2.3).
@@ -733,6 +817,8 @@ class Parser:
         n = Node(nid, kind)
         if self.at("id"):
             n.symbol = self.qname()
+        elif kind == "Format" and self.at("str"):      # its template (section 3.3)
+            n.symbol = self.next().value
         if self.at_p("<"):
             self.generics_hint()
         if self.at_p("::"):
@@ -755,12 +841,13 @@ class Parser:
         while not self.at_p(")"):
             if not self.at_p("."):
                 self.error("expected an input, '.pin <- value', or ')'")
+            cm = self.lead_comments(self.peek().line, self.peek().line)
             self.next()
             pin = self.ident("pin name")
             self.expect_p("<-")
             self.skip_nl()
             val, inline = self.input_value(f"{nid}.{pin}")
-            n.bindings.append(Binding(pin, val))
+            n.bindings.append(Binding(pin, val, cm))
             out.extend(inline)
             self.skip_nl()
             if self.at_p(","):
@@ -774,17 +861,24 @@ class Parser:
     def input_value(self, path: str):
         """The value bound to an input: a literal, a pin reference `node.pin` (the node may be
         an inline node's dotted name), or a node written inline, `Kind(...).pin`, which gets
-        the id `path`. Returns (value, inline nodes)."""
+        the id `path`; `.pin` may be left out when the node has one data output. In an
+        expression body a parameter is named bare. Returns (value, inline nodes)."""
         t = self.peek()
         if t.kind == "id" and t.value not in ("true", "false", "null"):
             if self.at_p(".", 1):
                 parts = self.qname().split(".")
                 return PinRef(".".join(parts[:-1]), parts[-1]), []
+            if self.bare is not None and t.value in self.bare and not (
+                    self.at_p("(", 1) or self.at_p("::", 1) or self.at_p("<", 1)
+                    or self.at("id", k=1) or self.at("str", k=1)):
+                self.next()
+                return PinRef("entry", t.value), []
             self.anchors.append((self.i, ("node", self.graph_name, path)))
             inline = self.node_expr(path)
             if not self.at_p("."):
-                self.error(f"a node written inline is followed by the output it feeds in, "
-                           f"as in '{inline[0].kind}(...).result'")
+                ref = PinRef(path, None)            # its one data output, resolved later
+                self.defaults.append((self.graph_name, ref, inline[0], t))
+                return ref, inline
             self.next()
             return PinRef(path, self.ident("pin name")), inline
         return self.literal(), []
@@ -798,7 +892,8 @@ class Parser:
         return node, pin
 
     def flow(self) -> list:
-        """`flow { src[.pin] -> dst[.pin] ... }`; returns (token, src, pin, (dst, dst_pin))."""
+        """`flow { src[.pin] -> dst[.pin] ... }`; returns (token, src, pin, (dst, dst_pin),
+        comment lines)."""
         self.expect_p("{")
         self.skip_nl()
         out = []
@@ -806,9 +901,10 @@ class Parser:
             tok = self.peek()
             if self.at_p("#["):
                 self.error("flow wires cannot carry metadata; put a note above the node instead")
+            cm = self.lead_comments(tok.line, tok.line)
             src, pin = self.endpoint("exec source")
             self.expect_p("->")
-            out.append((tok, src, pin, self.endpoint("exec target")))
+            out.append((tok, src, pin, self.endpoint("exec target"), cm))
             self.end_stmt()
         self.next()
         self.end_stmt()

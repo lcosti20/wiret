@@ -42,14 +42,14 @@ module untitled
 extern func host.Log(message: string)
 
 func Main() {
+  flow {
+    entry -> hello
+  }
+
   node entry = Entry()
   node hello = Call host.Log(
     .message <- "Hello, Wiret!",
   )
-
-  flow {
-    entry -> hello
-  }
 
   layout {
     entry at (0, 0)
@@ -383,9 +383,10 @@ class EditorApp:
         self.set_text(text, from_disk=True)
         self.after_text_parsed(fit=True)
         if self.module and self.module.comments:
-            self.log(f"{len(self.module.comments)} '//' comment(s) found. They are not part of the "
-                     f"model: use File > Convert // comments to notes before editing the graph, "
-                     f"or they will be offered for conversion on the first graph edit (W0603).",
+            self.log(f"{len(self.module.comments)} '//' comment(s) are not directly above a "
+                     f"statement, so they are attached to nothing: use File > Convert // comments "
+                     f"to notes before editing the graph, or they will be offered for conversion "
+                     f"on the first graph edit (W0603).",
                      "dim")
 
     # -- lessons ------------------------------------------------------------------
@@ -609,9 +610,9 @@ class EditorApp:
         if m.comments:
             ans = messagebox.askyesnocancel(
                 "Comments would be lost",
-                f"The source has {len(m.comments)} '//' comment(s). Comments are not part of the "
-                f"model, so saving the graph cannot keep them (W0603).\n\nYes: convert them to "
-                f"notes\nNo: drop them\nCancel: undo this edit")
+                f"The source has {len(m.comments)} '//' comment(s) that are not directly above "
+                f"a statement, so saving the graph cannot keep them (W0603).\n\nYes: convert "
+                f"them to notes\nNo: drop them\nCancel: undo this edit")
             if ans is None:
                 self.parse_text()
                 self.refresh()

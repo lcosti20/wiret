@@ -6,6 +6,17 @@ extern func host.Log(message: string)
 #[note("Lesson 6: Challenge, FizzBuzz. For 1 to 15, print Fizz for multiples of 3, Buzz for multiples of 5, FizzBuzz for multiples of both, and otherwise the number. Rem gives the remainder: a number is a multiple of 3 when the remainder after dividing by 3 is 0.")]
 #[note("Try it: (1) Predict the output, then Run. (2) Swap the order of check15 and check3 and see what breaks. (3) Add 'Bang' for multiples of 7.")]
 func Main() {
+  flow {
+    check15.then -> fizzbuzz
+    check15.else -> check3
+    check3.then -> fizz
+    check3.else -> check5
+    check5.then -> buzz
+    check5.else -> number
+    entry -> loop
+    loop.each -> check15
+  }
+
   node buzz = Call host.Log(
     .message <- "Buzz",
   )
@@ -14,27 +25,27 @@ func Main() {
       .a <- Rem::<i32>(
         .a <- loop.index,
         .b <- 15,
-      ).result,
+      ),
       .b <- 0,
-    ).result,
+    ),
   )
   node check3 = Branch(
     .cond <- Eq::<i32>(
       .a <- Rem::<i32>(
         .a <- loop.index,
         .b <- 3,
-      ).result,
+      ),
       .b <- 0,
-    ).result,
+    ),
   )
   node check5 = Branch(
     .cond <- Eq::<i32>(
       .a <- Rem::<i32>(
         .a <- loop.index,
         .b <- 5,
-      ).result,
+      ),
       .b <- 0,
-    ).result,
+    ),
   )
   node entry = Entry()
   node fizz = Call host.Log(
@@ -50,19 +61,8 @@ func Main() {
   node number = Call host.Log(
     .message <- Convert::<i32, string>(
       .value <- loop.index,
-    ).result,
+    ),
   )
-
-  flow {
-    check15.then -> fizzbuzz
-    check15.else -> check3
-    check3.then -> fizz
-    check3.else -> check5
-    check5.then -> buzz
-    check5.else -> number
-    entry -> loop
-    loop.each -> check15
-  }
 
   layout {
     buzz at (1502, -141)

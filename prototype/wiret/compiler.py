@@ -23,7 +23,7 @@ from .registry import (class_field_target, field_place, parent_method, delegate_
                        ARRAY_MUTATORS, FLOAT_TYPES, INT_TYPES, MAP_PURE, PLACE_MUTATORS,
                        REGISTRY_NAME, REGISTRY_VERSION, SET_PURE,
                        SIGNED_TYPES, ModuleIndex, Pin, Sig, array_elem, attr_int, enum_values,
-                       is_container, map_types, set_elem, signature, zero_lit)
+                       format_parts, is_container, map_types, set_elem, signature, zero_lit)
 
 # map and set kinds -> their instruction (section 5.6)
 CONTAINER_OPS = {"MapFind": "map.find", "MapHas": "map.has", "MapLength": "map.len",
@@ -1465,6 +1465,9 @@ class FuncLowerer:
         if k in LAZY_KINDS:
             self.emit_lazy(n, ep)
             return
+        if k == "Format":
+            self.emit_format(n, ep)
+            return
         if k == "CallParent":
             self.E("local.get", self.local_index["self"])
         for _, _, s in n.inputs:          # Eq and Ne only compare, so they do not share
@@ -1589,6 +1592,24 @@ class FuncLowerer:
             for i in range(len(self.c.idx.structs[name].fields)):
                 self.E("local.get", tmp)
                 self.E("struct.get", t, i)
+
+    def emit_format(self, n: IRNode, ep: EvalPoint):
+        """Format: each piece of the template in order, a literal or an input converted to
+        text as Convert does, joined with std.string.Concat."""
+        srcs = {pin: (ty, s) for pin, ty, s in n.inputs}
+        concat = self.c.import_ref("std.string.Concat")
+        parts = format_parts(n.symbol)
+        for i, (kind, v) in enumerate(parts):
+            if kind == "text":
+                self.emit_const(Lit("string", v), "string")
+            else:
+                ty, s = srcs[v]
+                self.eval(s, ep)
+                self.emit_convert(ty, "string")
+            if i:
+                self.E("call", concat)
+        if not parts:
+            self.emit_const(Lit("string", ""), "string")
 
     def emit_convert(self, f: str, t: str):
         f, t = self.c.base(f), self.c.base(t)    # an enum converts to its integer as-is
