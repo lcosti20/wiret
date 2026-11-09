@@ -243,12 +243,12 @@ The editor also follows the graph-editor contract in section 7.5:
 | Area | Status |
 | --- | --- |
 | Text syntax (2.1–2.4) | Full lexer and parser for `use`, `extern`, `const`, `var`, `enum`, `struct`, `class` (with methods, dispatchers, a base class and `impl`), `interface`, `func`, `event`, `macro`, `local`, `state`, nodes with their inputs in parentheses (`Kind(.pin <- value, ...)`, `Entry()`), nodes written inline in the one input they feed (naming the output they feed in only when they have several), functions written `= value`, `Format "..."` templates, `//` comments attached to what they stand above, semantic `@` attributes, `#[...]` metadata lines (`#[doc]`, `#[note]`, ...) above declarations, and above nodes' and boxes' lines in the layout block, the `flow` block (exec wires) and `layout` (places and boxes). An old `markup` block is rejected with a hint, and an unknown `@` name such as `@doc` is `E0104`. See *Structs and enums*, *Classes*, *Interfaces* and *Delegates and dispatchers* below. |
-| Canonical form and hashes (2.5) | Sorted items (struct fields and enum members keep the order written), the `flow` block before the node statements, nodes (a node read by exactly one input, with no exec pins and no `@` attribute, written inline there and named by its path, such as `show.message`), `flow` wires (by source node id, then exec pin order) and layout lines, each with its metadata lines above it (`doc`, `category`, `keywords`, then notes as written); registry pin order; default-valued bindings omitted; 100-column wrapping; attribute ordering. Semantic hash (ignores layout, every `#[...]` line, every `//` comment and `Reroute`) and layout hash. |
+| Canonical form and hashes (2.5) | Sorted items (struct fields and enum members keep the order written), the `flow` block before the node statements, nodes (a node read by exactly one input, with no exec pins and no `@` attribute, written inline there and named by its path, such as `show.message`), `flow` wires (by source node id, then exec pin order) and layout lines, each with its metadata lines above it (`doc`, `category`, `keywords`, then notes as written); registry pin order; default-valued bindings omitted; 100-column wrapping; attribute ordering. Semantic hash (ignores layout, every `#[...]` line, every `//` comment and `Reroute`) and layout hash. The §2.6 example, which the spec shows in flow order with no alignment, round-trips byte for byte: `wiretc view --flow` of its canonical form is the example exactly (see tests). |
 | Node kinds (3.3) | `Entry`, `Return`, `Branch`, `Sequence`, `Switch`, `Select`, `Macro`, `Exit`, `Reroute`, `Get/SetLocal`, `Get/SetVar` (and `const`s), `Get/SetState`, `Call`, `Convert`, all arithmetic, comparison, logic and bit kinds, and the array kinds `MakeArray`, `ArrayGet`, `ArrayLength`, `ArraySet`, `ArrayAdd`, `ArrayInsert`, `ArrayRemove`, `ArrayClear`, the struct kinds, the map and set kinds (see *Maps and sets* below), `Try` and `Throw` (see *Faults* below), the latent kinds `Delay`, `Yield` and `Await` (see *Fibers* below), the class kinds `New`, `GetField`/`SetField` on objects, `Cast` and `IsValid` (see *Classes* below), and `CreateDelegate`, `Invoke`, `Bind`, `Unbind` and `Broadcast` (see *Delegates and dispatchers* below). Types: `bool`, all integer widths, `f32`, `f64`, `string`, `array::<T>`, `map::<K, V>`, `set::<T>`, structs, enums, classes, interfaces, `delegate::<(A) -> (R)>` and `std.Signal`. |
 | Execution model (4.2–4.3) | Continuation stack, `Sequence` push/pop, macro inlining with path-style ids (`loop/test`, `loop!in`), `Exit` as a jump, joins, evaluation points with per-point sharing, impure output slots, `@pure` and `@reads` calls as pure nodes, per-expansion `state`. The §4.2 `SumTo(2)` trace is reproduced exactly (see tests). |
-| Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0150, E0151, E0152, E0160, E0201 (latency), E0301, E0302, E0304, E0310, E0320, E0401, E0412, E0501, E0502, E0503, W0201, W0301, W0302, W0601, W0602, W0603, W0604, W0605. |
+| Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0150, E0151, E0152, E0160, E0201 (latency), E0301, E0302, E0304, E0310, E0320, E0401, E0412, E0501, E0502, E0503, W0201, W0203, W0301, W0302, W0601, W0602, W0603, W0604, W0605. |
 | Lowering (4.8) | `-O0`: one labelled block per impure node, `local.tee` for shared values, `cont.push`/`cont.pop` kept. Output closely matches the §5.8 listings. |
-| WBC (5.2–5.4) | Type (function, `5E` array and `5F` struct entries), Import, Function, Global, Export, Data and Code sections, plus custom sections `name`, `wr.debug`, `wr.pins`, `wr.pure`, `wr.meta` (hashes), `wr.caps` and `wr.graph` (deflated canonical source). |
+| WBC (5.2–5.4) | Type (function, `5E` array and `5F` struct entries), Import, Function, Global, Export, Data and Code sections, plus custom sections `name`, `wr.debug`, `wr.pins`, `wr.pure`, `wr.meta` (hashes and export mode), `wr.caps` and `wr.graph` (deflated canonical source). Export modes as in 5.2: a normal `wiretc build` exports only what is marked `@export` (funcs, events, methods, `var`s, and struct, class and interface types; an enum has no type entry to export, so `@export` on one is warning `W0203`), each with flag bit 3; `wiretc build --export-all`, which `wiretc run`, `wiretc replay`, the editor and the browser version use, also exports every func, event and method, without bit 3. `LoadedModule.declared` holds the bit-3 names. |
 | Verifier (5.5) | One linear pass: decoding, branch targets, empty stack at labels, operand typing (including `struct.new`/`get`/`with`), returns, `max_stack`, latency/purity flags. Type references may point forward, but a struct may not hold itself by value. Fuzz-tested. |
 | VM (5–6) | Interpreter with exact fuel counting (5.7), faults with node-level tracebacks (6.9), a node hook that drives the editor's trace, linking against `std.*` natives and the host native `host.Log`. |
 
@@ -768,14 +768,12 @@ pins for results, and flow wires for a macro's exec parameters and results.
 
 ### Deviations and known gaps
 
-- **Exports.** Every `func` and `event` is exported, so the editor can run any of them. The
-  spec exports only `@export` declarations.
 - **Tier 2 in this prototype:** the language features are done (`Try`/`Throw`, fibers,
   classes, interfaces, delegates and dispatchers), and so are copy-on-write and capabilities.
   The prototype exists to show Wiret as a language, so the embedding and infrastructure items
   are out of its scope: the C API (the `VM` class's Python methods stand in for it), the
-  project manager (`wiret.toml` dependencies, `use` of other modules, `@export`-only exports,
-  `wiret.lock`, `WR_LOAD_LAZY_LINK` and `wr_link`), and debugger hooks as a host API (the
+  project manager (`wiret.toml` dependencies, `use` of other modules and linking against
+  their declared exports, `wiret.lock`, `WR_LOAD_LAZY_LINK` and `wr_link`), and debugger hooks as a host API (the
   editor has its own debugger). A module is one file.
 - **No `ref.share` removal.** Without `-O1` there is no liveness analysis, so a function that
   builds a local array and returns it still shares it, and the caller's first change to it
@@ -787,9 +785,6 @@ pins for results, and flow wires for a macro's exec parameters and results.
   implementations; this VM is one implementation on one interpreter.
 - **Optimisation.** There is no `-O1`, so the `cont.push`/`cont.pop` pairs are never replaced
   by direct branches.
-- **Example layout.** The spec's examples align the `=` signs; the canonical writer does not.
-  If it did, adding one longer node id would change every line of the graph, which breaks the
-  one-line-diff rule.
 - **Example literals.** The math pins in the registry have no declared defaults, so bindings
   such as `b: 0` are kept rather than omitted. This matches the §2.6 examples.
 

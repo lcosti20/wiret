@@ -113,8 +113,12 @@ class EvalPoint:
 
 class Compiler:
     def __init__(self, module: Module, source: Optional[str] = None, embed_source=True,
-                 debug=False, project=None):
+                 debug=False, project=None, export_all=False):
         self.m = module
+        # Export mode (section 5.2): a normal build exports only what is marked @export; an
+        # --export-all build (wiretc run, the editor) also exports every func, event and method
+        # so that any of them can be run by name.
+        self.export_all = export_all
         self.project = project     # for the [capabilities] allow check (E0160)
         self.debug = debug   # -Og: keep every pin's value in a local for the debugger
         self.idx = ModuleIndex(module)
@@ -390,13 +394,23 @@ class Compiler:
             mod.globals.append((self.vt(ty), 1, value))
         for i, fl in enumerate(lowered):
             g = fl.g
+            declared = g.has_attr("export")
+            if not (declared or self.export_all):
+                continue
             eflags = (wbc.EX_EVENT | wbc.EX_LATENT if g.kind == "event" else 0) | \
                      (wbc.EX_LATENT if g.has_attr("latent") else 0) | \
-                     (wbc.EX_PURE if g.has_attr("pure") else 0)
-            mod.exports.append((g.name, 0, len(self.imports) + i, eflags))
+                     (wbc.EX_PURE if g.has_attr("pure") else 0) | \
+                     (wbc.EX_DECLARED if declared else 0)
+            mod.exports.append((g.name, wbc.EXPORT_FUNC, len(self.imports) + i, eflags))
         for v in sorted(self.idx.vars.values(), key=lambda v: v.name):
-            if v.attrs and any(a.name == "export" for a in v.attrs):
-                mod.exports.append((v.name, 1, self.global_index[v.name], 0))
+            if _exported(v):
+                mod.exports.append((v.name, wbc.EXPORT_GLOBAL, self.global_index[v.name],
+                                    wbc.EX_DECLARED))
+        # Types only when marked, in either mode. An enum is its underlying integer in WBC and
+        # has no type entry to export, so only structs, classes and interfaces are listed.
+        named = {**self.idx.structs, **self.idx.classes, **self.idx.interfaces}
+        for name in sorted(n for n, t in named.items() if _exported(t)):
+            mod.exports.append((name, wbc.EXPORT_TYPE, self.vt(name).type, wbc.EX_DECLARED))
         mod.data = list(self.data)
         for key, ti in list(self.type_keys.items()):
             if key[0] == "class":               # fill each vtable with function indices
@@ -513,7 +527,8 @@ class Compiler:
         canonical = print_module(self.m)
         for s in (self.m.name, mid, COMPILER_VERSION, f"{REGISTRY_NAME}@{REGISTRY_VERSION}",
                   semantic_hash(self.m), layout_hash(self.m),
-                  hashlib.sha256((self.source or canonical).encode()).hexdigest()):
+                  hashlib.sha256((self.source or canonical).encode()).hexdigest(),
+                  "export-all" if self.export_all else "declared"):
             w.name(s)
         out.append(("wr.meta", bytes(w.b)))
 
@@ -1709,6 +1724,12 @@ class FuncLowerer:
         return imms
 
 
+def _exported(item) -> bool:
+    return any(a.name == "export" for a in (item.attrs or []))
+
+
 def compile_module(module: Module, source: Optional[str] = None, embed_source=True,
-                   debug=False, project=None) -> CompileResult:
-    return Compiler(module, source, embed_source, debug, project).compile()
+                   debug=False, project=None, export_all=False) -> CompileResult:
+    """Compile and verify. `export_all` is `wiretc build --export-all` (section 5.2): pass it
+    to run any function by name, never for a build that ships."""
+    return Compiler(module, source, embed_source, debug, project, export_all).compile()

@@ -281,7 +281,9 @@ def verify(m: WbcModule) -> list:
             raise VerifyError(f"export '{name}' names function {index}, out of range")
         if kind == 1 and index >= len(m.globals):
             raise VerifyError(f"export '{name}' names global {index}, out of range")
-        if kind not in (0, 1):
+        if kind == 2 and index >= len(m.types):
+            raise VerifyError(f"export '{name}' names type {index}, out of range")
+        if kind not in (0, 1, 2):
             raise VerifyError(f"export '{name}' has unsupported kind {kind}")
     for gi, (vt, mut, init) in enumerate(m.globals):
         if vt != SIGNAL and not valid_vt(m, vt):

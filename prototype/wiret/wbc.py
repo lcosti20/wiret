@@ -126,7 +126,8 @@ def vt_name(vt, types=None, depth=0) -> str:
 SEC_CUSTOM, SEC_TYPE, SEC_IMPORT, SEC_FUNCTION, SEC_GLOBAL, SEC_EXPORT, SEC_DATA, SEC_CODE = range(8)
 
 FN_PURE, FN_LATENT, FN_EVENT = 1, 2, 4
-EX_EVENT, EX_LATENT, EX_PURE = 1, 2, 4
+EX_EVENT, EX_LATENT, EX_PURE, EX_DECLARED = 1, 2, 4, 8   # EX_DECLARED: marked @export
+EXPORT_FUNC, EXPORT_GLOBAL, EXPORT_TYPE = 0, 1, 2
 
 
 class WbcError(Exception):

@@ -195,6 +195,10 @@ def check_type_decls(module: Module, idx: ModuleIndex, D):
                       it.name, pin=f.name, literal=True, dst=f.type)
         else:
             base = it.base or "i32"
+            if any(a.name == "export" for a in it.attrs):
+                D("W0203", f"enum '{it.name}' is marked @export, but an enum is stored as its "
+                           f"{base} values and has no type entry, so it is not in the export "
+                           f"table; remove @export", it.name)
             lo, hi = INT_RANGES[base]
             for name, v in enum_values(it):
                 if not lo <= v <= hi:
