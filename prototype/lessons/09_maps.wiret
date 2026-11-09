@@ -7,6 +7,15 @@ extern func host.Log(message: string)
 #[note("Try it: (1) Add a fifth fruit to the array (right-click 'fruits', more inputs) and run again. (2) Step (F11) through the first loop and watch counts grow in the Variables panel. (3) Change the key type: what has to change with it?")]
 func Main() {
   local counts: map::<string, i32>
+
+  flow {
+    entry -> loop
+    loop.each -> count
+    loop.done -> show
+    show.each -> log
+    show.done -> log_total
+  }
+
   node count = MapSet::<string, i32> counts(
     .key <- loop.item,
     .value <- Add::<i32>(
@@ -15,7 +24,7 @@ func Main() {
         .key <- loop.item,
       ).value,
       .b <- 1,
-    ).result,
+    ),
   )
   node entry = Entry()
   node fruits = MakeArray::<string>(
@@ -30,21 +39,21 @@ func Main() {
       .a <- Call std.string.Concat(
         .a <- show.key,
         .b <- ": ",
-      ).result,
+      ),
       .b <- Convert::<i32, string>(
         .value <- show.value,
-      ).result,
-    ).result,
+      ),
+    ),
   )
   node log_total = Call host.Log(
     .message <- Call std.string.Concat(
       .a <- Convert::<i32, string>(
         .value <- MapLength::<string, i32>(
           .map <- got.value,
-        ).length,
-      ).result,
+        ),
+      ),
       .b <- " different fruits",
-    ).result,
+    ),
   )
   node loop = Macro std.flow.ForEach::<string>(
     .array <- fruits.result,
@@ -52,14 +61,6 @@ func Main() {
   node show = Macro std.flow.ForEachMap::<string, i32>(
     .map <- got.value,
   )
-
-  flow {
-    entry -> loop
-    loop.each -> count
-    loop.done -> show
-    show.each -> log
-    show.done -> log_total
-  }
 
   layout {
     #[note("A key that is not there yet gives 0, so the first apple counts as 0 + 1.")]

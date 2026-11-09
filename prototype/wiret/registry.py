@@ -420,6 +420,7 @@ CONTEXT_KINDS = {
     "MapValueAt": "Maps", "MapSet": "Maps", "MapRemove": "Maps", "MapClear": "Maps",
     "SetHas": "Sets", "SetLength": "Sets", "SetAt": "Sets", "SetAdd": "Sets",
     "SetRemove": "Sets", "SetClear": "Sets",
+    "Format": "Text",
 }
 
 # Struct kinds and how their symbol is written: the struct (`MakeStruct Vec2`), or the struct
@@ -849,6 +850,8 @@ def signature(node: Node, graph: Graph, idx: ModuleIndex) -> Sig:
         return _struct_sig(node, idx, sig)
     if k in MAP_PURE or k in MAP_MUTATORS or k in SET_PURE or k in SET_MUTATORS:
         return _container_sig(node, graph, idx, sig)
+    if k == "Format":
+        return _format_sig(node, graph, idx, sig)
     if k == "SetField" and (node.symbol or "").split(".")[0] in idx.structs:
         sig.error = ("E0501", f"structs are immutable, so SetField cannot change one; use "
                               f"'WithField {node.symbol}', which makes a changed copy")
@@ -861,6 +864,95 @@ def signature(node: Node, graph: Graph, idx: ModuleIndex) -> Sig:
 
 
 CLASS_KINDS = {"New", "Cast", "IsValid"}
+
+
+_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def format_parts(template: str) -> list:
+    """A Format template (section 3.3) as [("text", s) | ("pin", name)]: `{name}` is an
+    input, `{{` and `}}` are literal braces. Raises ValueError for a malformed template."""
+    parts, buf, i, t = [], [], 0, template
+    while i < len(t):
+        c = t[i]
+        if t.startswith("{{", i) or t.startswith("}}", i):
+            buf.append(c)
+            i += 2
+        elif c == "{":
+            j = t.find("}", i)
+            name = t[i + 1:j] if j >= 0 else ""
+            if j < 0 or not _IDENT.match(name):
+                raise ValueError(f"a Format template names an input between braces, as in "
+                                 f"'{{total}}', and writes a brace as '{{{{' or '}}}}'; "
+                                 f"'{t[i:j + 1] if j >= 0 else t[i:]}' is neither")
+            if buf:
+                parts.append(("text", "".join(buf)))
+                buf = []
+            parts.append(("pin", name))
+            i = j + 1
+        elif c == "}":
+            raise ValueError("a '}' in a Format template closes no '{'; write a brace as '}}'")
+        else:
+            buf.append(c)
+            i += 1
+    if buf:
+        parts.append(("text", "".join(buf)))
+    return parts
+
+
+_FORMAT_BUSY: set = set()
+
+
+def _format_input_type(node: Node, name: str, graph: Graph, idx: ModuleIndex) -> str:
+    """A Format input takes the type of what is bound to it: the output it reads, or the
+    literal's own type (an unsuffixed integer is i32, a decimal f64). Unbound, it is text."""
+    b = node.binding(name)
+    if b is None:
+        return "string"
+    v = b.value
+    if isinstance(v, Lit):
+        return {"int": v.suffix or "i32", "float": v.suffix or "f64", "bool": "bool",
+                "string": "string"}.get(v.kind, v.value.split(".")[0] if v.kind == "enum"
+                                        else v.kind)
+    src = graph.node(v.node)
+    key = (id(graph), v.node)
+    if src is None or key in _FORMAT_BUSY:      # a missing node or a cycle: reported elsewhere
+        return "string"
+    _FORMAT_BUSY.add(key)
+    try:
+        p = signature(src, graph, idx).output(v.pin)
+    finally:
+        _FORMAT_BUSY.discard(key)
+    return p.type if p is not None and not p.is_exec else "string"
+
+
+def _format_sig(node: Node, graph: Graph, idx: ModuleIndex, sig: Sig) -> Sig:
+    """`Format "Total: {total}"(.total <- ...)`: text built from a template, with an input
+    per placeholder that takes a bool, a number or a string (section 3.3)."""
+    sig.purity = "pure"
+    sig.outputs = [Pin("result", "string")]
+    if node.symbol is None:
+        sig.error = ("E0501", 'Format needs a template, as in Format "Total: {total}"(...)')
+        return sig
+    if node.targs:
+        sig.error = ("E0502", "Format takes no type arguments: each input takes the type of "
+                              "what is bound to it")
+    try:
+        parts = format_parts(node.symbol)
+    except ValueError as e:
+        sig.error = ("E0501", str(e))
+        return sig
+    names = []
+    for kind, v in parts:
+        if kind == "pin" and v not in names:
+            names.append(v)
+    for name in names:
+        ty = _format_input_type(node, name, graph, idx)
+        if ty not in PRIM_TYPES and not sig.error:
+            sig.error = ("E0110", f"Format writes bool, number and string values, but "
+                                  f"'{name}' is {ty}; convert it first")
+        sig.inputs.append(Pin(name, ty, ZERO if node.binding(name) is None else None))
+    return sig
 
 
 def class_field_target(node: Node, graph: Graph, idx: ModuleIndex):

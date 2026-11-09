@@ -92,6 +92,7 @@ class PinRef:
 class Binding:
     pin: str
     value: Union[PinRef, Lit]
+    comment: list = field(default_factory=list)    # the `//` lines directly above its `.pin <-` line
 
 
 @dataclass
@@ -100,6 +101,7 @@ class ExecOut:
     pin: Optional[str]          # None: the `source -> target` shorthand
     target: str
     target_pin: Optional[str] = None
+    comment: list = field(default_factory=list)    # the `//` lines directly above its line in the flow block
 
 
 @dataclass
@@ -112,6 +114,7 @@ class Node:
     execs: list = field(default_factory=list)      # [ExecOut]
     attrs: list = field(default_factory=list)      # [Attr]
     meta: list = field(default_factory=list)       # [Attr], written as `#[...]` lines above
+    comment: list = field(default_factory=list)    # the `//` lines directly above it (section 2.1)
 
     def binding(self, pin: str) -> Optional[Binding]:
         for b in self.bindings:
@@ -141,6 +144,7 @@ class Local:
     default: Optional[Lit] = None
     attrs: list = field(default_factory=list)
     meta: list = field(default_factory=list)
+    comment: list = field(default_factory=list)    # the `//` lines directly above it (section 2.1)
 
 
 @dataclass
@@ -191,6 +195,7 @@ class Graph:
     states: list = field(default_factory=list)     # [Local]
     nodes: list = field(default_factory=list)      # [Node]
     meta: list = field(default_factory=list)       # [Attr]: doc, graph-level notes, ...
+    comment: list = field(default_factory=list)    # the `//` lines directly above it (section 2.1)
     places: list = field(default_factory=list)     # [Place]
     # layout-block metadata above a name that is no node of the graph (W0605): kept as
     # written until someone moves it above a node's line or deletes it
@@ -260,6 +265,7 @@ class Use:
     alias: Optional[str] = None
     attrs: list = field(default_factory=list)
     meta: list = field(default_factory=list)
+    comment: list = field(default_factory=list)    # the `//` lines directly above it (section 2.1)
 
 
 @dataclass
@@ -270,6 +276,7 @@ class Extern:
     results: Optional[list] = None
     attrs: list = field(default_factory=list)
     meta: list = field(default_factory=list)
+    comment: list = field(default_factory=list)    # the `//` lines directly above it (section 2.1)
 
     def has_attr(self, name: str) -> bool:
         return any(a.name == name for a in self.attrs)
@@ -282,6 +289,7 @@ class Const:
     value: Lit
     attrs: list = field(default_factory=list)
     meta: list = field(default_factory=list)
+    comment: list = field(default_factory=list)    # the `//` lines directly above it (section 2.1)
 
 
 @dataclass
@@ -291,6 +299,7 @@ class Var:
     default: Optional[Lit] = None
     attrs: list = field(default_factory=list)
     meta: list = field(default_factory=list)
+    comment: list = field(default_factory=list)    # the `//` lines directly above it (section 2.1)
 
 
 @dataclass
@@ -301,6 +310,7 @@ class Field:
     default: Optional[Lit] = None
     attrs: list = field(default_factory=list)
     meta: list = field(default_factory=list)
+    comment: list = field(default_factory=list)    # the `//` lines directly above it (section 2.1)
 
 
 @dataclass
@@ -310,6 +320,7 @@ class Struct:
     fields: list = field(default_factory=list)     # [Field]
     attrs: list = field(default_factory=list)
     meta: list = field(default_factory=list)
+    comment: list = field(default_factory=list)    # the `//` lines directly above it (section 2.1)
 
     def field(self, name: str) -> Optional[Field]:
         for f in self.fields:
@@ -327,6 +338,7 @@ class Class:
     fields: list = field(default_factory=list)     # [Field]
     attrs: list = field(default_factory=list)
     meta: list = field(default_factory=list)
+    comment: list = field(default_factory=list)    # the `//` lines directly above it (section 2.1)
     impls: list = field(default_factory=list)      # interface names after `impl`
     dispatchers: list = field(default_factory=list)  # [Dispatcher], in the order written
 
@@ -345,6 +357,7 @@ class Dispatcher:
     params: list = field(default_factory=list)     # [Param]
     attrs: list = field(default_factory=list)
     meta: list = field(default_factory=list)
+    comment: list = field(default_factory=list)    # the `//` lines directly above it (section 2.1)
     results = None                                 # a dispatcher returns nothing
 
     @property
@@ -363,6 +376,7 @@ class IfaceMethod:
     results: Optional[list] = None
     attrs: list = field(default_factory=list)
     meta: list = field(default_factory=list)
+    comment: list = field(default_factory=list)    # the `//` lines directly above it (section 2.1)
 
     @property
     def result_list(self) -> list:
@@ -380,6 +394,7 @@ class Interface:
     methods: list = field(default_factory=list)    # [IfaceMethod]
     attrs: list = field(default_factory=list)
     meta: list = field(default_factory=list)
+    comment: list = field(default_factory=list)    # the `//` lines directly above it (section 2.1)
 
     def method(self, name: str) -> Optional[IfaceMethod]:
         for m in self.methods:
@@ -395,6 +410,7 @@ class EnumMember:
     value: Optional[int] = None                    # None: no `= INT` written
     attrs: list = field(default_factory=list)
     meta: list = field(default_factory=list)
+    comment: list = field(default_factory=list)    # the `//` lines directly above it (section 2.1)
 
 
 @dataclass
@@ -405,6 +421,7 @@ class Enum:
     members: list = field(default_factory=list)    # [EnumMember]
     attrs: list = field(default_factory=list)
     meta: list = field(default_factory=list)
+    comment: list = field(default_factory=list)    # the `//` lines directly above it (section 2.1)
 
     def member(self, name: str) -> Optional[EnumMember]:
         for m in self.members:
@@ -415,7 +432,8 @@ class Enum:
 
 @dataclass
 class Comment:
-    """A `//` comment: trivia, not part of the model (section 2.1)."""
+    """A `//` comment that is attached to nothing (not directly above an element that keeps
+    its comments): trivia, not part of the model (section 2.1)."""
     line: int
     text: str
     anchor: Optional[tuple] = None  # ("node", graph, node_id) | ("graph", graph) | None
@@ -428,7 +446,8 @@ class Module:
     attrs: list = field(default_factory=list)
     items: list = field(default_factory=list)
     meta: list = field(default_factory=list)
-    comments: list = field(default_factory=list)
+    comment: list = field(default_factory=list)    # the `//` lines directly above `module`
+    comments: list = field(default_factory=list)   # [Comment]: `//` lines attached to nothing
     # (graph name, node id) pairs retired in the project's wiret.ids (section 7.3). Not part
     # of the text: set by a tool that has the project, so that a node declared under a new
     # name (an inline node that came to feed several inputs) never takes a retired id
@@ -468,3 +487,21 @@ def item_kind(item) -> str:
     if isinstance(item, Graph):
         return item.kind
     raise TypeError(item)
+
+
+def strip_comments(obj) -> None:
+    """Clear every attached `//` comment in a model tree, in place (the semantic text has none)."""
+    seen = set()
+
+    def walk(x):
+        if isinstance(x, list):
+            for y in x:
+                walk(y)
+        elif hasattr(x, "__dataclass_fields__") and id(x) not in seen:
+            seen.add(id(x))
+            if isinstance(getattr(x, "comment", None), list):
+                x.comment = []
+            for f in x.__dataclass_fields__:
+                if f != "comment":
+                    walk(getattr(x, f))
+    walk(obj)

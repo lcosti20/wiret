@@ -5,22 +5,22 @@ extern func host.Log(message: string)
 
 #[note("CheckAge stops with an error of its own when the age is negative. Throw gives the error a message and a code; whoever called CheckAge decides what to do about it.")]
 func CheckAge(age: i32) {
+  flow {
+    chk.then -> stop
+    entry -> chk
+  }
+
   node chk = Branch(
     .cond <- Lt::<i32>(
       .a <- entry.age,
       .b <- 0,
-    ).result,
+    ),
   )
   node entry = Entry()
   node stop = Throw(
     .message <- "An age can't be negative",
     .code <- 1,
   )
-
-  flow {
-    chk.then -> stop
-    entry -> chk
-  }
 
   layout {
     chk at (333, 0)
@@ -33,6 +33,20 @@ func CheckAge(age: i32) {
 #[note("Lesson 10: Errors. Dividing by zero has no answer, so it is an error, and normally an error stops the whole program. A Try node catches it instead: what is wired after 'body' runs protected, and if something in it goes wrong, 'fault' runs with the error's message. Either way, 'then' runs afterwards.")]
 #[note("Try it: (1) Change 0 in 'zero' to 2: now 'never' prints, and 'fault' is skipped. (2) Disconnect 'sorted.fault' and run: the age error now stops the program, and the error panel names the node. (3) Make your own Throw with your own message.")]
 func Main() {
+  flow {
+    age -> ages_ok
+    entry -> safe
+    good -> log_share
+    log_share -> zero
+    safe.body -> good
+    safe.fault -> say_oops
+    safe.then -> sorted
+    sorted.body -> age
+    sorted.fault -> say_oops2
+    sorted.then -> still
+    zero -> never
+  }
+
   node age = Call CheckAge(
     .age <- -3,
   )
@@ -49,8 +63,8 @@ func Main() {
       .a <- "Each gets ",
       .b <- Convert::<i32, string>(
         .value <- good.each,
-      ).result,
-    ).result,
+      ),
+    ),
   )
   node never = Call host.Log(
     .message <- "This line never prints",
@@ -60,13 +74,13 @@ func Main() {
     .message <- Call std.string.Concat(
       .a <- "Oops: ",
       .b <- safe.message,
-    ).result,
+    ),
   )
   node say_oops2 = Call host.Log(
     .message <- Call std.string.Concat(
       .a <- "Oops: ",
       .b <- sorted.message,
-    ).result,
+    ),
   )
   node sorted = Try()
   node still = Call host.Log(
@@ -76,20 +90,6 @@ func Main() {
     .total <- 7,
     .people <- 0,
   )
-
-  flow {
-    age -> ages_ok
-    entry -> safe
-    good -> log_share
-    log_share -> zero
-    safe.body -> good
-    safe.fault -> say_oops
-    safe.then -> sorted
-    sorted.body -> age
-    sorted.fault -> say_oops2
-    sorted.then -> still
-    zero -> never
-  }
 
   layout {
     age at (853, 316)
@@ -114,17 +114,17 @@ func Main() {
 
 #[note("Share divides a total between people. Divide by zero people and Div fails.")]
 func Share(total: i32, people: i32) -> (each: i32) {
+  flow {
+    entry -> ret
+  }
+
   node entry = Entry()
   node ret = Return(
     .each <- Div::<i32>(
       .a <- entry.total,
       .b <- entry.people,
-    ).result,
+    ),
   )
-
-  flow {
-    entry -> ret
-  }
 
   layout {
     entry at (0, 0)

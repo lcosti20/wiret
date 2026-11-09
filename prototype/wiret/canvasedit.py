@@ -17,7 +17,7 @@ from .checker import GraphInfo
 from .explain import type_words
 from .model import Attr, Box, Graph, Lit, PinRef, set_note_text
 from .parser import ParseError, parse_literal
-from .registry import can_convert, enum_values, lit_fits
+from .registry import PRIM_TYPES, can_convert, enum_values, lit_fits
 
 # geom(node id) -> (x, y, width) of a node as drawn, or None; used to place an inserted node
 Geom = Callable[[str], Optional[tuple]]
@@ -48,7 +48,10 @@ def connect(g: Graph, info, idx, a: tuple, b: tuple, geom: Geom) -> Optional[str
         single = sig_a.exec_outs[0].name if len(sig_a.exec_outs) == 1 else None
         ops.wire_exec(g, na, pa, nb, pb, single)
         return f"Wired {na}.{pa} -> {nb}" + ("" if pb == "in" else f".{pb}")
-    if out.type == inp.type:
+    target = g.node(nb)
+    if out.type == inp.type or (target is not None and target.kind == "Format"
+                                and out.type in PRIM_TYPES):
+        # a Format input takes the type of what is bound to it (section 3.3)
         ops.bind(g, nb, pb, PinRef(na, pa))
         return f"Bound {nb}.{pb} = {na}.{pa}"
     if can_convert(out.type, inp.type, idx):

@@ -75,6 +75,7 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 | `Cast` | pure; symbol: the class to cast to (`Cast Boss`); in `obj: anyref` (any object); out `result` of that class, `ok: bool` | `result` is null when the cast fails. |
 | `IsValid` | pure; in `obj: anyref`; out `result: bool` | Non-null and, for host handles, still alive. |
 | `Convert::<From, To>` | pure; in `value`; out `result` | See section 3.2. |
+| `Format "template"` | pure; in one per placeholder; out `result: string` | Text from a template: `Format "{n} items, {left} left"(.n <- ..., .left <- ...)`. Each `{name}` is an input, in the order of first appearance, and `{{` and `}}` are literal braces. An input takes the type of what is bound to it, which must be `bool`, a number or `string` (`E0110`), and is written as `Convert::<T, string>` would write it; an unbound input is empty text. A malformed template is `E0501`. It compiles to the same `Concat` and conversion calls as the nodes it replaces. |
 | `GetState` / `SetState` | `value` | Persistent slots declared with `state` (section 2.3). `SetState` is impure. |
 
 **Arithmetic, comparison, logic** (all pure)

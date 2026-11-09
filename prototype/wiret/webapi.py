@@ -169,7 +169,8 @@ def edit(source: str, graph: str, request: str) -> str:
     and optionally "geoms": {node: [x, y, width]} as drawn (to place an inserted Convert node)
     and "comments": "convert". The result is {"ok", "text", "message", "select"} (`select`: a
     node the edit added). When the edit is refused, `ok` is false and `message` says why. The
-    canonical text cannot keep `//` comments: then the result is {"ok": false, "comments": n}
+    canonical text cannot keep a `//` comment that is attached to nothing (not directly above
+    a statement, input or flow wire): then the result is {"ok": false, "comments": n}
     and nothing changes, so the page can ask and send the edit again with "comments":
     "convert", which turns them into notes."""
     req = json.loads(request)

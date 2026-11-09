@@ -9,7 +9,7 @@ import unicodedata
 
 from .model import (Attr, Binding, Box, Class, Const, Enum, Interface, ExecOut, Extern, Graph, ITEM_ORDER, Lit,
                     META_ORDER, Module, Node, PinRef, SEMANTIC_ATTRS, Struct, Use, Var,
-                    item_kind)
+                    item_kind, strip_comments)
 from .registry import (PLACE_MUTATORS, ModuleIndex, Sig, field_place, lit_equal, lit_fits,
                        signature)
 
@@ -105,6 +105,16 @@ def fmt_meta(meta: list, indent: str, semantic=False) -> list:
     return [f"{indent}#[{a.name}{fmt_args(a)}]" for a in sorted_meta(meta)]
 
 
+def fmt_comment(lines: list, indent: str) -> list:
+    """The `//` lines attached to an element, directly above it (section 2.1)."""
+    return [f"{indent}//" + (f" {c}" if c else "") for c in lines]
+
+
+def above(x, indent: str, semantic=False) -> list:
+    """What stands directly above a declaration: its `//` lines, then its `#[...]` lines."""
+    return fmt_comment(getattr(x, "comment", []), indent) + fmt_meta(x.meta, indent, semantic)
+
+
 def fmt_params(ps: list) -> str:
     parts = []
     for p in ps:
@@ -127,7 +137,8 @@ def _ordered_bindings(node: Node, sig: Sig) -> list:
         if pin is not None and isinstance(b.value, Lit):
             d = pin.default_lit()
             # never drop a binding that does not fit its pin: the checker reports it
-            if d is not None and lit_fits(b.value, pin.type) and lit_equal(d, b.value):
+            if d is not None and lit_fits(b.value, pin.type) and lit_equal(d, b.value) \
+                    and not b.comment:
                 continue
         out.append(b)
     return sorted(out, key=lambda b: order.get(b.pin, len(order)))
@@ -143,7 +154,7 @@ def fmt_target(e: ExecOut, names: "GraphNames" = None) -> str:
 
 
 def fmt_wires(node: Node, sig: Sig, names: "GraphNames" = None) -> list:
-    """The node's exec wires as `flow` lines (without indentation)."""
+    """The node's exec wires as `flow` lines (without indentation), each after its `//` lines."""
     execs = _ordered_execs(node, sig)
     single = len(sig.exec_outs) == 1 or (not sig.exec_outs and len(execs) == 1 and execs[0].pin is None)
     nid = names.name(node.id) if names else node.id
@@ -153,6 +164,7 @@ def fmt_wires(node: Node, sig: Sig, names: "GraphNames" = None) -> list:
             src = nid                                         # shorthand
         else:
             src = f"{nid}.{e.pin or (sig.exec_outs[0].name if sig.exec_outs else 'then')}"
+        out.extend(fmt_comment(e.comment, ""))
         out.append(f"{src} -> {fmt_target(e, names)}")
     return out
 
@@ -180,6 +192,8 @@ def fmt_head(node: Node, names: "GraphNames" = None) -> str:
     """`Kind symbol::<targs>`, or `ArrayAdd::<i32> acc` for a place mutator (section 3.3)."""
     targs = fmt_targs(node.targs)
     sym = names.symbol(node) if names is not None else node.symbol
+    if node.kind == "Format" and sym is not None:       # its template is a string
+        sym = fmt_string(sym)
     if node.kind in PLACE_MUTATORS:
         return node.kind + targs + (f" {sym}" if sym else "")
     return node.kind + (f" {sym}" if sym else "") + targs
@@ -192,8 +206,8 @@ class GraphNames:
     """How a graph's nodes are written (section 2.3): which nodes are written inline, inside
     the one input they feed, and the name each node is written with.
 
-    A node is written inline when it has no exec pins, carries no semantic attribute, and
-    exactly one input in the graph reads it. Its name is then its consumer's name, a dot and
+    A node is written inline when it has no exec pins, carries no semantic attribute or
+    `//` comment, and exactly one input in the graph reads it. Its name is then its consumer's name, a dot and
     the input's name (`show.message`). Every other node is declared with a `node` statement
     under its id; an id that is not an identifier (a node that was inline and now feeds
     several inputs) is declared with its dots turned into underscores, followed by `_2`,
@@ -201,6 +215,8 @@ class GraphNames:
 
     def __init__(self, g: Graph, idx: ModuleIndex, sigs: dict = None):
         self.g, self.idx = g, idx
+        self.bare = None            # in an expression body: Entry, whose outputs are bare
+        self.current = None         # the node whose inputs are being written
         self.sigs = sigs if sigs is not None else {n.id: signature(n, g, idx) for n in g.nodes}
         nodes = {}
         for n in g.nodes:
@@ -218,6 +234,7 @@ class GraphNames:
             r = refs.get(n.id, [])
             if (sig is not None and len(r) == 1 and r[0][0] != n.id and ids.count(n.id) == 1
                     and ids.count(r[0][0]) == 1 and not n.attrs and not n.execs
+                    and not n.comment
                     and n.id not in targets and not sig.error and not sig.exec_ins
                     and not sig.exec_outs and n.kind not in ("Entry", "Return", "Exit")
                     and sum(1 for b in nodes[r[0][0]].bindings if b.pin == r[0][1]) == 1):
@@ -276,26 +293,41 @@ class GraphNames:
 
 
 def fmt_value(b: Binding, names: GraphNames = None) -> str:
+    if isinstance(b.value, PinRef) and names is not None and b.value.node == names.bare:
+        return b.value.pin
     if isinstance(b.value, PinRef):
         return f"{names.name(b.value.node) if names else b.value.node}.{b.value.pin}"
     return fmt_lit(b.value)
 
 
+def fmt_input(b: Binding, indent: str, names: GraphNames = None) -> str:
+    """The value of a binding. An inline node is written in place, followed by the pin it is
+    read from, `Call F(...).x`, unless that is its one data output: `Call F(...)`."""
+    kids = names.children.get(names.current, {}) if names is not None else {}
+    kid = kids.get(b.pin)
+    if kid is None or not isinstance(b.value, PinRef) or b.value.node != kid.id:
+        return fmt_value(b, names)
+    sig = names.sigs[kid.id]
+    text = fmt_expr(kid, sig, indent, names)
+    outs = sig.data_outs
+    if not sig.error and len(outs) == 1 and outs[0].name == b.value.pin:
+        return text
+    return f"{text}.{b.value.pin}"
+
+
 def fmt_expr(node: Node, sig: Sig, indent: str, names: GraphNames = None) -> str:
-    """`Kind symbol::<targs>(`, one `.pin <- value,` line per bound input and `)`, or
-    `Kind()` when no input is bound. An inline node is written in place of the value it
-    feeds, followed by the pin it is read from: `.message <- Call F(...).result`."""
+    """`Kind symbol::<targs>(`, one `.pin <- value,` line per bound input (after its `//`
+    lines) and `)`, or `Kind()` when no input is bound. An inline node is written in place of
+    the value it feeds (`fmt_input`)."""
     bindings = _ordered_bindings(node, sig)
     if not bindings:
         return fmt_head(node, names) + "()"
-    kids = names.children.get(node.id, {}) if names else {}
     lines = [fmt_head(node, names) + "("]
     for b in bindings:
-        kid = kids.get(b.pin)
-        if kid is not None and isinstance(b.value, PinRef) and b.value.node == kid.id:
-            val = fmt_expr(kid, names.sigs[kid.id], indent + IND, names) + "." + b.value.pin
-        else:
-            val = fmt_value(b, names)
+        if names is not None:
+            names.current = node.id
+        val = fmt_input(b, indent + IND, names)
+        lines.extend(fmt_comment(b.comment, indent + IND))
         lines.append(f"{indent}{IND}.{b.pin} <- {val},")
     lines.append(f"{indent})")
     return "\n".join(lines)
@@ -305,7 +337,8 @@ def fmt_node(node: Node, sig: Sig, indent: str, semantic=False, names: GraphName
     """The node statement `node id = Kind(...) @attrs`, with its inputs one per line and its
     inline nodes written in place (section 2.3). Its metadata lines are in the layout block."""
     nid = names.name(node.id) if names else node.id
-    return f"{indent}node {nid} = {fmt_expr(node, sig, indent, names)}{fmt_attrs(node.attrs)}"
+    return "\n".join(fmt_comment(node.comment, indent) + [
+        f"{indent}node {nid} = {fmt_expr(node, sig, indent, names)}{fmt_attrs(node.attrs)}"])
 
 
 # -- graphs and module -----------------------------------------------------------
@@ -313,7 +346,7 @@ def fmt_local(kw, l, indent, semantic=False) -> list:
     s = f"{indent}{kw} {l.name}: {l.type}"
     if l.default is not None:
         s += f" = {fmt_lit(l.default)}"
-    return fmt_meta(l.meta, indent, semantic) + [s + fmt_attrs(l.attrs)]
+    return above(l, indent, semantic) + [s + fmt_attrs(l.attrs)]
 
 
 def fmt_props(props: list, sort_members=True) -> str:
@@ -329,29 +362,71 @@ def fmt_props(props: list, sort_members=True) -> str:
     return " [" + ", ".join(parts) + "]"
 
 
-def fmt_graph(g: Graph, idx: ModuleIndex, indent: str = "", semantic=False) -> list:
+def expr_value(g: Graph, names: GraphNames):
+    """The binding a function is written `= value` with (section 2.3), or None. That is a
+    function outside a class with one result whose graph is `entry`, wired to `ret`, and the
+    nodes written inline in `ret`'s one input, with nothing else to keep: no locals, no
+    attributes, comments or metadata on the two nodes, and no layout."""
+    if g.kind != "func" or g.owner or g.results is None or len(g.results) != 1 or g.locals \
+            or g.states or g.places or g.boxes or g.orphan_meta \
+            or any(n.meta for n in g.nodes):
+        return None
+    entry, ret = g.node("entry"), g.node("ret")
+    if entry is None or ret is None or entry.kind != "Entry" or ret.kind != "Return" \
+            or [n.id for n in names.declared(g.nodes)] != ["entry", "ret"]:
+        return None
+    if entry.bindings or entry.attrs or entry.comment or ret.attrs or ret.comment or ret.execs:
+        return None
+    if len(entry.execs) != 1:
+        return None
+    e = entry.execs[0]
+    if e.target != "ret" or e.target_pin or e.comment or e.pin not in (None, "then"):
+        return None
+    if len(ret.bindings) != 1 or ret.bindings[0].pin != g.results[0].name \
+            or ret.bindings[0].comment:
+        return None
+    return ret.bindings[0]
+
+
+def fmt_graph(g: Graph, idx: ModuleIndex, indent: str = "", semantic=False,
+              order: list = None) -> list:
+    """A graph: its locals and states, its `flow` block, its node statements and its layout
+    block (section 2.5, rule 3). `order` (node ids) lists the node statements and wires in
+    that order instead of by name, for `wiretc view --flow`."""
     head = f"{indent}{g.kind} {g.short_name}"
     if g.tparams:
         head += fmt_targs(g.tparams)
     head += fmt_params(g.params)
     if g.results is not None:
         head += " -> " + fmt_params(g.results)
-    lines = fmt_meta(g.meta, indent, semantic) + [head + fmt_attrs(g.attrs) + " {"]
+    head = above(g, indent, semantic) + [head + fmt_attrs(g.attrs)]
+    names = GraphNames(g, idx)
+    value = expr_value(g, names)
+    if value is not None:
+        names.bare, names.current = "entry", "ret"
+        return head[:-1] + [head[-1] + " = " + fmt_input(value, indent, names)]
+    lines = head[:-1] + [head[-1] + " {"]
+    top = len(lines)
     inner = indent + IND
     for l in sorted(g.locals, key=lambda l: l.name):
         lines.extend(fmt_local("local", l, inner, semantic))
     for l in sorted(g.states, key=lambda l: l.name):
         lines.extend(fmt_local("state", l, inner, semantic))
-    names = GraphNames(g, idx)
-    wires = []
-    for n in names.declared(g.nodes):
-        sig = names.sigs[n.id]
-        wires.extend(fmt_wires(n, sig, names))
-        lines.append(fmt_node(n, sig, inner, semantic, names))
+    declared = names.declared(g.nodes)
+    if order is not None:
+        rank = {nid: i for i, nid in enumerate(order)}
+        declared.sort(key=lambda n: rank.get(n.id, len(rank)))
+    wires = [w for n in declared for w in fmt_wires(n, names.sigs[n.id], names)]
     if wires:
-        lines.extend(["", f"{inner}flow {{"])
+        if len(lines) > top:
+            lines.append("")
+        lines.append(f"{inner}flow {{")
         lines.extend(f"{inner}{IND}{w}" for w in wires)
         lines.append(f"{inner}}}")
+    if declared and len(lines) > top:
+        lines.append("")
+    for n in declared:
+        lines.append(fmt_node(n, names.sigs[n.id], inner, semantic, names))
     if not semantic:
         lines.extend(fmt_layout(g, names, inner))
     lines.append(indent + "}")
@@ -404,19 +479,19 @@ def fmt_type_decl(it, semantic=False) -> list:
             line = f"{IND}{f.name}: {f.type}"
             if f.default is not None:
                 line += f" = {fmt_lit(f.default)}"
-            members.append((f.meta, line + fmt_attrs(f.attrs)))
+            members.append((f, line + fmt_attrs(f.attrs)))
     else:
         head = f"enum {it.name}" + (f": {it.base}" if it.base else "")
         members = []
         for m in it.members:
             line = f"{IND}{m.name}" + (f" = {m.value}" if m.value is not None else "")
-            members.append((m.meta, line + fmt_attrs(m.attrs)))
+            members.append((m, line + fmt_attrs(m.attrs)))
     head += fmt_attrs(it.attrs)
     if not members:
         return [head + " {}"]
     lines = [head + " {"]
-    for meta, line in members:
-        lines.extend(fmt_meta(meta, IND, semantic))
+    for m, line in members:
+        lines.extend(above(m, IND, semantic))
         lines.append(line)
     return lines + ["}"]
 
@@ -433,10 +508,10 @@ def fmt_class(c: Class, methods: list, idx: ModuleIndex, semantic=False) -> list
         line = f"{IND}{f.name}: {f.type}"
         if f.default is not None:
             line += f" = {fmt_lit(f.default)}"
-        lines.extend(fmt_meta(f.meta, IND, semantic))
+        lines.extend(above(f, IND, semantic))
         lines.append(line + fmt_attrs(f.attrs))
     for d in c.dispatchers:
-        lines.extend(fmt_meta(d.meta, IND, semantic))
+        lines.extend(above(d, IND, semantic))
         lines.append(f"{IND}dispatcher {d.name}{fmt_params(d.params)}{fmt_attrs(d.attrs)}")
     for g in sorted(methods, key=lambda g: (g.kind != "func", g.name)):
         if len(lines) > 1:
@@ -455,21 +530,21 @@ def fmt_interface(it: Interface, semantic=False) -> list:
         s = f"{IND}func {m.name}{fmt_params(m.params)}"
         if m.results is not None:
             s += " -> " + fmt_params(m.results)
-        lines.extend(fmt_meta(m.meta, IND, semantic))
+        lines.extend(above(m, IND, semantic))
         lines.append(s + fmt_attrs(m.attrs))
     return lines + ["}"]
 
 
 def fmt_item(it, idx: ModuleIndex, semantic=False, methods=None) -> list:
-    if isinstance(it, Interface):
-        return fmt_meta(it.meta, "", semantic) + fmt_interface(it, semantic)
-    if isinstance(it, Class):
-        return fmt_meta(it.meta, "", semantic) + fmt_class(it, methods or [], idx, semantic)
     if isinstance(it, Graph):
-        return fmt_graph(it, idx, "", semantic)
+        return fmt_graph(it, idx, "", semantic)        # its `//` and #[...] lines included
+    if isinstance(it, Interface):
+        return above(it, "", semantic) + fmt_interface(it, semantic)
+    if isinstance(it, Class):
+        return above(it, "", semantic) + fmt_class(it, methods or [], idx, semantic)
     if isinstance(it, (Struct, Enum)):
-        return fmt_meta(it.meta, "", semantic) + fmt_type_decl(it, semantic)
-    return fmt_meta(it.meta, "", semantic) + _fmt_decl(it)
+        return above(it, "", semantic) + fmt_type_decl(it, semantic)
+    return above(it, "", semantic) + _fmt_decl(it)
 
 
 def _fmt_decl(it) -> list:
@@ -491,8 +566,11 @@ def _fmt_decl(it) -> list:
 
 
 def print_module(m: Module, semantic=False) -> str:
+    if semantic:                    # `//` comments are not semantic (section 2.1)
+        m = copy.deepcopy(m)
+        strip_comments(m)
     idx = ModuleIndex(m)
-    lines = ([f"wiret {m.version}"] + fmt_meta(m.meta, "", semantic)
+    lines = ([f"wiret {m.version}"] + above(m, "", semantic)
              + [f"module {m.name}{fmt_attrs(m.attrs)}"])
     owned = {}
     for it in m.items:

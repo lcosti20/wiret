@@ -233,8 +233,11 @@ def explain(d: Diag) -> str:
     if c == "W0602":
         return f"'{_quoted(m)}' is listed in two boxes; it belongs to the first one."
     if c == "W0603":
-        return ("This '//' comment isn't saved with the graph. Use File → Convert // comments to "
-                "notes to keep it.")
+        return ("A '//' comment is kept when it stands directly above a declaration, a "
+                "statement, an input or a flow wire, with no blank line between. This one "
+                "doesn't (it has a blank line under it, ends a line of code, or is in the "
+                "layout block), so formatting would drop it. Move it, or use File → Convert // "
+                "comments to notes to keep it as a note.")
     if c == "W0605":
         return ("A line in the layout block names a node that is no longer in this graph, "
                 "usually because a node written inside another one moved, which changes its "

@@ -18,30 +18,31 @@ extern func host.Log(message: string)
 #[note("Try it: (1) Step through (F11) and watch the Variables panel in the Debugger tab: score changes from 0 to 10 to 15. (2) Change the bonus: double-click pin b on the Add node and type 100.")]
 func Main() {
   local score: i32
-  node bonus = SetLocal score(
-    .value <- Add::<i32>(
-      .a <- GetLocal score().value,
-      .b <- 5,
-    ).result,
-  )
-  node entry = Entry()
-  node show = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- "Your score is ",
-      .b <- Convert::<i32, string>(
-        .value <- GetLocal score().value,
-      ).result,
-    ).result,
-  )
-  node start = SetLocal score(
-    .value <- 10,
-  )
 
   flow {
     bonus -> show
     entry -> start
     start -> bonus
   }
+
+  node bonus = SetLocal score(
+    .value <- Add::<i32>(
+      .a <- GetLocal score(),
+      .b <- 5,
+    ),
+  )
+  node entry = Entry()
+  node show = Call host.Log(
+    .message <- Call std.string.Concat(
+      .a <- "Your score is ",
+      .b <- Convert::<i32, string>(
+        .value <- GetLocal score(),
+      ),
+    ),
+  )
+  node start = SetLocal score(
+    .value <- 10,
+  )
 
   layout {
     bonus at (560, 0)

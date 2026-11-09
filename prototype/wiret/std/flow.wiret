@@ -4,11 +4,19 @@ module std.flow
 #[doc("Lets execution through at most n times, until reset.")]
 macro DoN(in: exec, reset: exec, n: i32) -> (out: exec, counter: i32) {
   state count: i32
+
+  flow {
+    bump -> fire
+    entry.in -> test
+    entry.reset -> clear
+    test.then -> bump
+  }
+
   node bump = SetState count(
     .value <- Add::<i32>(
       .a <- cur.value,
       .b <- 1,
-    ).result,
+    ),
   )
   node clear = SetState count(
     .value <- 0,
@@ -22,22 +30,23 @@ macro DoN(in: exec, reset: exec, n: i32) -> (out: exec, counter: i32) {
     .cond <- Lt::<i32>(
       .a <- cur.value,
       .b <- entry.n,
-    ).result,
+    ),
   )
-
-  flow {
-    bump -> fire
-    entry.in -> test
-    entry.reset -> clear
-    test.then -> bump
-  }
 }
 
 #[doc("Lets execution through once, until reset.")]
 macro DoOnce(in: exec, reset: exec) -> (out: exec) {
   state fired: bool
+
+  flow {
+    check.else -> mark
+    entry.in -> check
+    entry.reset -> clear
+    mark -> fire
+  }
+
   node check = Branch(
-    .cond <- GetState fired().value,
+    .cond <- GetState fired(),
   )
   node clear = SetState fired(
     .value <- false,
@@ -47,20 +56,22 @@ macro DoOnce(in: exec, reset: exec) -> (out: exec) {
   node mark = SetState fired(
     .value <- true,
   )
-
-  flow {
-    check.else -> mark
-    entry.in -> check
-    entry.reset -> clear
-    mark -> fire
-  }
 }
 
 #[doc("Alternates between output a and output b each time it runs.")]
 macro FlipFlop(in: exec) -> (a: exec, b: exec, is_a: bool) {
   state on_b: bool
+
+  flow {
+    check.then -> to_a
+    check.else -> to_b
+    entry -> check
+    to_a -> exit_a
+    to_b -> exit_b
+  }
+
   node check = Branch(
-    .cond <- GetState on_b().value,
+    .cond <- GetState on_b(),
   )
   node entry = Entry()
   node exit_a = Exit a(
@@ -73,24 +84,27 @@ macro FlipFlop(in: exec) -> (a: exec, b: exec, is_a: bool) {
   node to_b = SetState on_b(
     .value <- true,
   )
-
-  flow {
-    check.then -> to_a
-    check.else -> to_b
-    entry -> check
-    to_a -> exit_a
-    to_b -> exit_b
-  }
 }
 
 #[doc("Loops over an array: runs 'each' once for every item, in order (index counts 0, 1, 2, ...), then runs 'done'.")]
 macro ForEach::<T>(in: exec, array: array::<T>) -> (each: exec, done: exec, item: T, index: i32) {
   local i: i32
+
+  flow {
+    bump -> test
+    entry -> init
+    init -> test
+    seq.then0 -> each_out
+    seq.then1 -> bump
+    test.then -> seq
+    test.else -> finish
+  }
+
   node bump = SetLocal i(
     .value <- Add::<i32>(
       .a <- cur.value,
       .b <- 1,
-    ).result,
+    ),
   )
   node cur = GetLocal i()
   node each_out = Exit each(
@@ -114,8 +128,13 @@ macro ForEach::<T>(in: exec, array: array::<T>) -> (each: exec, done: exec, item
     .cond <- Lt::<i32>(
       .a <- cur.value,
       .b <- len.length,
-    ).result,
+    ),
   )
+}
+
+#[doc("Loops over a map: runs 'each' once for every entry, in the order the keys were first added, then runs 'done'.")]
+macro ForEachMap::<K, V>(in: exec, map: map::<K, V>) -> (each: exec, done: exec, key: K, value: V, index: i32) {
+  local i: i32
 
   flow {
     bump -> test
@@ -126,16 +145,12 @@ macro ForEach::<T>(in: exec, array: array::<T>) -> (each: exec, done: exec, item
     test.then -> seq
     test.else -> finish
   }
-}
 
-#[doc("Loops over a map: runs 'each' once for every entry, in the order the keys were first added, then runs 'done'.")]
-macro ForEachMap::<K, V>(in: exec, map: map::<K, V>) -> (each: exec, done: exec, key: K, value: V, index: i32) {
-  local i: i32
   node bump = SetLocal i(
     .value <- Add::<i32>(
       .a <- cur.value,
       .b <- 1,
-    ).result,
+    ),
   )
   node cur = GetLocal i()
   node each_out = Exit each(
@@ -164,8 +179,13 @@ macro ForEachMap::<K, V>(in: exec, map: map::<K, V>) -> (each: exec, done: exec,
     .cond <- Lt::<i32>(
       .a <- cur.value,
       .b <- len.length,
-    ).result,
+    ),
   )
+}
+
+#[doc("Runs 'each' once for every number from first to last (inclusive), then runs 'done'.")]
+macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, index: i32) {
+  local i: i32
 
   flow {
     bump -> test
@@ -176,16 +196,12 @@ macro ForEachMap::<K, V>(in: exec, map: map::<K, V>) -> (each: exec, done: exec,
     test.then -> seq
     test.else -> finish
   }
-}
 
-#[doc("Runs 'each' once for every number from first to last (inclusive), then runs 'done'.")]
-macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, index: i32) {
-  local i: i32
   node bump = SetLocal i(
     .value <- Add::<i32>(
       .a <- cur.value,
       .b <- 1,
-    ).result,
+    ),
   )
   node cur = GetLocal i()
   node each_out = Exit each(
@@ -201,23 +217,24 @@ macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, inde
     .cond <- Le::<i32>(
       .a <- cur.value,
       .b <- entry.last,
-    ).result,
+    ),
   )
-
-  flow {
-    bump -> test
-    entry -> init
-    init -> test
-    seq.then0 -> each_out
-    seq.then1 -> bump
-    test.then -> seq
-    test.else -> finish
-  }
 }
 
 #[doc("Runs 'body' the given number of times (index counts 0, 1, 2, ...), then runs 'done'.")]
 macro Repeat(in: exec, times: i32) -> (body: exec, done: exec, index: i32) {
   local i: i32
+
+  flow {
+    bump -> test
+    entry -> init
+    init -> test
+    seq.then0 -> body_out
+    seq.then1 -> bump
+    test.then -> seq
+    test.else -> finish
+  }
+
   node body_out = Exit body(
     .index <- cur.value,
   )
@@ -225,7 +242,7 @@ macro Repeat(in: exec, times: i32) -> (body: exec, done: exec, index: i32) {
     .value <- Add::<i32>(
       .a <- cur.value,
       .b <- 1,
-    ).result,
+    ),
   )
   node cur = GetLocal i()
   node entry = Entry()
@@ -238,16 +255,6 @@ macro Repeat(in: exec, times: i32) -> (body: exec, done: exec, index: i32) {
     .cond <- Lt::<i32>(
       .a <- cur.value,
       .b <- entry.times,
-    ).result,
+    ),
   )
-
-  flow {
-    bump -> test
-    entry -> init
-    init -> test
-    seq.then0 -> body_out
-    seq.then1 -> bump
-    test.then -> seq
-    test.else -> finish
-  }
 }

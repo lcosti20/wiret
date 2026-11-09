@@ -133,8 +133,9 @@ def check(module: Module, comments_ok=False, project=None) -> list:
                   getattr(owner, "name", None) if owner is not module else None)
     if module.comments and not comments_ok:
         for c in module.comments:
-            D("W0603", f"line {c.line}: '//' comment is not part of the model and would be dropped; "
-                       f"convert it to a note")
+            D("W0603", f"line {c.line}: this '//' comment is not directly above a statement, "
+                       f"input or flow wire, so it is attached to nothing and would be dropped; "
+                       f"move it above what it explains, or convert it to a note")
 
     for g in module.graphs():
         if g.tparams:   # check a generic macro through one instance of it

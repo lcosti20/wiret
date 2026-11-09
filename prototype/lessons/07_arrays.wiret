@@ -8,15 +8,25 @@ extern func host.Log(message: string)
 func Main() {
   local scores: array::<i32>
   local total: i32
+
+  flow {
+    add -> loop
+    entry -> start
+    loop.each -> say
+    loop.done -> report
+    say -> keep
+    start -> add
+  }
+
   node add = ArrayAdd::<i32> scores(
     .item <- 25,
   )
   node entry = Entry()
   node keep = SetLocal total(
     .value <- Add::<i32>(
-      .a <- GetLocal total().value,
+      .a <- GetLocal total(),
       .b <- loop.item,
-    ).result,
+    ),
   )
   node list = GetLocal scores()
   node loop = Macro std.flow.ForEach::<i32>(
@@ -33,14 +43,14 @@ func Main() {
         .a <- Convert::<i32, string>(
           .value <- ArrayLength::<i32>(
             .array <- list.value,
-          ).length,
-        ).result,
+          ),
+        ),
         .b <- " scores, total ",
-      ).result,
+      ),
       .b <- Convert::<i32, string>(
-        .value <- GetLocal total().value,
-      ).result,
-    ).result,
+        .value <- GetLocal total(),
+      ),
+    ),
   )
   node say = Call host.Log(
     .message <- Call std.string.Concat(
@@ -49,27 +59,18 @@ func Main() {
           .a <- "Item ",
           .b <- Convert::<i32, string>(
             .value <- loop.index,
-          ).result,
-        ).result,
+          ),
+        ),
         .b <- " is ",
-      ).result,
+      ),
       .b <- Convert::<i32, string>(
         .value <- loop.item,
-      ).result,
-    ).result,
+      ),
+    ),
   )
   node start = SetLocal scores(
     .value <- make.result,
   )
-
-  flow {
-    add -> loop
-    entry -> start
-    loop.each -> say
-    loop.done -> report
-    say -> keep
-    start -> add
-  }
 
   layout {
     #[note("ArrayAdd puts one more item on the end of the array. scores now holds 4 items.")]

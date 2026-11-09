@@ -357,7 +357,7 @@ function applyEdit(req) {
   const before = $("src").value;
   let r = JSON.parse(api.edit(before, graphName, JSON.stringify(req)));
   if (r.comments) {
-    if (!confirm(`The source has ${r.comments} '//' comment(s). Comments are not part of the model, ` +
+    if (!confirm(`The source has ${r.comments} '//' comment(s) that are not directly above a statement, ` +
                  "so editing the graph cannot keep them (W0603).\n\nOK: convert them to notes\nCancel: undo this edit")) {
       recheck();
       return false;

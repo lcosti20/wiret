@@ -7,33 +7,6 @@ extern func host.Log(message: string)
 #[note("Try it: (1) Turn on Animate and press Run to watch the loop go round. (2) Count to 10 instead of 5. (3) What total do you get for 1 to 100?")]
 func Main() {
   local total: i32
-  node count = Macro std.flow.ForRange(
-    .first <- 1,
-    .last <- 5,
-  )
-  node entry = Entry()
-  node keep = SetLocal total(
-    .value <- Add::<i32>(
-      .a <- GetLocal total().value,
-      .b <- count.index,
-    ).result,
-  )
-  node report = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- "Total: ",
-      .b <- Convert::<i32, string>(
-        .value <- GetLocal total().value,
-      ).result,
-    ).result,
-  )
-  node say = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- "Counting: ",
-      .b <- Convert::<i32, string>(
-        .value <- count.index,
-      ).result,
-    ).result,
-  )
 
   flow {
     count.each -> say
@@ -41,6 +14,34 @@ func Main() {
     entry -> count
     say -> keep
   }
+
+  node count = Macro std.flow.ForRange(
+    .first <- 1,
+    .last <- 5,
+  )
+  node entry = Entry()
+  node keep = SetLocal total(
+    .value <- Add::<i32>(
+      .a <- GetLocal total(),
+      .b <- count.index,
+    ),
+  )
+  node report = Call host.Log(
+    .message <- Call std.string.Concat(
+      .a <- "Total: ",
+      .b <- Convert::<i32, string>(
+        .value <- GetLocal total(),
+      ),
+    ),
+  )
+  node say = Call host.Log(
+    .message <- Call std.string.Concat(
+      .a <- "Counting: ",
+      .b <- Convert::<i32, string>(
+        .value <- count.index,
+      ),
+    ),
+  )
 
   layout {
     count at (200, 0)

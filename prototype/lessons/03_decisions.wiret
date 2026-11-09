@@ -6,11 +6,17 @@ extern func host.Log(message: string)
 #[doc("Prints whether a person of this age is an adult or a child.")]
 #[note("CheckAge asks one question: is age at least 18? Branch follows 'then' when the answer is true and 'else' when it is false.")]
 func CheckAge(age: i32) {
+  flow {
+    decide.then -> adult
+    decide.else -> child
+    entry -> decide
+  }
+
   node adult = Call host.Log(
     .message <- Call std.string.Concat(
       .a <- age_text.result,
       .b <- " is an adult.",
-    ).result,
+    ),
   )
   node age_text = Convert::<i32, string>(
     .value <- entry.age,
@@ -19,21 +25,15 @@ func CheckAge(age: i32) {
     .message <- Call std.string.Concat(
       .a <- age_text.result,
       .b <- " is a child.",
-    ).result,
+    ),
   )
   node decide = Branch(
     .cond <- Ge::<i32>(
       .a <- entry.age,
       .b <- 18,
-    ).result,
+    ),
   )
   node entry = Entry()
-
-  flow {
-    decide.then -> adult
-    decide.else -> child
-    entry -> decide
-  }
 
   layout {
     adult at (900, -120)
@@ -50,6 +50,12 @@ func CheckAge(age: i32) {
 #[note("Lesson 3: Decisions. Main asks CheckAge about three ages. Double-click a CheckAge node to see how it decides.")]
 #[note("Try it: (1) Predict the three lines before you press Run. (2) Change 18 to 21 inside CheckAge. (3) Use Step (F11) and watch which way the Branch goes.")]
 func Main() {
+  flow {
+    entry -> first
+    first -> second
+    second -> third
+  }
+
   node entry = Entry()
   node first = Call CheckAge(
     .age <- 12,
@@ -60,12 +66,6 @@ func Main() {
   node third = Call CheckAge(
     .age <- 18,
   )
-
-  flow {
-    entry -> first
-    first -> second
-    second -> third
-  }
 
   layout {
     entry at (0, 0)
