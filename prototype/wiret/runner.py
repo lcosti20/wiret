@@ -39,7 +39,7 @@ def lit_value(lit: Lit, ty: str, name: str, idx: Optional[ModuleIndex] = None):
         values = dict(enum_values(idx.enums[ty]))
         member = lit.value.split(".", 1)[1] if lit.kind == "enum" else None
         if not lit_fits(lit, ty) or member not in values:
-            names = ", ".join(f"{ty}.{m}" for m in values)
+            names = ", ".join(f"{ty}::{m}" for m in values)
             raise ValueError(f"argument {name}: write one of {names}")
         return values[member]
     if not lit_fits(lit, ty):
@@ -115,7 +115,7 @@ def format_value(ty: Optional[str], v, idx: Optional[ModuleIndex] = None) -> str
         base = idx.enum_base(ty)
         for name, value in enum_values(idx.enums[ty]):
             if format_value(base, value) == format_value(base, v):
-                return f"{ty}.{name}"
+                return f"{ty}::{name}"
         return f"{ty}({format_value(base, v)})"   # Convert does not check membership
     if isinstance(v, dict):           # a map {k: v} or a set {a, b}
         kv = map_types(ty) if ty else None

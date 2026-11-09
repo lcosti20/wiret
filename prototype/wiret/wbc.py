@@ -140,6 +140,7 @@ OPS: dict[str, tuple] = {
     "unreachable": (0x00, ""), "nop": (0x01, ""), "br": (0x02, "L"), "br_if": (0x03, "L"),
     "br_table": (0x04, "T"), "return": (0x05, ""), "call": (0x06, "u"),
     "cont.push": (0x0A, "L"), "cont.pop": (0x0B, ""), "try.push": (0x0C, "Lu"),
+    "cont.depth": (0x17, ""), "cont.trunc": (0x18, ""),
     "throw": (0x0E, ""), "suspend": (0x0D, "b"), "call_virtual": (0x07, "uu"),
     "call_interface": (0x08, "uu"), "call_delegate": (0x09, "u"),
     "delegate.new": (0xF4, "ub"), "dispatcher.bind": (0xF5, "u"),

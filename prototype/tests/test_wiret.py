@@ -27,7 +27,7 @@ from wiret.checker import check  # noqa: E402
 from wiret.compiler import compile_module  # noqa: E402
 from wiret.disasm import disassemble  # noqa: E402
 from wiret.flow import view_flow  # noqa: E402
-from wiret.model import PinRef, Place, note_detached, note_text, notes  # noqa: E402
+from wiret.model import Lit, PinRef, Place, note_detached, note_text, notes  # noqa: E402
 from wiret.ops import add_note, convert_comments, delete_box, delete_node  # noqa: E402
 from wiret.parser import ParseError, parse  # noqa: E402
 from wiret.printer import layout_hash, print_module, semantic_hash  # noqa: E402
@@ -843,7 +843,7 @@ enum Mode: u8 {
 
 struct Enemy {
   pos: Vec2
-  mode: Mode = Mode.Idle
+  mode: Mode = Mode::Idle
   hp: i32 = 10
 }
 
@@ -861,7 +861,7 @@ func Spawn() -> (e: Enemy) @pure {
   node r = Return(
     .e <- MakeStruct Enemy(
       .pos <- MakeStruct Vec2(),
-      .mode <- Mode.Chase,
+      .mode <- Mode::Chase,
     ),
   )
 }
@@ -897,14 +897,14 @@ func Step(e: Enemy) -> (out: Enemy, fleeing: bool) {
     .out <- chased.result,
     .fleeing <- Eq::<Mode>(
       .a <- mode.value,
-      .b <- Mode.Flee,
+      .b <- Mode::Flee,
     ),
   )
   node r2 = Return(
     .out <- entry.e,
     .fleeing <- Lt::<Mode>(
       .a <- mode.value,
-      .b <- Mode.Flee,
+      .b <- Mode::Flee,
     ),
   )
   node sw = Switch::<Mode>(
@@ -913,14 +913,14 @@ func Step(e: Enemy) -> (out: Enemy, fleeing: bool) {
         .a <- entry.e,
         .b <- chased.result,
       ),
-      .a <- Mode.Idle,
+      .a <- Mode::Idle,
       .b <- Convert::<u8, Mode>(
         .value <- Convert::<Mode, u8>(
           .value <- mode.value,
         ),
       ),
     ),
-  ) @cases(Mode.Idle, Mode.Chase)
+  ) @cases(Mode::Idle, Mode::Chase)
 }
 """
 
@@ -949,9 +949,9 @@ class StructNodeTests(unittest.TestCase):
         enemy = next(it for it in m.items if it.name == "Enemy")
         self.assertEqual(enemy.field("mode").default.kind, "enum")
         # MakeStruct inputs default to the field's declared default, else to the zero value
-        spawn = parse(text.replace("    .mode <- Mode.Chase\n",
-                                   "    .mode <- Mode.Idle\n    .hp <- 10\n"))
-        self.assertEqual(print_module(spawn), text.replace("    .mode <- Mode.Chase\n", ""))
+        spawn = parse(text.replace("    .mode <- Mode::Chase\n",
+                                   "    .mode <- Mode::Idle\n    .hp <- 10\n"))
+        self.assertEqual(print_module(spawn), text.replace("    .mode <- Mode::Chase\n", ""))
 
     def test_pins(self):
         from wiret.registry import ModuleIndex, signature
@@ -989,11 +989,11 @@ class StructNodeTests(unittest.TestCase):
         self.assertEqual(self.graph_errors("""
   node a = Eq::<Mode>(
     .a <- entry.m,
-    .b <- Mode.Run,
+    .b <- Mode::Run,
   )
   node b = Eq::<i32>(
     .a <- 1,
-    .b <- Mode.Idle,
+    .b <- Mode::Idle,
   )
   node c = Eq::<Mode>(
     .a <- entry.m,
@@ -1001,11 +1001,11 @@ class StructNodeTests(unittest.TestCase):
   )
   node d = Eq::<Mode>(
     .a <- entry.m,
-    .b <- Mood.Idle,
+    .b <- Mood::Idle,
   )
-""", decls="\nvar ok: Mode = Mode.Chase\n\nvar bad: Mode = Mode.Zip\n"),
-            [("E0101", "d", "b"), ("E0110", "b", "b"), ("E0110", "c", "b"),
-             ("E0501", "a", "b"), ("E0501", "bad", "bad")])
+""", decls="\nvar ok: Mode = Mode::Chase\n\nvar bad: Mode = Mode::Zip\n"),
+            [("E0110", "b", "b"), ("E0110", "c", "b"), ("E0501", "a", "b"),
+             ("E0501", "bad", "bad"), ("E0501", "d", "b")])
         self.assertEqual(self.found("""
 enum A {
   X
@@ -1016,12 +1016,12 @@ enum B {
 }
 
 struct S {
-  a: A = A.Nope
-  b: A = B.Y
+  a: A = A::Nope
+  b: A = B::Y
 }
 
-func F(p: A = B.Y) {
-  local l: A = A.X
+func F(p: A = B::Y) {
+  local l: A = A::X
 
   node entry = Entry()
 }
@@ -1031,7 +1031,7 @@ func F(p: A = B.Y) {
         self.assertEqual(self.graph_errors("""
   node lt = Lt::<Mode>(
     .a <- entry.m,
-    .b <- Mode.Idle,
+    .b <- Mode::Idle,
   )
   node sel = Select::<Vec2>(
     .a <- entry.v,
@@ -1067,7 +1067,7 @@ func F(p: A = B.Y) {
         self.assertEqual(self.graph_errors("""
   node a = Switch::<Mode>(
     .value <- entry.m,
-  ) @cases(Mode.Idle, 3, Mode.Nope)
+  ) @cases(Mode::Idle, 3, Mode::Nope)
   node b = Switch::<i32>(
     .value <- 0,
   ) @cases(1, "two")
@@ -1075,16 +1075,17 @@ func F(p: A = B.Y) {
     .value <- 0,
   ) @cases(300)
   node Mode = Branch()
-"""), [("E0102", "Mode", ""), ("E0110", "a", "case1"), ("E0110", "b", "case1"),
+"""), [("E0110", "a", "case1"), ("E0110", "b", "case1"),       # a node may be called Mode
        ("E0110", "c", "case0"), ("E0501", "a", "case2")])
 
     def test_enum_value_literals(self):
         from wiret.parser import parse_literal
-        lit = parse_literal("Mode.Chase")
+        lit = parse_literal("Mode::Chase")
         self.assertEqual((lit.kind, lit.value), ("enum", "Mode.Chase"))
+        self.assertEqual(parse_literal("Mode.Chase"), lit)              # Draft 0.11 spelling
         with self.assertRaises(ParseError) as cm:
             parse_literal("a.b.c")
-        self.assertIn("Enum.Member", cm.exception.msg)
+        self.assertIn("Enum::Member", cm.exception.msg)
 
     def test_a_struct_used_only_inside_a_graph_runs(self):
         text = module("""
@@ -1123,7 +1124,7 @@ func Main() {
         self.assertTrue(palette.items(m.graph("Step"), ModuleIndex(m)))
         types = STRUCT_NODES.split("\nfunc Spawn")[0]
         text = module(types + """
-var bad: Mode = Mode.Zip
+var bad: Mode = Mode::Zip
 
 func G(e: Enemy, v: Vec2, m: Mode, p: Mode = Other.X) {
   node entry = Entry()
@@ -1136,16 +1137,16 @@ func G(e: Enemy, v: Vec2, m: Mode, p: Mode = Other.X) {
   node i = SetField Enemy.hp()
   node j = Eq::<i32>(
     .a <- 1,
-    .b <- Mode.Idle,
+    .b <- Mode::Idle,
   )
   node k = Switch::<Mode>(
     .value <- entry.m,
-  ) @cases(Mode.Idle, 3)
+  ) @cases(Mode::Idle, 3)
   node Mode = Branch()
 }
 """, macros=False)
         diags = [d for d in check(parse(text)) if d.severity == "error"]
-        self.assertEqual(len(diags), 12)   # with node Mode present, j.b is a wire to it
+        self.assertEqual(len(diags), 11)   # a node called Mode is no clash: j.b is Mode::Idle
         for d in diags:
             with self.subTest(d=str(d)):
                 friendly = explain(d)
@@ -1155,11 +1156,11 @@ func G(e: Enemy, v: Vec2, m: Mode, p: Mode = Other.X) {
 
 
 STRUCT_DATA = """
-const START: Mode = Mode.Chase
+const START: Mode = Mode::Chase
 
 var best: Enemy
 
-var mode: Mode = Mode.Flee
+var mode: Mode = Mode::Flee
 
 enum Mode: u8 {
   Idle
@@ -1173,7 +1174,7 @@ enum Wide: i64 {
 
 struct Enemy {
   pos: Vec2
-  mode: Mode = Mode.Idle
+  mode: Mode = Mode::Idle
   hp: i32 = 10
   name: string = "grunt"
 }
@@ -1236,10 +1237,10 @@ func Equal(a: Enemy, b: Enemy) -> (eq: bool, ne: bool) {
 func Far() -> (w: Wide, back: i64) {
   node entry = Entry()
   node to_int = Convert::<Wide, i64>(
-    .value <- Wide.Far,
+    .value <- Wide::Far,
   )
   node r = Return(
-    .w <- Wide.Far,
+    .w <- Wide::Far,
     .back <- to_int.result,
   )
 
@@ -1319,7 +1320,7 @@ func Pick(m: Mode) -> (word: string) {
   )
   node sw = Switch::<Mode>(
     .value <- entry.m,
-  ) @cases(Mode.Idle, Mode.Chase)
+  ) @cases(Mode::Idle, Mode::Chase)
   node wait = Return(
     .word <- "wait",
   )
@@ -1387,16 +1388,16 @@ class StructRunTests(unittest.TestCase):
         from wiret.runner import format_results, parse_args_for
         m = parse(self.text)
         self.assertEqual(format_results(m, "Defaults", self.call("Defaults")).split(", m =")[0],
-                         'local_e = Enemy { pos: Vec2 { x: 0.0, y: 1.5 }, mode: Mode.Idle, '
+                         'local_e = Enemy { pos: Vec2 { x: 0.0, y: 1.5 }, mode: Mode::Idle, '
                          'hp: 10, name: \'grunt\' }, global_e = Enemy { pos: Vec2 { x: 0.0, '
-                         'y: 1.5 }, mode: Mode.Idle, hp: 10, name: \'grunt\' }')
+                         'y: 1.5 }, mode: Mode::Idle, hp: 10, name: \'grunt\' }')
         self.assertEqual(format_results(m, "Leaf", self.call("Leaf", "r")),
                          "t = Tree { label: 'r', children: [] }")
-        self.assertEqual(parse_args_for(m, "Pick", ["Mode.Flee"]), [5])
-        for bad in ("5", "Mode.Run", "Wide.Far"):
+        self.assertEqual(parse_args_for(m, "Pick", ["Mode::Flee"]), [5])
+        for bad in ("5", "Mode::Run", "Wide::Far"):
             with self.subTest(bad), self.assertRaises(ValueError) as cm:
                 parse_args_for(m, "Pick", [bad])
-            self.assertIn("Mode.Idle, Mode.Chase, Mode.Flee", str(cm.exception))
+            self.assertIn("Mode::Idle, Mode::Chase, Mode::Flee", str(cm.exception))
         with self.assertRaises(ValueError) as cm:
             parse_args_for(m, "Equal", ["1", "2"])
         self.assertIn("cannot be typed", str(cm.exception))
@@ -2263,7 +2264,7 @@ func Main(m: Mode) -> (out: i32, len: f32, word: string) {
   )
   node sw = Switch::<Mode>(
     .value <- entry.m,
-  ) @cases(Mode.Idle)
+  ) @cases(Mode::Idle)
 
   flow {
     entry -> save
@@ -2305,7 +2306,7 @@ class EditTests(unittest.TestCase):
             {"op": "wire_exec", "graph": "Main", "from": "entry", "to": "log"},
             {"op": "wire_exec", "graph": "Main", "from": "log", "to": "save"},
             {"op": "set_meta", "graph": "Main", "node": "log", "meta": '#[note("Says hi.")]'},
-            {"op": "set_attr", "graph": "Main", "node": "sw", "attr": "@cases(Mode.Idle, Mode.Run)"},
+            {"op": "set_attr", "graph": "Main", "node": "sw", "attr": "@cases(Mode::Idle, Mode::Run)"},
             {"op": "wire_exec", "graph": "Main", "from": "sw.case1", "to": "r_run"},
             {"op": "place", "graph": "Main", "node": "log", "props": {"label": '"Greet"'}},
         ])
@@ -2424,11 +2425,11 @@ class RenameTests(unittest.TestCase):
 
     def test_enum_and_member(self):
         text = self.renamed("member", "Idle", "Resting")
-        self.assertIn("@cases(Mode.Resting)", text)
+        self.assertIn("@cases(Mode::Resting)", text)
         text = self.renamed("enum", "Mode", "State")
         self.assertIn("func Main(m: State", text)
         self.assertIn("node sw = Switch::<State>(\n", text)
-        self.assertIn("  ) @cases(State.Resting)\n", text)
+        self.assertIn("  ) @cases(State::Resting)\n", text)
 
     def test_macro_exec_pins(self):
         from wiret.ids import assign_ids, elements
@@ -2481,7 +2482,7 @@ func Main() {
     def test_refusals(self):
         from wiret.rename import RenameError, rename
         for kind, name, new in (("func", "Main", "Double"), ("param", "v", "r"),
-                                ("local", "acc", "node"), ("func", "Main", "2x"),
+                                ("local", "acc", "null"), ("func", "Main", "2x"),
                                 ("module", "t", "u")):
             with self.subTest(name=name, new=new), self.assertRaises(RenameError):
                 rename(self.m, self.id_of(kind, name), new)
@@ -3149,8 +3150,72 @@ func F() -> (a: i32, b: i32) {
   }
 }
 """, macros=False)
-        self.assertIn("W0320", codes(text))
-        self.assertEqual(run(text, "F")[0], [10, 7])
+        # read at save, then at ret after hit wrote it: an error unless that is meant
+        self.assertIn("E0320", codes(text))
+        live = text.replace("  node cur = GetVar hp()\n", "  node cur = GetVar hp() @live\n")
+        self.assertNotIn("E0320", codes(live))
+        self.assertEqual(run(live, "F")[0], [10, 7])
+        # @live on a node that reads it also excuses it, but not on an impure node
+        dmg = text.replace("    .b <- 3,\n  )\n", "    .b <- 3,\n  ) @live\n")
+        self.assertIn("E0320", codes(dmg))       # cur still reaches save and ret directly
+        bad = text.replace("  node hit = SetVar hp(\n    .value <- dmg.result,\n  )\n",
+                           "  node hit = SetVar hp(\n    .value <- dmg.result,\n  ) @live\n")
+        self.assertIn("E0104", codes(bad))
+
+    def test_reads_on_exclusive_paths_are_not_e0320(self):
+        text = module("""
+var hp: i32 = 10
+
+func F(c: bool) -> (a: i32) {
+  flow {
+    entry -> chk
+    chk.then -> r1
+    chk.else -> r2
+  }
+
+  node chk = Branch(
+    .cond <- entry.c,
+  )
+  node cur = GetVar hp()
+  node entry = Entry()
+  node r1 = Return(
+    .a <- cur.value,
+  )
+  node r2 = Return(
+    .a <- Add::<i32>(
+      .a <- cur.value,
+      .b <- 1,
+    ),
+  )
+}
+""", macros=False)
+        self.assertNotIn("E0320", codes(text))
+        # a loop body and the code after the loop do run one after the other
+        loop = module("""
+var hp: i32 = 10
+
+func F() -> (a: i32) {
+  flow {
+    entry -> loop
+    loop.each -> bump
+    loop.done -> ret
+  }
+
+  node bump = SetVar hp(
+    .value <- cur.value,
+  )
+  node cur = GetVar hp()
+  node entry = Entry()
+  node loop = Macro ForRange(
+    .first <- 1,
+    .last <- 3,
+  )
+  node ret = Return(
+    .a <- cur.value,
+  )
+}
+""")
+        self.assertIn("E0320", codes(loop))
 
     def test_do_once_state_is_per_expansion(self):
         text = module("""
@@ -3637,6 +3702,274 @@ func Main() {
         self.assertIn("  // begins here\n  node entry = Entry()\n", r.text)
         self.assertIn("    // the summary\n    .message <- Format \"{n}", r.text)
         self.assertIn('.name <- "finished"', r.text)
+
+
+LEAVE = """
+func Nest() -> (n: i32) {
+  local count: i32
+
+  flow {
+    chk.then -> outer.break
+    entry -> outer
+    inner.each -> seq
+    outer.each -> inner
+    outer.done -> ret
+    seq.then0 -> chk
+    seq.then1 -> add
+  }
+
+  node add = SetLocal count(
+    .value <- Add::<i32>(
+      .a <- GetLocal count(),
+      .b <- 1,
+    ),
+  )
+  node chk = Branch(
+    .cond <- And(
+      .a <- Eq::<i32>(
+        .a <- outer.index,
+        .b <- 2,
+      ),
+      .b <- Eq::<i32>(
+        .a <- inner.index,
+        .b <- 2,
+      ),
+    ),
+  )
+  node entry = Entry()
+  node inner = Macro std.flow.ForRange(
+    .first <- 1,
+    .last <- 3,
+  )
+  node outer = Macro std.flow.ForRange(
+    .first <- 1,
+    .last <- 3,
+  )
+  node ret = Return(
+    .n <- GetLocal count(),
+  )
+  node seq = Sequence() @count(2)
+}
+
+func Never() -> (n: i32) {
+  flow {
+    entry -> loop.break
+    loop.done -> ret
+  }
+
+  node entry = Entry()
+  node loop = Macro std.flow.ForRange(
+    .first <- 1,
+    .last <- 3,
+  )
+  node ret = Return(
+    .n <- 7,
+  )
+}
+
+func SumUntil(stop: i32) -> (total: i32) {
+  local acc: i32
+
+  flow {
+    chk.then -> loop.break
+    chk.else -> add
+    entry -> loop
+    loop.each -> chk
+    loop.done -> ret
+  }
+
+  node add = SetLocal acc(
+    .value <- Add::<i32>(
+      .a <- GetLocal acc(),
+      .b <- loop.index,
+    ),
+  )
+  node chk = Branch(
+    .cond <- Eq::<i32>(
+      .a <- loop.index,
+      .b <- entry.stop,
+    ),
+  )
+  node entry = Entry()
+  node loop = Macro std.flow.ForRange(
+    .first <- 1,
+    .last <- 10,
+  )
+  node ret = Return(
+    .total <- GetLocal acc(),
+  )
+}
+"""
+
+
+class LeaveTests(unittest.TestCase):
+    """`Leave o` ends a macro early: it drops every continuation the macro pushed since it was
+    entered, so a loop's `break` input skips the rest of the loop (section 4.2)."""
+
+    def text(self):
+        return module(LEAVE, macros=False)
+
+    def test_break_ends_the_loop_and_runs_done(self):
+        text = self.text()
+        self.assertEqual(print_module(parse(text)), text)
+        self.assertEqual([c for c in codes(text) if c[0] == "E" or c == "W0302"], [])
+        self.assertEqual(run(text, "SumUntil", 4)[0], [6])         # 1 + 2 + 3, then break
+        self.assertEqual(run(text, "SumUntil", 99)[0], [55])       # never breaks
+
+    def test_break_from_a_nested_loop_drops_the_inner_continuations(self):
+        # outer pass 1 counts 3; pass 2 counts j = 1, then breaks the outer loop at j = 2,
+        # dropping the inner loop's pending pass and the Sequence's pending `add`
+        self.assertEqual(run(self.text(), "Nest")[0], [4])
+
+    def test_a_break_before_the_loop_started_drops_nothing(self):
+        self.assertEqual(run(self.text(), "Never")[0], [7])
+
+    def test_debug_build_and_bytecode(self):
+        text = self.text()
+        r = compile_module(parse(text), text, debug=True)
+        self.assertTrue(r.ok, [str(d) for d in r.diags])
+        asm = disassemble(r.wbc)
+        self.assertIn("cont.depth", asm)
+        self.assertIn("cont.trunc", asm)
+        vm = VM()
+        self.assertEqual(vm.call(vm.load(r.wbc), "Nest", []), [4])
+
+    def test_leave_belongs_in_a_macro(self):
+        text = module("""
+func F() {
+  flow {
+    entry -> out
+  }
+
+  node entry = Entry()
+  node out = Leave done()
+}
+""", macros=False)
+        diags = [d for d in check(parse(text)) if d.code == "E0501"]
+        self.assertIn("Leave is only allowed in a macro", diags[0].message)
+
+
+NAMES = """
+enum Mode {
+  Idle
+  Chase
+}
+
+struct layout {
+  size: i32
+  flow: i32
+}
+
+class Box {
+  func: i32 = 1
+  event: i32 = 2
+  dispatcher: i32 = 3
+  state: i32 = 4
+
+  func Total() -> (size: i32) {
+    flow {
+      entry -> ret
+    }
+
+    node entry = Entry()
+    node ret = Return(
+      .size <- GetField Box.state(
+        .obj <- entry.self,
+      ),
+    )
+  }
+}
+
+func Main(node: i32) -> (size: i32) {
+  local flow: i32
+  local state: Mode
+
+  flow {
+    Mode.then -> local
+    at -> box
+    box -> Mode
+    entry -> at
+    local -> size
+  }
+
+  node Mode = Branch(
+    .cond <- Eq::<Mode>(
+      .a <- GetLocal state(),
+      .b <- Mode::Idle,
+    ),
+  )
+  node at = SetLocal flow(
+    .value <- entry.node,
+  )
+  node box = SetLocal state(
+    .value <- Mode::Idle,
+  )
+  node entry = Entry()
+  node local = Call host.Log(
+    .message <- Format "{size} {flow}"(
+      .size <- GetField layout.size(
+        .obj <- MakeStruct layout(
+          .size <- 5,
+        ),
+      ),
+      .flow <- GetLocal flow(),
+    ),
+  )
+  node size = Return(
+    .size <- GetLocal flow(),
+  )
+
+  layout {
+    at at (100, 0)
+    box at (200, 0)
+    entry at (0, 0)
+    size at (300, 0)
+    box group "Group" at (0, 0) size (400, 100) [members = [at, box]]
+  }
+}
+"""
+
+
+class ContextualNameTests(unittest.TestCase):
+    """Keywords are contextual (section 2.1), and an enum value is `Mode::Chase`, so a node,
+    field, local, parameter or type may take a keyword's or an enum's name."""
+
+    def text(self):
+        return module(NAMES, macros=False)
+
+    def test_keywords_and_enum_names_as_names(self):
+        text = self.text()
+        self.assertEqual(print_module(parse(text)), text)
+        self.assertEqual([c for c in codes(text) if c[0] == "E"], [])
+        m = parse(text)
+        layout = next(it for it in m.items if getattr(it, "name", "") == "layout")
+        self.assertEqual([f.name for f in layout.fields], ["size", "flow"])
+        box = next(it for it in m.items if getattr(it, "name", "") == "Box")
+        self.assertEqual([f.name for f in box.fields], ["func", "event", "dispatcher", "state"])
+        g = m.graph("Main")
+        self.assertEqual([b.id for b in g.boxes], ["group"])
+        self.assertEqual(sorted(p.id for p in g.places), ["at", "box", "entry", "size"])
+        # node Mode and enum Mode side by side: a wire is `Mode.then`, a value `Mode::Idle`
+        self.assertEqual(g.node("box").binding("value").value, Lit("enum", "Mode.Idle"))
+        self.assertEqual(run(text, "Main", 3), ([3], ["5 3"]))
+
+    def test_only_values_are_reserved(self):
+        from wiret import canvasedit
+        m = parse(self.text())
+        g = m.graph("Main")
+        self.assertEqual(canvasedit.rename_node(g, "at", "state"), "Renamed at to state")
+        with self.assertRaises(canvasedit.Refused):
+            canvasedit.rename_node(g, "box", "true")
+
+    def test_highlighting_follows_the_context(self):
+        from wiret.syntax import spans
+        kw = lambda line: [line[a:b] for a, b, t in spans(line) if t == "kw"]
+        self.assertEqual(kw("  local flow: i32"), ["local"])
+        self.assertEqual(kw("  state: i32 = 4"), [])
+        self.assertEqual(kw("    .size <- GetField layout.size("), [])
+        self.assertEqual(kw("  node at = SetLocal flow("), ["node", "at"])
+        self.assertEqual(kw("    box.message at (1, 2)"), ["at"])
+
 
 class SaturationTests(unittest.TestCase):
     """Float to integer conversion saturates to the target type's range (section 3.2)."""
@@ -5436,24 +5769,30 @@ class Barrel impl Damageable {
   hp: i32 = 10
 
   func Hit(amount: i32) -> (left: i32) {
+    local hp_left: i32
+
     flow {
-      entry -> set
+      entry -> keep
+      keep -> set
       set -> ret
     }
 
     node entry = Entry()
+    node keep = SetLocal hp_left(
+      .value <- Sub::<i32>(
+        .a <- GetField Barrel.hp(
+          .obj <- entry.self,
+        ),
+        .b <- entry.amount,
+      ),
+    )
+    node now = GetLocal hp_left()
     node ret = Return(
-      .left <- sub.result,
+      .left <- now.value,
     )
     node set = SetField Barrel.hp(
       .obj <- entry.self,
-      .value <- sub.result,
-    )
-    node sub = Sub::<i32>(
-      .a <- GetField Barrel.hp(
-        .obj <- entry.self,
-      ),
-      .b <- entry.amount,
+      .value <- now.value,
     )
   }
 
@@ -5570,7 +5909,7 @@ class InterfaceTests(unittest.TestCase):
 
     def test_calls_dispatch_through_the_interface(self):
         text = iface_text()
-        self.assertEqual(run(text, "Smash", 0)[0], ["big barrel", 2, 0])   # Hit is Barrel's
+        self.assertEqual(run(text, "Smash", 0)[0], ["big barrel", 6, 0])   # Hit is Barrel's
         self.assertEqual(run(text, "Smash", 1)[0], ["door", 99, 1])
         _, r = build(text)
         self.assertIn("call_interface", disassemble(r.wbc))
@@ -6654,7 +6993,7 @@ func Fill(t: Ticker) -> (before: array::<i32>, after: array::<i32>) {
   node entry = Entry()
   node get = GetField Ticker.items(
     .obj <- entry.t,
-  )
+  ) @live
   node keep = Call Ticker.Keep(
     .self <- entry.t,
     .x <- 1,
@@ -7505,7 +7844,8 @@ class WebApiTests(unittest.TestCase):
         (main,) = r["graphs"]
         nodes = {n["id"]: n for n in main["nodes"]}
         self.assertEqual((nodes["count"]["x"], nodes["count"]["y"]), (200, 0))
-        self.assertEqual([p["label"] for p in nodes["count"]["ins"]], ["", "first = 1", "last = 5"])
+        self.assertEqual([p["label"] for p in nodes["count"]["ins"]],
+                         ["", "break", "first = 1", "last = 5"])
         self.assertEqual([p["name"] for p in nodes["count"]["outs"]], ["each", "done", "index"])
         self.assertTrue(nodes["count"]["outs"][0]["exec"] and nodes["count"]["outs"][0]["filled"])
         self.assertIn({"exec": True, "from": ["count", "each"], "to": ["say", "in"], "color": "#f0f0f0"},
@@ -7558,7 +7898,7 @@ class WebApiTests(unittest.TestCase):
         g = next(g["name"] for g in json.loads(webapi.check(pets))["graphs"]
                  if any(n["id"] == "save.value" for n in g["nodes"]))
         self.assertIn("Happy, Hungry, Sleepy", json.loads(webapi.literal_prompt(pets, g, "save.value", "value"))["hint"])
-        self.assertIn(".value <- Mood.Sleepy", self.edit(pets, g, op="literal", node="save.value", pin="value", text="Sleepy")["text"])
+        self.assertIn(".value <- Mood::Sleepy", self.edit(pets, g, op="literal", node="save.value", pin="value", text="Sleepy")["text"])
         self.assertIn("not a member of Mood", self.edit(pets, g, op="literal", node="save.value", pin="value", text="Bored")["message"])
         self.assertIn("has no typed value", self.edit(pets, g, op="literal", node="save.value", pin="obj", text="1")["message"])
         # a bool flips
@@ -7691,7 +8031,7 @@ class WebApiTests(unittest.TestCase):
     def test_menus_follow_the_desktop(self):
         pets = lesson("08_structs.wiret")
         self.assertEqual(self.labels(self.menu(pets, "Main", kind="pin", node="save.value", dir="in", pin="value")),
-                         ["[Set 'value' to]", "Mood.Happy", "Mood.Hungry", "Mood.Sleepy", "Disconnect",
+                         ["[Set 'value' to]", "Mood::Happy", "Mood::Hungry", "Mood::Sleepy", "Disconnect",
                           "---", "[save.value  (WithField)]", "Breakpoint  (F9)", "Label…",
                           "Colour…", "Add note…", "Disable (@disabled)", "---", "Delete node"])
         self.assertEqual(self.labels(self.menu(pets, "Main", kind="pin", node="save.value", dir="in", pin="obj"))[:2],
@@ -7725,7 +8065,7 @@ class WebApiTests(unittest.TestCase):
                 req["text"] = text
             return self.edit(source, "Main", **req)
         node = {"kind": "node", "node": "start.value"}
-        self.assertIn(".value <- Mood.Sleepy", run({"kind": "pin", "node": "save.value", "dir": "in", "pin": "value"}, "Mood.Sleepy")["text"])
+        self.assertIn(".value <- Mood::Sleepy", run({"kind": "pin", "node": "save.value", "dir": "in", "pin": "value"}, "Mood::Sleepy")["text"])
         r = run({"kind": "pin", "node": "save.value", "dir": "in", "pin": "obj"}, "Make a Pet for 'obj'", geoms={"save.value": [300, 0, 150]})
         self.assertEqual(r["select"], "save.value.obj")
         self.assertIn("      .obj <- MakeStruct Pet(),\n", r["text"])
@@ -7788,7 +8128,7 @@ func Main() {
                          "Enter a whole number from 1 to 64.")
         e = next(e for e in self.menu(text, "Main", kind="node", node="sw") if e["label"] == "Set cases (@cases)…")
         self.assertEqual(e["ask"]["label"], "Mode members, comma separated (one of: Idle, Chase):")
-        self.assertIn("@cases(Mode.Idle, Mode.Chase)", self.edit(text, "Main", **{**e["action"], "text": "Idle, Chase"})["text"])
+        self.assertIn("@cases(Mode::Idle, Mode::Chase)", self.edit(text, "Main", **{**e["action"], "text": "Idle, Chase"})["text"])
 
     def test_web_highlighting_matches_desktop(self):
         """web/syntax.js colours every line as the desktop editor does (wiret/syntax.py)."""

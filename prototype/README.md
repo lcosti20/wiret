@@ -1,7 +1,7 @@
 # Wiret prototype
 
 A Python prototype of the Wiret graph editor, compiler and runtime, built against
-[`docs/reference.md`](../docs/reference.md) (Draft 0.11). It implements **Tier 0** and **Tier 1**
+[`docs/reference.md`](../docs/reference.md) (Draft 0.12). It implements **Tier 0** and **Tier 1**
 of the spec (section 1.6). It uses only the Python standard library; the editor uses Tkinter, and the Git
 commands need `git`.
 
@@ -246,7 +246,7 @@ The editor also follows the graph-editor contract in section 7.5:
 | Canonical form and hashes (2.5) | Sorted items (struct fields and enum members keep the order written), the `flow` block before the node statements, nodes (a node read by exactly one input, with no exec pins and no `@` attribute, written inline there and named by its path, such as `show.message`), `flow` wires (by source node id, then exec pin order) and layout lines, each with its metadata lines above it (`doc`, `category`, `keywords`, then notes as written); registry pin order; default-valued bindings omitted; 100-column wrapping; attribute ordering. Semantic hash (ignores layout, every `#[...]` line, every `//` comment and `Reroute`) and layout hash. |
 | Node kinds (3.3) | `Entry`, `Return`, `Branch`, `Sequence`, `Switch`, `Select`, `Macro`, `Exit`, `Reroute`, `Get/SetLocal`, `Get/SetVar` (and `const`s), `Get/SetState`, `Call`, `Convert`, all arithmetic, comparison, logic and bit kinds, and the array kinds `MakeArray`, `ArrayGet`, `ArrayLength`, `ArraySet`, `ArrayAdd`, `ArrayInsert`, `ArrayRemove`, `ArrayClear`, the struct kinds, the map and set kinds (see *Maps and sets* below), `Try` and `Throw` (see *Faults* below), the latent kinds `Delay`, `Yield` and `Await` (see *Fibers* below), the class kinds `New`, `GetField`/`SetField` on objects, `Cast` and `IsValid` (see *Classes* below), and `CreateDelegate`, `Invoke`, `Bind`, `Unbind` and `Broadcast` (see *Delegates and dispatchers* below). Types: `bool`, all integer widths, `f32`, `f64`, `string`, `array::<T>`, `map::<K, V>`, `set::<T>`, structs, enums, classes, interfaces, `delegate::<(A) -> (R)>` and `std.Signal`. |
 | Execution model (4.2–4.3) | Continuation stack, `Sequence` push/pop, macro inlining with path-style ids (`loop/test`, `loop!in`), `Exit` as a jump, joins, evaluation points with per-point sharing, impure output slots, `@pure` and `@reads` calls as pure nodes, per-expansion `state`. The §4.2 `SumTo(2)` trace is reproduced exactly (see tests). |
-| Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0150, E0151, E0152, E0160, E0201 (latency), E0301, E0302, E0304, E0310, E0401, E0412, E0501, E0502, E0503, W0201, W0301, W0302, W0320, W0601, W0602, W0603, W0604, W0605. |
+| Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0150, E0151, E0152, E0160, E0201 (latency), E0301, E0302, E0304, E0310, E0320, E0401, E0412, E0501, E0502, E0503, W0201, W0301, W0302, W0601, W0602, W0603, W0604, W0605. |
 | Lowering (4.8) | `-O0`: one labelled block per impure node, `local.tee` for shared values, `cont.push`/`cont.pop` kept. Output closely matches the §5.8 listings. |
 | WBC (5.2–5.4) | Type (function, `5E` array and `5F` struct entries), Import, Function, Global, Export, Data and Code sections, plus custom sections `name`, `wr.debug`, `wr.pins`, `wr.pure`, `wr.meta` (hashes), `wr.caps` and `wr.graph` (deflated canonical source). |
 | Verifier (5.5) | One linear pass: decoding, branch targets, empty stack at labels, operand typing (including `struct.new`/`get`/`with`), returns, `max_stack`, latency/purity flags. Type references may point forward, but a struct may not hold itself by value. Fuzz-tested. |
@@ -288,11 +288,11 @@ Declarations are checked, and their names can be used as types in signatures, `l
 - A struct that holds itself by value, directly or through other structs, is `E0503`. Holding
   it in an array is fine.
 
-An enum value is written `Mode.Chase`: on a pin (`.b <- Mode.Flee`), as a default
-(`mode: Mode = Mode.Idle`) and in `@cases(Mode.Idle, Mode.Chase)`. On a pin it reads like a wire,
-so it means the enum value only when the graph has no node called `Mode`. A node with the same id
-as an enum is `E0102`. A missing enum or member is `E0501`, and a value of the wrong enum is
-`E0110`.
+An enum value is written `Mode::Chase`: on a pin (`.b <- Mode::Flee`), as a default
+(`mode: Mode = Mode::Idle`) and in `@cases(Mode::Idle, Mode::Chase)`. It never reads like a wire,
+so a node may be called `Mode` too. The dotted `Mode.Chase` of earlier drafts is still read where
+the graph has no node called `Mode`, and `wiretc fmt` rewrites it. A missing enum or member is
+`E0501`, and a value of the wrong enum is `E0110`.
 
 Struct nodes name their struct, and the field nodes name the field too:
 
@@ -324,8 +324,8 @@ They compile and run:
   struct pin.
 - `Eq` and `Ne` on structs compare field by field, inline. Arrays cannot be compared in this
   prototype, so `Eq` on a struct that holds an array is `E0110`.
-- `wiretc run` takes enum arguments as `Mode.Chase` and prints results as
-  `Vec2 { x: 1.0, y: 1.5 }` and `Mode.Chase`, and the debugger shows values the same way.
+- `wiretc run` takes enum arguments as `Mode::Chase` and prints results as
+  `Vec2 { x: 1.0, y: 1.5 }` and `Mode::Chase`, and the debugger shows values the same way.
   Struct arguments cannot be typed on the command line.
 
 In the editor:
@@ -735,7 +735,7 @@ the wires a cascading delete removed, and the ids it retired in `wiret.ids`. A s
 | `delete_node` | `graph`, `node`, optional `cascade`; refused while wired, unless `cascade` |
 | `rename` | `id` (an `@id`) and `to`; or `graph`, `node` and `to` for a node id |
 
-A value is written as on the right of `<-`: `"plus.result"`, `"5"`, `"\"hi\""`, `"Mode.Chase"`.
+A value is written as on the right of `<-`: `"plus.result"`, `"5"`, `"\"hi\""`, `"Mode::Chase"`.
 A target is `graph` and `node` (a node or box), `graph` alone, or `decl` (any declaration).
 `set_meta` with a note adds one; with any other name it replaces it. Renaming by `@id` rewrites
 every reference: calls and macro uses, type names, struct and field symbols, enum values and

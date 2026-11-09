@@ -362,7 +362,7 @@ def menu(source: str, graph: str, target: str) -> str:
         if d == "in" and p.type in idx.enums:
             out.append({"label": f"Set '{pin}' to", "header": True})
             for member, _ in enum_values(idx.enums[p.type]):
-                out.append({"label": f"{p.type}.{member}", "indent": True,
+                out.append({"label": f"{p.type}::{member}", "indent": True,
                             "action": {"op": "set_enum", "node": nid, "pin": pin,
                                        "type": p.type, "member": member}})
         elif d == "in" and p.type in idx.structs:

@@ -409,7 +409,7 @@ for _k in ("BitAnd", "BitOr", "BitXor", "Shl", "Shr"):
 # Kinds handled by `signature` directly.
 CONTEXT_KINDS = {
     "Entry": "Flow", "Return": "Flow", "Sequence": "Flow", "Switch": "Flow", "Reroute": "Flow",
-    "Macro": "Macro", "Exit": "Macro", "Call": "Call", "CallParent": "Call",
+    "Macro": "Macro", "Exit": "Macro", "Leave": "Macro", "Call": "Call", "CallParent": "Call",
     "MakeArray": "Arrays", "ArrayGet": "Arrays", "ArrayLength": "Arrays", "ArraySet": "Arrays",
     "ArrayAdd": "Arrays", "ArrayInsert": "Arrays", "ArrayRemove": "Arrays", "ArrayClear": "Arrays",
     "GetLocal": "Variables", "SetLocal": "Variables", "GetVar": "Variables",
@@ -827,9 +827,9 @@ def signature(node: Node, graph: Graph, idx: ModuleIndex) -> Sig:
         sig.inputs = [Pin(p.name, p.type, p.default) for p in m.params]
         sig.outputs = [Pin(r.name, r.type) for r in m.result_list]
         return sig
-    if k == "Exit":
+    if k in ("Exit", "Leave"):         # Leave also discards the macro's continuations (4.2)
         if not is_macro:
-            sig.error = ("E0501", "Exit is only allowed in a macro")
+            sig.error = ("E0501", f"{k} is only allowed in a macro")
             return sig
         outs = {r.name: r for r in graph.result_list}
         r = outs.get(node.symbol or "")

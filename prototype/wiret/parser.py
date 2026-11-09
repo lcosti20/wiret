@@ -10,6 +10,10 @@ from .model import (Attr, Binding, Box, Class, Comment, Dispatcher, IfaceMethod,
 
 KEYWORDS = set("wiret module use extern const var local enum struct interface class impl macro "
                "func event dispatcher node state flow layout box at size".split())
+# Keywords are contextual (section 2.1): each is a keyword only where a statement of its kind
+# can start, so `size`, `state` or `func` is a fine name for a field, pin, local or node. Only
+# these words can never be a name, since they are values wherever a value can stand.
+RESERVED = {"true", "false", "null"}
 
 MARKUP_HINT = ("the 'markup' block was removed: write each note as #[note(\"...\")] on its own "
                "line directly above the node, box or graph it explains")
@@ -413,7 +417,8 @@ class Parser:
             t0 = self.peek()
             meta = self.meta_lines()
             cm = self.lead_comments(t0.line, self.peek().line)
-            if self.at_kw("func") or self.at_kw("event"):
+            named = self.at_p(":", 1)           # `name: type`: a field, whatever its name
+            if not named and (self.at_kw("func") or self.at_kw("event")):
                 start = self.i
                 kw = self.next().value
                 g = self.graph(kw, start, owner=c.name)
@@ -421,7 +426,7 @@ class Parser:
                 self.pending_methods.append(g)
                 self.skip_nl()
                 continue
-            if self.at_kw("dispatcher"):
+            if not named and self.at_kw("dispatcher"):
                 self.next()
                 d = Dispatcher(self.ident("dispatcher name"), meta=meta, comment=cm)
                 d.params = self.params()
@@ -432,7 +437,7 @@ class Parser:
                 c.dispatchers.append(d)
                 self.end_stmt()
                 continue
-            if self.at_kw("macro"):
+            if not named and self.at_kw("macro"):
                 self.error("a class cannot declare a macro; declare it at module level")
             if not self.at("id"):
                 self.error("expected a field, func or event")
@@ -687,6 +692,8 @@ class Parser:
                     self.skip_nl()
             self.next()
             return Lit("map", pairs)
+        if self.at("id") and self.at_p("::", 1) and self.at("id", k=2):
+            return self.enum_value()
         if self.at("id") and self.peek().value not in ("true", "false", "null"):
             return Lit("ident", self.qname())
         return self.literal()
@@ -721,13 +728,22 @@ class Parser:
         if t.kind == "id" and t.value == "null":
             self.next()
             return Lit("null", None)
+        if t.kind == "id" and self.at_p("::", 1) and self.at("id", k=2):
+            return self.enum_value()
         if t.kind == "id" and self.at_p(".", 1) and self.at("id", k=2):
-            name = self.qname()
+            name = self.qname()                 # the dotted form of Draft 0.11 and earlier
             if name.count(".") == 1:
                 return Lit("enum", name)
-            raise ParseError(f"an enum value is written 'Enum.Member', not '{name}'",
+            raise ParseError(f"an enum value is written 'Enum::Member', not '{name}'",
                              t.line, t.col)
         self.error("expected a literal")
+
+    def enum_value(self) -> Lit:
+        """`Mode::Chase` (section 2.1). `::` followed by a name, never by `<`, so it cannot
+        be read as type arguments or as a wire."""
+        name = self.ident()
+        self.expect_p("::")
+        return Lit("enum", f"{name}.{self.ident('enum member')}")
 
     # -- graph bodies --------------------------------------------------------
     def body(self, g: Graph):
@@ -864,6 +880,8 @@ class Parser:
         the id `path`; `.pin` may be left out when the node has one data output. In an
         expression body a parameter is named bare. Returns (value, inline nodes)."""
         t = self.peek()
+        if t.kind == "id" and self.at_p("::", 1) and self.at("id", k=2):
+            return self.enum_value(), []
         if t.kind == "id" and t.value not in ("true", "false", "null"):
             if self.at_p(".", 1):
                 parts = self.qname().split(".")
@@ -918,7 +936,7 @@ class Parser:
         while not self.at_p("}"):
             mt = self.peek()
             meta = self.meta_lines()
-            if self.at_kw("box"):
+            if self.at_kw("box") and self.at("id", k=1) and self.at("str", k=2):
                 self.next()
                 bid = self.ident("box id")
                 title = self.expect("str", None, "box title").value
@@ -971,9 +989,10 @@ class Parser:
 
 
 def resolve_enum_values(mod: Module):
-    """`.pin <- Mode.Chase` reads like a wire from node `Mode`. When the graph has no node
-    with that id and the module declares an enum with that name, it is the enum value
-    instead. `@cases(Mode.Idle, ...)` arguments become enum values the same way."""
+    """The dotted enum value of Draft 0.11 and earlier: `.pin <- Mode.Chase` reads like a
+    wire from node `Mode`. When the graph has no node with that id and the module declares an
+    enum with that name, it is the enum value instead, which the formatter writes
+    `Mode::Chase`. `@cases(Mode.Idle, ...)` arguments become enum values the same way."""
     enums = {it.name for it in mod.items if isinstance(it, Enum)}
     if not enums:
         return

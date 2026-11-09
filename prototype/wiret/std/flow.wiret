@@ -21,7 +21,7 @@ macro DoN(in: exec, reset: exec, n: i32) -> (out: exec, counter: i32) {
   node clear = SetState count(
     .value <- 0,
   )
-  node cur = GetState count()
+  node cur = GetState count() @live
   node entry = Entry()
   node fire = Exit out(
     .counter <- cur.value,
@@ -86,13 +86,14 @@ macro FlipFlop(in: exec) -> (a: exec, b: exec, is_a: bool) {
   )
 }
 
-#[doc("Loops over an array: runs 'each' once for every item, in order (index counts 0, 1, 2, ...), then runs 'done'.")]
-macro ForEach::<T>(in: exec, array: array::<T>) -> (each: exec, done: exec, item: T, index: i32) {
+#[doc("Loops over an array: runs 'each' once for every item, in order (index counts 0, 1, 2, ...), then runs 'done'. Wiring 'break' ends the loop early and runs 'done' at once.")]
+macro ForEach::<T>(in: exec, break: exec, array: array::<T>) -> (each: exec, done: exec, item: T, index: i32) {
   local i: i32
 
   flow {
     bump -> test
-    entry -> init
+    entry.in -> init
+    entry.break -> stop
     init -> test
     seq.then0 -> each_out
     seq.then1 -> bump
@@ -124,6 +125,7 @@ macro ForEach::<T>(in: exec, array: array::<T>) -> (each: exec, done: exec, item
     .array <- entry.array,
   )
   node seq = Sequence() @count(2)
+  node stop = Leave done()
   node test = Branch(
     .cond <- Lt::<i32>(
       .a <- cur.value,
@@ -132,13 +134,14 @@ macro ForEach::<T>(in: exec, array: array::<T>) -> (each: exec, done: exec, item
   )
 }
 
-#[doc("Loops over a map: runs 'each' once for every entry, in the order the keys were first added, then runs 'done'.")]
-macro ForEachMap::<K, V>(in: exec, map: map::<K, V>) -> (each: exec, done: exec, key: K, value: V, index: i32) {
+#[doc("Loops over a map: runs 'each' once for every entry, in the order the keys were first added, then runs 'done'. Wiring 'break' ends the loop early and runs 'done' at once.")]
+macro ForEachMap::<K, V>(in: exec, break: exec, map: map::<K, V>) -> (each: exec, done: exec, key: K, value: V, index: i32) {
   local i: i32
 
   flow {
     bump -> test
-    entry -> init
+    entry.in -> init
+    entry.break -> stop
     init -> test
     seq.then0 -> each_out
     seq.then1 -> bump
@@ -175,6 +178,7 @@ macro ForEachMap::<K, V>(in: exec, map: map::<K, V>) -> (each: exec, done: exec,
     .map <- entry.map,
   )
   node seq = Sequence() @count(2)
+  node stop = Leave done()
   node test = Branch(
     .cond <- Lt::<i32>(
       .a <- cur.value,
@@ -183,13 +187,14 @@ macro ForEachMap::<K, V>(in: exec, map: map::<K, V>) -> (each: exec, done: exec,
   )
 }
 
-#[doc("Runs 'each' once for every number from first to last (inclusive), then runs 'done'.")]
-macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, index: i32) {
+#[doc("Runs 'each' once for every number from first to last (inclusive), then runs 'done'. Wiring 'break' ends the loop early and runs 'done' at once.")]
+macro ForRange(in: exec, break: exec, first: i32, last: i32) -> (each: exec, done: exec, index: i32) {
   local i: i32
 
   flow {
     bump -> test
-    entry -> init
+    entry.in -> init
+    entry.break -> stop
     init -> test
     seq.then0 -> each_out
     seq.then1 -> bump
@@ -213,6 +218,7 @@ macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, inde
     .value <- entry.first,
   )
   node seq = Sequence() @count(2)
+  node stop = Leave done()
   node test = Branch(
     .cond <- Le::<i32>(
       .a <- cur.value,
@@ -221,13 +227,14 @@ macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, inde
   )
 }
 
-#[doc("Runs 'body' the given number of times (index counts 0, 1, 2, ...), then runs 'done'.")]
-macro Repeat(in: exec, times: i32) -> (body: exec, done: exec, index: i32) {
+#[doc("Runs 'body' the given number of times (index counts 0, 1, 2, ...), then runs 'done'. Wiring 'break' ends the loop early and runs 'done' at once.")]
+macro Repeat(in: exec, break: exec, times: i32) -> (body: exec, done: exec, index: i32) {
   local i: i32
 
   flow {
     bump -> test
-    entry -> init
+    entry.in -> init
+    entry.break -> stop
     init -> test
     seq.then0 -> body_out
     seq.then1 -> bump
@@ -251,6 +258,7 @@ macro Repeat(in: exec, times: i32) -> (body: exec, done: exec, index: i32) {
     .value <- 0,
   )
   node seq = Sequence() @count(2)
+  node stop = Leave done()
   node test = Branch(
     .cond <- Lt::<i32>(
       .a <- cur.value,

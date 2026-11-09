@@ -29,6 +29,7 @@ Let `S` be the frame's continuation stack, with the top at the right. Each step 
 | `Sequence` with `n` outputs | Push the entries of outputs `n-1`, ..., `1` (so output 1 ends up on top); next node is output 0. |
 | Macro call site | Inlined, so no stack effect. Data inputs are captured into the expansion's locals; next node is the macro's `Entry` exec output for the exec input that was wired. |
 | `Exit o (vals)` | Assign the bound data outputs `vals`, then next node is the caller's target wired to macro output `o`; if `o` is unwired, this is a chain end. **`S` is not touched**: continuations the macro pushed stay pending, and anything the caller's chain pushes sits above them. |
+| `Leave o (vals)` | As `Exit`, but first cut `S` back to the depth it had when the macro was entered: everything the macro pushed since, and everything the caller's chains pushed above that, is discarded. A macro is entered through any exec input whose wire does not lead straight to a `Leave`; an input that does (a loop's `break`) only leaves it. A `Leave` in a macro not yet entered in this frame discards nothing. |
 | `Try` | Push a handler marker, then run `body`. |
 | Fault | Pop `S` down to the nearest handler marker, discarding every continuation above it, and jump to its handler. No marker: the fiber ends with the fault. |
 | `Return` | Discard the frame, including `S`. |
@@ -71,7 +72,7 @@ Section 7.4 requires each of these as a trace test (expected `S` after every ste
 
 1. **Nested loops.** A `ForRange` inside the `each` chain of another. At the inner `each` body, `S` holds the outer `bump` below the inner `bump`; the inner `done` returns to the outer chain's next node.
 2. **`Sequence` inside a macro body.** A macro that sequences two `Exit`s, to confirm the later one runs only after the caller's chain for the earlier one has ended.
-3. **Early exit.** A `Return` inside the `each` chain discards the pending `bump` with the frame. A caller chain cannot leave a macro any other way; a loop macro that offers `break` as an input does so with a `state` flag the `bump` step checks (**Provisional**: revisit if this proves awkward).
+3. **Early exit.** A `Return` inside the `each` chain discards the pending `bump` with the frame. A chain inside the loop wired to the loop's `break` input reaches `Leave done`, which drops the pending `bump`, and any continuation the body itself pushed, and runs `done`. From a loop nested in another, `break` of the outer loop also drops the inner loop's continuations.
 4. **Unwired `Exit`.** `Exit` to an unwired caller output behaves as a chain end and pops a pending continuation if one exists.
 5. **Faults.** A fault in the `each` chain with a `Try` outside the loop pops the pending `bump` and everything above the marker; a `Try` entirely inside the `each` chain leaves the macro's continuation untouched.
 6. **Join.** Two producers wired to one exec input, each storing a value in a local that the join reads; a read of an impure output whose producer is on only one of the paths is rejected (`E0310`).
@@ -105,7 +106,7 @@ Rules:
 - **Cacheability is what the optimiser may use.** Common-subexpression elimination across a state change, hoisting out of loops and memoisation apply only to `@pure` calls and `pure`-purity kinds. A `reads` node is never moved across a write to anything it could read.
 - **Faults are results, not effects.** A fault is part of what a deterministic function returns: the same arguments fault the same way. So a pure call that may fault is kept when its result is unused (removing it would remove the fault), and it is never reordered past another node that could fault or write when that would change which fault is observed. Fuel exhaustion and an interrupt are not faults of the function; they are the VM's limits (section 5.7) and are exempt.
 - **Natives are trusted, not proved.** The VM cannot check a native's flags. A host registers `WR_NATIVE_EFFECT_FREE`, `WR_NATIVE_DETERMINISTIC` and `WR_NATIVE_CACHEABLE` (section 6.6) and is responsible for them. With `WR_CFG_AUDIT_NATIVES`, the VM calls each cacheable native twice and compares the results, and reports `WR_ERR_API` on a mismatch; this finds some false claims and proves none.
-- **Warning.** `W0320` fires when a `reads` node, or a call to a `@reads` function, feeds more than one impure consumer, since the consumers may see different values. The usual fix is to store the value in a local first, as `TakeDamage` does.
+- **Snapshots are explicit (`E0320`).** A `reads` node, or a call to a `@reads` function, is evaluated again at each impure consumer. When two of its consumers can run one after the other in one call (one is reachable from the other along exec wires, counting the resumption of a `Sequence`, `Try` or macro after a chain ends, so a loop's next pass and its `done` chain follow its body), they may see different values, and that is an error. The fix is to store the value in a local before the first consumer, as `TakeDamage` does (`SetLocal`, then `GetLocal`), which takes a snapshot. When each consumer should see the current value, the node is marked `@live`; a `@live` node also excuses the reads behind it, for the paths that go through it. Consumers on exclusive branches never conflict.
 
 The compiler, not the verifier, checks effect-freedom and the read restrictions (`E0302`, `E0304`); the verifier only checks that such functions are never latent.
 
@@ -176,6 +177,7 @@ Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber
 | `E0303` | A path provably ends, with no pending continuation, in a function that declares results and has not returned. |
 | `E0304` | `@pure` function reads variables, fields or state, dereferences a class reference or host handle, or calls anything that is not `@pure`. |
 | `E0310` | Read of an impure output whose producer does not dominate the reader: on some path to the reader the producer has not run (sections 4.2, 4.3). |
+| `E0320` | A `reads` node is evaluated again at two impure consumers that can run one after the other, so they may see different values; store it in a local, or mark it `@live` (section 4.3). |
 | `E0401` | Macro expands itself. |
 | `E0412` | `Try` body is not properly nested. |
 | `E0501` / `E0502` | Unresolved symbol / missing type argument. |
@@ -185,7 +187,6 @@ Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber
 | `W0202` | Element in a project has no `@id` (section 2.4). A file outside a project gets no `W0202`. |
 | `W0301` | Node unreachable from any entry. |
 | `W0302` | Chain can end in a function that declares results. |
-| `W0320` | A `reads` node feeds more than one impure consumer (section 4.3). |
 | `W0601` | A box lists a member id that names no node or box. |
 | `W0602` | A node or box is listed as a member of more than one box. |
 | `W0603` | `wiretc fmt` would drop a `//` comment (section 2.1). |

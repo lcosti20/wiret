@@ -91,6 +91,8 @@ DESCRIBE = {
     "GetState": ("Reads a value this graph remembers between runs.", "state remember"),
     "SetState": ("Stores a value this graph remembers between runs.", "state remember"),
     "Exit": ("Leaves the macro through this output.", "exit leave"),
+    "Leave": ("Leaves the macro through this output at once, dropping everything the macro "
+              "was still going to do, such as a loop's next pass.", "break leave stop exit early"),
     "MakeArray": ("Makes a new array from the items wired into it.",
                   "list array new create collection make"),
     "ArrayGet": ("The item at a position in the array. Positions start at 0.",
@@ -410,6 +412,7 @@ def items(g: Graph, idx: ModuleIndex) -> list:
         for r in g.result_list:
             if r.type == "exec":
                 out.append(_item("Exit", f"Exit {r.name}", "Macro", r.name))
+                out.append(_item("Leave", f"Leave {r.name}", "Macro", r.name))
     return out
 
 

@@ -298,6 +298,7 @@ NUMERIC = _build_numeric()
  OP_DROP, OP_SELECT, OP_LGET, OP_LSET, OP_LTEE, OP_GGET, OP_GSET, OP_CONST) = (
     0x00, 0x01, 0x02, 0x03, 0x05, 0x06, 0x0A, 0x0B, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x20)
 OP_TRY_PUSH, OP_SUSPEND, OP_THROW = 0x0C, 0x0D, 0x0E
+OP_CONT_DEPTH, OP_CONT_TRUNC = 0x17, 0x18   # 0x0F is brk, reserved
 OP_CALL_VIRTUAL, OP_CALL_INTERFACE, OP_CALL_DELEGATE = 0x07, 0x08, 0x09
 OP_DELEGATE_NEW, OP_BIND, OP_UNBIND, OP_BROADCAST = 0xF4, 0xF5, 0xF6, 0xF7
 OP_REF_NULL, OP_REF_IS_NULL, OP_REF_EQ, OP_REF_CAST, OP_REF_TEST, OP_REF_VALID = range(0x25, 0x2B)
@@ -1277,6 +1278,12 @@ class VM:
                                 if type(k) is int:
                                     ip = k
                                     break
+                        elif op == OP_CONT_DEPTH:    # handler markers count (section 5.5)
+                            stack.append(len(cont))
+                        elif op == OP_CONT_TRUNC:
+                            d = stack.pop()
+                            if 0 <= d < len(cont):
+                                del cont[d:]
                         elif op == OP_SUSPEND:
                             # park the whole fiber, every frame included (section 4.5)
                             if arg == 1:

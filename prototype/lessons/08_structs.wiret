@@ -13,7 +13,7 @@ enum Mood {
 #[doc("A pet: its name and how it feels.")]
 struct Pet {
   name: string
-  mood: Mood = Mood.Happy
+  mood: Mood = Mood::Happy
 }
 
 #[note("Lesson 8: Structs and enums. An enum is a short list of named choices: a Mood is Happy, Hungry or Sleepy, and nothing else. A struct bundles several values into one: a Pet has a name and a mood. Both are declared at the top of the Source pane.")]
@@ -32,7 +32,7 @@ func Main() {
   node save = SetLocal pet(
     .value <- WithField Pet.mood(
       .obj <- GetLocal pet(),
-      .value <- Mood.Hungry,
+      .value <- Mood::Hungry,
     ),
   )
   node show_after = Call Show(
@@ -96,7 +96,7 @@ func Show(p: Pet) {
   )
   node which = Switch::<Mood>(
     .value <- parts.mood,
-  ) @cases(Mood.Happy, Mood.Hungry)
+  ) @cases(Mood::Happy, Mood::Hungry)
 
   layout {
     entry at (0, 0)

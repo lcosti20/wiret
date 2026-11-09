@@ -58,6 +58,7 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 | `Await` | in `signal: std.Signal`; exec out `then` | **Latent.** Resumes when the host fires the signal. |
 | `Macro` | symbol: macro name; pins from its signature | Inlined at compile time. |
 | `Exit` | symbol: macro exec output; in: its data outputs | Macro-only. Leaves the macro through that exec output (a jump) and assigns the data outputs bound on the node. It never changes the continuation stack, so a continuation the macro pushed stays pending. On the first output of a Sequence it runs the caller's chain as a subroutine (see ForRange in section 2.6 and the trace in section 4.2). |
+| `Leave` | as `Exit` | Macro-only. Like `Exit`, but first discards every continuation the macro has pushed since it was entered, and everything the caller's chains pushed above them, so the macro is over: nothing it left pending runs (section 4.2). A loop's `break` input is wired to `Leave done`. |
 | `Reroute::<T>` | in `in`, out `out` | Visual only. |
 
 **Variables, fields and objects**
@@ -124,7 +125,7 @@ The VM ships these namespaces as natives (callable through `Call`) and as Wiret 
 - `std.fault`: `Make(message, code) -> fault`, `Message(fault) -> string`, `Code(fault) -> i32` (pure). The compiler calls them to lower `Throw` and the outputs of `Try`; they are not nodes in the palette.
 - `std.signal`: `New() -> std.Signal` and `Fire(signal)` (both impure). `Fire` does what `wr_signal_fire` does (section 6.8).
 - `std.random`: an explicit-state generator class (`New`, `NextI32`, `NextF64`). There is **no ambient randomness, clock or I/O**. The host provides any of those as natives, which keeps modules replayable.
-- `std.flow` (macros written in Wiret): `ForRange`, `ForEach::<T>`, `ForEachMap::<K,V>`, `While`, `DoOnce`, `DoN`, `Gate`, `FlipFlop`, `MultiGate`, `Retriggerable`. `ForEachMap::<K,V>` takes `map` and has the exec outputs `each` and `done` and the data outputs `key`, `value` and `index`, in insertion order.
+- `std.flow` (macros written in Wiret): `ForRange`, `ForEach::<T>`, `ForEachMap::<K,V>`, `While`, `DoOnce`, `DoN`, `Gate`, `FlipFlop`, `MultiGate`, `Retriggerable`. Each loop has a `break` exec input besides `in`: wiring a chain inside the loop to it ends the loop at once and runs `done`. `ForEachMap::<K,V>` takes `map` and has the exec outputs `each` and `done` and the data outputs `key`, `value` and `index`, in insertion order.
 
 ### 3.5 The node registry
 
