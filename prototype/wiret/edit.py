@@ -115,10 +115,12 @@ def value_of(m: Module, g: Graph, text: str):
     """The right-hand side of `.pin <- text`: a pin reference or a literal."""
     p = Parser(str(text))
     p.skip_nl()
-    if p.at("id") and p.at_p(".", 1) and p.at("id", k=2) and p.peek(3).kind in ("nl", "eof"):
-        node = p.next().value
-        p.next()                                   # the dot
-        pin = p.next().value
+    if p.at("id") and p.at_p(".", 1) and p.at("id", k=2):
+        j = p.i
+        node, _, pin = p.qname().rpartition(".")  # an inline node's name has dots too
+        if not p.at("nl") and not p.at("eof"):
+            p.i = j
+            raise EditError("request", f"unexpected text after '{text}'")
         enums = {it.name for it in m.items if isinstance(it, Enum)}
         if g.node(node) is None and node in enums:   # the parser's rule (section 2.3)
             return Lit("enum", f"{node}.{pin}")

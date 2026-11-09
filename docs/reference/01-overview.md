@@ -48,7 +48,7 @@ Compiler stages: parse, resolve names, type-check, validate graphs, expand macro
 | Term | Meaning |
 | --- | --- |
 | Graph | The body of a function, event or macro: nodes plus locals. |
-| Node | One operation. Written `node id = Kind ...`. |
+| Node | One operation. Written `node id = Kind(.pin <- value, ...)`, or, when exactly one input reads it, inline as that input's value (section 2.3). |
 | Pin | A named input or output of a node. Has a type. |
 | Exec pin | A pin of type `exec`. Wires between exec pins carry control flow. |
 | Data pin | Any other pin. Wires between data pins carry values. |

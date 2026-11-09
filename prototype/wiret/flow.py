@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from .checker import GraphInfo
 from .model import Graph, Module, PinRef
-from .printer import IND, fmt_graph, fmt_node, fmt_wires, print_module
+from .printer import IND, GraphNames, fmt_graph, fmt_node, fmt_wires, print_module
 from .registry import ModuleIndex
 
 
@@ -50,18 +50,18 @@ def view_flow(m: Module) -> str:
         outer = IND if g.owner else ""      # a method is printed inside its class
         ind = outer + IND
         lines = fmt_graph(g, idx, outer)
-        order = flow_order(g, info)
-        flowed = [fmt_node(info.nodes[nid], info.sigs[nid], ind) for nid in order]
-        # a node entry is its node line, any `#[...]` lines above it and its bindings
-        node_lines = [l for l in lines
-                      if any(x.startswith(ind + "node ") for x in l.splitlines())]
+        names = GraphNames(g, idx, info.sigs)
+        order = [nid for nid in flow_order(g, info) if not names.inline(nid)]
+        flowed = [fmt_node(info.nodes[nid], info.sigs[nid], ind, names=names) for nid in order]
+        # a node entry is its whole statement, with the nodes written inline in it
+        node_lines = [l for l in lines if l.startswith(ind + "node ")]
         if node_lines:
             start = lines.index(node_lines[0])
             lines[start:start + len(node_lines)] = flowed
         if ind + "flow {" in lines:
             start = lines.index(ind + "flow {") + 1
             wires = [ind + IND + w for nid in order
-                     for w in fmt_wires(info.nodes[nid], info.sigs[nid])]
+                     for w in fmt_wires(info.nodes[nid], info.sigs[nid], names)]
             lines[start:start + len(wires)] = wires
         out.append(("\n".join(fmt_graph(g, idx, outer)), "\n".join(lines)))
     for before, after in out:

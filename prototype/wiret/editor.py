@@ -28,7 +28,7 @@ from .graphview import BG, DIM, TEXT, GraphView
 from .model import Box, Graph, Lit, Local, Module, Param, PinRef, note_text, set_note_text
 from .natives import STD
 from .parser import ParseError, parse, parse_literal
-from .printer import layout_hash, print_module, semantic_hash
+from .printer import GraphNames, layout_hash, print_module, semantic_hash
 from .ids import assign_ids, find_project, retired_between
 from .registry import (ModuleIndex, STATIC_KINDS, can_convert, enum_values,
                        type_choices, type_ok)
@@ -42,9 +42,10 @@ module untitled
 extern func host.Log(message: string)
 
 func Main() {
-  node entry = Entry
-  node hello = Call host.Log
-    .message <- "Hello, Wiret!"
+  node entry = Entry()
+  node hello = Call host.Log(
+    .message <- "Hello, Wiret!",
+  )
 
   flow {
     entry -> hello
@@ -627,6 +628,10 @@ class EditorApp:
             assign_ids(m, retired={r.id for r in self.project.retired})
         self.last_counts, self.fault = {}, {}
         self.view.run_counts, self.view.fault_node = {}, None
+        sel = self.view.selected
+        if g is not None and sel and sel[0] == "node":
+            # the text read back knows a node by the name it is written with (section 2.3)
+            self.view.selected = ("node", GraphNames(g, ModuleIndex(m)).name(sel[1]))
         text = print_module(m)
         if text != self.text:
             self.push_undo(self.text)
@@ -1185,7 +1190,8 @@ class EditorApp:
         bp = (self.graph_name, nid) in self.breakpoints
         menu.add_command(label=("Remove breakpoint" if bp else "Set breakpoint") + "  (F9)",
                          command=lambda: self.toggle_breakpoint(nid))
-        menu.add_command(label="Rename id…", command=lambda: self.rename_node(nid))
+        if "." not in nid:          # an inline node's name says where it is written
+            menu.add_command(label="Rename id…", command=lambda: self.rename_node(nid))
         menu.add_command(label="Label…", command=lambda: self.set_label(nid))
         menu.add_command(label="Colour…", command=lambda: self.set_color(nid))
         menu.add_command(label="Add note…", command=lambda: self.add_note(nid))

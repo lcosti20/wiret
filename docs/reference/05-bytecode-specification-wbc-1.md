@@ -44,7 +44,7 @@ vec(X)  = n:u32 X*               name = vec(u8)  ; UTF-8, no NUL
 | 0 | Custom | `name:name` then payload. Unknown custom sections are skipped. |
 | 1 | Type | `vec(typeentry)` |
 | 2 | Import | `vec(module:name field:name kind:u8=0 type:u32 flags:u8)`; kind 0 is a function. Flags: bit 0 pure, bit 1 reserved. `module` names a Wiret module or a host namespace; resolution order is in section 7.3. |
-| 3 | Function | `vec(typeidx:u32 flags:u8)` for each defined function. Flags: bit 0 pure, bit 1 latent, bit 2 event. Function indices count imports first. |
+| 3 | Function | `vec(typeidx:u32 flags:u8)` for each defined function. Flags: bit 0 pure, bit 1 latent, bit 2 event; the verifier rejects any other bit, a function that is both pure and latent, and an event that is not latent or has results. Function indices count imports first. |
 | 4 | Global | `vec(valtype mut:u8 init:const)` |
 | 5 | Export | `vec(name kind:u8 index:u32 flags:u8)`; kind 0 func, 1 global, 2 type. Flags: bit 0 event, 1 latent, 2 pure, 3 declared (the source marks it `@export`). Methods are exported as `Class.Method`. Which entries are present depends on the export mode, below. |
 | 6 | Data | `vec(vec(u8))`: string constants, UTF-8. |

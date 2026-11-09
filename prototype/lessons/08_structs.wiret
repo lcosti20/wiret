@@ -20,25 +20,24 @@ struct Pet {
 #[note("Try it: (1) Step (F11) into Show and look at p in the Variables panel. (2) Right-click the value pin of 'hungry' and set it to Mood.Sleepy. (3) In the Source pane, add a field 'age: i32 = 1' to Pet and watch 'Make Pet' grow a pin. (4) Right-click an output pin that carries a Pet and choose 'Break into fields'.")]
 func Main() {
   local pet: Pet
-  node after = GetLocal pet
-  node before = GetLocal pet
-  node entry = Entry
-  #[note("WithField makes a copy of the pet with one field changed. Structs never change in place, so the copy is stored back in pet.")]
-  node hungry = WithField Pet.mood
-    .obj <- now.value
-    .value <- Mood.Hungry
-  #[note("Make Pet builds a Pet from its fields. mood is not wired, so it takes its default, Mood.Happy.")]
-  node make = MakeStruct Pet
-    .name <- "Rex"
-  node now = GetLocal pet
-  node save = SetLocal pet
-    .value <- hungry.result
-  node show_after = Call Show
-    .p <- after.value
-  node show_before = Call Show
-    .p <- before.value
-  node start = SetLocal pet
-    .value <- make.result
+  node entry = Entry()
+  node save = SetLocal pet(
+    .value <- WithField Pet.mood(
+      .obj <- GetLocal pet().value,
+      .value <- Mood.Hungry,
+    ).result,
+  )
+  node show_after = Call Show(
+    .p <- GetLocal pet().value,
+  )
+  node show_before = Call Show(
+    .p <- GetLocal pet().value,
+  )
+  node start = SetLocal pet(
+    .value <- MakeStruct Pet(
+      .name <- "Rex",
+    ).result,
+  )
 
   flow {
     entry -> start
@@ -48,42 +47,48 @@ func Main() {
   }
 
   layout {
-    after at (653, 116)
-    before at (193, 106)
     entry at (0, 0)
-    hungry at (365, 187)
-    make at (-105, 81)
-    now at (201, 187)
     save at (640, 0)
+    #[note("WithField makes a copy of the pet with one field changed. Structs never change in place, so the copy is stored back in pet.")]
+    save.value at (365, 187)
+    save.value.obj at (201, 187)
     show_after at (860, 0)
+    show_after.p at (653, 116)
     show_before at (420, 0)
+    show_before.p at (193, 106)
     start at (200, 0)
+    #[note("Make Pet builds a Pet from its fields. mood is not wired, so it takes its default, Mood.Happy.")]
+    start.value at (-105, 81)
   }
 }
 
 #[note("Show prints one line about a pet. Break Pet splits the pet into its fields, and the Switch picks a line by its mood.")]
 func Show(p: Pet) {
-  node entry = Entry
-  node happy = Call host.Log
-    .message <- happy_line.result
-  node happy_line = Call std.string.Concat
-    .a <- parts.name
-    .b <- " is happy."
-  node hungry = Call host.Log
-    .message <- hungry_line.result
-  node hungry_line = Call std.string.Concat
-    .a <- parts.name
-    .b <- " is hungry."
-  node parts = BreakStruct Pet
-    .obj <- entry.p
-  node sleepy = Call host.Log
-    .message <- sleepy_line.result
-  node sleepy_line = Call std.string.Concat
-    .a <- parts.name
-    .b <- " is sleepy."
-  #[note("A Switch on an enum has one path per case. Anything not listed, here Sleepy, follows default.")]
-  node which = Switch::<Mood> @cases(Mood.Happy, Mood.Hungry)
-    .value <- parts.mood
+  node entry = Entry()
+  node happy = Call host.Log(
+    .message <- Call std.string.Concat(
+      .a <- parts.name,
+      .b <- " is happy.",
+    ).result,
+  )
+  node hungry = Call host.Log(
+    .message <- Call std.string.Concat(
+      .a <- parts.name,
+      .b <- " is hungry.",
+    ).result,
+  )
+  node parts = BreakStruct Pet(
+    .obj <- entry.p,
+  )
+  node sleepy = Call host.Log(
+    .message <- Call std.string.Concat(
+      .a <- parts.name,
+      .b <- " is sleepy.",
+    ).result,
+  )
+  node which = Switch::<Mood>(
+    .value <- parts.mood,
+  ) @cases(Mood.Happy, Mood.Hungry)
 
   flow {
     entry -> which
@@ -95,12 +100,13 @@ func Show(p: Pet) {
   layout {
     entry at (0, 0)
     happy at (774, -115)
-    happy_line at (460, -200)
+    happy.message at (460, -200)
     hungry at (970, 20)
-    hungry_line at (724, 90)
+    hungry.message at (724, 90)
     parts at (205, 90)
     sleepy at (759, 197)
-    sleepy_line at (434, 220)
+    sleepy.message at (434, 220)
+    #[note("A Switch on an enum has one path per case. Anything not listed, here Sleepy, follows default.")]
     which at (444, 0)
   }
 }

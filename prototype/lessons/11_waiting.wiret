@@ -6,25 +6,28 @@ extern func host.Log(message: string)
 #[note("Lesson 11: Waiting. An event can pause partway and carry on later: Delay waits a number of seconds of game time. Main is an event here, not a func, because it waits. While one event waits, a game keeps running everything else.")]
 #[note("Try it: (1) Change the wait to 0.5 and run: the countdown takes half as long in game time (see the time printed in the Output). (2) Count down from 5. (3) Try putting a Delay in a func: Wiret asks you to mark it @latent, because whatever calls it will have to wait too.")]
 event Main() {
-  node entry = Entry
-  node go = Call host.Log
-    .message <- "Go!"
-  node left = Sub::<i32>
-    .a <- 4
-    .b <- loop.index
-  node line = Call std.string.Concat
-    .a <- number.result
-    .b <- "..."
-  node loop = Macro std.flow.ForRange
-    .first <- 1
-    .last <- 3
-  node number = Convert::<i32, string>
-    .value <- left.result
-  node say = Call host.Log
-    .message <- line.result
-  #[note("The event stops here for one second, then the loop carries on where it was.")]
-  node wait = Delay
-    .seconds <- 1.0
+  node entry = Entry()
+  node go = Call host.Log(
+    .message <- "Go!",
+  )
+  node loop = Macro std.flow.ForRange(
+    .first <- 1,
+    .last <- 3,
+  )
+  node say = Call host.Log(
+    .message <- Call std.string.Concat(
+      .a <- Convert::<i32, string>(
+        .value <- Sub::<i32>(
+          .a <- 4,
+          .b <- loop.index,
+        ).result,
+      ).result,
+      .b <- "...",
+    ).result,
+  )
+  node wait = Delay(
+    .seconds <- 1.0,
+  )
 
   flow {
     entry -> loop
@@ -36,11 +39,12 @@ event Main() {
   layout {
     entry at (0, 0)
     go at (724, 175)
-    left at (723, 62)
-    line at (1178, 62)
     loop at (250, 0)
-    number at (920, 62)
     say at (1396, 0)
+    say.message at (1178, 62)
+    say.message.a at (920, 62)
+    say.message.a.value at (723, 62)
+    #[note("The event stops here for one second, then the loop carries on where it was.")]
     wait at (1614, 0)
   }
 }

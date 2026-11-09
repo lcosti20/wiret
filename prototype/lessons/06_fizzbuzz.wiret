@@ -6,45 +6,52 @@ extern func host.Log(message: string)
 #[note("Lesson 6: Challenge, FizzBuzz. For 1 to 15, print Fizz for multiples of 3, Buzz for multiples of 5, FizzBuzz for multiples of both, and otherwise the number. Rem gives the remainder: a number is a multiple of 3 when the remainder after dividing by 3 is 0.")]
 #[note("Try it: (1) Predict the output, then Run. (2) Swap the order of check15 and check3 and see what breaks. (3) Add 'Bang' for multiples of 7.")]
 func Main() {
-  node buzz = Call host.Log
-    .message <- "Buzz"
-  #[note("Why check 15 first? 15 is a multiple of 3 too. If check3 came first, 15 would only print Fizz.")]
-  node check15 = Branch
-    .cond <- is15.result
-  node check3 = Branch
-    .cond <- is3.result
-  node check5 = Branch
-    .cond <- is5.result
-  node entry = Entry
-  node fizz = Call host.Log
-    .message <- "Fizz"
-  node fizzbuzz = Call host.Log
-    .message <- "FizzBuzz"
-  node is15 = Eq::<i32>
-    .a <- r15.result
-    .b <- 0
-  node is3 = Eq::<i32>
-    .a <- r3.result
-    .b <- 0
-  node is5 = Eq::<i32>
-    .a <- r5.result
-    .b <- 0
-  node loop = Macro std.flow.ForRange
-    .first <- 1
-    .last <- 15
-  node num_text = Convert::<i32, string>
-    .value <- loop.index
-  node number = Call host.Log
-    .message <- num_text.result
-  node r15 = Rem::<i32>
-    .a <- loop.index
-    .b <- 15
-  node r3 = Rem::<i32>
-    .a <- loop.index
-    .b <- 3
-  node r5 = Rem::<i32>
-    .a <- loop.index
-    .b <- 5
+  node buzz = Call host.Log(
+    .message <- "Buzz",
+  )
+  node check15 = Branch(
+    .cond <- Eq::<i32>(
+      .a <- Rem::<i32>(
+        .a <- loop.index,
+        .b <- 15,
+      ).result,
+      .b <- 0,
+    ).result,
+  )
+  node check3 = Branch(
+    .cond <- Eq::<i32>(
+      .a <- Rem::<i32>(
+        .a <- loop.index,
+        .b <- 3,
+      ).result,
+      .b <- 0,
+    ).result,
+  )
+  node check5 = Branch(
+    .cond <- Eq::<i32>(
+      .a <- Rem::<i32>(
+        .a <- loop.index,
+        .b <- 5,
+      ).result,
+      .b <- 0,
+    ).result,
+  )
+  node entry = Entry()
+  node fizz = Call host.Log(
+    .message <- "Fizz",
+  )
+  node fizzbuzz = Call host.Log(
+    .message <- "FizzBuzz",
+  )
+  node loop = Macro std.flow.ForRange(
+    .first <- 1,
+    .last <- 15,
+  )
+  node number = Call host.Log(
+    .message <- Convert::<i32, string>(
+      .value <- loop.index,
+    ).result,
+  )
 
   flow {
     check15.then -> fizzbuzz
@@ -59,20 +66,21 @@ func Main() {
 
   layout {
     buzz at (1502, -141)
+    #[note("Why check 15 first? 15 is a multiple of 3 too. If check3 came first, 15 would only print Fizz.")]
     check15 at (788, 0)
+    check15.cond at (608, 64)
+    check15.cond.a at (475, 64)
     check3 at (1043, 20)
+    check3.cond at (609, 154)
+    check3.cond.a at (474, 156)
     check5 at (1282, 40)
+    check5.cond at (609, 246)
+    check5.cond.a at (475, 246)
     entry at (0, 0)
     fizz at (1255, -140)
     fizzbuzz at (972, -138)
-    is15 at (608, 64)
-    is3 at (609, 154)
-    is5 at (609, 246)
     loop at (200, 0)
-    num_text at (474, 346)
     number at (1531, 60)
-    r15 at (475, 64)
-    r3 at (474, 156)
-    r5 at (475, 246)
+    number.message at (474, 346)
   }
 }
