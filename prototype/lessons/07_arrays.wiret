@@ -30,7 +30,7 @@ func Main() {
   )
   node list = GetLocal scores()
   node loop = Macro std.flow.ForEach::<i32>(
-    .array <- list.value,
+    .array <- list,
   )
   node make = MakeArray::<i32>(
     .item0 <- 12,
@@ -42,7 +42,7 @@ func Main() {
       .a <- Call std.string.Concat(
         .a <- Convert::<i32, string>(
           .value <- ArrayLength::<i32>(
-            .array <- list.value,
+            .array <- list,
           ),
         ),
         .b <- " scores, total ",
@@ -69,7 +69,7 @@ func Main() {
     ),
   )
   node start = SetLocal scores(
-    .value <- make.result,
+    .value <- make,
   )
 
   layout {

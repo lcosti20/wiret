@@ -294,9 +294,26 @@ class GraphNames:
         return sorted((n for n in nodes if n.id not in self.parent), key=lambda n: self.name(n.id))
 
 
+def implied_output(ref: PinRef, names: GraphNames) -> bool:
+    """Whether a wire from a declared node is written with its id alone (section 2.3): the
+    node has one data output and is not an Entry or a macro, whose outputs are named
+    parameters and results."""
+    sig = names.sigs.get(ref.node)
+    if sig is None or sig.error or not _IDENT_RE.match(names.name(ref.node)):
+        return False
+    n = names.g.node(ref.node)
+    outs = sig.data_outs
+    return (n is not None and n.kind not in ("Entry", "Macro") and len(outs) == 1
+            and outs[0].name == ref.pin)
+
+
 def fmt_value(b: Binding, names: GraphNames = None) -> str:
     if isinstance(b.value, PinRef) and names is not None and b.value.node == names.bare:
         return b.value.pin
+    if isinstance(b.value, PinRef) and not b.value.pin:      # a node that does not exist
+        return names.name(b.value.node) if names else b.value.node
+    if isinstance(b.value, PinRef) and names is not None and implied_output(b.value, names):
+        return names.name(b.value.node)
     if isinstance(b.value, PinRef):
         return f"{names.name(b.value.node) if names else b.value.node}.{b.value.pin}"
     return fmt_lit(b.value)

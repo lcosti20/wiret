@@ -111,24 +111,24 @@ func Main() {
   node announce = CreateDelegate Announce()
   node b = New Button()
   node bind_a = Bind Button.OnClick(
-    .obj <- b.result,
-    .handler <- announce.result,
+    .obj <- b,
+    .handler <- announce,
   )
   node bind_c = Bind Button.OnClick(
-    .obj <- b.result,
+    .obj <- b,
     .handler <- CreateDelegate Counter.Heard(
-      .target <- c.result,
+      .target <- c,
     ),
   )
   node c = New Counter()
   node click1 = Call Button.Click(
-    .self <- b.result,
+    .self <- b,
   )
   node click2 = Call Button.Click(
-    .self <- b.result,
+    .self <- b,
   )
   node click3 = Call Button.Click(
-    .self <- b.result,
+    .self <- b,
   )
   node entry = Entry()
   node say = Call host.Log(
@@ -137,7 +137,7 @@ func Main() {
       .b <- Call std.string.Concat(
         .a <- Convert::<i32, string>(
           .value <- GetField Counter.heard(
-            .obj <- c.result,
+            .obj <- c,
           ),
         ),
         .b <- " clicks",
@@ -145,8 +145,8 @@ func Main() {
     ),
   )
   node unbind_a = Unbind Button.OnClick(
-    .obj <- b.result,
-    .handler <- announce.result,
+    .obj <- b,
+    .handler <- announce,
   )
 
   layout {

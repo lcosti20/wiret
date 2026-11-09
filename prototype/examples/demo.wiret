@@ -43,13 +43,13 @@ macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, inde
 
   node bump = SetLocal i(
     .value <- Add::<i32>(
-      .a <- cur.value,
+      .a <- cur,
       .b <- 1,
     ),
   )
   node cur = GetLocal i()
   node each_out = Exit each(
-    .index <- cur.value,
+    .index <- cur,
   )
   node entry = Entry()
   node finish = Exit done()
@@ -59,7 +59,7 @@ macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, inde
   node seq = Sequence() @count(2)
   node test = Branch(
     .cond <- Le::<i32>(
-      .a <- cur.value,
+      .a <- cur,
       .b <- entry.last,
     ),
   )
@@ -158,7 +158,7 @@ func Main() @id("fn_main") {
     .message <- Call std.string.Concat(
       .a <- "SumTo(100) = ",
       .b <- Convert::<i32, string>(
-        .value <- sum.total,
+        .value <- sum,
       ),
     ),
   )

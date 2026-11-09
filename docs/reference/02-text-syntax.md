@@ -109,7 +109,7 @@ expr      = KIND [ symbol | STRING ] [ targs ] "(" [ binding { "," binding } [ "
 targs     = "::" "<" type { "," type } ">" ;            (* STRING: Format's template *)
 binding   = "." IDENT "<-" value ;
 value     = pinref | literal | expr [ "." IDENT ] ;     (* expr: an inline node *)
-pinref    = name "." IDENT ;
+pinref    = name "." IDENT | IDENT ;          (* IDENT: a declared node's one output *)
 name      = IDENT { "." IDENT } ;            (* a node id, or an inline node's dotted name *)
 flow      = "flow" "{" { wire } "}" NL ;
 wire      = source "->" target NL ;
@@ -127,7 +127,7 @@ Rules:
 2. **Kind** is a PascalCase built-in (`Add`, `Branch`, `SetLocal`, ...; section 3.3). Calling a declared function is always `Call`, so the closed set of built-in kinds never collides with user names.
 3. **Symbol** (optional) names the thing the node acts on: `Call std.math.Sqrt`, `GetField Player.health`, `SetLocal acc`, `GetState done`, `New Player`, `Cast Player`, `Macro ForRange`, `Exit done`, and for `Format` its template, a string: `Format "Total: {total}"` (section 3.3). A struct node names its struct, and a field node the struct and the field, since nothing else on the node says which struct it is: `MakeStruct Vec2`, `BreakStruct Vec2`, `GetField Vec2.x`, `WithField Vec2.x`. A member of a class (a field, a dispatcher, or a field that a container node changes) is always written with its class: `GetField Player.health`, `Broadcast Player.OnHit`, `ArrayAdd::<i32> Player.items`. A node therefore reads the same in a method and anywhere else, and moving it between them never changes its text. Inside a method the reader also accepts a member of the method's own class by its bare name, `GetField health`, and the formatter writes it qualified with that class. A member inherited from a base class resolves through the chain, so in a method of `Boss` the bare `health` is written `GetField Boss.health` and names the `health` declared in `Player`.
 4. **Type arguments** follow the symbol: `Add::<i32>`, `Convert::<i32, string>`, `Call std.array.Get::<f32>`. They are always written out, never inferred. Every generic argument list in Wiret, on a node, a declaration (`macro ForEach::<T>`) or a type (`array::<i32>`), is introduced by `::`. A node statement binds an id to a kind (`node plus = Add::<i32>(...)`), and with a bare `<` a node such as `NodeType<a, b> variable` would read like a comparison; the `::` removes that ambiguity.
-5. **Bindings** connect input pins. They are written in parentheses after the node, `.pin <- value`, separated by commas, and a trailing comma is allowed: `Call host.Log(.message <- "hi")`. Newlines inside the parentheses are ignored, and the canonical form puts each binding on its own line, indented one level further than the node, with a trailing comma (section 2.5). A node with no bound inputs is written with empty parentheses, `Entry()`, so every node reads the same way. `<-` mirrors the `->` of exec wires: data flows *into* the pin. The right-hand side is a pin reference (`other_node.pin`, a data wire), a literal, or a node written inline (see *Inline nodes* below). An enum value is written `Mode::Chase`. `::` followed by a name never starts type arguments (those are `::<`), so an enum value never reads like a pin reference, and a node may share an enum's name: `Mode.then` is a wire from node `Mode`, `Mode::Idle` a value. The reader also accepts the dotted `Mode.Chase` of Draft 0.11 and earlier where the graph has no node called `Mode`, and the formatter writes it `Mode::Chase`. An input that is not listed takes the pin's default value (the declared default, otherwise the zero value of its type); the compiler warns (`W0201`) about unlisted inputs that have no declared default.
+5. **Bindings** connect input pins. They are written in parentheses after the node, `.pin <- value`, separated by commas, and a trailing comma is allowed: `Call host.Log(.message <- "hi")`. Newlines inside the parentheses are ignored, and the canonical form puts each binding on its own line, indented one level further than the node, with a trailing comma (section 2.5). A node with no bound inputs is written with empty parentheses, `Entry()`, so every node reads the same way. `<-` mirrors the `->` of exec wires: data flows *into* the pin. The right-hand side is a pin reference (`other_node.pin`, a data wire; `other_node` alone when that node has one data output, see *Which output* below), a literal, or a node written inline (see *Inline nodes* below). An enum value is written `Mode::Chase`. `::` followed by a name never starts type arguments (those are `::<`), so an enum value never reads like a pin reference, and a node may share an enum's name: `Mode.then` is a wire from node `Mode`, `Mode::Idle` a value. The reader also accepts the dotted `Mode.Chase` of Draft 0.11 and earlier where the graph has no node called `Mode`, and the formatter writes it `Mode::Chase`. An input that is not listed takes the pin's default value (the declared default, otherwise the zero value of its type); the compiler warns (`W0201`) about unlisted inputs that have no declared default.
 6. **Exec wiring** is written in the graph's `flow` block, one wire per line, never on node lines (see *The flow block* below). `source -> target` is shorthand for a source node with exactly one exec output; otherwise the output is named, `source.pin -> target`. An exec output with no wire is unconnected, which means "this chain ends here" (section 4.2).
 7. **Targets** are exec inputs. The default exec input is `in`; write `node.pin` to target another one. Any number of producers may target the same exec input (merging flow).
 8. **Data wires** may fan out freely: any number of nodes may reference the same output pin.
@@ -150,7 +150,7 @@ node show = Call host.Log(
 )
 ```
 
-- **Which output.** An inline node with one data output feeds that output in, so nothing more is written. A node with several is followed by the one it feeds in: `.len <- BreakStruct Vec2(...).x`. Leaving it out there is a syntax error that lists the outputs. The reader also accepts the one output written out (`GetLocal score().value`), and the formatter leaves it out.
+- **Which output.** A node with one data output feeds that output in, so nothing more is written, the way `entry -> loop` leaves out the exec output of a node that has one. That holds for an inline node (`GetLocal score()`) and for a wire from a declared node (`.value <- hp`, not `hp.value`). A node with several outputs names the one it feeds in: `.len <- BreakStruct Vec2(...).x`, `.x <- parts.x`; leaving it out is a syntax error that lists the outputs. The reader also accepts the one output written out (`GetLocal score().value`, `hp.value`), and the formatter leaves it out, except on a wire from `Entry` or a macro node, whose outputs are parameters and results and are always named (`entry.amount`, `loop.index`). An inline node's dotted name is always followed by its output, since `show.message` alone reads as node `show`, output `message`. A bare name that is no node of the graph is kept as written and reported as `E0101`, so deleting a node never makes the file unreadable.
 
 - **Names.** An inline node's name is its consumer's name, a dot and the input it feeds: above, the `Concat` is `show.message`, the `Convert` is `show.message.b` and the `GetLocal` is `show.message.b.value`. The name is used wherever the node must be named: in the layout block, in a box's `members`, in diagnostics, in the debugger, in `wiretc edit` requests and in pin references (`show.message.b.result`), where the output is always named.
 - **Which nodes are inline.** In canonical form a node is written inline exactly when one input in the graph reads it, it has no exec pins (it is pure or `reads`) and it carries no semantic attribute or `//` comment (an attribute ends a node's statement and a comment stands above one, and an inline node has none of its own). Every other node is declared with a `node` statement: a node with exec pins, an unread node, and a node whose outputs feed several inputs. A shared output is the one place where the data graph is not a tree, and the declared node's id is the name it is shared under.
@@ -315,7 +315,7 @@ The canonical form is a function of the model alone, so two tools always write i
 2. Items ordered by kind (`use`, `extern`, `const`, `var`, `enum`, `struct`, `interface`, `class`, `macro`, `func`, `event`), then by name. Inside a `struct` or `enum`, fields and members keep the order they are written in: field order is the struct's layout, and member order gives the value of a member written without `= INT`, so reordering them changes the program and its semantic hash. Inside a `class`, fields likewise keep their written order (the object layout), followed by the methods: `func`s, then `event`s, each sorted by name. Inside an `interface`, methods keep their written order, since a method's position is its dispatch slot. A class's `dispatcher` lines come after its fields, in their written order, and before its methods.
 3. Inside a body: `local` statements by name, then `state` statements by name, then the `flow` block, then the declared `node` statements sorted by **node id** (ASCII order), then the `layout` block last. The flow block, the node statements and the layout block are each preceded by one blank line unless they open the body, and an empty block is omitted. Wiring an exec pin never reorders node statements; it only adds or removes `flow` lines.
 4. Inside the layout block: a line per node sorted by the node's name (so an inline node's line follows its consumer's), each with the node's metadata lines directly above it, then `box` lines sorted by box id. Inside a box, `members` are sorted by id. Moving a node changes only its own `place` line; moving a box changes only its own `box` line. Inside the flow block, wires are sorted by source node id, then by the source's exec-output order from the registry; the bare `source -> target` form is used exactly when the source has one exec output.
-5. A node statement is `node <id> = <Kind>(`, then its bindings, one per line, indented two spaces further than the node, each written `.pin <- value,` with a trailing comma, in the node kind's pin order (from the registry), then `)` at the node's indentation. Bindings equal to the pin default are omitted, and a node with no bindings left is written `<Kind>()` on its line. A node that only one input reads, and that has no exec pins and no semantic attribute, is written inline as that input's value, laid out the same way one level deeper and followed by `.output` only when it has more than one data output (section 2.3). A function whose graph is only `entry` wired to `ret` is written `= value` (section 2.3, *Expression bodies*).
+5. A node statement is `node <id> = <Kind>(`, then its bindings, one per line, indented two spaces further than the node, each written `.pin <- value,` with a trailing comma, in the node kind's pin order (from the registry), then `)` at the node's indentation. Bindings equal to the pin default are omitted, and a node with no bindings left is written `<Kind>()` on its line. A node that only one input reads, and that has no exec pins and no semantic attribute, is written inline as that input's value, laid out the same way one level deeper and followed by `.output` only when it has more than one data output (section 2.3). A wire from a declared node with one data output is written with the node's id alone, unless the node is `Entry` or a macro. A function whose graph is only `entry` wired to `ret` is written `= value` (section 2.3, *Expression bodies*).
 6. Semantic attributes are sorted alphabetically and end the line they modify (on a node, the line with its closing parenthesis). Metadata lines stand directly above their statement, or for a node above its line in the layout block, with no blank line between, in this order: `doc`, `category`, `keywords`, then `note` lines in the order they were written, then any other metadata in the order it was written. A metadata line moves with its statement when statements are sorted.
 7. Nothing else wraps: each binding line, each metadata line and each flow wire is a single line.
 8. Numbers and strings are written in their shortest unambiguous form.
@@ -370,11 +370,11 @@ class Player {
     node hp = GetLocal new_hp()
     node store = SetField Player.health(
       .obj <- entry.self,
-      .value <- hp.value,
+      .value <- hp,
     )
     node chk = Branch(
       .cond <- Le::<i32>(
-        .a <- hp.value,
+        .a <- hp,
         .b <- 0,
       ),
     )
@@ -465,17 +465,17 @@ macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, inde
   node cur = GetLocal i()
   node test = Branch(
     .cond <- Le::<i32>(
-      .a <- cur.value,
+      .a <- cur,
       .b <- entry.last,
     ),
   )
   node seq = Sequence() @count(2)
   node each_out = Exit each(
-    .index <- cur.value,
+    .index <- cur,
   )
   node bump = SetLocal i(
     .value <- Add::<i32>(
-      .a <- cur.value,
+      .a <- cur,
       .b <- 1,
     ),
   )
