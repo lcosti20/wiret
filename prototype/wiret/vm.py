@@ -670,6 +670,7 @@ class LoadedModule:
     global_names: dict = field(default_factory=dict)   # name -> global index
     classes: dict = field(default_factory=dict)        # class name -> ClassInfo
     capabilities: list = field(default_factory=list)   # wr.caps
+    declared: set = field(default_factory=set)         # exports marked @export (flag bit 3)
 
 
 def parse_pins(m: wbc.WbcModule, debug: dict) -> dict:
@@ -794,7 +795,7 @@ def parse_customs(m: wbc.WbcModule):
     if p:
         r = wbc.Reader(p)
         keys = ["module", "id", "compiler", "registry", "semantic_hash", "layout_hash",
-                "source_hash"]
+                "source_hash", "exports"]
         for k in keys:
             if r.eof():
                 break
@@ -1033,7 +1034,8 @@ class VM:
                  for vt, _, init in m.globals]
         return LoadedModule(m, meta.get("module", ""), funcs, exports, gvals, m.data, meta,
                             local_names, parse_global_names(m),
-                            {c.name: c for c in classes.values()}, caps)
+                            {c.name: c for c in classes.values()}, caps,
+                            {name for name, _, _, flags in m.exports if flags & wbc.EX_DECLARED})
 
     # -- execution ----------------------------------------------------------------
     def _fiber(self, mod: LoadedModule, name: str, args: list) -> Fiber:

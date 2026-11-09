@@ -3,7 +3,7 @@
 
   wiretc check [--json] FILE           diagnostics (with E0140/W0202 inside a project)
   wiretc fmt [--check] [--assign-ids] [--convert-comments | --drop-comments] FILE
-  wiretc build FILE [-o OUT.wbc] [--no-source]
+  wiretc build FILE [-o OUT.wbc] [--no-source] [--export-all]
   wiretc dis FILE.wbc                  disassemble with node ids
   wiretc verify FILE.wbc               run only the verifier
   wiretc run [--grant CAP]... [--sandbox] [--deterministic [--record LOG.json]]
@@ -55,9 +55,9 @@ def load(path):
         sys.exit(2)
 
 
-def build(path, out=None, embed=True):
+def build(path, out=None, embed=True, export_all=False):
     m, text = load(path)
-    r = compile_module(m, text, embed, project=find_project(path))
+    r = compile_module(m, text, embed, project=find_project(path), export_all=export_all)
     for d in r.diags:
         print(d, file=sys.stderr)
     if not r.ok:
@@ -118,6 +118,9 @@ def main(argv=None):
     p.add_argument("file")
     p.add_argument("-o", "--output")
     p.add_argument("--no-source", action="store_true")
+    p.add_argument("--export-all", action="store_true",
+                   help="export every func, event and method, not only the @export ones "
+                        "(for running and debugging; never ship this build)")
     p = sub.add_parser("dis")
     p.add_argument("file")
     p = sub.add_parser("verify")
@@ -268,7 +271,7 @@ def main(argv=None):
             print(f"git: {e}", file=sys.stderr)
             return 2
     if a.cmd == "build":
-        _, out, data = build(a.file, a.output, not a.no_source)
+        _, out, data = build(a.file, a.output, not a.no_source, a.export_all)
         print(f"wrote {out} ({len(data)} bytes)")
         return 0
     if a.cmd == "dis":
@@ -286,7 +289,7 @@ def main(argv=None):
         if a.file.endswith(".wbc"):
             data, m = open(a.file, "rb").read(), None
         else:
-            m, _, data = build(a.file)
+            m, _, data = build(a.file, export_all=True)     # run any function (section 7)
         if a.record and not a.deterministic:
             print("--record needs --deterministic: only a deterministic run can be replayed",
                   file=sys.stderr)
@@ -316,7 +319,7 @@ def main(argv=None):
         if a.file.endswith(".wbc"):
             data = open(a.file, "rb").read()
         else:
-            _, _, data = build(a.file)
+            _, _, data = build(a.file, export_all=True)     # as `run --record` built it
         with open(a.log, encoding="utf-8") as f:
             log = json.load(f)
         try:

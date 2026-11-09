@@ -14,7 +14,8 @@ def disassemble(data: bytes) -> str:
     wbc.CLASS_NAMES.update({ti: name for ti, (name, _) in classes.items()})
     out = []
     if meta:
-        out.append(f"; module {meta.get('module', '')}  compiler {meta.get('compiler', '')}")
+        out.append(f"; module {meta.get('module', '')}  compiler {meta.get('compiler', '')}"
+                   + (f"  exports {meta['exports']}" if "exports" in meta else ""))
         out.append(f"; semantic hash {meta.get('semantic_hash', '')[:16]}  "
                    f"layout hash {meta.get('layout_hash', '')[:16]}")
     for i, (mod, fld, t, flags) in enumerate(m.imports):

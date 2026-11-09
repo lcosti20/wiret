@@ -210,6 +210,10 @@ def explain(d: Diag) -> str:
         ty = data.get("type", "")
         return (f"Input {here} isn't connected and has no default, so it will be "
                 f"{zero_words(ty)}. Connect a wire, or double-click the pin to type a value.")
+    if c == "W0203":
+        return (f"Enum '{_quoted(m)}' is marked @export, but an enum is saved as plain numbers, so "
+                f"there is nothing to export and the mark does nothing. Remove @export; "
+                f"functions that are exported can still take and return its values.")
     if c == "W0301":
         return ("Nothing leads to this node, so it will never run. Connect a white exec wire into "
                 "it from the step that should come before it.")

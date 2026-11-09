@@ -68,7 +68,7 @@ def _compile(source: str, out: dict, debug: bool):
     m = _parse(source, out)
     if m is None:
         return None, None
-    r = compile_module(m, source, debug=debug)
+    r = compile_module(m, source, debug=debug, export_all=True)   # run any function by name
     out["diags"] = [_diag(d) for d in r.diags]
     return (m, r) if r.ok else (None, None)
 

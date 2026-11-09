@@ -185,6 +185,7 @@ Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber
 | `E0900` | Edit rejected: the document changed since the hash the edit was based on (section 7.2). |
 | `W0201` | Input left unbound and no declared default. |
 | `W0202` | Element in a project has no `@id` (section 2.4). A file outside a project gets no `W0202`. |
+| `W0203` | An `enum` is marked `@export`. An enum is its underlying integer type in WBC and has no type entry, so it is not exported (section 5.2). |
 | `W0301` | Node unreachable from any entry. |
 | `W0302` | Chain can end in a function that declares results. |
 | `W0601` | A box lists a member id that names no node or box. |

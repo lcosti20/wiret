@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 
 from wiret import wbc  # noqa: E402
 from wiret.checker import check  # noqa: E402
-from wiret.compiler import compile_module  # noqa: E402
+from wiret.compiler import compile_module as compile_declared  # noqa: E402
 from wiret.disasm import disassemble  # noqa: E402
 from wiret.flow import view_flow  # noqa: E402
 from wiret.model import Lit, PinRef, Place, note_detached, note_text, notes  # noqa: E402
@@ -34,6 +34,12 @@ from wiret.printer import layout_hash, print_module, semantic_hash  # noqa: E402
 from wiret.vm import VM, WiretError  # noqa: E402
 
 DEMO = os.path.join(os.path.dirname(HERE), "examples", "demo.wiret")
+
+
+def compile_module(*args, export_all=True, **kw):
+    """The tests call functions by name, as `wiretc run` and the editor do, so they build with
+    --export-all (section 5.2). ExportModeTests use compile_declared for a normal build."""
+    return compile_declared(*args, export_all=export_all, **kw)
 
 
 def demo() -> str:
@@ -4068,6 +4074,190 @@ func Sat(x: f64) -> ({results}) @pure {{
             with self.subTest(x=x):
                 got = run(text, "Sat", x)[0]
                 self.assertEqual([int(format_value(t, v)) for t, v in zip(types, got)], want)
+
+
+EXPORTS = module("""
+var counter: i32 = 0 @export
+var hidden: i32 = 0
+
+enum Color: u8 @export {
+  Red
+  Green
+}
+
+struct Point @export {
+  x: i32
+  y: i32
+}
+
+struct Inner {
+  v: i32
+}
+
+interface Named @export {
+  func Name() -> (name: string)
+}
+
+class Box @export {
+  size: i32 = 1
+
+  func Grow(by: i32) -> (size: i32) @export {
+    flow {
+      entry -> ret
+    }
+
+    node entry = Entry()
+    node ret = Return(
+      .size <- entry.by,
+    )
+  }
+
+  func Shrink(by: i32) -> (size: i32) {
+    flow {
+      entry -> ret
+    }
+
+    node entry = Entry()
+    node ret = Return(
+      .size <- entry.by,
+    )
+  }
+}
+
+func Priv(x: i32) -> (y: i32) = x
+
+func Pub(x: i32) -> (y: i32) @export {
+  flow {
+    call -> ret
+    entry -> call
+  }
+
+  node call = Call Priv(
+    .x <- entry.x,
+  )
+  node entry = Entry()
+  node ret = Return(
+    .y <- call,
+  )
+}
+""", macros=False)
+
+
+class ExportModeTests(unittest.TestCase):
+    """Section 5.2: a normal build exports only what is marked @export, each with flag bit 3;
+    an --export-all build also exports every func, event and method, without bit 3."""
+
+    def exports(self, export_all):
+        r = compile_declared(parse(EXPORTS), EXPORTS, export_all=export_all)
+        self.assertTrue(r.ok, r.diags)
+        return r, {name: (kind, flags) for name, kind, _, flags in r.module.exports}
+
+    def test_normal_build_exports_only_declared_items(self):
+        r, ex = self.exports(False)
+        self.assertEqual(ex, {
+            "Box.Grow": (wbc.EXPORT_FUNC, wbc.EX_DECLARED),
+            "Pub": (wbc.EXPORT_FUNC, wbc.EX_DECLARED),
+            "counter": (wbc.EXPORT_GLOBAL, wbc.EX_DECLARED),
+            "Box": (wbc.EXPORT_TYPE, wbc.EX_DECLARED),
+            "Named": (wbc.EXPORT_TYPE, wbc.EX_DECLARED),
+            "Point": (wbc.EXPORT_TYPE, wbc.EX_DECLARED),
+        })           # an enum has no type entry in WBC, so Color is not listed
+        vm = VM(output=lambda _s: None)
+        lm = vm.load(r.wbc)
+        self.assertEqual(lm.meta["exports"], "declared")
+        self.assertEqual(lm.declared, {"Box.Grow", "Pub", "counter", "Box", "Named", "Point"})
+        self.assertEqual(vm.call(lm, "Pub", [7]), [7])    # Priv still runs inside Pub
+        with self.assertRaises(WiretError) as e:
+            vm.call(lm, "Priv", [7])
+        self.assertEqual(e.exception.status, "WR_ERR_LINK")
+
+    def test_export_all_adds_every_function_without_bit_3(self):
+        r, ex = self.exports(True)
+        self.assertEqual({n for n, (k, _) in ex.items() if k == wbc.EXPORT_FUNC},
+                         {"Box.Grow", "Box.Shrink", "Priv", "Pub"})
+        self.assertEqual({n for n, (k, _) in ex.items() if k != wbc.EXPORT_FUNC},
+                         {"counter", "Box", "Named", "Point"})     # vars and types: still marked only
+        self.assertEqual({n for n, (_, f) in ex.items() if f & wbc.EX_DECLARED},
+                         {"Box.Grow", "Pub", "counter", "Box", "Named", "Point"})
+        vm = VM(output=lambda _s: None)
+        lm = vm.load(r.wbc)
+        self.assertEqual(lm.meta["exports"], "export-all")
+        self.assertEqual(vm.call(lm, "Priv", [3]), [3])
+
+    def test_export_mode_changes_only_the_export_table(self):
+        a, _ = self.exports(False)
+        b, _ = self.exports(True)
+        self.assertEqual([x.code for x in a.module.bodies], [x.code for x in b.module.bodies])
+        self.assertEqual(a.module.types, b.module.types)
+        self.assertEqual(a.module.funcs, b.module.funcs)
+        meta = lambda r: VM().load(r.wbc).meta
+        self.assertEqual(meta(a)["semantic_hash"], meta(b)["semantic_hash"])
+
+    def test_export_on_an_enum_is_W0203(self):
+        from wiret.explain import explain
+        r, _ = self.exports(False)
+        w = [d for d in r.diags if d.code == "W0203"]
+        self.assertEqual([(d.graph, d.node) for d in w], [("Color", None)])
+        self.assertIn("Enum 'Color' is marked @export", explain(w[0]))
+        unmarked = EXPORTS.replace("enum Color: u8 @export {", "enum Color: u8 {")
+        self.assertNotIn("W0203", codes(unmarked))
+
+    def test_verifier_checks_type_export_index(self):
+        r, _ = self.exports(False)
+        m = wbc.decode_module(r.wbc)
+        m.exports = [(n, k, 999 if k == wbc.EXPORT_TYPE else i, f) for n, k, i, f in m.exports]
+        with self.assertRaises(WiretError) as e:
+            VM().load(wbc.encode_module(m))
+        self.assertIn("names type 999", str(e.exception))
+
+    def test_wiretc_build_exports_declared_and_run_exports_all(self):
+        d = tempfile.mkdtemp()
+        try:
+            path = os.path.join(d, "t.wiret")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(EXPORTS)
+            wiretc = os.path.join(os.path.dirname(HERE), "wiretc.py")
+            sh = lambda *a: subprocess.run([sys.executable, wiretc, *a], capture_output=True,
+                                           text=True)
+            out = os.path.join(d, "t.wbc")
+            self.assertEqual(sh("build", path, "-o", out).returncode, 0)
+            refused = sh("run", out, "Priv", "1")
+            self.assertEqual(refused.returncode, 1)
+            self.assertIn("no exported function 'Priv'", refused.stderr)
+            self.assertIn("exports declared", sh("dis", out).stdout)
+            self.assertEqual(sh("build", "--export-all", path, "-o", out).returncode, 0)
+            self.assertEqual(sh("run", out, "Priv", "1").returncode, 0)
+            ran = sh("run", path, "Priv", "4")             # run builds with --export-all
+            self.assertEqual(ran.returncode, 0, ran.stderr)
+            self.assertIn("y = 4", ran.stdout)
+        finally:
+            shutil.rmtree(d)
+
+
+class SpecExampleRoundTrip(unittest.TestCase):
+    """Tier 0 exit criterion (section 1.6): the section 2.6 example round-trips byte for byte.
+    The spec shows it in flow order with no alignment (section 2.5), so the canonical writer's
+    output, put back in flow order by `wiretc view --flow`, must be the example exactly."""
+
+    def example(self):
+        spec = os.path.join(os.path.dirname(os.path.dirname(HERE)), "docs", "reference",
+                            "02-text-syntax.md")
+        with open(spec, encoding="utf-8", newline="") as f:
+            sec = f.read().split("### 2.6 A complete example", 1)[1]
+        return sec.split("```\n", 1)[1].split("```", 1)[0]
+
+    def test_section_2_6_round_trips_byte_for_byte(self):
+        from wiret.flow import view_flow
+        text = self.example()
+        canonical = print_module(parse(text))
+        self.assertEqual(print_module(parse(canonical)), canonical)     # fmt(fmt(x)) == fmt(x)
+        self.assertEqual(view_flow(parse(canonical)), text)
+        self.assertEqual(view_flow(parse(text)), text)
+
+    def test_section_2_6_has_no_alignment_padding(self):
+        for line in self.example().splitlines():
+            with self.subTest(line=line):
+                self.assertNotRegex(line.strip(), r"\S  +(=|at|<-|->) ")
 
 
 class ArithmeticEdgeCases(unittest.TestCase):
