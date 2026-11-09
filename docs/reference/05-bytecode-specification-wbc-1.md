@@ -156,6 +156,8 @@ Notation: `[in] -> [out]`. `L` is a branch target, an `s32` offset relative to t
 | 0D | `suspend` | kind: 0 yield, 1 timer, 2 signal | `[]`, `[f64]` or `[signal]` -> `[]` |
 | 0E | `throw` |  | `[fault]` -> . A `fault` is made with the native `std.fault.Make` and read with `std.fault.Message` and `std.fault.Code` (section 3.4). The type `fault` appears only in locals and function types. |
 | 0F | `brk` |  | Reserved for debuggers. Never appears in a file. |
+| 17 | `cont.depth` |  | `[]` -> `[i32]`: the number of entries on the frame's continuation stack, handler markers included. |
+| 18 | `cont.trunc` |  | `[i32 n]` -> `[]`: discards the entries above the first `n`; nothing when `n` is negative or not below the depth. `Leave` uses the pair (section 4.2). |
 
 **Variables and constants (10 to 2F)**
 

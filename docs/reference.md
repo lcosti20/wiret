@@ -1,6 +1,6 @@
 # Wiret Language Specification
 
-*Draft 0.11: text syntax, bytecode (WBC) and embedding API for a text-based visual scripting language*
+*Draft 0.12: text syntax, bytecode (WBC) and embedding API for a text-based visual scripting language*
 
 > **Status.** This is a design draft, not an implementation. Nothing here has been run through a real parser, verifier or VM, so treat the grammar and opcode tables as a starting point to test, not a frozen standard. Where I went beyond your reference documents (mainly Blueprint runtime behaviour that the supplied documentation does not spell out), the text says so.
 
@@ -19,6 +19,8 @@
 **Draft 0.8.** Records decisions made while adding maps, sets, container equality, ids and merging to the prototype (Appendix G). Map and set nodes have fixed pins, and the mutators that may change nothing say whether they did (3.3). Every NaN is the same map key or set item (3.1). Container equality calls one native per container kind, which takes `anyref` and declares its fuel cost (3.4, 4.9, 5.7). `@id`s and `W0202` are required only in a project (2.4, 4.7), and `wiret.ids` has a fixed line format (7.3). A merge matches an element to the same element after it gains an `@id`, carries renames across, lets the incoming side win layout disagreements, and marks a deleted-versus-modified node as a whole block (7.1).
 
 **Draft 0.9.** Node statements change shape, following the research note on text syntax for a Blueprint-style language (Appendix H). A node's inputs are written in parentheses, comma separated with a trailing comma allowed, and a node without inputs is written `Entry()` (2.3). A node's metadata lines move to its line in the layout block (2.3, 2.4). A node that exactly one input reads, with no exec pins and no semantic attribute, is written inline in that input and named by its position, `show.message` (2.3, 2.5); such names are never retired (7.3). The verifier rejects unknown function flags and an event with results (5.2).
+
+**Draft 0.12.** Takes the last group of changes from the review (Appendix K). A node that reads mutable state and is evaluated again at two consumers that run one after the other is the error `E0320` unless it is stored in a local or marked `@live` (2.4, 4.3). `Leave` ends a macro early, and every `std.flow` loop has a `break` input (3.3, 3.4, 4.2). Enum values are written `Mode::Chase`, so a node may share an enum's name (2.1, 2.3). Keywords are contextual, and only `true`, `false` and `null` are reserved (2.1).
 
 **Draft 0.11.** Makes the text shorter to write and easier to read, following the same review (Appendix J). An inline node with one data output no longer names it (`Convert::<i32, string>(...)`, not `(...).result`). A function with one result that is a single expression is written `= value`, with its parameters named bare. A `Format` node builds text from a template, replacing chains of `Concat` and `Convert`. Each graph opens with its `flow` block, so it reads as the order in which it runs and then the nodes. A `//` comment directly above a declaration, statement, input or wire is kept, through formatting, editing and merges (2.1, 2.3, 2.5, 3.3).
 
@@ -47,3 +49,4 @@
 - [Appendix H. Changes in Draft 0.9](reference/appendix-h.md)
 - [Appendix I. Changes in Draft 0.10](reference/appendix-i.md)
 - [Appendix J. Changes in Draft 0.11](reference/appendix-j.md)
+- [Appendix K. Changes in Draft 0.12](reference/appendix-k.md)

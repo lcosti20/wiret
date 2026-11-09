@@ -399,6 +399,10 @@ def verify_function(m: WbcModule, i: int):
         elif n == "cont.pop":
             if stack:
                 raise VerifyError("cont.pop with a non-empty operand stack", fidx, ins.pc)
+        elif n == "cont.depth":
+            stack.append(I32)
+        elif n == "cont.trunc":
+            pop(I32, ins)
         elif n == "return":
             if len(stack) != len(results) or not all(is_sub(m, g, r)
                                                       for g, r in zip(stack, results)):

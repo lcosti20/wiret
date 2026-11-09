@@ -89,6 +89,7 @@ class Ctx:
     params: dict = field(default_factory=dict)
     locals: dict = field(default_factory=dict)
     states: dict = field(default_factory=dict)
+    depth: Optional[str] = None    # a macro with Leave: the local holding its entry depth + 1
     exits: dict = field(default_factory=dict)
     results: dict = field(default_factory=dict)
 
@@ -661,7 +662,9 @@ class FuncLowerer:
                     self.ir[nid] = IRNode(nid, "Nop", sig, execs=[("then", tgt)])
                 continue
             ir = IRNode(nid, n.kind, sig, n.symbol, list(n.targs), pure=sig.pure, attrs=n.attrs)
-            if n.kind == "Exit":
+            if n.kind in ("Exit", "Leave"):
+                if n.kind == "Leave":
+                    ir.extra["leave"] = ctx.depth
                 for p in sig.data_ins:
                     if n.binding(p.name) is not None:
                         ir.inputs.append((p.name, p.type, self.src(ctx, n, p)))
@@ -753,6 +756,9 @@ class FuncLowerer:
             self.add_local(sub.locals[l.name], l.type, l.default)
         for s in sorted(mg.states, key=lambda s: s.name):
             sub.states[s.name] = self.state_slot(mpath, s)
+        if any(m.kind == "Leave" for m in mg.nodes):
+            sub.depth = f"{mpath}.!depth"
+            self.add_local(sub.depth, "i32")
         entry = next((m for m in mg.nodes if m.kind == "Entry"), None)
         data_params = [p for p in sig.data_ins]
         for p in mg.params:
@@ -763,6 +769,12 @@ class FuncLowerer:
             ir.inputs = [(q.name, q.type, self.src(ctx, n, q)) for q in data_params]
             ir.extra["assign"] = [sub.params[q.name] for q in data_params]
             ir.execs = [("then", self.out_target(sub, entry, p.name) if entry else None)]
+            # an input wired straight to a Leave leaves the macro; any other enters it, and
+            # records the depth that a Leave discards back to
+            first = next((e for e in entry.execs if e.pin == p.name), None) if entry else None
+            first = mg.node(first.target) if first is not None else None
+            if sub.depth and (first is None or first.kind != "Leave"):
+                ir.extra["record"] = sub.depth
             self.ir[cid] = ir
         self.expand(sub)
 
@@ -797,9 +809,9 @@ class FuncLowerer:
         if not self.g.result_list:
             return
         warned, states = set(), set()
-        work = [(self.entry, ())]
+        work = [(self.entry, (), ())]       # node, continuation stack, recorded macro depths
 
-        def chain_end(nid, S):
+        def chain_end(nid, S, M):
             while True:
                 if not S:
                     if nid not in warned:
@@ -809,15 +821,19 @@ class FuncLowerer:
                     return
                 k, S = S[-1], S[:-1]
                 if k is not None:
-                    work.append((k, S))
+                    work.append((k, S, M))
                     return
 
         while work and len(states) < 20000:
-            nid, S = work.pop()
-            if (nid, S) in states or len(S) > 64:
+            nid, S, M = work.pop()
+            if (nid, S, M) in states or len(S) > 64:
                 continue
-            states.add((nid, S))
+            states.add((nid, S, M))
             n = self.ir[nid]
+            if "record" in n.extra:
+                M = tuple(sorted(dict(M, **{n.extra["record"]: len(S)}).items()))
+            if "leave" in n.extra and n.extra["leave"] in dict(M):
+                S = S[:dict(M)[n.extra["leave"]]]
             if n.kind in ("Return", "Throw"):
                 continue
             if n.kind == "Try":
@@ -827,14 +843,14 @@ class FuncLowerer:
                 nexts = [(t.get("body"), base + (None,)), (t.get("fault"), base)]
                 for tgt, s in nexts:
                     if tgt is None:
-                        chain_end(nid, s)
+                        chain_end(nid, s, M)
                     else:
-                        work.append((tgt, s))
+                        work.append((tgt, s, M))
                 continue
             if n.kind == "Sequence":
                 outs = [t for _, t in n.execs]
                 if not outs:
-                    chain_end(nid, S)
+                    chain_end(nid, S, M)
                     continue
                 S2 = S + tuple(reversed(outs[1:]))
                 nexts = [(outs[0], S2)]
@@ -842,9 +858,9 @@ class FuncLowerer:
                 nexts = [(t, S) for _, t in n.execs] or [(None, S)]
             for t, s in nexts:
                 if t is None:
-                    chain_end(nid, s)
+                    chain_end(nid, s, M)
                 else:
-                    work.append((t, s))
+                    work.append((t, s, M))
 
     # -- lowering -----------------------------------------------------------------
     def lower(self):
@@ -941,10 +957,20 @@ class FuncLowerer:
         elif k == "Nop":
             self.ready(n)
             self.transfer(then, nxt)
-        elif k in ("Capture", "Exit"):
+        elif k in ("Capture", "Exit", "Leave"):
+            if "record" in n.extra:         # depth + 1, so 0 means "not entered"
+                self.E("cont.depth")
+                self.E("i32.const", 1)
+                self.E("i32.add")
+                self.E("local.set", self.local_index[n.extra["record"]])
             self.emit_inputs(n)
             for name in reversed(n.extra["assign"]):
                 self.E("local.set", self.local_index[name])
+            if "leave" in n.extra:          # -1 when not entered: cont.trunc does nothing
+                self.E("local.get", self.local_index[n.extra["leave"]])
+                self.E("i32.const", 1)
+                self.E("i32.sub")
+                self.E("cont.trunc")
             self.transfer(then, nxt)
         elif k == "SetLocal":
             self.emit_inputs(n)

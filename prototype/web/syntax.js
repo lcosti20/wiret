@@ -28,7 +28,13 @@ export function makeHighlighter(rules) {
     token.lastIndex = 0;
     for (let m; (m = token.exec(line)); ) {
       if (!m[0]) { token.lastIndex++; continue; }
-      const tag = tagOf(m[0]);
+      let tag = tagOf(m[0]);
+      if (tag === "kw") {      // as syntax.is_name: next to `.` or before a single `:`, a name
+        const before = line.slice(0, m.index).trimEnd(), after = line.slice(m.index + m[0].length);
+        const rest = after.trimStart();
+        if (before.endsWith(".") || after.startsWith(".") || after.startsWith("(") ||
+            (rest.startsWith(":") && !rest.startsWith("::"))) tag = null;
+      }
       if (tag) out.push([m.index, m.index + m[0].length, tag]);
     }
     return out;

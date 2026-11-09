@@ -76,7 +76,7 @@ def input_label(n, pin) -> str:
         if len(text) > 22:
             text = text[:20] + "…\""
         return f"{pin.name} = {text}"
-    if b is None and pin.default is not None and n.kind != "Exit":
+    if b is None and pin.default is not None and n.kind not in ("Exit", "Leave"):
         return f"{pin.name} ({fmt_lit(pin.default_lit())})"
     return pin.name
 

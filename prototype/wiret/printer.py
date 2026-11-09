@@ -61,7 +61,9 @@ def fmt_lit(v: Lit) -> str:
         return "null"
     if k == "string":
         return fmt_string(v.value)
-    if k in ("ident", "enum"):
+    if k == "enum":                     # "Mode.Chase" in the model
+        return v.value.replace(".", "::", 1)
+    if k == "ident":
         return v.value
     if k == "tuple":
         return "(" + ", ".join(fmt_lit(x) for x in v.value) + ")"
@@ -236,7 +238,7 @@ class GraphNames:
                     and ids.count(r[0][0]) == 1 and not n.attrs and not n.execs
                     and not n.comment
                     and n.id not in targets and not sig.error and not sig.exec_ins
-                    and not sig.exec_outs and n.kind not in ("Entry", "Return", "Exit")
+                    and not sig.exec_outs and n.kind not in ("Entry", "Return", "Exit", "Leave")
                     and sum(1 for b in nodes[r[0][0]].bindings if b.pin == r[0][1]) == 1):
                 self.parent[n.id] = r[0]
         # a ring of nodes that each feed the next has no node to write it under (E0301)

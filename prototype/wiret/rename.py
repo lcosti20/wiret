@@ -8,7 +8,7 @@ from typing import Optional
 
 from .ids import Element, elements
 from .model import Graph, Lit, Module, PinRef
-from .parser import KEYWORDS
+from .parser import RESERVED
 
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -90,7 +90,7 @@ def rename(m: Module, token: str, new: str) -> list:
 
 def rename_element(m: Module, e: Element, new: str) -> list:
     old = e.name
-    if not IDENT.match(new) or new in KEYWORDS:
+    if not IDENT.match(new) or new in RESERVED:
         raise RenameError(f"'{new}' is not a valid name")
     if new == old:
         return []
@@ -239,9 +239,9 @@ def _rename_signature_pin(m: Module, g, e: Element, old: str, new: str) -> list:
                     else _rename_binding(cg, n, old, new))
     else:
         for n in g.nodes:
-            if n.kind == "Return" or (n.kind == "Exit" and not is_exec):
+            if n.kind == "Return" or (n.kind in ("Exit", "Leave") and not is_exec):
                 out += _rename_binding(g, n, old, new)
-            if n.kind == "Exit" and is_exec and n.symbol == old:
+            if n.kind in ("Exit", "Leave") and is_exec and n.symbol == old:
                 n.symbol = new
                 out.append(f"{g.name}.{n.id}")
         for cg, n in _calls(m, ("Call", "Macro"), g.name):

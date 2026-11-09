@@ -1129,7 +1129,7 @@ class EditorApp:
             if d == "in" and p and p.type in self.idx.enums:
                 sub = tk.Menu(menu, tearoff=0)
                 for member, _ in enum_values(self.idx.enums[p.type]):
-                    sub.add_command(label=f"{p.type}.{member}",
+                    sub.add_command(label=f"{p.type}::{member}",
                                     command=lambda m=member: self.set_enum_value(nid, pin,
                                                                                  p.type, m))
                 menu.add_cascade(label=f"Set '{pin}' to", menu=sub)
@@ -1370,6 +1370,7 @@ class EditorApp:
             for r in g.result_list:
                 if r.type == "exec":
                     add(mac, f"Exit {r.name}", "Exit", r.name)
+                    add(mac, f"Leave {r.name}", "Leave", r.name)
         if mac.index("end") is None:
             mac.add_command(label="(no macros: Graph > New macro…)", state="disabled")
         menu.add_cascade(label="Macro", menu=mac)

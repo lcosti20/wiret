@@ -25,7 +25,7 @@ class Lit:
 
 # Semantic attributes (`@name`, section 2.4). Any other `@` name is E0104.
 SEMANTIC_ATTRS = {"id", "pure", "reads", "final", "private", "export", "inline", "deprecated",
-                  "count", "cases", "disabled", "capability", "latent"}
+                  "count", "cases", "disabled", "capability", "latent", "live"}
 # Metadata attributes (`#[name]`) in canonical order; any other name follows them (section 2.5).
 META_ORDER = ["doc", "category", "keywords", "note"]
 

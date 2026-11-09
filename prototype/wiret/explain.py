@@ -220,10 +220,13 @@ def explain(d: Diag) -> str:
         return (f"This uses a result from '{_quoted(m)}', but '{_quoted(m)}' doesn't run on every "
                 f"path before this node, so there might be no value to use. Store the value "
                 f"in a local variable on every path instead.")
-    if c == "W0320":
-        return (f"'{_quoted(m)}' reads a variable and is used by more than one step, and each step "
-                f"may see a different value. If they should all see the same value, store it in "
-                f"a local variable first.")
+    if c == "E0320":
+        return (f"'{_quoted(m)}' reads something that can change (a field, a variable or "
+                f"state), and it is read again at each step that uses it. Two of those steps can "
+                f"run one after the other, so the second may see a different value than the "
+                f"first. To use one value, store it in a local before the first step (Set, then "
+                f"Get the local). If each step should see the value as it is then, mark the "
+                f"node @live.")
     if c == "E0130":
         return ("Nodes that change an array, map or set need to know which one to change: the "
                 "name of a local variable or module variable that holds it, written after the "
