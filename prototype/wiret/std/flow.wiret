@@ -14,7 +14,7 @@ macro DoN(in: exec, reset: exec, n: i32) -> (out: exec, counter: i32) {
 
   node bump = SetState count(
     .value <- Add::<i32>(
-      .a <- cur.value,
+      .a <- cur,
       .b <- 1,
     ),
   )
@@ -24,11 +24,11 @@ macro DoN(in: exec, reset: exec, n: i32) -> (out: exec, counter: i32) {
   node cur = GetState count() @live
   node entry = Entry()
   node fire = Exit out(
-    .counter <- cur.value,
+    .counter <- cur,
   )
   node test = Branch(
     .cond <- Lt::<i32>(
-      .a <- cur.value,
+      .a <- cur,
       .b <- entry.n,
     ),
   )
@@ -103,20 +103,20 @@ macro ForEach::<T>(in: exec, break: exec, array: array::<T>) -> (each: exec, don
 
   node bump = SetLocal i(
     .value <- Add::<i32>(
-      .a <- cur.value,
+      .a <- cur,
       .b <- 1,
     ),
   )
   node cur = GetLocal i()
   node each_out = Exit each(
     .item <- got.item,
-    .index <- cur.value,
+    .index <- cur,
   )
   node entry = Entry()
   node finish = Exit done()
   node got = ArrayGet::<T>(
     .array <- entry.array,
-    .index <- cur.value,
+    .index <- cur,
   )
   node init = SetLocal i(
     .value <- 0,
@@ -128,7 +128,7 @@ macro ForEach::<T>(in: exec, break: exec, array: array::<T>) -> (each: exec, don
   node stop = Leave done()
   node test = Branch(
     .cond <- Lt::<i32>(
-      .a <- cur.value,
+      .a <- cur,
       .b <- len.length,
     ),
   )
@@ -151,7 +151,7 @@ macro ForEachMap::<K, V>(in: exec, break: exec, map: map::<K, V>) -> (each: exec
 
   node bump = SetLocal i(
     .value <- Add::<i32>(
-      .a <- cur.value,
+      .a <- cur,
       .b <- 1,
     ),
   )
@@ -159,17 +159,17 @@ macro ForEachMap::<K, V>(in: exec, break: exec, map: map::<K, V>) -> (each: exec
   node each_out = Exit each(
     .key <- got_key.key,
     .value <- got_value.value,
-    .index <- cur.value,
+    .index <- cur,
   )
   node entry = Entry()
   node finish = Exit done()
   node got_key = MapKeyAt::<K, V>(
     .map <- entry.map,
-    .index <- cur.value,
+    .index <- cur,
   )
   node got_value = MapValueAt::<K, V>(
     .map <- entry.map,
-    .index <- cur.value,
+    .index <- cur,
   )
   node init = SetLocal i(
     .value <- 0,
@@ -181,7 +181,7 @@ macro ForEachMap::<K, V>(in: exec, break: exec, map: map::<K, V>) -> (each: exec
   node stop = Leave done()
   node test = Branch(
     .cond <- Lt::<i32>(
-      .a <- cur.value,
+      .a <- cur,
       .b <- len.length,
     ),
   )
@@ -204,13 +204,13 @@ macro ForRange(in: exec, break: exec, first: i32, last: i32) -> (each: exec, don
 
   node bump = SetLocal i(
     .value <- Add::<i32>(
-      .a <- cur.value,
+      .a <- cur,
       .b <- 1,
     ),
   )
   node cur = GetLocal i()
   node each_out = Exit each(
-    .index <- cur.value,
+    .index <- cur,
   )
   node entry = Entry()
   node finish = Exit done()
@@ -221,7 +221,7 @@ macro ForRange(in: exec, break: exec, first: i32, last: i32) -> (each: exec, don
   node stop = Leave done()
   node test = Branch(
     .cond <- Le::<i32>(
-      .a <- cur.value,
+      .a <- cur,
       .b <- entry.last,
     ),
   )
@@ -243,11 +243,11 @@ macro Repeat(in: exec, break: exec, times: i32) -> (body: exec, done: exec, inde
   }
 
   node body_out = Exit body(
-    .index <- cur.value,
+    .index <- cur,
   )
   node bump = SetLocal i(
     .value <- Add::<i32>(
-      .a <- cur.value,
+      .a <- cur,
       .b <- 1,
     ),
   )
@@ -261,7 +261,7 @@ macro Repeat(in: exec, break: exec, times: i32) -> (body: exec, done: exec, inde
   node stop = Leave done()
   node test = Branch(
     .cond <- Lt::<i32>(
-      .a <- cur.value,
+      .a <- cur,
       .b <- entry.times,
     ),
   )

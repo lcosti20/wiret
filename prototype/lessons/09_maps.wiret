@@ -20,7 +20,7 @@ func Main() {
     .key <- loop.item,
     .value <- Add::<i32>(
       .a <- MapFind::<string, i32>(
-        .map <- got.value,
+        .map <- got,
         .key <- loop.item,
       ).value,
       .b <- 1,
@@ -49,17 +49,17 @@ func Main() {
     .message <- Call std.string.Concat(
       .a <- Convert::<i32, string>(
         .value <- MapLength::<string, i32>(
-          .map <- got.value,
+          .map <- got,
         ),
       ),
       .b <- " different fruits",
     ),
   )
   node loop = Macro std.flow.ForEach::<string>(
-    .array <- fruits.result,
+    .array <- fruits,
   )
   node show = Macro std.flow.ForEachMap::<string, i32>(
-    .map <- got.value,
+    .map <- got,
   )
 
   layout {

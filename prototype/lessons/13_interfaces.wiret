@@ -154,13 +154,13 @@ func Main() {
   }
 
   node add_r = ArrayAdd::<Shape> shapes(
-    .item <- rect.result,
+    .item <- rect,
   )
   node add_s = ArrayAdd::<Shape> shapes(
-    .item <- square.result,
+    .item <- square,
   )
   node add_t = ArrayAdd::<Shape> shapes(
-    .item <- tri.result,
+    .item <- tri,
   )
   node area = Call Shape.Area(
     .self <- loop.item,
@@ -176,20 +176,20 @@ func Main() {
   node say = Call host.Log(
     .message <- Call std.string.Concat(
       .a <- Call std.string.Concat(
-        .a <- name.name,
+        .a <- name,
         .b <- ": area ",
       ),
       .b <- Convert::<i32, string>(
-        .value <- area.area,
+        .value <- area,
       ),
     ),
   )
   node side_h = SetField Rectangle.height(
-    .obj <- square.result,
+    .obj <- square,
     .value <- 5,
   )
   node side_w = SetField Rectangle.width(
-    .obj <- square.result,
+    .obj <- square,
     .value <- 5,
   )
   node square = New Square()

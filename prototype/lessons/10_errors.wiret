@@ -62,7 +62,7 @@ func Main() {
     .message <- Call std.string.Concat(
       .a <- "Each gets ",
       .b <- Convert::<i32, string>(
-        .value <- good.each,
+        .value <- good,
       ),
     ),
   )

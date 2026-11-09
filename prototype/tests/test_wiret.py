@@ -56,13 +56,13 @@ macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, inde
 
   node bump = SetLocal i(
     .value <- Add::<i32>(
-      .a <- cur.value,
+      .a <- cur,
       .b <- 1,
     ),
   )
   node cur = GetLocal i()
   node each_out = Exit each(
-    .index <- cur.value,
+    .index <- cur,
   )
   node entry = Entry()
   node finish = Exit done()
@@ -72,7 +72,7 @@ macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, inde
   node seq = Sequence() @count(2)
   node test = Branch(
     .cond <- Le::<i32>(
-      .a <- cur.value,
+      .a <- cur,
       .b <- entry.last,
     ),
   )
@@ -215,7 +215,7 @@ func Main() {
         out = print_module(m)
         self.assertIn("  node show_message_b = Convert::<i32, string>(\n"
                       "    .value <- GetLocal score(),\n  )\n", out)
-        self.assertIn("      .a <- show_message_b.result,\n      .b <- show_message_b.result,\n", out)
+        self.assertIn("      .a <- show_message_b,\n      .b <- show_message_b,\n", out)
         self.assertIn("    show_message_b at (600, 320)\n    show_message_b.value at (440, 420)\n",
                       out)
         self.assertEqual(print_module(parse(out)), out)
@@ -231,7 +231,7 @@ func F() -> (n: i32) {
   node entry = Entry()
   node get = Call G()
   node r = Return(
-    .n <- get.n,
+    .n <- get,
   )
   node seq = Sequence() @count(2)
 }
@@ -379,7 +379,7 @@ func F() {
         self.assertEqual(promoted(())[0], ["log_message_2"])     # log_message is live
         names, out = promoted(("log_message_2", "log_message_3"))
         self.assertEqual(names, ["log_message_4"])
-        self.assertIn(".message <- log_message_4.result", out)
+        self.assertIn(".message <- log_message_4,", out)
         # a retired id in another graph does not count
         self.assertEqual(promoted(())[0], ["log_message_2"])
         m = parse(text)
@@ -894,16 +894,16 @@ func Step(e: Enemy) -> (out: Enemy, fleeing: bool) {
     ),
   )
   node r1 = Return(
-    .out <- chased.result,
+    .out <- chased,
     .fleeing <- Eq::<Mode>(
-      .a <- mode.value,
+      .a <- mode,
       .b <- Mode::Flee,
     ),
   )
   node r2 = Return(
     .out <- entry.e,
     .fleeing <- Lt::<Mode>(
-      .a <- mode.value,
+      .a <- mode,
       .b <- Mode::Flee,
     ),
   )
@@ -911,12 +911,12 @@ func Step(e: Enemy) -> (out: Enemy, fleeing: bool) {
     .value <- Select::<Mode>(
       .cond <- Eq::<Enemy>(
         .a <- entry.e,
-        .b <- chased.result,
+        .b <- chased,
       ),
       .a <- Mode::Idle,
       .b <- Convert::<u8, Mode>(
         .value <- Convert::<Mode, u8>(
-          .value <- mode.value,
+          .value <- mode,
         ),
       ),
     ),
@@ -1944,8 +1944,8 @@ func Add1(v: i32) -> (r: i32, s: i32) {
     .b <- 1,
   )
   node ret = Return(
-    .r <- plus.result,
-    .s <- plus.result,
+    .r <- plus,
+    .s <- plus,
   )
 }
 """
@@ -2510,8 +2510,8 @@ func Double(v: i32) -> (r: i32, s: i32) {
 
   node entry = Entry()
   node ret = Return(
-    .r <- twice.result,
-    .s <- twice.result,
+    .r <- twice,
+    .s <- twice,
   )
   node twice = Add::<i32>(
     .a <- entry.v,
@@ -2767,7 +2767,7 @@ class DiffTests(unittest.TestCase):
                 '    .message <- "B",\n  )\n  node c = Call host.Log(\n    .message <- "c",\n  )\n'
                 '  node entry = Entry()\n')
         b = sub(b, "    a -> b\n", "    a -> b\n    b -> c\n")
-        b = sub(b, "    .r <- twice.result,\n    .s <- twice.result,\n",
+        b = sub(b, "    .r <- twice,\n    .s <- twice,\n",
                 "    .r <- 1,\n    .s <- 1,\n")
         b = sub(b, "  node twice = Add::<i32>(\n    .a <- entry.v,\n    .b <- entry.v,\n  )\n", "")
         self.assertEqual(self.diff(MERGE_BASE, b), """func Double
@@ -3202,7 +3202,7 @@ func F() -> (a: i32) {
   }
 
   node bump = SetVar hp(
-    .value <- cur.value,
+    .value <- cur,
   )
   node cur = GetVar hp()
   node entry = Entry()
@@ -3211,7 +3211,7 @@ func F() -> (a: i32) {
     .last <- 3,
   )
   node ret = Return(
-    .a <- cur.value,
+    .a <- cur,
   )
 }
 """)
@@ -3600,6 +3600,70 @@ class ReadabilityTests(unittest.TestCase):
         long = self.text().replace("        .v <- 2.5,\n      ),", "        .v <- 2.5,\n      ).result,")
         self.assertNotEqual(long, self.text())
         self.assertEqual(print_module(parse(long)), self.text())
+
+    def test_a_declared_node_s_one_output_is_implied_too(self):
+        text = module("""
+struct Vec2 {
+  x: f32
+  y: f32
+}
+
+func F(n: i32) -> (r: i32, x: f32, y: f32) {
+  local acc: i32
+
+  flow {
+    entry -> loop
+    loop.each -> add
+    loop.done -> ret
+  }
+
+  node add = SetLocal acc(
+    .value <- Add::<i32>(
+      .a <- cur,
+      .b <- loop.index,
+    ),
+  )
+  node cur = GetLocal acc()
+  node entry = Entry()
+  node loop = Macro std.flow.ForRange(
+    .first <- 1,
+    .last <- entry.n,
+  )
+  node parts = BreakStruct Vec2(
+    .obj <- MakeStruct Vec2(
+      .x <- 1.5,
+    ),
+  )
+  node ret = Return(
+    .r <- cur,
+    .x <- parts.x,
+    .y <- parts.y,
+  )
+}
+""", macros=False)
+        self.assertEqual(print_module(parse(text)), text)
+        self.assertEqual(run(text, "F", 4)[0], [10, 1.5, 0.0])
+        g = parse(text).graph("F")
+        self.assertEqual(g.node("ret").binding("r").value, PinRef("cur", "value"))
+        # written out, the one output reads the same and is printed the short way
+        self.assertEqual(print_module(parse(text.replace("    .r <- cur,", "    .r <- cur.value,"))),
+                         text)
+        # Entry and a macro name their outputs, which are parameters and results: the bare
+        # form is read, but written with the name
+        bare = text.replace("    .last <- entry.n,", "    .last <- entry,")
+        self.assertEqual(print_module(parse(bare)), text)
+        # several outputs: the one read must be named
+        with self.assertRaises(ParseError) as cm:
+            parse(text.replace("    .x <- parts.x,", "    .x <- parts,"))
+        self.assertIn("'parts' has several outputs (x, y)", cm.exception.msg)
+        self.assertIn("'parts.x'", cm.exception.msg)
+        # a node that does not exist is kept as written and reported, never unreadable
+        gone = print_module(parse(text.replace("    .r <- cur,", "    .r <- old,")))
+        self.assertIn("    .r <- old,\n", gone)
+        self.assertEqual(print_module(parse(gone)), gone)
+        found = [d for d in check(parse(gone)) if d.code == "E0101"]
+        self.assertEqual([(d.node, d.pin) for d in found], [("ret", "r")])
+        self.assertIn("'old()'", found[0].message)
 
     def test_format_templates_and_types(self):
         def errors(body):
@@ -4140,7 +4204,7 @@ func Main(at: i32) -> (r: i32) {
   )
   node entry = Entry()
   node init = SetLocal nums(
-    .value <- mk.result,
+    .value <- mk,
   )
   node keep = SetLocal total(
     .value <- Add::<i32>(
@@ -5291,7 +5355,7 @@ class Player {
 
     node chk = Branch(
       .cond <- Le::<i32>(
-        .a <- hp.value,
+        .a <- hp,
         .b <- 0,
       ),
     )
@@ -5313,7 +5377,7 @@ class Player {
     )
     node store = SetField Player.health(
       .obj <- entry.self,
-      .value <- hp.value,
+      .value <- hp,
     )
   }
 }
@@ -5341,10 +5405,10 @@ func Make(boss: bool) -> (p: Player) {
     .p <- GetLocal who(),
   )
   node set_b = SetLocal who(
-    .value <- b.result,
+    .value <- b,
   )
   node set_p = SetLocal who(
-    .value <- pl.result,
+    .value <- pl,
   )
 }
 """
@@ -5636,11 +5700,11 @@ func F() -> (x: i32) {
 
   node a = New A()
   node c = Call A.Id(
-    .self <- a.result,
+    .self <- a,
   )
   node entry = Entry()
   node ret = Return(
-    .x <- c.x,
+    .x <- c,
   )
 }
 """, macros=False)
@@ -5788,11 +5852,11 @@ class Barrel impl Damageable {
     )
     node now = GetLocal hp_left()
     node ret = Return(
-      .left <- now.value,
+      .left <- now,
     )
     node set = SetField Barrel.hp(
       .obj <- entry.self,
-      .value <- now.value,
+      .value <- now,
     )
   }
 
@@ -5871,24 +5935,24 @@ func Smash(which: i32) -> (name: string, left: i32, is_d: bool) {
   node entry = Entry()
   node get = GetLocal t()
   node hit = Call Damageable.Hit(
-    .self <- get.value,
+    .self <- get,
     .amount <- 4,
   )
   node nm = Call Damageable.Name(
-    .self <- get.value,
+    .self <- get,
   )
   node ret = Return(
-    .name <- nm.name,
-    .left <- hit.left,
+    .name <- nm,
+    .left <- hit,
     .is_d <- Cast Door(
-      .obj <- get.value,
+      .obj <- get,
     ).ok,
   )
   node sb = SetLocal t(
-    .value <- b.result,
+    .value <- b,
   )
   node sd = SetLocal t(
-    .value <- d.result,
+    .value <- d,
   )
 }
 """
@@ -6235,34 +6299,34 @@ func Run() -> (hits: i32, twice: i32) {
   }
 
   node add = CreateDelegate Counter.Add(
-    .target <- c.result,
+    .target <- c,
   )
   node b1 = Bind Player.OnHit(
-    .obj <- p.result,
-    .handler <- add.result,
+    .obj <- p,
+    .handler <- add,
   )
   node b2 = Bind Player.OnHit(
-    .obj <- p.result,
+    .obj <- p,
     .handler <- CreateDelegate Boom(),
   )
   node b3 = Bind Player.OnHit(
-    .obj <- p.result,
+    .obj <- p,
     .handler <- CreateDelegate Counter.Later(
-      .target <- c.result,
+      .target <- c,
     ),
   )
   node b4 = Bind Player.OnHit(
-    .obj <- p.result,
-    .handler <- add.result,
+    .obj <- p,
+    .handler <- add,
   )
   node c = New Counter()
   node entry = Entry()
   node h1 = Call Player.Hit(
-    .self <- p.result,
+    .self <- p,
     .amount <- 5,
   )
   node h2 = Call Player.Hit(
-    .self <- p.result,
+    .self <- p,
     .amount <- 7,
   )
   node inv = Invoke::<delegate::<(i32) -> (i32)>>(
@@ -6272,13 +6336,13 @@ func Run() -> (hits: i32, twice: i32) {
   node p = New Player()
   node ret = Return(
     .hits <- GetField Counter.hits(
-      .obj <- c.result,
+      .obj <- c,
     ),
-    .twice <- inv.result0,
+    .twice <- inv,
   )
   node ub = Unbind Player.OnHit(
-    .obj <- p.result,
-    .handler <- add.result,
+    .obj <- p,
+    .handler <- add,
   )
 }
 
@@ -6350,7 +6414,7 @@ func Over() {
   }
 
   node d = CreateDelegate Counter.Add(
-    .target <- l.result,
+    .target <- l,
   )
   node entry = Entry()
   node inv = Invoke::<delegate::<(i32)>>(
@@ -6920,7 +6984,7 @@ class Shouter : Ticker {
     node parent = CallParent Tick()
     node ret = Return(
       .n <- Mul::<i32>(
-        .a <- parent.n,
+        .a <- parent,
         .b <- 10,
       ),
     )
@@ -7000,10 +7064,10 @@ func Fill(t: Ticker) -> (before: array::<i32>, after: array::<i32>) {
   )
   node ret = Return(
     .before <- GetLocal snap(),
-    .after <- get.value,
+    .after <- get,
   )
   node take = SetLocal snap(
-    .value <- get.value,
+    .value <- get,
   )
 }
 """
@@ -7920,7 +7984,7 @@ class WebApiTests(unittest.TestCase):
         self.assertTrue(r["ok"])
         self.assertEqual(conv, "show.message")                 # written inline in show.message
         self.assertIn("    .message <- Convert::<i32, string>(\n"
-                      "      .value <- show_message_b_value.value,\n    ),\n", r["text"])
+                      "      .value <- show_message_b_value,\n    ),\n", r["text"])
         self.assertIn(f"{conv} at (710, 250)", r["text"])       # x: (440 + 120 + 980) / 2 - 60
         refused = {
             "Connect an output pin to an input pin.": (["bonus.value", "out", "result"], [now, "out", "value"]),
@@ -7942,7 +8006,7 @@ class WebApiTests(unittest.TestCase):
         r = self.edit(freed, "Main", op="connect_to_node", a=[old, "out", "value"], node="bonus.value")
         self.assertEqual(r["message"], "Bound bonus.value.b = bonus.value.a.value")
         # now read twice, the GetLocal is declared under a name of its own
-        self.assertIn("      .a <- bonus_value_a.value,\n      .b <- bonus_value_a.value,\n", r["text"])
+        self.assertIn("      .a <- bonus_value_a,\n      .b <- bonus_value_a,\n", r["text"])
         r = self.edit(text, "Main", op="disconnect", node="bonus.value", dir="out", pin="result")
         self.assertIn("  node bonus = SetLocal score()\n", r["text"])
         self.assertIn("  node bonus_value = Add::<i32>(\n", r["text"])

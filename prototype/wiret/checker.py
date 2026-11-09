@@ -446,7 +446,10 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
             if isinstance(b.value, PinRef):
                 src = nodes.get(b.value.node)
                 if src is None:
-                    D("E0101", f"unknown node '{b.value.node}'", G, n.id, b.pin)
+                    D("E0101", f"unknown node '{b.value.node}'" + (
+                        "" if b.value.pin else f" (a node written in place has its inputs in "
+                                               f"parentheses, as in '{b.value.node}()')"),
+                      G, n.id, b.pin)
                     continue
                 spin = sigs[src.id].output(b.value.pin)
                 if spin is None:

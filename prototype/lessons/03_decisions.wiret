@@ -14,7 +14,7 @@ func CheckAge(age: i32) {
 
   node adult = Call host.Log(
     .message <- Call std.string.Concat(
-      .a <- age_text.result,
+      .a <- age_text,
       .b <- " is an adult.",
     ),
   )
@@ -23,7 +23,7 @@ func CheckAge(age: i32) {
   )
   node child = Call host.Log(
     .message <- Call std.string.Concat(
-      .a <- age_text.result,
+      .a <- age_text,
       .b <- " is a child.",
     ),
   )

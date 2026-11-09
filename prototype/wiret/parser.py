@@ -250,15 +250,21 @@ class Parser:
         return mod
 
     def resolve_defaults(self, mod: Module):
-        """An inline node written without `.pin` feeds in its one data output (section 2.3,
-        rule 4). Which output that is depends on the node's signature, known once the whole
-        module is read."""
+        """A node written without `.pin`, inline or as a declared node's id, feeds in its one
+        data output (section 2.3). Which output that is depends on the node's signature, known
+        once the whole module is read."""
         if not self.defaults:
             return
         from .registry import ModuleIndex, signature
         idx = ModuleIndex(mod)
         graphs = {g.name: g for g in mod.graphs()}
         for gname, ref, n, tok in self.defaults:
+            what = f"{n.kind}(...)" if n is not None else ref.node
+            if n is None:
+                n = graphs[gname].node(ref.node)
+                if n is None:           # kept as written; the checker reports it (E0101)
+                    ref.pin = ""
+                    continue
             sig = signature(n, graphs[gname], idx)
             outs = sig.data_outs
             if len(outs) == 1:
@@ -266,12 +272,12 @@ class Parser:
             elif sig.error:
                 ref.pin = "result"      # the checker reports the node itself
             elif not outs:
-                raise ParseError(f"'{n.kind}' has no output to feed into this input",
+                raise ParseError(f"'{what}' has no output to feed into this input",
                                  tok.line, tok.col)
             else:
                 names = ", ".join(o.name for o in outs)
-                raise ParseError(f"'{n.kind}' has several outputs ({names}); name the one this "
-                                 f"input reads, as in '{n.kind}(...).{outs[0].name}'",
+                raise ParseError(f"'{what}' has several outputs ({names}); name the one this "
+                                 f"input reads, as in '{what}.{outs[0].name}'",
                                  tok.line, tok.col)
 
     def attach_comments(self):
@@ -877,8 +883,9 @@ class Parser:
     def input_value(self, path: str):
         """The value bound to an input: a literal, a pin reference `node.pin` (the node may be
         an inline node's dotted name), or a node written inline, `Kind(...).pin`, which gets
-        the id `path`; `.pin` may be left out when the node has one data output. In an
-        expression body a parameter is named bare. Returns (value, inline nodes)."""
+        the id `path`; `.pin` may be left out when the node, declared or inline, has one
+        data output. In an expression body a parameter is named bare. Returns (value, inline
+        nodes)."""
         t = self.peek()
         if t.kind == "id" and self.at_p("::", 1) and self.at("id", k=2):
             return self.enum_value(), []
@@ -891,6 +898,12 @@ class Parser:
                     or self.at("id", k=1) or self.at("str", k=1)):
                 self.next()
                 return PinRef("entry", t.value), []
+            if not (self.at_p("(", 1) or self.at_p("::", 1) or self.at_p("<", 1)
+                    or self.at("id", k=1) or self.at("str", k=1)):
+                self.next()                         # a declared node: its one data output
+                ref = PinRef(t.value, None)
+                self.defaults.append((self.graph_name, ref, None, t))
+                return ref, []
             self.anchors.append((self.i, ("node", self.graph_name, path)))
             inline = self.node_expr(path)
             if not self.at_p("."):

@@ -72,7 +72,7 @@ class Dog : Animal {
     node parent = CallParent Speak()
     node ret = Return(
       .line <- Call std.string.Concat(
-        .a <- parent.line,
+        .a <- parent,
         .b <- " Woof!",
       ),
     )
@@ -106,13 +106,13 @@ func Main() {
   }
 
   node add_cat = ArrayAdd::<Animal> pets(
-    .item <- cat.result,
+    .item <- cat,
   )
   node add_dog = ArrayAdd::<Animal> pets(
-    .item <- dog.result,
+    .item <- dog,
   )
   node add_other = ArrayAdd::<Animal> pets(
-    .item <- other.result,
+    .item <- other,
   )
   node cat = New Cat()
   node dog = New Dog()
@@ -121,16 +121,16 @@ func Main() {
     .array <- GetLocal pets(),
   )
   node name_cat = SetField Animal.name(
-    .obj <- cat.result,
+    .obj <- cat,
     .value <- "Tom",
   )
   node name_dog = SetField Animal.name(
-    .obj <- dog.result,
+    .obj <- dog,
     .value <- "Rex",
   )
   node other = New Animal()
   node say = Call host.Log(
-    .message <- speak.line,
+    .message <- speak,
   )
   node speak = Call Animal.Speak(
     .self <- loop.item,

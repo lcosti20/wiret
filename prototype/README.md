@@ -570,9 +570,9 @@ class Player {
 }
 
 node bind = Bind Player.OnHit(
-  .obj <- player.result,
+  .obj <- player,
   .handler <- CreateDelegate Counter.Add(     // a method: its object is the target
-    .target <- counter.result,
+    .target <- counter,
   ),
 )
 node fire = Broadcast Player.OnHit(
