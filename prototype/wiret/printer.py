@@ -10,7 +10,8 @@ import unicodedata
 from .model import (Attr, Binding, Box, Class, Const, Enum, Interface, ExecOut, Extern, Graph, ITEM_ORDER, Lit,
                     META_ORDER, Module, Node, PinRef, SEMANTIC_ATTRS, Struct, Use, Var,
                     item_kind)
-from .registry import PLACE_MUTATORS, ModuleIndex, Sig, lit_equal, lit_fits, signature
+from .registry import (PLACE_MUTATORS, ModuleIndex, Sig, field_place, lit_equal, lit_fits,
+                       signature)
 
 IND = "  "
 
@@ -160,12 +161,28 @@ def fmt_targs(targs: list) -> str:
     return "::<" + ", ".join(targs) + ">" if targs else ""
 
 
-def fmt_head(node: Node) -> str:
+def qualified_symbol(node: Node, g: Graph, idx: ModuleIndex) -> str:
+    """The symbol as the canonical form writes it. Inside a method the reader also accepts a
+    member of the method's class by its bare name (`GetField health`, `Broadcast OnDied`,
+    `ArrayAdd::<i32> items`); it is written `Player.health` everywhere, so a node reads the
+    same in a method and in a free function (section 2.3, rule 3)."""
+    sym = node.symbol
+    if not sym or "." in sym or g is None or not g.owner or g.owner not in idx.classes:
+        return sym
+    k = node.kind
+    if k in ("GetField", "SetField", "Bind", "Unbind", "Broadcast") or \
+            (k in PLACE_MUTATORS and field_place(sym, g, idx) is not None):
+        return f"{g.owner}.{sym}"
+    return sym
+
+
+def fmt_head(node: Node, names: "GraphNames" = None) -> str:
     """`Kind symbol::<targs>`, or `ArrayAdd::<i32> acc` for a place mutator (section 3.3)."""
     targs = fmt_targs(node.targs)
+    sym = names.symbol(node) if names is not None else node.symbol
     if node.kind in PLACE_MUTATORS:
-        return node.kind + targs + (f" {node.symbol}" if node.symbol else "")
-    return node.kind + (f" {node.symbol}" if node.symbol else "") + targs
+        return node.kind + targs + (f" {sym}" if sym else "")
+    return node.kind + (f" {sym}" if sym else "") + targs
 
 
 _IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*$")
@@ -179,9 +196,11 @@ class GraphNames:
     exactly one input in the graph reads it. Its name is then its consumer's name, a dot and
     the input's name (`show.message`). Every other node is declared with a `node` statement
     under its id; an id that is not an identifier (a node that was inline and now feeds
-    several inputs) is declared with its dots turned into underscores."""
+    several inputs) is declared with its dots turned into underscores, followed by `_2`,
+    `_3`, ... when that name is the id of another node or retired in the project."""
 
     def __init__(self, g: Graph, idx: ModuleIndex, sigs: dict = None):
+        self.g, self.idx = g, idx
         self.sigs = sigs if sigs is not None else {n.id: signature(n, g, idx) for n in g.nodes}
         nodes = {}
         for n in g.nodes:
@@ -217,6 +236,8 @@ class GraphNames:
             self.children.setdefault(c, {})[pin] = nodes[nid]
         self.names = {}
         taken = {i for i in ids if _IDENT_RE.match(i)}
+        module = getattr(idx, "module", None)
+        taken |= {i for gn, i in getattr(module, "retired_nodes", ()) if gn == g.name}
         for nid in sorted(set(ids)):
             if nid in self.parent:
                 continue
@@ -243,6 +264,9 @@ class GraphNames:
     def name(self, nid: str) -> str:
         return self.names.get(nid, nid)
 
+    def symbol(self, node: Node) -> str:
+        return qualified_symbol(node, self.g, self.idx)
+
     def inline(self, nid: str) -> bool:
         return nid in self.parent
 
@@ -263,9 +287,9 @@ def fmt_expr(node: Node, sig: Sig, indent: str, names: GraphNames = None) -> str
     feeds, followed by the pin it is read from: `.message <- Call F(...).result`."""
     bindings = _ordered_bindings(node, sig)
     if not bindings:
-        return fmt_head(node) + "()"
+        return fmt_head(node, names) + "()"
     kids = names.children.get(node.id, {}) if names else {}
-    lines = [fmt_head(node) + "("]
+    lines = [fmt_head(node, names) + "("]
     for b in bindings:
         kid = kids.get(b.pin)
         if kid is not None and isinstance(b.value, PinRef) and b.value.node == kid.id:
@@ -344,6 +368,9 @@ def fmt_layout(g: Graph, names: GraphNames, inner: str) -> list:
     for n in g.nodes:
         if n.meta:
             metas.setdefault(n.id, n.meta)
+    for nid, meta in g.orphan_meta.items():     # stale names (W0605), kept as written
+        if nid not in metas:
+            metas[nid] = meta
     ids = sorted(set(places) | set(metas), key=lambda i: names.name(i))
     if not ids and not g.boxes:
         return []

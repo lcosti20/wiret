@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from .checker import check
-from .ids import Project, retired_between
+from .ids import Project, attach_retired, retired_between
 from .model import Attr, Enum, Graph, Lit, Module, PinRef
 from .ops import (bind, create_node, delete_node, place, rename_node, unbind, unwire_exec,
                   wire_exec)
@@ -80,6 +80,7 @@ def apply_request(text: str, request: dict, project: Optional[Project] = None) -
         except (KeyError, TypeError, ValueError, AttributeError) as e:
             return EditResult(False, text, cur_hash,
                               error={"op": i, "code": "request", "message": f"bad op: {e!r}"})
+    attach_retired(new, project)
     out = print_module(new)
     try:
         reparsed = parse(out)

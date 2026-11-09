@@ -574,6 +574,11 @@ class Merger:
                        pfields(pt) if pt else {}, f"{name}.{nid}")
             if "at" in f:
                 places.append(build(proto, f))
+        # stale layout lines (W0605) are kept from both sides; theirs wins on a clash
+        stale = {p.id: p for side in (o, t) for p in side.places if p.id not in ids}
+        places.extend(stale[k] for k in sorted(stale))
+        g.orphan_meta = {k: v for side in (o, t) for k, v in side.orphan_meta.items()
+                         if k not in ids}
         g.places = places
         bb = {x.id: x for x in (b.boxes if b else [])}
         ob = {x.id: x for x in o.boxes}

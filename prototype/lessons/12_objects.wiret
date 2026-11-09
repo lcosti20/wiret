@@ -12,7 +12,7 @@ class Animal {
     node entry = Entry()
     node ret = Return(
       .line <- Call std.string.Concat(
-        .a <- GetField name(
+        .a <- GetField Animal.name(
           .obj <- entry.self,
         ).value,
         .b <- " makes a sound.",
@@ -39,7 +39,7 @@ class Cat : Animal {
     node entry = Entry()
     node ret = Return(
       .line <- Call std.string.Concat(
-        .a <- GetField name(
+        .a <- GetField Cat.name(
           .obj <- entry.self,
         ).value,
         .b <- " says Meow.",

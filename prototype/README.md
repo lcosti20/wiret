@@ -1,7 +1,7 @@
 # Wiret prototype
 
 A Python prototype of the Wiret graph editor, compiler and runtime, built against
-[`docs/reference.md`](../docs/reference.md) (Draft 0.9). It implements **Tier 0** and **Tier 1**
+[`docs/reference.md`](../docs/reference.md) (Draft 0.10). It implements **Tier 0** and **Tier 1**
 of the spec (section 1.6). It uses only the Python standard library; the editor uses Tkinter, and the Git
 commands need `git`.
 
@@ -245,7 +245,7 @@ The editor also follows the graph-editor contract in section 7.5:
 | Canonical form and hashes (2.5) | Sorted items (struct fields and enum members keep the order written), nodes (a node read by exactly one input, with no exec pins and no `@` attribute, written inline there and named by its path, such as `show.message`), `flow` wires (by source node id, then exec pin order) and layout lines, each with its metadata lines above it (`doc`, `category`, `keywords`, then notes as written); registry pin order; default-valued bindings omitted; 100-column wrapping; attribute ordering. Semantic hash (ignores layout, every `#[...]` line and `Reroute`) and layout hash. |
 | Node kinds (3.3) | `Entry`, `Return`, `Branch`, `Sequence`, `Switch`, `Select`, `Macro`, `Exit`, `Reroute`, `Get/SetLocal`, `Get/SetVar` (and `const`s), `Get/SetState`, `Call`, `Convert`, all arithmetic, comparison, logic and bit kinds, and the array kinds `MakeArray`, `ArrayGet`, `ArrayLength`, `ArraySet`, `ArrayAdd`, `ArrayInsert`, `ArrayRemove`, `ArrayClear`, the struct kinds, the map and set kinds (see *Maps and sets* below), `Try` and `Throw` (see *Faults* below), the latent kinds `Delay`, `Yield` and `Await` (see *Fibers* below), the class kinds `New`, `GetField`/`SetField` on objects, `Cast` and `IsValid` (see *Classes* below), and `CreateDelegate`, `Invoke`, `Bind`, `Unbind` and `Broadcast` (see *Delegates and dispatchers* below). Types: `bool`, all integer widths, `f32`, `f64`, `string`, `array::<T>`, `map::<K, V>`, `set::<T>`, structs, enums, classes, interfaces, `delegate::<(A) -> (R)>` and `std.Signal`. |
 | Execution model (4.2–4.3) | Continuation stack, `Sequence` push/pop, macro inlining with path-style ids (`loop/test`, `loop!in`), `Exit` as a jump, joins, evaluation points with per-point sharing, impure output slots, `@pure` and `@reads` calls as pure nodes, per-expansion `state`. The §4.2 `SumTo(2)` trace is reproduced exactly (see tests). |
-| Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0150, E0151, E0152, E0160, E0201 (latency), E0301, E0302, E0304, E0401, E0412, E0501, E0502, E0503, W0201, W0301, W0302, W0310, W0320, W0601, W0602, W0603, W0604. |
+| Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0150, E0151, E0152, E0160, E0201 (latency), E0301, E0302, E0304, E0310, E0401, E0412, E0501, E0502, E0503, W0201, W0301, W0302, W0320, W0601, W0602, W0603, W0604, W0605. |
 | Lowering (4.8) | `-O0`: one labelled block per impure node, `local.tee` for shared values, `cont.push`/`cont.pop` kept. Output closely matches the §5.8 listings. |
 | WBC (5.2–5.4) | Type (function, `5E` array and `5F` struct entries), Import, Function, Global, Export, Data and Code sections, plus custom sections `name`, `wr.debug`, `wr.pins`, `wr.pure`, `wr.meta` (hashes), `wr.caps` and `wr.graph` (deflated canonical source). |
 | Verifier (5.5) | One linear pass: decoding, branch targets, empty stack at labels, operand typing (including `struct.new`/`get`/`with`), returns, `max_stack`, latency/purity flags. Type references may point forward, but a struct may not hold itself by value. Fuzz-tested. |
@@ -477,9 +477,9 @@ class Boss : Player {
   an implicit first parameter `self`, an output of its `Entry`. Canonical order inside a class:
   fields as written (they are the object layout), then funcs, then events, each by name.
 - **Nodes.** `New Player` (impure: it makes an identity) has `result`. `GetField` and
-  `SetField` take the bare field name inside the class's own methods (`GetField health`, as in
-  section 2.6) and `Class.field` anywhere else; `GetField` on an object has `reads` purity, so
-  it is evaluated at each consumer. `Cast Boss` and `IsValid` take any object (`anyref`):
+  `SetField` name `Class.field` (`GetField Player.health`, as in section 2.6); inside a method
+  the bare field name of its own class is also read, and the formatter writes it qualified.
+  `GetField` on an object has `reads` purity, so it is evaluated at each consumer. `Cast Boss` and `IsValid` take any object (`anyref`):
   `Cast` gives `result` (null when the object is not a `Boss`) and `ok`. `Eq` and `Ne` on a
   class compare identity. `null` is the class literal.
 - **Calls.** `Call Player.TakeDamage` has `self` as its first input. A method that is not

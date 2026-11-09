@@ -101,6 +101,9 @@ class CompileResult:
     module: Optional[wbc.WbcModule] = None
 
 
+LAZY_KINDS = ("Select", "And", "Or")   # evaluate only the inputs they need
+
+
 class EvalPoint:
     def __init__(self):
         self.uses = Counter()
@@ -872,6 +875,7 @@ class FuncLowerer:
                             self.slots[key] = self.add_local(f"{nid}.{p.name}", p.type)
                             self.pin_map[self.slots[key]] = key
         self.code = []
+        self.lazy_cache, self.lazy_count = {}, 0
         for i, nid in enumerate(order):
             nxt = order[i + 1] if i + 1 < len(order) else None
             self.emit_block(self.ir[nid], nxt)
@@ -948,8 +952,7 @@ class FuncLowerer:
             self.transfer(then, nxt)
         elif k in ("SetVar", "SetState") and isinstance(n.extra["global"], tuple):
             _, t, f = n.extra["global"]           # state on the object
-            self.E("local.get", self.local_index["self"])
-            self.emit_inputs(n)
+            self.emit_inputs(n, pre=lambda: self.E("local.get", self.local_index["self"]))
             self.E("class.set", t, f)
             self.transfer(then, nxt)
         elif k in ("SetVar", "SetState"):
@@ -957,8 +960,7 @@ class FuncLowerer:
             self.E("global.set", n.extra["global"])
             self.transfer(then, nxt)
         elif k == "CallParent":
-            self.E("local.get", self.local_index["self"])
-            self.emit_inputs(n)
+            self.emit_inputs(n, pre=lambda: self.E("local.get", self.local_index["self"]))
             self.E("call", n.extra["func"])
             for p in reversed(n.sig.data_outs):
                 slot = self.slots.get((n.id, p.name))
@@ -1028,9 +1030,7 @@ class FuncLowerer:
         elif k in ("Bind", "Unbind", "Broadcast"):
             # obj, then its dispatcher (a hidden slot), then the handler or the arguments
             cls_t, slot, disp_t = n.extra["dispatcher"]
-            ep = EvalPoint()
-            for _, _, s in n.inputs:
-                self.count(s, ep)
+            ep = self.new_ep(n)
             self.eval(n.inputs[0][2], ep)
             self.E("class.get", cls_t, slot)
             for _, _, s in n.inputs[1:]:
@@ -1083,9 +1083,7 @@ class FuncLowerer:
             if kind == "field":
                 # obj, then the field read without sharing it (it is the place this node
                 # changes); the changed container goes back with class.set on the same obj
-                ep = EvalPoint()
-                for _, _, s in n.inputs:
-                    self.count(s, ep)
+                ep = self.new_ep(n)
                 self.eval(n.inputs[0][2], ep, keep=False)
                 obj = self.temp(n.inputs[0][1])
                 self.E("local.tee", obj)
@@ -1095,8 +1093,7 @@ class FuncLowerer:
                     self.eval(s, ep)
                 self.ready(n)
             else:
-                self.E(f"{kind}.get", idx)
-                self.emit_inputs(n)
+                self.emit_inputs(n, pre=lambda: self.E(f"{kind}.get", idx))
             if k in ARRAY_MUTATORS:
                 op = {"ArraySet": "array.set", "ArrayAdd": "array.push",
                       "ArrayInsert": "array.insert", "ArrayRemove": "array.remove",
@@ -1126,13 +1123,85 @@ class FuncLowerer:
                 for _, _, inner in self.ir[s.a].inputs:
                     self.count(inner, ep)
 
-    def emit_inputs(self, n: IRNode):
+    def new_ep(self, n: IRNode) -> EvalPoint:
+        """The evaluation point of impure node `n`. When an input reaches a lazy node, every
+        input is evaluated into a temp first, in pin order, so the lazy node's branches start
+        with an empty operand stack (labels require one, section 5.5)."""
         ep = EvalPoint()
         for _, _, s in n.inputs:
             self.count(s, ep)
+        if any(self.has_lazy(s) for _, _, s in n.inputs):
+            for _, _, s in n.inputs:
+                self.spill(s, ep)
+        return ep
+
+    def emit_inputs(self, n: IRNode, pre=None):
+        ep = self.new_ep(n)
+        if pre is not None:
+            pre()
         for _, _, s in n.inputs:
             self.eval(s, ep)
         self.ready(n)
+
+    # -- lazy nodes (Select, And, Or: section 4.3) --------------------------------
+    def has_lazy(self, s: Src) -> bool:
+        """Whether evaluating `s` reaches a lazy node."""
+        if s.kind != "node":
+            return False
+        t = self.ir.get(s.a)
+        if t is None or not t.pure:
+            return False
+        if s.a not in self.lazy_cache:
+            self.lazy_cache[s.a] = False         # a pure cycle is E0301; never loop here
+            self.lazy_cache[s.a] = t.kind in LAZY_KINDS or any(
+                self.has_lazy(inner) for _, _, inner in t.inputs)
+        return self.lazy_cache[s.a]
+
+    def spill(self, s: Src, ep: EvalPoint):
+        """Evaluate a pure node into a temp now, with the operand stack empty."""
+        if s.kind != "node" or (s.a, s.b) in ep.temps:
+            return
+        t = self.ir.get(s.a)
+        if t is None or not t.pure:
+            return
+        self._eval(s, ep)
+        tmp = self.temp(s.type)
+        self.E("local.set", tmp)
+        ep.temps[(s.a, s.b)] = tmp
+
+    def branch_value(self, s: Src, ep: EvalPoint, tmp: int):
+        """Evaluate `s` into `tmp` on one side of a lazy node. Values computed there are
+        only known on that side, so they are forgotten afterwards."""
+        saved = dict(ep.temps)
+        self._eval(s, ep)
+        self.E("local.set", tmp)
+        ep.temps = saved
+
+    def emit_lazy(self, n: IRNode, ep: EvalPoint):
+        """Select evaluates only the input it chooses; And and Or skip `b` when `a` decides
+        the result. Entered with an empty operand stack; leaves the result on it."""
+        self.lazy_count += 1
+        end = f"{n.id}!lazy{self.lazy_count}"
+        out = self.temp(n.data_outs[0].type)
+        if n.kind == "Select":
+            (_, _, cond), (_, _, a), (_, _, b) = n.inputs
+            take_a = end + "a"
+            self._eval(cond, ep)
+            self.E("br_if", take_a)
+            self.branch_value(b, ep, out)
+            self.E("br", end)
+            self.code.append(("label", take_a))
+            self.branch_value(a, ep, out)
+        else:                                  # And, Or
+            (_, _, a), (_, _, b) = n.inputs
+            self._eval(a, ep)
+            self.E("local.tee", out)
+            if n.kind == "And":
+                self.E("i32.eqz")              # a is false: so is the result
+            self.E("br_if", end)
+            self.branch_value(b, ep, out)
+        self.code.append(("label", end))
+        self.E("local.get", out)
 
     def ready(self, n: IRNode):
         """Debug builds mark the point where a node's inputs are evaluated and it is about to act."""
@@ -1169,6 +1238,9 @@ class FuncLowerer:
                 self.E("local.get", ep.temps[(s.a, s.b)])
             else:
                 outs = t.data_outs
+                if t.kind not in LAZY_KINDS and self.has_lazy(s):
+                    for _, _, inner in t.inputs:    # so a lazy input starts on an empty stack
+                        self.spill(inner, ep)
                 # mark the pure node's code, so a fault in it (ArrayGet, Div) names that node
                 self.at.append(t.id)
                 self.code.append(("pure", t.id))
@@ -1390,16 +1462,8 @@ class FuncLowerer:
             self.E("ref.cast", t)
             self.E("local.get", ok)
             return
-        if k == "Select":
-            ty = n.targs[0]
-            (_, _, cond), (_, _, a), (_, _, b) = n.inputs
-            self.eval(cond, ep)
-            tc = self.temp("bool")
-            self.E("local.set", tc)
-            self.eval(a, ep)
-            self.eval(b, ep)
-            self.E("local.get", tc)
-            self.E("select")
+        if k in LAZY_KINDS:
+            self.emit_lazy(n, ep)
             return
         if k == "CallParent":
             self.E("local.get", self.local_index["self"])
@@ -1417,8 +1481,8 @@ class FuncLowerer:
         if k == "Not":
             self.E("i32.eqz")
             return
-        if k in ("And", "Or", "Xor"):
-            self.E(f"i32.{k.lower()}")
+        if k == "Xor":
+            self.E("i32.xor")
             return
         T = n.targs[0]
         if T in self.c.idx.structs or T in self.c.idx.classes or T in self.c.idx.interfaces \

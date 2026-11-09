@@ -29,7 +29,7 @@ from .model import Box, Graph, Lit, Local, Module, Param, PinRef, note_text, set
 from .natives import STD
 from .parser import ParseError, parse, parse_literal
 from .printer import GraphNames, layout_hash, print_module, semantic_hash
-from .ids import assign_ids, find_project, retired_between
+from .ids import assign_ids, attach_retired, find_project, retired_between
 from .registry import (ModuleIndex, STATIC_KINDS, can_convert, enum_values,
                        type_choices, type_ok)
 from .explain import explain, explain_runtime, type_words
@@ -626,6 +626,7 @@ class EditorApp:
             canvasedit.place_unplaced(g, self.auto_pos)
         if getattr(self, "project", None) is not None:   # editors always write @id (2.4)
             assign_ids(m, retired={r.id for r in self.project.retired})
+        attach_retired(m, getattr(self, "project", None))
         self.last_counts, self.fault = {}, {}
         self.view.run_counts, self.view.fault_node = {}, None
         sel = self.view.selected
