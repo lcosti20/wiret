@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 MAGIC = b"\x00WBC"
 VERSION = 1
 FLAG_HAS_SOURCE = 1
+FLAG_LANES = 2                  # the module uses lane types (section 5.3)
 
 # value types (section 5.3)
 I32, I64, F32, F64, STRING = 0x7F, 0x7E, 0x7D, 0x7C, 0x6E
@@ -22,8 +23,13 @@ REF = 0x6B                      # `6B t`: reference to type index t (arrays and 
 ANYREF = 0x6D                   # the top of the reference types; only in function types here
 FAULT = 0x6A                    # a caught fault: its message and code (section 4.6)
 SIGNAL = 0x69                   # a nullable reference to a signal that fibers await (4.5)
+# Lane types (section 3.1.1): unboxed f32 lanes, one operand-stack entry each.
+VEC2, VEC3, QUAT, TRANSFORM = 0x76, 0x75, 0x74, 0x73
+LANE_VTS = {VEC2: "vec2", VEC3: "vec3", QUAT: "quat", TRANSFORM: "transform"}
+LANE_LAYOUT = {VEC2: (F32,) * 2, VEC3: (F32,) * 3, QUAT: (F32,) * 4}
+LANE_LAYOUT[TRANSFORM] = (VEC3, QUAT, VEC3)
 VT_NAMES = {I32: "i32", I64: "i64", F32: "f32", F64: "f64", STRING: "string", ANYREF: "anyref",
-            FAULT: "fault", SIGNAL: "signal"}
+            FAULT: "fault", SIGNAL: "signal", **LANE_VTS}
 FUNC_TYPE = 0x60
 ARRAY_TYPE = 0x5E
 STRUCT_TYPE = 0x5F
@@ -189,6 +195,13 @@ _CONV = ["i32.wrap_i64", "i64.extend_i32_s", "i64.extend_i32_u", "i32.trunc_f32_
          "f64.reinterpret_i64"]
 for _i, _n in enumerate(_CONV):
     OPS[_n] = (0xB0 + _i, "")
+
+# Lane instructions (section 5.6): `FB` then a LEB128 sub-opcode. The opcode recorded for
+# them is 0xFB00 plus the sub-opcode; `get` and `with` take a u8 field index.
+from .lanes import IMM_OPS as _LANE_IMM, SUB_OPS as _LANE_SUB
+for _n, _sub in _LANE_SUB.items():
+    OPS[_n] = (0xFB00 | _sub, "b" if _n in _LANE_IMM else "")
+LANE_PREFIX = 0xFB
 
 BY_CODE: dict[int, tuple] = {code: (name, imm) for name, (code, imm) in OPS.items()}
 
@@ -360,6 +373,11 @@ def decode_code(code: bytes) -> list:
     while not r.eof():
         pc = r.p
         op = r.u8()
+        if op == LANE_PREFIX:
+            sub = r.u32()
+            op = 0xFB00 | sub
+            if op not in BY_CODE:
+                raise WbcError(f"invalid lane sub-opcode FB {sub:02X} at pc {pc}")
         if op in BY_CODE:
             name, imm = BY_CODE[op]
         elif op in LATER_TIER_OPS:
@@ -399,7 +417,11 @@ def decode_code(code: bytes) -> list:
 
 def encode_instr(w: Writer, name: str, imms: tuple):
     code, imm = OPS[name]
-    w.u8(code)
+    if code > 0xFF:                      # a lane instruction: the FB prefix, then the sub-opcode
+        w.u8(LANE_PREFIX)
+        w.u32(code & 0xFF)
+    else:
+        w.u8(code)
     if imm == "L":
         w.sleb5(imms[0])
     elif imm == "Lu":
@@ -468,6 +490,13 @@ class WbcModule:
 
 
 def _write_const(w: Writer, vt, value):
+    if vt in LANE_LAYOUT:                # its f32 lanes in field order, 4 bytes each (5.3)
+        for fvt, x in zip(LANE_LAYOUT[vt], value):
+            if fvt in LANE_LAYOUT:
+                _write_const(w, fvt, x)
+            else:
+                w.raw(struct.pack("<f", x))
+        return
     if isinstance(vt, Ref) or vt == SIGNAL:
         return                       # references start empty (an empty array), signals null
     if vt == I32:
@@ -485,6 +514,9 @@ def _write_const(w: Writer, vt, value):
 
 
 def _read_const(r: Reader, vt):
+    if vt in LANE_LAYOUT:
+        return tuple(_read_const(r, fvt) if fvt in LANE_LAYOUT else
+                     struct.unpack("<f", r.raw(4))[0] for fvt in LANE_LAYOUT[vt])
     if isinstance(vt, Ref) or vt == SIGNAL:
         return None
     if vt in (I32, I64):
@@ -642,7 +674,7 @@ def decode_module(data: bytes) -> WbcModule:
     version, flags = struct.unpack_from("<II", data, 4)
     if version != VERSION:
         raise WbcError(f"unsupported WBC version {version}")
-    if flags & ~FLAG_HAS_SOURCE:
+    if flags & ~(FLAG_HAS_SOURCE | FLAG_LANES):
         raise WbcError(f"module requires unknown features (flags 0x{flags:08X})")
     m = WbcModule(flags=flags)
     r = Reader(data, 12)

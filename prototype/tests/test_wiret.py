@@ -8523,5 +8523,486 @@ process.stdout.write(JSON.stringify(got));
         self.assertGreater(pauses, 200)
 
 
+# -- Lane types (Draft 0.13, section 3.1.1) --------------------------------------------------
+LANES = """
+const Up: vec3 = (0, 1, 0)
+var spawn: transform = ((0, 2, 0), (0, 0, 0, 1), (2, 2, 2))
+
+struct Body {
+  pos: vec3 = (1, 2, 3)
+  turn: quat
+}
+
+class Mover {
+  at: vec3 = (5, 0, 0)
+}
+
+func Step(p: vec3, v: vec3, dt: f32) -> (r: vec3) @pure = Add::<vec3>(
+  .a <- p,
+  .b <- Scale::<vec3>(
+    .v <- v,
+    .s <- dt,
+  ),
+)
+
+func Arith(a: vec2, b: vec2) -> (sub: vec2, mul: vec2, div: vec2, min: vec2, max: vec2, neg: vec2, abs: vec2) @pure {
+  flow {
+    entry -> ret
+  }
+
+  node entry = Entry()
+  node ret = Return(
+    .sub <- Sub::<vec2>(
+      .a <- entry.a,
+      .b <- entry.b,
+    ),
+    .mul <- Mul::<vec2>(
+      .a <- entry.a,
+      .b <- entry.b,
+    ),
+    .div <- Div::<vec2>(
+      .a <- entry.a,
+      .b <- entry.b,
+    ),
+    .min <- Min::<vec2>(
+      .a <- entry.a,
+      .b <- entry.b,
+    ),
+    .max <- Max::<vec2>(
+      .a <- entry.a,
+      .b <- entry.b,
+    ),
+    .neg <- Neg::<vec2>(
+      .value <- entry.a,
+    ),
+    .abs <- Abs::<vec2>(
+      .value <- entry.b,
+    ),
+  )
+}
+
+func VecLib(a: vec3, b: vec3) -> (dot: f32, cross: vec3, len: f32, dist: f32, norm: vec3, lerp: vec3, refl: vec3) @pure {
+  flow {
+    entry -> ret
+  }
+
+  node entry = Entry()
+  node ret = Return(
+    .dot <- Call std.vec.Dot::<vec3>(
+      .a <- entry.a,
+      .b <- entry.b,
+    ),
+    .cross <- Call std.vec.Cross(
+      .a <- entry.a,
+      .b <- entry.b,
+    ),
+    .len <- Call std.vec.Length::<vec3>(
+      .v <- entry.a,
+    ),
+    .dist <- Call std.vec.Distance::<vec3>(
+      .a <- entry.a,
+      .b <- entry.b,
+    ),
+    .norm <- Call std.vec.Normalize::<vec3>(
+      .v <- entry.a,
+    ),
+    .lerp <- Call std.vec.Lerp::<vec3>(
+      .a <- entry.a,
+      .b <- entry.b,
+      .t <- 0.25,
+    ),
+    .refl <- Call std.vec.Reflect::<vec3>(
+      .v <- entry.a,
+      .n <- GetVar Up(),
+    ),
+  )
+}
+
+func PerpDot(a: vec2, b: vec2) -> (r: f32) @pure = Call std.vec.PerpDot(
+  .a <- a,
+  .b <- b,
+)
+
+func Turn(axis: vec3, angle: f32, v: vec3) -> (r: vec3) = Call std.quat.Rotate(
+  .q <- Call std.quat.FromAxisAngle(
+    .axis <- axis,
+    .angle <- angle,
+  ),
+  .v <- v,
+)
+
+func Compose(a: quat, b: quat, v: vec3) -> (r: vec3) @pure = Call std.quat.Rotate(
+  .q <- Mul::<quat>(
+    .a <- a,
+    .b <- b,
+  ),
+  .v <- v,
+)
+
+func Slerp(a: quat, b: quat, t: f32) -> (r: quat) = Call std.quat.Slerp(
+  .a <- a,
+  .b <- b,
+  .t <- t,
+)
+
+func Angle(a: quat, b: quat) -> (r: f32) = Call std.quat.Angle(
+  .a <- a,
+  .b <- b,
+)
+
+func QuatLib(q: quat) -> (conj: quat, inv: quat, norm: quat) @pure {
+  flow {
+    entry -> ret
+  }
+
+  node entry = Entry()
+  node ret = Return(
+    .conj <- Call std.quat.Conjugate(
+      .q <- entry.q,
+    ),
+    .inv <- Call std.quat.Inverse(
+      .q <- entry.q,
+    ),
+    .norm <- Call std.quat.Normalize(
+      .q <- entry.q,
+    ),
+  )
+}
+
+func Place(p: vec3) -> (r: vec3) = Call std.transform.Apply(
+  .t <- GetVar spawn(),
+  .p <- p,
+)
+
+func TLib(a: transform, b: transform, p: vec3) -> (both: vec3, back: vec3, dir: vec3) @pure {
+  flow {
+    entry -> ret
+  }
+
+  node entry = Entry()
+  node ret = Return(
+    .both <- Call std.transform.Apply(
+      .t <- Mul::<transform>(
+        .a <- entry.a,
+        .b <- entry.b,
+      ),
+      .p <- entry.p,
+    ),
+    .back <- Call std.transform.Apply(
+      .t <- Call std.transform.Inverse(
+        .t <- entry.a,
+      ),
+      .p <- Call std.transform.Apply(
+        .t <- entry.a,
+        .p <- entry.p,
+      ),
+    ),
+    .dir <- Call std.transform.ApplyVector(
+      .t <- entry.a,
+      .v <- entry.p,
+    ),
+  )
+}
+
+func Fields(v: vec3, t: transform) -> (y: f32, moved: vec3, rot: quat, x: f32, z: f32) @pure {
+  flow {
+    entry -> ret
+  }
+
+  node entry = Entry()
+  node parts = BreakStruct vec3(
+    .obj <- entry.v,
+  )
+  node ret = Return(
+    .y <- GetField vec3.y(
+      .obj <- entry.v,
+    ),
+    .moved <- WithField vec3.z(
+      .obj <- entry.v,
+      .value <- 9,
+    ),
+    .rot <- GetField transform.rotation(
+      .obj <- entry.t,
+    ),
+    .x <- parts.x,
+    .z <- parts.z,
+  )
+}
+
+func Same(a: vec3, b: vec3) -> (eq: bool, ne: bool) @pure {
+  flow {
+    entry -> ret
+  }
+
+  node entry = Entry()
+  node ret = Return(
+    .eq <- Eq::<vec3>(
+      .a <- entry.a,
+      .b <- entry.b,
+    ),
+    .ne <- Ne::<vec3>(
+      .a <- entry.a,
+      .b <- entry.b,
+    ),
+  )
+}
+
+func Defaults() -> (body: Body, t: transform, q: quat, at: vec3) {
+  flow {
+    entry -> mk
+    mk -> ret
+  }
+
+  node entry = Entry()
+  node mk = New Mover()
+  node ret = Return(
+    .body <- MakeStruct Body(),
+    .t <- MakeStruct transform(
+      .translation <- (1, 0, 0),
+    ),
+    .q <- MapFind::<string, quat>(
+      .key <- "none",
+    ).value,
+    .at <- GetField Mover.at(
+      .obj <- mk.result,
+    ),
+  )
+}
+
+func Converts(v: vec3) -> (flat: vec2, up: vec3, text: string) @pure {
+  flow {
+    entry -> ret
+  }
+
+  node entry = Entry()
+  node ret = Return(
+    .flat <- Convert::<vec3, vec2>(
+      .value <- entry.v,
+    ),
+    .up <- Convert::<vec2, vec3>(
+      .value <- (7, 8),
+    ),
+    .text <- Format "at {v}"(
+      .v <- entry.v,
+    ),
+  )
+}
+
+func Keyed(v: vec3) -> (n: i32) {
+  local seen: map::<vec3, i32>
+
+  flow {
+    entry -> put
+    put -> ret
+  }
+
+  node entry = Entry()
+  node put = MapSet::<vec3, i32> seen(
+    .key <- (1, 2, 3),
+    .value <- 42,
+  )
+  node ret = Return(
+    .n <- MapFind::<vec3, i32>(
+      .map <- GetLocal seen(),
+      .key <- entry.v,
+    ).value,
+  )
+}
+
+func Pick(c: bool) -> (r: vec3) @pure = Select::<vec3>(
+  .cond <- c,
+  .a <- GetVar Up(),
+  .b <- (0, -1, 0),
+)
+"""
+
+
+class LaneTypeTests(unittest.TestCase):
+    """`vec2`, `vec3`, `quat` and `transform` (Draft 0.13, sections 3.1.1, 5.3 and 5.6)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = module(LANES, macros=False)
+        _, cls.r = build(cls.text)
+
+    def call(self, func, *args, **vm_args):
+        vm = VM(output=lambda s: None, **vm_args)
+        return vm.call(vm.load(self.r.wbc), func, list(args))
+
+    def close(self, got, want, eps=1e-6):
+        if isinstance(want, (tuple, list)):
+            self.assertEqual(len(got), len(want))
+            for g, w in zip(got, want):
+                self.close(g, w, eps)
+        else:
+            self.assertAlmostEqual(got, want, delta=eps)
+
+    def test_round_trip(self):
+        m = parse(self.text)
+        self.assertEqual(print_module(parse(print_module(m))), print_module(m))
+        self.assertIn("var spawn: transform = ((0, 2, 0), (0, 0, 0, 1), (2, 2, 2))",
+                      print_module(m))
+
+    def test_component_wise_arithmetic(self):
+        self.assertEqual(self.call("Step", (1, 2, 3), (1, 0, -2), 0.5), [(1.5, 2.0, 2.0)])
+        sub, mul, div, mn, mx, neg, ab = self.call("Arith", (1, -2), (4, 0))
+        self.assertEqual((sub, mul, mn, mx, neg, ab),
+                         ((-3.0, -2.0), (4.0, -0.0), (1.0, -2.0), (4.0, 0.0), (-1.0, 2.0),
+                          (4.0, 0.0)))
+        self.assertEqual(div[0], 0.25)
+        self.assertEqual(div[1], -math.inf)      # an f32 division by zero, never a fault
+
+    def test_results_are_f32(self):
+        r, = self.call("Step", (0.1, 0, 0), (0, 0, 0), 0)
+        self.assertEqual(r[0], struct.unpack("<f", struct.pack("<f", 0.1))[0])
+
+    def test_vector_library(self):
+        dot, cross, ln, dist, norm, lerp, refl = self.call("VecLib", (3, 4, 0), (0, 0, 2))
+        self.assertEqual((dot, cross, ln), (0.0, (8.0, -6.0, 0.0), 5.0))
+        self.close(dist, math.sqrt(29))
+        self.close(norm, (0.6, 0.8, 0.0))
+        self.assertEqual(lerp, (2.25, 3.0, 0.5))
+        self.assertEqual(refl, (3.0, -4.0, 0.0))
+        self.assertEqual(self.call("VecLib", (0, 0, 0), (0, 0, 0))[4], (0.0, 0.0, 0.0))
+        self.assertEqual(self.call("PerpDot", (1, 0), (0, 1)), [1.0])
+
+    def test_rotations(self):
+        r, = self.call("Turn", (0, 0, 1), math.pi / 2, (1, 0, 0))
+        self.close(r, (0, 1, 0))                 # the right-hand rule about +z
+        self.assertEqual(self.call("Turn", (0, 0, 0), 1.0, (1, 2, 3)), [(1.0, 2.0, 3.0)])
+        s = math.sqrt(0.5)
+        turn_z, tilt_x = (0, 0, s, s), (s, 0, 0, s)
+        # Mul::<quat>(a, b) rotates by b, then a
+        self.close(self.call("Compose", turn_z, tilt_x, (0, 1, 0))[0], (-0.0, 0.0, 1.0))
+        self.close(self.call("Compose", tilt_x, turn_z, (0, 1, 0))[0], (-1.0, 0.0, 0.0))
+        half, = self.call("Slerp", (0, 0, 0, 1), turn_z, 0.5)
+        self.close(half, (0, 0, math.sin(math.pi / 8), math.cos(math.pi / 8)))
+        self.close(self.call("Angle", turn_z, tuple(-x for x in turn_z))[0], 0.0, 1e-3)
+        self.close(self.call("Angle", (0, 0, 0, 1), turn_z)[0], math.pi / 2, 1e-5)
+        conj, inv, norm = self.call("QuatLib", (0, 0, 0, 2))
+        self.assertEqual((conj, inv, norm), ((-0.0, -0.0, -0.0, 2.0), (-0.0, -0.0, -0.0, 0.5),
+                                             (0.0, 0.0, 0.0, 1.0)))
+        self.assertEqual(self.call("QuatLib", (0, 0, 0, 0))[2], (0.0, 0.0, 0.0, 1.0))
+
+    def test_transforms(self):
+        self.assertEqual(self.call("Place", (1, 0, 0)), [(2.0, 2.0, 0.0)])
+        s = math.sqrt(0.5)
+        a = ((1, 2, 3), (0, 0, s, s), (2, 2, 2))
+        b = ((0, 1, 0), (s, 0, 0, s), (1, 3, 1))
+        both, back, d = self.call("TLib", a, b, (1, 1, 1))
+        b_p = (1.0, 0.0, 3.0)                    # b applied to (1, 1, 1) by hand
+        self.close(both, (1 - 2 * b_p[1], 2 + 2 * b_p[0], 3 + 2 * b_p[2]), 1e-5)
+        self.close(back, (1, 1, 1), 1e-5)
+        self.close(d, (-2, 2, 2), 1e-5)
+
+    def test_struct_nodes(self):
+        y, moved, rot, x, z = self.call("Fields", (1, 2, 3), ((0, 0, 0), (0, 0, 1, 0), (1, 1, 1)))
+        self.assertEqual((y, moved, rot, x, z), (2.0, (1.0, 2.0, 9.0), (0.0, 0.0, 1.0, 0.0),
+                                                 1.0, 3.0))
+
+    def test_equality(self):
+        self.assertEqual(self.call("Same", (1, 2, 3), (1, 2, 3)), [1, 0])
+        self.assertEqual(self.call("Same", (1, 2, 3), (1, 2, 4)), [0, 1])
+        self.assertEqual(self.call("Same", (math.nan, 0, 0), (math.nan, 0, 0)), [0, 1])
+        self.assertEqual(self.call("Same", (-0.0, 0, 0), (0.0, 0, 0)), [1, 0])
+
+    def test_defaults_are_identities(self):
+        body, t, q, at = self.call("Defaults")
+        self.assertEqual(body, ((1.0, 2.0, 3.0), (0.0, 0.0, 0.0, 1.0)))
+        self.assertEqual(t, ((1.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0), (1.0, 1.0, 1.0)))
+        self.assertEqual(q, (0.0, 0.0, 0.0, 1.0))      # a missing key's zero value
+        self.assertEqual(at, (5.0, 0.0, 0.0))
+
+    def test_conversions_and_format(self):
+        self.assertEqual(self.call("Converts", (1, 2.5, 3)),
+                         [(1.0, 2.5), (7.0, 8.0, 0.0), "at (1.0, 2.5, 3.0)"])
+
+    def test_map_keys_and_select(self):
+        self.assertEqual(self.call("Keyed", (1, 2, 3)), [42])
+        self.assertEqual(self.call("Keyed", (1, 2, 4)), [0])
+        self.assertEqual(self.call("Pick", True), [(0.0, 1.0, 0.0)])
+        self.assertEqual(self.call("Pick", False), [(0.0, -1.0, 0.0)])
+
+    def test_bytecode_is_unboxed(self):
+        m = wbc.decode_module(self.r.wbc)
+        self.assertTrue(m.flags & wbc.FLAG_LANES)
+        dis = disassemble(self.r.wbc)
+        step = dis.split("func t.Step")[1].split("\nfunc ")[0]
+        self.assertIn("v3.scale", step)
+        self.assertIn("v3.add", step)
+        self.assertNotIn("struct.", step)
+        self.assertNotIn("call", step)
+        lib = dis.split("func t.VecLib")[1].split("\nfunc ")[0]
+        for op in ("v3.dot", "v3.cross", "v3.len", "v3.sub", "v3.normalize", "v3.lerp"):
+            self.assertIn(op, lib)                 # intrinsics, not native calls
+        self.assertNotIn("call", lib)
+        self.assertIn("v3.get 1                ; vec3.y", dis)
+        w = wbc.Writer()
+        wbc.encode_instr(w, "v3.add", ())
+        self.assertEqual(bytes(w.b), b"\xfb\x23")  # FB plus the sub-opcode (section 5.6)
+
+    def test_fuel_has_no_allocation(self):
+        vm = VM()
+        mod = vm.load(self.r.wbc)
+        vm.call(mod, "Step", [(1, 2, 3), (1, 1, 1), 2.0])
+        # local.get x3, v3.scale, v3.add, return: one unit each
+        self.assertEqual(vm.fuel_limit - vm.fuel, 6)
+
+    def test_module_without_the_feature_bit_is_refused(self):
+        data = bytearray(self.r.wbc)
+        flags = struct.unpack_from("<I", data, 8)[0]
+        struct.pack_into("<I", data, 8, flags & ~wbc.FLAG_LANES)
+        with self.assertRaises(Exception):
+            VM().load(bytes(data))
+        m = wbc.decode_module(bytes(data))
+        from wiret.verifier import VerifyError, verify
+        with self.assertRaises(VerifyError):
+            verify(m)
+
+    def test_deterministic_mode(self):
+        args = ((1, 1, 0), 1.2345, (0.5, -2, 3))
+        a = self.call("Turn", *args)
+        b = self.call("Turn", *args, deterministic=True)
+        self.close(a, b, 1e-6)
+        s = math.sqrt(0.5)
+        self.close(self.call("Slerp", (0, 0, 0, 1), (0, 0, s, s), 0.3, deterministic=True),
+                   self.call("Slerp", (0, 0, 0, 1), (0, 0, s, s), 0.3), 1e-6)
+
+    def test_diagnostics(self):
+        def c(body):
+            return codes(module(body, macros=False))
+        self.assertEqual(c("const A: vec3 = (0, 1)\n"), ["E0110"])
+        self.assertEqual(c("const T: transform = ((0, 2, 0), (0, 0, 0), (1, 1, 1))\n"),
+                         ["E0110"])
+        self.assertEqual(c("const A: i32 = \"x\"\n"), ["E0110"])
+        self.assertEqual(c("struct vec3 {\n  x: f32\n}\n"), ["E0102"])
+        for kind in ("Add::<quat>", "Rem::<vec3>", "Lt::<vec3>", "Div::<transform>"):
+            with self.subTest(kind=kind):
+                self.assertIn("E0110", c(f"func F(a: quat) -> (r: bool) @pure = Eq::<bool>(\n"
+                                         f"  .a <- {kind}(\n    .a <- a,\n    .b <- a,\n  ),\n"
+                                         f"  .b <- true,\n)\n"))
+        self.assertIn("E0110", c("func F(a: quat) -> (r: quat) @pure = Scale::<quat>(\n"
+                                 "  .v <- a,\n  .s <- 2,\n)\n"))
+        self.assertIn("E0110", c("func F() -> (r: vec3) @pure = Add::<vec3>(\n"
+                                 "  .a <- (1, 2),\n  .b <- (1, 2, 3),\n)\n"))
+        self.assertIn("E0502", c("func F(a: vec3) -> (r: f32) @pure = Call std.vec.Dot(\n"
+                                 "  .a <- a,\n  .b <- a,\n)\n"))
+        self.assertIn("E0110", c("func F(a: quat) -> (r: vec3) @pure = Convert::<quat, vec3>(\n"
+                                 "  .value <- a,\n)\n"))
+        self.assertIn("E0501", c("func F(a: vec3) {\n  flow {\n    entry -> s\n  }\n\n"
+                                 "  node entry = Entry()\n  node s = SetField vec3.x(\n"
+                                 "    .obj <- a,\n    .value <- 1,\n  )\n}\n"))
+        with self.assertRaises(ParseError):
+            parse(module('const A: vec3 = (0, "1", 0)\n', macros=False))
+
+    def test_runner_arguments(self):
+        from wiret.runner import format_value, lit_value
+        from wiret.parser import parse_literal
+        self.assertEqual(lit_value(parse_literal("(1, 2, 3)"), "vec3", "p"), (1.0, 2.0, 3.0))
+        with self.assertRaises(ValueError):
+            lit_value(parse_literal("(1, 2)"), "vec3", "p")
+        self.assertEqual(format_value("vec3", (1.0, 2.5, 0.0)), "(1.0, 2.5, 0.0)")
+
+
 if __name__ == "__main__":
     unittest.main()

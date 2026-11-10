@@ -11,7 +11,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .model import Class, Interface, Const, Enum, Extern, Graph, Lit, Module, Node, Struct, Var
+from .lanes import DEFAULTS as LANE_DEFAULTS, LANE_FIELDS, LANE_TYPES, VECTORS
+from .model import (Class, Interface, Const, Enum, Extern, Field, Graph, Lit, Module, Node,
+                    Struct, Var)
 from .natives import STD, NativeSpec
 
 INT_TYPES = ["i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64"]
@@ -24,15 +26,54 @@ CONSTRAINTS = {
     "number": NUM_TYPES,
     "int": INT_TYPES,
     "signed": ["i8", "i16", "i32", "i64", "f32", "f64"],
-    "eq": ["bool"] + NUM_TYPES + ["string"],
+    "eq": ["bool"] + NUM_TYPES + ["string"] + list(LANE_TYPES),
     "ord": NUM_TYPES + ["string"],
     "switch": ["bool"] + INT_TYPES + ["string"],
-    "any": PRIM_TYPES,
-    "convertible": PRIM_TYPES,
+    "any": PRIM_TYPES + list(LANE_TYPES),
+    "convertible": PRIM_TYPES + list(VECTORS) + ["quat", "transform"],
+    # the lane types (section 3.1.1): vectors are component-wise under Add Sub Div Min Max
+    # Neg Abs; Mul also composes rotations and transforms; Scale takes a vector
+    "arith": NUM_TYPES + list(VECTORS),
+    "mul": NUM_TYPES + list(LANE_TYPES),
+    "neg": ["i8", "i16", "i32", "i64", "f32", "f64"] + list(VECTORS),
+    "vector": list(VECTORS),
 }
 
 # Names a struct or enum may not take: they already mean a built-in type.
-BUILTIN_TYPE_NAMES = set(PRIM_TYPES) | {"array", "set", "map", "delegate", "dispatcher", "exec"}
+BUILTIN_TYPE_NAMES = set(PRIM_TYPES) | {"array", "set", "map", "delegate", "dispatcher",
+                                        "exec"} | set(LANE_TYPES)
+
+
+def lane_struct(name: str) -> Struct:
+    """A lane type as the struct it behaves like (section 3.1.1): its fixed fields, with the
+    defaults that make the type's own default (a transform's scale is (1, 1, 1))."""
+    fields = []
+    for i, (fname, fty) in enumerate(LANE_FIELDS[name]):
+        d = LANE_DEFAULTS[name][i]
+        default = lane_lit(d) if isinstance(d, tuple) else Lit("float", d)
+        fields.append(Field(fname, fty, default))
+    return Struct(name, fields)
+
+
+def lane_lit(v) -> Lit:
+    """A lane value as its literal: a tuple of floats, nested for a transform."""
+    return Lit("tuple", [lane_lit(x) if isinstance(x, tuple) else Lit("float", float(x))
+                         for x in v])
+
+
+def lane_value(lit: Lit, ty: str):
+    """The value of a lane literal, as floats (not yet rounded to f32)."""
+    if ty == "transform":
+        return tuple(lane_value(x, t) for x, (_, t) in zip(lit.value, LANE_FIELDS[ty]))
+    return tuple(float(x.value) for x in lit.value)
+
+
+def lane_lit_fits(lit: Lit, ty: str) -> bool:
+    """A tuple with one number per field, nested for a transform (section 3.1.1)."""
+    if lit.kind != "tuple" or len(lit.value) != len(LANE_FIELDS[ty]):
+        return False
+    return all(lane_lit_fits(x, t) if t in LANE_FIELDS else x.kind in ("int", "float")
+               for x, (_, t) in zip(lit.value, LANE_FIELDS[ty]))
 
 INT_RANGES = {t: ((-(1 << (b - 1)), (1 << (b - 1)) - 1) if t[0] == "i" else (0, (1 << b) - 1))
               for t in INT_TYPES for b in [int(t[1:])]}
@@ -124,7 +165,8 @@ def type_choices(constraint: str, idx: "Optional[ModuleIndex]" = None) -> list:
     structs and enums by name: what the palette and menus offer."""
     out = list(CONSTRAINTS[constraint])
     if idx is not None:
-        out += [t for t in sorted(idx.structs) + sorted(idx.enums) if allows(constraint, t, idx)]
+        out += [t for t in sorted(idx.structs) + sorted(idx.enums)
+                if allows(constraint, t, idx) and t not in out]
     return out
 
 
@@ -181,7 +223,8 @@ def is_container(ty: str) -> bool:
 
 
 def key_type_ok(ty: str, idx: "Optional[ModuleIndex]" = None) -> bool:
-    """A map key or set element: a primitive, an enum, or a struct of those (section 3.1)."""
+    """A map key or set element: a primitive, a lane type, an enum, or a struct of those
+    (section 3.1)."""
     if ty in CONSTRAINTS["eq"]:
         return True
     return idx is not None and (ty in idx.enums or (ty in idx.structs and plain_struct(ty, idx)))
@@ -226,7 +269,8 @@ def type_ok(ty: str, idx: "Optional[ModuleIndex]" = None) -> bool:
     sig = delegate_sig(ty)
     if sig is not None:
         return all(type_ok(t, idx) or t in HANDLE_TYPES for t in sig[0] + sig[1])
-    return ty in PRIM_TYPES or (idx is not None and idx.user_type(ty) is not None)
+    return ty in PRIM_TYPES or ty in LANE_FIELDS or (idx is not None
+                                                     and idx.user_type(ty) is not None)
 
 
 def enum_values(en: Enum) -> list:
@@ -251,6 +295,8 @@ REGISTRY_VERSION = "0.1-proto"
 
 
 def zero_lit(ty: str) -> Lit:
+    if ty in LANE_DEFAULTS:
+        return lane_lit(LANE_DEFAULTS[ty])
     if is_container(ty):
         return Lit("null", None)     # the empty container: containers are values, never null
     if ty == "bool":
@@ -273,6 +319,8 @@ def lit_fits(lit: Lit, ty: str, idx: "Optional[ModuleIndex]" = None) -> bool:
         return True
     if lit.kind == "enum":
         return lit.value.rsplit(".", 1)[0] == ty
+    if ty in LANE_FIELDS:
+        return lane_lit_fits(lit, ty)
     if ty in INT_TYPES:
         return lit.kind == "int"
     if ty in FLOAT_TYPES:
@@ -305,7 +353,9 @@ def can_convert(src: str, dst: str, idx: "Optional[ModuleIndex]" = None) -> bool
         # an enum converts to its underlying integer type, and back (section 3.2)
         return idx.enum_base(src) == dst or idx.enum_base(dst) == src
     if dst == "string":
-        return src in PRIM_TYPES and src != "string"
+        return (src in PRIM_TYPES or src in LANE_FIELDS) and src != "string"
+    if src in LANE_FIELDS or dst in LANE_FIELDS:     # only vec2 <-> vec3 (section 3.2)
+        return {src, dst} == {"vec2", "vec3"}
     if "bool" in (src, dst):
         return (src if dst == "bool" else dst) in INT_TYPES
     return src in NUM_TYPES and dst in NUM_TYPES
@@ -393,10 +443,16 @@ STATIC_KINDS = {
                                      ("then", "out", "exec", None)]),
     "BitNot": ("Bits", "pure", ["int"], _UN),
 }
-for _k in ("Add", "Sub", "Mul", "Div", "Rem", "Min", "Max"):
-    STATIC_KINDS[_k] = ("Math", "pure", ["number"], _BIN)
+for _k in ("Add", "Sub", "Div", "Min", "Max"):
+    STATIC_KINDS[_k] = ("Math", "pure", ["arith"], _BIN)
+STATIC_KINDS["Mul"] = ("Math", "pure", ["mul"], _BIN)
+STATIC_KINDS["Rem"] = ("Math", "pure", ["number"], _BIN)
 for _k in ("Neg", "Abs"):
-    STATIC_KINDS[_k] = ("Math", "pure", ["signed"], _UN)
+    STATIC_KINDS[_k] = ("Math", "pure", ["neg"], _UN)
+# A vector times a number (section 3.1.1).
+STATIC_KINDS["Scale"] = ("Math", "pure", ["vector"], [("v", "in", "T", None),
+                                                      ("s", "in", "f32", None),
+                                                      ("result", "out", "T", None)])
 for _k in ("Eq", "Ne"):
     STATIC_KINDS[_k] = ("Compare", "pure", ["eq"], _CMP)
 for _k in ("Lt", "Le", "Gt", "Ge"):
@@ -514,6 +570,8 @@ class ModuleIndex:
         self.vars = {i.name: i for i in module.items if isinstance(i, Var)}
         self.consts = {i.name: i for i in module.items if isinstance(i, Const)}
         self.structs = {i.name: i for i in module.items if isinstance(i, Struct)}
+        for name in LANE_TYPES:              # built-in structs (section 3.1.1); a declaration
+            self.structs.setdefault(name, lane_struct(name))   # of one is E0102
         self.enums = {i.name: i for i in module.items if isinstance(i, Enum)}
         self.classes = {i.name: i for i in module.items if isinstance(i, Class)}
         self.interfaces = {i.name: i for i in module.items if isinstance(i, Interface)}
@@ -636,7 +694,14 @@ class ModuleIndex:
         prefix = self.module.name + "."
         return symbol[len(prefix):] if symbol.startswith(prefix) else symbol
 
-    def callee(self, symbol: str) -> Optional[Callee]:
+    def callee(self, symbol: str, targs=()) -> Optional[Callee]:
+        if targs:                  # a generic native: `std.vec.Dot::<vec3>` (section 3.4)
+            key = f"{symbol}::<{', '.join(targs)}>"
+            n = STD.get(key)
+            if n is None:
+                return None
+            return Callee(key, "native", [Pin(a, t) for a, t in n.params],
+                          [Pin(a, t) for a, t in n.results], n.purity)
         s = self._strip(symbol)
         cls, _, short = s.rpartition(".")
         if cls in self.interfaces:                 # dispatched through the interface (5.6)
@@ -798,9 +863,18 @@ def signature(node: Node, graph: Graph, idx: ModuleIndex) -> Sig:
             sig.outputs = [Pin("then", E)]
         return sig
     if k == "Call":
-        c = idx.callee(node.symbol or "")
+        c = idx.callee(node.symbol or "", node.targs)
         if c is None:
-            sig.error = ("E0501", f"unresolved function '{node.symbol}'")
+            generic = [q for q in STD if q.startswith(f"{node.symbol}::<")]
+            if generic and not node.targs:
+                sig.error = ("E0502", f"'{node.symbol}' needs a type argument, as in "
+                                      f"'Call {generic[0]}'")
+            elif generic:
+                sig.error = ("E0110", f"'{node.symbol}' does not take "
+                                      f"{', '.join(node.targs)}; it takes "
+                                      f"{', '.join(q[len(node.symbol):] for q in generic)}")
+            else:
+                sig.error = ("E0501", f"unresolved function '{node.symbol}'")
             return sig
         sig.purity = c.purity
         sig.category = "Call"
@@ -948,9 +1022,9 @@ def _format_sig(node: Node, graph: Graph, idx: ModuleIndex, sig: Sig) -> Sig:
             names.append(v)
     for name in names:
         ty = _format_input_type(node, name, graph, idx)
-        if ty not in PRIM_TYPES and not sig.error:
-            sig.error = ("E0110", f"Format writes bool, number and string values, but "
-                                  f"'{name}' is {ty}; convert it first")
+        if ty not in PRIM_TYPES and ty not in LANE_FIELDS and not sig.error:
+            sig.error = ("E0110", f"Format writes bool, number, vector and string values, "
+                                  f"but '{name}' is {ty}; convert it first")
         sig.inputs.append(Pin(name, ty, ZERO if node.binding(name) is None else None))
     return sig
 

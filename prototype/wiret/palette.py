@@ -60,7 +60,9 @@ DESCRIBE = {
                 "cast change type to string text number"),
     "Add": ("Adds two numbers: a + b.", "+ plus sum total"),
     "Sub": ("Subtracts: a − b.", "- minus subtract difference"),
-    "Mul": ("Multiplies: a × b.", "* times multiply product"),
+    "Mul": ("Multiplies: a × b.", "* times multiply product combine compose rotation"),
+    "Scale": ("Multiplies every component of a vector by one number: v × s.",
+              "* times scale vector stretch speed"),
     "Div": ("Divides: a ÷ b. Whole numbers drop the remainder.", "/ divide quotient"),
     "Rem": ("The remainder after dividing a by b (a mod b). Handy for even/odd checks.",
             "% mod modulo remainder even odd"),
@@ -218,7 +220,8 @@ def describe(kind: str, symbol: Optional[str] = None, idx: Optional[ModuleIndex]
         return (f"Calls {symbol} on any object that implements "
                 f"{symbol.rpartition('.')[0]}; the object's own class decides what runs.")
     if kind == "Call" and symbol:
-        return f"Calls {symbol}."
+        spec = STD.get(f"{symbol}::<{', '.join(targs)}>" if targs else symbol)
+        return spec.doc if spec is not None and spec.doc else f"Calls {symbol}."
     return DESCRIBE.get(kind, ("", ""))[0]
 
 
@@ -302,8 +305,8 @@ def items(g: Graph, idx: ModuleIndex) -> list:
         for t in convertible:
             if can_convert(f, t, idx):
                 to = ("text" if t == "string" else "decimal" if t in ("f32", "f64")
-                      else "true/false" if t == "bool" else f"a {t}" if t in idx.enums
-                      else "whole number")
+                      else "true/false" if t == "bool" else f"a {t}"
+                      if t in idx.enums or t in ("vec2", "vec3") else "whole number")
                 out.append(_item("Convert", f"Convert::<{f}, {t}> (to {to})", "Math", targs=[f, t]))
     out.append(_item("Format", 'Format "{value}" (text from a template)', "Text", "{value}"))
     for l in sorted(g.locals, key=lambda l: l.name):
@@ -327,7 +330,9 @@ def items(g: Graph, idx: ModuleIndex) -> list:
     for q in sorted(idx.externs):
         out.append(_item("Call", f"Call {q}", "Call", q, idx=idx))
     for q in sorted(STD):
-        out.append(_item("Call", f"Call {q}", "Call", q, idx=idx))
+        sym, _, targs = q.partition("::<")      # a generic native: std.vec.Dot::<vec3>
+        out.append(_item("Call", f"Call {q}", "Call", sym, idx=idx,
+                         targs=[t.strip() for t in targs[:-1].split(",")] if targs else None))
     for name in sorted(idx.classes):
         out.append(_item("New", f"New {name}", "Classes", name, idx=idx))
         out.append(_item("Cast", f"Cast to {name}", "Classes", name, idx=idx))

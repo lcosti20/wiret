@@ -1,7 +1,7 @@
 """Disassembler (`wiretc dis`, spec section 5.8): bytecode with node ids from `wr.debug`."""
 from __future__ import annotations
 
-from . import wbc
+from . import lanes, wbc
 from .vm import parse_customs
 from .wbc import ArrayType, decode_code, vt_name
 
@@ -25,8 +25,6 @@ def disassemble(data: bytes) -> str:
     from .vm import parse_caps
     for cap in parse_caps(m):
         out.append(f"capability {cap}")
-    for gi, (vt, mut, init) in enumerate(m.globals):
-        out.append(f"global {gi} {vt_name(vt, m.types)} {names.get(gi, '')}")
     nimp = len(m.imports)
     gnames = {}
     p = m.custom("name")
@@ -41,6 +39,8 @@ def disassemble(data: bytes) -> str:
         for _ in range(r.u32()):
             gi = r.u32()
             gnames[gi] = r.name()
+    for gi, (vt, mut, init) in enumerate(m.globals):
+        out.append(f"global {gi} {vt_name(vt, m.types)} {gnames.get(gi, '')}".rstrip())
     for i, ((t, flags), body) in enumerate(zip(m.funcs, m.bodies)):
         fi = nimp + i
         params, results = m.types[t]
@@ -112,6 +112,10 @@ def disassemble(data: bytes) -> str:
                 text += f" {t}"
                 if t < len(m.types) and isinstance(m.types[t], ArrayType):
                     comment = f"array::<{vt_name(m.types[t].elem, m.types)}>"
+            elif ins.op > 0xFF and ins.imms:     # a lane get or with: name the field
+                text += f" {ins.imms[0]}"
+                ty = lanes.BLOCKS[ins.name.partition(".")[0]][1]
+                comment = f"{ty}.{lanes.LANE_FIELDS[ty][ins.imms[0]][0]}"
             elif ins.imms:
                 text += " " + " ".join(str(x) for x in ins.imms)
             line = f"  {text}"
