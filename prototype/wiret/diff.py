@@ -125,7 +125,7 @@ class Differ:
             if p is None:
                 text = fmt_node(q, signature(q, y, self.ib), "").splitlines()
                 out.append(f"{IND}+ {text[0]}")
-                out += [f"{IND}    {t.strip()}" for t in text[1:]]
+                out += [f"{IND}    {t}" for t in text[1:]]     # keeps the nesting of inline nodes
             elif q is None:
                 out.append(f"{IND}- node {nid} = {p.kind}" + (f" {p.symbol}" if p.symbol else ""))
             else:

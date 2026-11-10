@@ -51,7 +51,8 @@ typedef enum { WR_OK = 0, WR_YIELD, WR_ERR_FAULT, WR_ERR_FUEL, WR_ERR_MEM,
 typedef enum { WR_T_NULL, WR_T_BOOL, WR_T_I32, WR_T_I64, WR_T_F32, WR_T_F64,
                WR_T_STRING, WR_T_STRUCT, WR_T_CLASS, WR_T_ARRAY, WR_T_MAP, WR_T_SET,
                WR_T_DELEGATE, WR_T_DISPATCHER, WR_T_HOST, WR_T_SIGNAL,
-               WR_T_FAULT } wr_Type;
+               WR_T_FAULT, WR_T_VEC2, WR_T_VEC3, WR_T_QUAT,
+               WR_T_TRANSFORM } wr_Type;   /* new values are appended, never inserted */
 
 typedef void *(*wr_AllocFn)(void *ud, void *ptr, size_t old_size, size_t new_size);
 typedef int   (*wr_NativeFn)(wr_Fiber *f, void *ud);
@@ -185,9 +186,19 @@ int         wr_to_bool(wr_Fiber *f, int idx);       int32_t wr_to_i32(wr_Fiber *
 int64_t     wr_to_i64(wr_Fiber *f, int idx);        float   wr_to_f32(wr_Fiber *f, int idx);
 double      wr_to_f64(wr_Fiber *f, int idx);
 const char *wr_to_string(wr_Fiber *f, int idx, size_t *len);   /* valid while on the stack */
+
+typedef struct { float x, y; } wr_Vec2;
+typedef struct { float x, y, z; } wr_Vec3;
+typedef struct { float x, y, z, w; } wr_Quat;
+typedef struct { wr_Vec3 translation; wr_Quat rotation; wr_Vec3 scale; } wr_Transform;
+
+void wr_push_vec2(wr_Fiber *f, wr_Vec2 v);    void wr_push_vec3(wr_Fiber *f, wr_Vec3 v);
+void wr_push_quat(wr_Fiber *f, wr_Quat q);    void wr_push_transform(wr_Fiber *f, const wr_Transform *t);
+wr_Vec2 wr_to_vec2(wr_Fiber *f, int idx);     wr_Vec3 wr_to_vec3(wr_Fiber *f, int idx);
+wr_Quat wr_to_quat(wr_Fiber *f, int idx);     void    wr_to_transform(wr_Fiber *f, int idx, wr_Transform *out);
 ```
 
-The `wr_to_*` functions return 0 or NULL when the slot has another type; use `wr_type` to branch. Narrow integer parameters (`u8`, `i16`, ...) are pushed and read as `i32`.
+The `wr_to_*` functions return 0 or NULL when the slot has another type, and the lane functions the type's default (section 3.1.1); use `wr_type` to branch. The lane structs are plain `float` fields in field order, the layout of Godot's `Vector2`, `Vector3` and `Quaternion` (in single-precision builds) and of Unity's `Vector2`, `Vector3` and `Quaternion`, so a binding can copy them field for field; Unreal's `FVector` and `FQuat` hold `double` since Unreal Engine 5 and are narrowed at the boundary. Narrow integer parameters (`u8`, `i16`, ...) are pushed and read as `i32`.
 
 **Objects and containers.** All look-ups are by name and return `wr_Status`.
 

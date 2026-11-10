@@ -14,7 +14,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Optional
 
-from . import wbc
+from . import lanes, wbc
 from .checker import Diag, check, has_errors
 from .model import Const, Extern, Graph, Lit, Module, Node, PinRef, Var
 from .natives import INTERNAL, STD
@@ -23,7 +23,8 @@ from .registry import (class_field_target, field_place, parent_method, delegate_
                        ARRAY_MUTATORS, FLOAT_TYPES, INT_TYPES, MAP_PURE, PLACE_MUTATORS,
                        REGISTRY_NAME, REGISTRY_VERSION, SET_PURE,
                        SIGNED_TYPES, ModuleIndex, Pin, Sig, array_elem, attr_int, enum_values,
-                       is_container, map_types, set_elem, signature, zero_lit)
+                       format_parts, is_container, map_types, set_elem, signature, zero_lit,
+                       lane_value)
 
 # map and set kinds -> their instruction (section 5.6)
 CONTAINER_OPS = {"MapFind": "map.find", "MapHas": "map.has", "MapLength": "map.len",
@@ -39,6 +40,13 @@ VT = {"bool": I32, "i8": I32, "u8": I32, "i16": I32, "u16": I32, "i32": I32, "u3
       "i64": I64, "u64": I64, "f32": F32, "f64": F64, "string": STRING, "fault": FAULT,
       "std.Signal": SIGNAL}
 PFX = {I32: "i32", I64: "i64", F32: "f32", F64: "f64"}
+# The lane types (section 3.1.1): their value types and instruction prefixes.
+LANE_VT = {name: vt for vt, name in wbc.LANE_VTS.items()}
+LP = lanes.PREFIX                          # "vec3" -> "v3"
+# arithmetic kinds -> lane operation, for the types section 3.1.1 allows them on
+LANE_ARITH = {"Add": "add", "Sub": "sub", "Mul": "mul", "Div": "div", "Min": "min",
+              "Max": "max", "Neg": "neg", "Abs": "abs", "Scale": "scale", "Eq": "eq",
+              "Ne": "ne"}
 
 
 def wrap_int(ty: str, v: int) -> int:
@@ -89,6 +97,7 @@ class Ctx:
     params: dict = field(default_factory=dict)
     locals: dict = field(default_factory=dict)
     states: dict = field(default_factory=dict)
+    depth: Optional[str] = None    # a macro with Leave: the local holding its entry depth + 1
     exits: dict = field(default_factory=dict)
     results: dict = field(default_factory=dict)
 
@@ -101,6 +110,9 @@ class CompileResult:
     module: Optional[wbc.WbcModule] = None
 
 
+LAZY_KINDS = ("Select", "And", "Or")   # evaluate only the inputs they need
+
+
 class EvalPoint:
     def __init__(self):
         self.uses = Counter()
@@ -109,8 +121,12 @@ class EvalPoint:
 
 class Compiler:
     def __init__(self, module: Module, source: Optional[str] = None, embed_source=True,
-                 debug=False, project=None):
+                 debug=False, project=None, export_all=False):
         self.m = module
+        # Export mode (section 5.2): a normal build exports only what is marked @export; an
+        # --export-all build (wiretc run, the editor) also exports every func, event and method
+        # so that any of them can be run by name.
+        self.export_all = export_all
         self.project = project     # for the [capabilities] allow check (E0160)
         self.debug = debug   # -Og: keep every pin's value in a local for the debugger
         self.idx = ModuleIndex(module)
@@ -128,6 +144,7 @@ class Compiler:
         self.funcs = sorted(module.graphs(("func", "event")), key=lambda g: g.name)
         self.func_names = {g.name: i for i, g in enumerate(self.funcs)}
         self.caps = set()
+        self.uses_lanes = False
 
     # -- tables -------------------------------------------------------------------
     def vt(self, ty: str):
@@ -135,6 +152,9 @@ class Compiler:
         structs become references to type entries."""
         if ty == "anyref":
             return wbc.ANYREF
+        if ty in LANE_VT:
+            self.uses_lanes = True           # container feature bit 1 (section 5.2)
+            return LANE_VT[ty]
         elem = array_elem(ty)
         if elem is not None:
             return wbc.Ref(self.array_type(elem))
@@ -255,6 +275,8 @@ class Compiler:
 
     def const_value(self, lit: Lit, ty: str):
         """A literal as the number or data index stored for a global or field default."""
+        if ty in LANE_VT:                    # f32 lanes, nested for a transform
+            return lanes.normalise(ty, lane_value(lit, ty))
         if ty == "string":
             return self.string_index(lit.value)
         if ty == "bool":
@@ -312,7 +334,9 @@ class Compiler:
         if name in self.global_index:
             return self.global_index[name]
         lit = init if init is not None else zero_lit(ty)
-        if is_container(ty) or ty in self.idx.structs or ty in self.idx.classes or \
+        if ty in LANE_VT:
+            value = self.const_value(lit, ty)
+        elif is_container(ty) or ty in self.idx.structs or ty in self.idx.classes or \
                 ty in self.idx.interfaces or ty == "std.Signal":
             value = None                 # the VM builds the default array or struct
         else:
@@ -386,13 +410,23 @@ class Compiler:
             mod.globals.append((self.vt(ty), 1, value))
         for i, fl in enumerate(lowered):
             g = fl.g
+            declared = g.has_attr("export")
+            if not (declared or self.export_all):
+                continue
             eflags = (wbc.EX_EVENT | wbc.EX_LATENT if g.kind == "event" else 0) | \
                      (wbc.EX_LATENT if g.has_attr("latent") else 0) | \
-                     (wbc.EX_PURE if g.has_attr("pure") else 0)
-            mod.exports.append((g.name, 0, len(self.imports) + i, eflags))
+                     (wbc.EX_PURE if g.has_attr("pure") else 0) | \
+                     (wbc.EX_DECLARED if declared else 0)
+            mod.exports.append((g.name, wbc.EXPORT_FUNC, len(self.imports) + i, eflags))
         for v in sorted(self.idx.vars.values(), key=lambda v: v.name):
-            if v.attrs and any(a.name == "export" for a in v.attrs):
-                mod.exports.append((v.name, 1, self.global_index[v.name], 0))
+            if _exported(v):
+                mod.exports.append((v.name, wbc.EXPORT_GLOBAL, self.global_index[v.name],
+                                    wbc.EX_DECLARED))
+        # Types only when marked, in either mode. An enum is its underlying integer in WBC and
+        # has no type entry to export, so only structs, classes and interfaces are listed.
+        named = {**self.idx.structs, **self.idx.classes, **self.idx.interfaces}
+        for name in sorted(n for n, t in named.items() if _exported(t)):
+            mod.exports.append((name, wbc.EXPORT_TYPE, self.vt(name).type, wbc.EX_DECLARED))
         mod.data = list(self.data)
         for key, ti in list(self.type_keys.items()):
             if key[0] == "class":               # fill each vtable with function indices
@@ -411,6 +445,8 @@ class Compiler:
         mod.customs = self.custom_sections(lowered, assembled)
         if self.embed_source:
             mod.flags |= wbc.FLAG_HAS_SOURCE
+        if self.uses_lanes:
+            mod.flags |= wbc.FLAG_LANES
         # The verifier computes the operand stack height; record it and verify again.
         for body, (_, max_h) in zip(mod.bodies, verify(mod)):
             body.max_stack = max_h
@@ -509,7 +545,8 @@ class Compiler:
         canonical = print_module(self.m)
         for s in (self.m.name, mid, COMPILER_VERSION, f"{REGISTRY_NAME}@{REGISTRY_VERSION}",
                   semantic_hash(self.m), layout_hash(self.m),
-                  hashlib.sha256((self.source or canonical).encode()).hexdigest()):
+                  hashlib.sha256((self.source or canonical).encode()).hexdigest(),
+                  "export-all" if self.export_all else "declared"):
             w.name(s)
         out.append(("wr.meta", bytes(w.b)))
 
@@ -658,7 +695,9 @@ class FuncLowerer:
                     self.ir[nid] = IRNode(nid, "Nop", sig, execs=[("then", tgt)])
                 continue
             ir = IRNode(nid, n.kind, sig, n.symbol, list(n.targs), pure=sig.pure, attrs=n.attrs)
-            if n.kind == "Exit":
+            if n.kind in ("Exit", "Leave"):
+                if n.kind == "Leave":
+                    ir.extra["leave"] = ctx.depth
                 for p in sig.data_ins:
                     if n.binding(p.name) is not None:
                         ir.inputs.append((p.name, p.type, self.src(ctx, n, p)))
@@ -688,8 +727,13 @@ class FuncLowerer:
                     ir.extra["place"] = ("global", self.c.global_index[n.symbol])
             elif n.kind == "CallParent":
                 ir.extra["func"] = ("func", parent_method(n, ctx.graph, self.c.idx).name)
+            elif n.kind == "Call" and self.c.idx.callee(n.symbol, n.targs).name \
+                    in lanes.INTRINSICS:
+                op = lanes.INTRINSICS[self.c.idx.callee(n.symbol, n.targs).name]
+                ir.extra["intrinsic"] = [op] if isinstance(op, str) else op
+                self.c.uses_lanes = True
             elif n.kind == "Call":
-                callee = self.c.idx.callee(n.symbol)
+                callee = self.c.idx.callee(n.symbol, n.targs)
                 if callee.kind in ("func", "event"):
                     ir.extra["func"] = ("func", callee.name)
                 elif callee.kind != "interface":
@@ -750,6 +794,9 @@ class FuncLowerer:
             self.add_local(sub.locals[l.name], l.type, l.default)
         for s in sorted(mg.states, key=lambda s: s.name):
             sub.states[s.name] = self.state_slot(mpath, s)
+        if any(m.kind == "Leave" for m in mg.nodes):
+            sub.depth = f"{mpath}.!depth"
+            self.add_local(sub.depth, "i32")
         entry = next((m for m in mg.nodes if m.kind == "Entry"), None)
         data_params = [p for p in sig.data_ins]
         for p in mg.params:
@@ -760,6 +807,12 @@ class FuncLowerer:
             ir.inputs = [(q.name, q.type, self.src(ctx, n, q)) for q in data_params]
             ir.extra["assign"] = [sub.params[q.name] for q in data_params]
             ir.execs = [("then", self.out_target(sub, entry, p.name) if entry else None)]
+            # an input wired straight to a Leave leaves the macro; any other enters it, and
+            # records the depth that a Leave discards back to
+            first = next((e for e in entry.execs if e.pin == p.name), None) if entry else None
+            first = mg.node(first.target) if first is not None else None
+            if sub.depth and (first is None or first.kind != "Leave"):
+                ir.extra["record"] = sub.depth
             self.ir[cid] = ir
         self.expand(sub)
 
@@ -794,9 +847,9 @@ class FuncLowerer:
         if not self.g.result_list:
             return
         warned, states = set(), set()
-        work = [(self.entry, ())]
+        work = [(self.entry, (), ())]       # node, continuation stack, recorded macro depths
 
-        def chain_end(nid, S):
+        def chain_end(nid, S, M):
             while True:
                 if not S:
                     if nid not in warned:
@@ -806,15 +859,19 @@ class FuncLowerer:
                     return
                 k, S = S[-1], S[:-1]
                 if k is not None:
-                    work.append((k, S))
+                    work.append((k, S, M))
                     return
 
         while work and len(states) < 20000:
-            nid, S = work.pop()
-            if (nid, S) in states or len(S) > 64:
+            nid, S, M = work.pop()
+            if (nid, S, M) in states or len(S) > 64:
                 continue
-            states.add((nid, S))
+            states.add((nid, S, M))
             n = self.ir[nid]
+            if "record" in n.extra:
+                M = tuple(sorted(dict(M, **{n.extra["record"]: len(S)}).items()))
+            if "leave" in n.extra and n.extra["leave"] in dict(M):
+                S = S[:dict(M)[n.extra["leave"]]]
             if n.kind in ("Return", "Throw"):
                 continue
             if n.kind == "Try":
@@ -824,14 +881,14 @@ class FuncLowerer:
                 nexts = [(t.get("body"), base + (None,)), (t.get("fault"), base)]
                 for tgt, s in nexts:
                     if tgt is None:
-                        chain_end(nid, s)
+                        chain_end(nid, s, M)
                     else:
-                        work.append((tgt, s))
+                        work.append((tgt, s, M))
                 continue
             if n.kind == "Sequence":
                 outs = [t for _, t in n.execs]
                 if not outs:
-                    chain_end(nid, S)
+                    chain_end(nid, S, M)
                     continue
                 S2 = S + tuple(reversed(outs[1:]))
                 nexts = [(outs[0], S2)]
@@ -839,9 +896,9 @@ class FuncLowerer:
                 nexts = [(t, S) for _, t in n.execs] or [(None, S)]
             for t, s in nexts:
                 if t is None:
-                    chain_end(nid, s)
+                    chain_end(nid, s, M)
                 else:
-                    work.append((t, s))
+                    work.append((t, s, M))
 
     # -- lowering -----------------------------------------------------------------
     def lower(self):
@@ -872,6 +929,7 @@ class FuncLowerer:
                             self.slots[key] = self.add_local(f"{nid}.{p.name}", p.type)
                             self.pin_map[self.slots[key]] = key
         self.code = []
+        self.lazy_cache, self.lazy_count = {}, 0
         for i, nid in enumerate(order):
             nxt = order[i + 1] if i + 1 < len(order) else None
             self.emit_block(self.ir[nid], nxt)
@@ -937,10 +995,20 @@ class FuncLowerer:
         elif k == "Nop":
             self.ready(n)
             self.transfer(then, nxt)
-        elif k in ("Capture", "Exit"):
+        elif k in ("Capture", "Exit", "Leave"):
+            if "record" in n.extra:         # depth + 1, so 0 means "not entered"
+                self.E("cont.depth")
+                self.E("i32.const", 1)
+                self.E("i32.add")
+                self.E("local.set", self.local_index[n.extra["record"]])
             self.emit_inputs(n)
             for name in reversed(n.extra["assign"]):
                 self.E("local.set", self.local_index[name])
+            if "leave" in n.extra:          # -1 when not entered: cont.trunc does nothing
+                self.E("local.get", self.local_index[n.extra["leave"]])
+                self.E("i32.const", 1)
+                self.E("i32.sub")
+                self.E("cont.trunc")
             self.transfer(then, nxt)
         elif k == "SetLocal":
             self.emit_inputs(n)
@@ -948,8 +1016,7 @@ class FuncLowerer:
             self.transfer(then, nxt)
         elif k in ("SetVar", "SetState") and isinstance(n.extra["global"], tuple):
             _, t, f = n.extra["global"]           # state on the object
-            self.E("local.get", self.local_index["self"])
-            self.emit_inputs(n)
+            self.emit_inputs(n, pre=lambda: self.E("local.get", self.local_index["self"]))
             self.E("class.set", t, f)
             self.transfer(then, nxt)
         elif k in ("SetVar", "SetState"):
@@ -957,8 +1024,7 @@ class FuncLowerer:
             self.E("global.set", n.extra["global"])
             self.transfer(then, nxt)
         elif k == "CallParent":
-            self.E("local.get", self.local_index["self"])
-            self.emit_inputs(n)
+            self.emit_inputs(n, pre=lambda: self.E("local.get", self.local_index["self"]))
             self.E("call", n.extra["func"])
             for p in reversed(n.sig.data_outs):
                 slot = self.slots.get((n.id, p.name))
@@ -1028,9 +1094,7 @@ class FuncLowerer:
         elif k in ("Bind", "Unbind", "Broadcast"):
             # obj, then its dispatcher (a hidden slot), then the handler or the arguments
             cls_t, slot, disp_t = n.extra["dispatcher"]
-            ep = EvalPoint()
-            for _, _, s in n.inputs:
-                self.count(s, ep)
+            ep = self.new_ep(n)
             self.eval(n.inputs[0][2], ep)
             self.E("class.get", cls_t, slot)
             for _, _, s in n.inputs[1:]:
@@ -1083,9 +1147,7 @@ class FuncLowerer:
             if kind == "field":
                 # obj, then the field read without sharing it (it is the place this node
                 # changes); the changed container goes back with class.set on the same obj
-                ep = EvalPoint()
-                for _, _, s in n.inputs:
-                    self.count(s, ep)
+                ep = self.new_ep(n)
                 self.eval(n.inputs[0][2], ep, keep=False)
                 obj = self.temp(n.inputs[0][1])
                 self.E("local.tee", obj)
@@ -1095,8 +1157,7 @@ class FuncLowerer:
                     self.eval(s, ep)
                 self.ready(n)
             else:
-                self.E(f"{kind}.get", idx)
-                self.emit_inputs(n)
+                self.emit_inputs(n, pre=lambda: self.E(f"{kind}.get", idx))
             if k in ARRAY_MUTATORS:
                 op = {"ArraySet": "array.set", "ArrayAdd": "array.push",
                       "ArrayInsert": "array.insert", "ArrayRemove": "array.remove",
@@ -1126,13 +1187,85 @@ class FuncLowerer:
                 for _, _, inner in self.ir[s.a].inputs:
                     self.count(inner, ep)
 
-    def emit_inputs(self, n: IRNode):
+    def new_ep(self, n: IRNode) -> EvalPoint:
+        """The evaluation point of impure node `n`. When an input reaches a lazy node, every
+        input is evaluated into a temp first, in pin order, so the lazy node's branches start
+        with an empty operand stack (labels require one, section 5.5)."""
         ep = EvalPoint()
         for _, _, s in n.inputs:
             self.count(s, ep)
+        if any(self.has_lazy(s) for _, _, s in n.inputs):
+            for _, _, s in n.inputs:
+                self.spill(s, ep)
+        return ep
+
+    def emit_inputs(self, n: IRNode, pre=None):
+        ep = self.new_ep(n)
+        if pre is not None:
+            pre()
         for _, _, s in n.inputs:
             self.eval(s, ep)
         self.ready(n)
+
+    # -- lazy nodes (Select, And, Or: section 4.3) --------------------------------
+    def has_lazy(self, s: Src) -> bool:
+        """Whether evaluating `s` reaches a lazy node."""
+        if s.kind != "node":
+            return False
+        t = self.ir.get(s.a)
+        if t is None or not t.pure:
+            return False
+        if s.a not in self.lazy_cache:
+            self.lazy_cache[s.a] = False         # a pure cycle is E0301; never loop here
+            self.lazy_cache[s.a] = t.kind in LAZY_KINDS or any(
+                self.has_lazy(inner) for _, _, inner in t.inputs)
+        return self.lazy_cache[s.a]
+
+    def spill(self, s: Src, ep: EvalPoint):
+        """Evaluate a pure node into a temp now, with the operand stack empty."""
+        if s.kind != "node" or (s.a, s.b) in ep.temps:
+            return
+        t = self.ir.get(s.a)
+        if t is None or not t.pure:
+            return
+        self._eval(s, ep)
+        tmp = self.temp(s.type)
+        self.E("local.set", tmp)
+        ep.temps[(s.a, s.b)] = tmp
+
+    def branch_value(self, s: Src, ep: EvalPoint, tmp: int):
+        """Evaluate `s` into `tmp` on one side of a lazy node. Values computed there are
+        only known on that side, so they are forgotten afterwards."""
+        saved = dict(ep.temps)
+        self._eval(s, ep)
+        self.E("local.set", tmp)
+        ep.temps = saved
+
+    def emit_lazy(self, n: IRNode, ep: EvalPoint):
+        """Select evaluates only the input it chooses; And and Or skip `b` when `a` decides
+        the result. Entered with an empty operand stack; leaves the result on it."""
+        self.lazy_count += 1
+        end = f"{n.id}!lazy{self.lazy_count}"
+        out = self.temp(n.data_outs[0].type)
+        if n.kind == "Select":
+            (_, _, cond), (_, _, a), (_, _, b) = n.inputs
+            take_a = end + "a"
+            self._eval(cond, ep)
+            self.E("br_if", take_a)
+            self.branch_value(b, ep, out)
+            self.E("br", end)
+            self.code.append(("label", take_a))
+            self.branch_value(a, ep, out)
+        else:                                  # And, Or
+            (_, _, a), (_, _, b) = n.inputs
+            self._eval(a, ep)
+            self.E("local.tee", out)
+            if n.kind == "And":
+                self.E("i32.eqz")              # a is false: so is the result
+            self.E("br_if", end)
+            self.branch_value(b, ep, out)
+        self.code.append(("label", end))
+        self.E("local.get", out)
 
     def ready(self, n: IRNode):
         """Debug builds mark the point where a node's inputs are evaluated and it is about to act."""
@@ -1169,6 +1302,9 @@ class FuncLowerer:
                 self.E("local.get", ep.temps[(s.a, s.b)])
             else:
                 outs = t.data_outs
+                if t.kind not in LAZY_KINDS and self.has_lazy(s):
+                    for _, _, inner in t.inputs:    # so a lazy input starts on an empty stack
+                        self.spill(inner, ep)
                 # mark the pure node's code, so a fault in it (ArrayGet, Div) names that node
                 self.at.append(t.id)
                 self.code.append(("pure", t.id))
@@ -1225,6 +1361,15 @@ class FuncLowerer:
         elem = set_elem(ty)
         if elem is not None:
             self.E("set.new", self.c.set_type(elem))
+            return
+        if ty in LANE_VT:             # a tuple literal: its lanes, then make (3.1.1)
+            if ty == "transform":
+                for x, (_, ft) in zip(lit.value, lanes.LANE_FIELDS[ty]):
+                    self.emit_const(x, ft)
+            else:
+                for x in lit.value:
+                    self.E("f32.const", float(x.value))
+            self.E(f"{LP[ty]}.make")
             return
         if ty in self.c.idx.structs:  # structs have no literal: this is the default struct
             for f in self.c.idx.structs[ty].fields:
@@ -1298,6 +1443,9 @@ class FuncLowerer:
             return
         if ty in self.c.idx.classes or ty in self.c.idx.interfaces:   # identity (3.1)
             self.E("ref.eq")
+            return
+        if ty in LANE_VT:
+            self.E(f"{LP[ty]}.eq")
             return
         if ty in self.c.idx.structs:
             t = self.c.struct_type(ty)
@@ -1390,21 +1538,20 @@ class FuncLowerer:
             self.E("ref.cast", t)
             self.E("local.get", ok)
             return
-        if k == "Select":
-            ty = n.targs[0]
-            (_, _, cond), (_, _, a), (_, _, b) = n.inputs
-            self.eval(cond, ep)
-            tc = self.temp("bool")
-            self.E("local.set", tc)
-            self.eval(a, ep)
-            self.eval(b, ep)
-            self.E("local.get", tc)
-            self.E("select")
+        if k in LAZY_KINDS:
+            self.emit_lazy(n, ep)
+            return
+        if k == "Format":
+            self.emit_format(n, ep)
             return
         if k == "CallParent":
             self.E("local.get", self.local_index["self"])
         for _, _, s in n.inputs:          # Eq and Ne only compare, so they do not share
             self.eval(s, ep, keep=k not in ("Eq", "Ne"))
+        if k == "Call" and "intrinsic" in n.extra:     # a std.vec, std.quat, std.transform
+            for op in n.extra["intrinsic"]:              # function with a lane instruction
+                self.E(op)
+            return
         if k == "Call":
             self.emit_call(n)
             return
@@ -1417,10 +1564,13 @@ class FuncLowerer:
         if k == "Not":
             self.E("i32.eqz")
             return
-        if k in ("And", "Or", "Xor"):
-            self.E(f"i32.{k.lower()}")
+        if k == "Xor":
+            self.E("i32.xor")
             return
         T = n.targs[0]
+        if T in LANE_VT:                      # component-wise, or composition (3.1.1)
+            self.E(f"{LP[T]}.{LANE_ARITH[k]}")
+            return
         if T in self.c.idx.structs or T in self.c.idx.classes or T in self.c.idx.interfaces \
                 or is_container(T):
             # only Eq and Ne take these
@@ -1510,6 +1660,22 @@ class FuncLowerer:
         """MakeStruct, BreakStruct, GetField, WithField. All are pure."""
         k = n.kind
         name, _, fname = (n.symbol or "").partition(".")
+        if name in LANE_VT:                   # unboxed: lane instructions, no struct.* (5.6)
+            for _, _, src in n.inputs:
+                self.eval(src, ep)
+            p = LP[name]
+            names = [f for f, _ in lanes.LANE_FIELDS[name]]
+            if k == "MakeStruct":
+                self.E(f"{p}.make")
+            elif k in ("GetField", "WithField"):
+                self.E(f"{p}.{'get' if k == 'GetField' else 'with'}", names.index(fname))
+            else:
+                tmp = self.temp(name)
+                self.E("local.set", tmp)
+                for i in range(len(names)):
+                    self.E("local.get", tmp)
+                    self.E(f"{p}.get", i)
+            return
         t = self.c.struct_type(name)
         for _, _, src in n.inputs:            # fields in order, or obj (and value)
             self.eval(src, ep)
@@ -1526,9 +1692,33 @@ class FuncLowerer:
                 self.E("local.get", tmp)
                 self.E("struct.get", t, i)
 
+    def emit_format(self, n: IRNode, ep: EvalPoint):
+        """Format: each piece of the template in order, a literal or an input converted to
+        text as Convert does, joined with std.string.Concat."""
+        srcs = {pin: (ty, s) for pin, ty, s in n.inputs}
+        concat = self.c.import_ref("std.string.Concat")
+        parts = format_parts(n.symbol)
+        for i, (kind, v) in enumerate(parts):
+            if kind == "text":
+                self.emit_const(Lit("string", v), "string")
+            else:
+                ty, s = srcs[v]
+                self.eval(s, ep)
+                self.emit_convert(ty, "string")
+            if i:
+                self.E("call", concat)
+        if not parts:
+            self.emit_const(Lit("string", ""), "string")
+
     def emit_convert(self, f: str, t: str):
         f, t = self.c.base(f), self.c.base(t)    # an enum converts to its integer as-is
         if f == t:
+            return
+        if f in LANE_VT:                         # to text, or vec2 <-> vec3 (section 3.2)
+            if t == "string":
+                self.E("call", self.c.import_ref(f"std.convert.From{f.capitalize()}"))
+            else:
+                self.E("v3.from_v2" if f == "vec2" else "v3.to_v2")
             return
         vf, vt = VT[f], VT[t]
         if t == "string":
@@ -1598,6 +1788,12 @@ class FuncLowerer:
         return imms
 
 
+def _exported(item) -> bool:
+    return any(a.name == "export" for a in (item.attrs or []))
+
+
 def compile_module(module: Module, source: Optional[str] = None, embed_source=True,
-                   debug=False, project=None) -> CompileResult:
-    return Compiler(module, source, embed_source, debug, project).compile()
+                   debug=False, project=None, export_all=False) -> CompileResult:
+    """Compile and verify. `export_all` is `wiretc build --export-all` (section 5.2): pass it
+    to run any function by name, never for a build that ships."""
+    return Compiler(module, source, embed_source, debug, project, export_all).compile()

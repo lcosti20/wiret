@@ -1,7 +1,7 @@
 # Wiret prototype
 
 A Python prototype of the Wiret graph editor, compiler and runtime, built against
-[`docs/reference.md`](../docs/reference.md) (Draft 0.8). It implements **Tier 0** and **Tier 1**
+[`docs/reference.md`](../docs/reference.md) (Draft 0.12). It implements **Tier 0** and **Tier 1**
 of the spec (section 1.6). It uses only the Python standard library; the editor uses Tkinter, and the Git
 commands need `git`.
 
@@ -214,8 +214,9 @@ The editor also follows the graph-editor contract in section 7.5:
 - Unknown attributes and layout properties are kept.
 - Notes are kept even when the node or box they explain is deleted: they move to the graph as `#[note("...", detached: "id")]` and show as detached (`W0604`).
 - A wire whose source or target no longer exists stays on screen as a red dashed stub.
-- `//` comments are never dropped silently: before the first graph edit, the editor asks
-  whether to convert them to notes or drop them (`W0603`).
+- A `//` comment directly above a declaration, statement, input or flow wire is kept where
+  it is. One attached to nothing is never dropped silently: before the first graph edit, the
+  editor asks whether to convert it to a note or drop it (`W0603`).
 - Zoom, scroll and selection are never written to the file.
 
 ## The toolchain (`wiretc.py`)
@@ -241,14 +242,15 @@ The editor also follows the graph-editor contract in section 7.5:
 
 | Area | Status |
 | --- | --- |
-| Text syntax (2.1–2.4) | Full lexer and parser for `use`, `extern`, `const`, `var`, `enum`, `struct`, `class` (with methods, dispatchers, a base class and `impl`), `interface`, `func`, `event`, `macro`, `local`, `state`, nodes, bindings, semantic `@` attributes, `#[...]` metadata lines (`#[doc]`, `#[note]`, ...) above declarations, nodes and boxes, the `flow` block (exec wires) and `layout` (places and boxes). An old `markup` block is rejected with a hint, and an unknown `@` name such as `@doc` is `E0104`. See *Structs and enums*, *Classes*, *Interfaces* and *Delegates and dispatchers* below. |
-| Canonical form and hashes (2.5) | Sorted items (struct fields and enum members keep the order written), nodes, `flow` wires (by source node id, then exec pin order) and layout lines, each with its metadata lines above it (`doc`, `category`, `keywords`, then notes as written); registry pin order; default-valued bindings omitted; 100-column wrapping; attribute ordering. Semantic hash (ignores layout, every `#[...]` line and `Reroute`) and layout hash. |
-| Node kinds (3.3) | `Entry`, `Return`, `Branch`, `Sequence`, `Switch`, `Select`, `Macro`, `Exit`, `Reroute`, `Get/SetLocal`, `Get/SetVar` (and `const`s), `Get/SetState`, `Call`, `Convert`, all arithmetic, comparison, logic and bit kinds, and the array kinds `MakeArray`, `ArrayGet`, `ArrayLength`, `ArraySet`, `ArrayAdd`, `ArrayInsert`, `ArrayRemove`, `ArrayClear`, the struct kinds, the map and set kinds (see *Maps and sets* below), `Try` and `Throw` (see *Faults* below), the latent kinds `Delay`, `Yield` and `Await` (see *Fibers* below), the class kinds `New`, `GetField`/`SetField` on objects, `Cast` and `IsValid` (see *Classes* below), and `CreateDelegate`, `Invoke`, `Bind`, `Unbind` and `Broadcast` (see *Delegates and dispatchers* below). Types: `bool`, all integer widths, `f32`, `f64`, `string`, `array::<T>`, `map::<K, V>`, `set::<T>`, structs, enums, classes, interfaces, `delegate::<(A) -> (R)>` and `std.Signal`. |
+| Text syntax (2.1–2.4) | Full lexer and parser for `use`, `extern`, `const`, `var`, `enum`, `struct`, `class` (with methods, dispatchers, a base class and `impl`), `interface`, `func`, `event`, `macro`, `local`, `state`, nodes with their inputs in parentheses (`Kind(.pin <- value, ...)`, `Entry()`), nodes written inline in the one input they feed (naming the output they feed in only when they have several), functions written `= value`, `Format "..."` templates, `//` comments attached to what they stand above, semantic `@` attributes, `#[...]` metadata lines (`#[doc]`, `#[note]`, ...) above declarations, and above nodes' and boxes' lines in the layout block, the `flow` block (exec wires) and `layout` (places and boxes). An old `markup` block is rejected with a hint, and an unknown `@` name such as `@doc` is `E0104`. See *Structs and enums*, *Classes*, *Interfaces* and *Delegates and dispatchers* below. |
+| Canonical form and hashes (2.5) | Sorted items (struct fields and enum members keep the order written), the `flow` block before the node statements, nodes (a node read by exactly one input, with no exec pins and no `@` attribute, written inline there and named by its path, such as `show.message`), `flow` wires (by source node id, then exec pin order) and layout lines, each with its metadata lines above it (`doc`, `category`, `keywords`, then notes as written); registry pin order; default-valued bindings omitted; 100-column wrapping; attribute ordering. Semantic hash (ignores layout, every `#[...]` line, every `//` comment and `Reroute`) and layout hash. The §2.6 example, which the spec shows in flow order with no alignment, round-trips byte for byte: `wiretc view --flow` of its canonical form is the example exactly (see tests). |
+| Node kinds (3.3) | `Entry`, `Return`, `Branch`, `Sequence`, `Switch`, `Select`, `Macro`, `Exit`, `Reroute`, `Get/SetLocal`, `Get/SetVar` (and `const`s), `Get/SetState`, `Call`, `Convert`, all arithmetic, comparison, logic and bit kinds, `Scale`, and the array kinds `MakeArray`, `ArrayGet`, `ArrayLength`, `ArraySet`, `ArrayAdd`, `ArrayInsert`, `ArrayRemove`, `ArrayClear`, the struct kinds, the map and set kinds (see *Maps and sets* below), `Try` and `Throw` (see *Faults* below), the latent kinds `Delay`, `Yield` and `Await` (see *Fibers* below), the class kinds `New`, `GetField`/`SetField` on objects, `Cast` and `IsValid` (see *Classes* below), and `CreateDelegate`, `Invoke`, `Bind`, `Unbind` and `Broadcast` (see *Delegates and dispatchers* below). Types: `bool`, all integer widths, `f32`, `f64`, `string`, `array::<T>`, `map::<K, V>`, `set::<T>`, structs, enums, classes, interfaces, `delegate::<(A) -> (R)>` and `std.Signal`. |
 | Execution model (4.2–4.3) | Continuation stack, `Sequence` push/pop, macro inlining with path-style ids (`loop/test`, `loop!in`), `Exit` as a jump, joins, evaluation points with per-point sharing, impure output slots, `@pure` and `@reads` calls as pure nodes, per-expansion `state`. The §4.2 `SumTo(2)` trace is reproduced exactly (see tests). |
-| Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0150, E0151, E0152, E0160, E0201 (latency), E0301, E0302, E0304, E0401, E0412, E0501, E0502, E0503, W0201, W0301, W0302, W0310, W0320, W0601, W0602, W0603, W0604. |
+| Diagnostics (4.7) | E0101, E0102, E0103, E0110, E0111, E0120, E0121, E0150, E0151, E0152, E0160, E0201 (latency), E0301, E0302, E0304, E0310, E0320, E0401, E0412, E0501, E0502, E0503, W0201, W0203, W0301, W0302, W0601, W0602, W0603, W0604, W0605. |
 | Lowering (4.8) | `-O0`: one labelled block per impure node, `local.tee` for shared values, `cont.push`/`cont.pop` kept. Output closely matches the §5.8 listings. |
-| WBC (5.2–5.4) | Type (function, `5E` array and `5F` struct entries), Import, Function, Global, Export, Data and Code sections, plus custom sections `name`, `wr.debug`, `wr.pins`, `wr.pure`, `wr.meta` (hashes), `wr.caps` and `wr.graph` (deflated canonical source). |
-| Verifier (5.5) | One linear pass: decoding, branch targets, empty stack at labels, operand typing (including `struct.new`/`get`/`with`), returns, `max_stack`, latency/purity flags. Type references may point forward, but a struct may not hold itself by value. Fuzz-tested. |
+| WBC (5.2–5.4) | Type (function, `5E` array and `5F` struct entries), Import, Function, Global, Export, Data and Code sections, plus custom sections `name`, `wr.debug`, `wr.pins`, `wr.pure`, `wr.meta` (hashes and export mode), `wr.caps` and `wr.graph` (deflated canonical source). Export modes as in 5.2: a normal `wiretc build` exports only what is marked `@export` (funcs, events, methods, `var`s, and struct, class and interface types; an enum has no type entry to export, so `@export` on one is warning `W0203`), each with flag bit 3; `wiretc build --export-all`, which `wiretc run`, `wiretc replay`, the editor and the browser version use, also exports every func, event and method, without bit 3. `LoadedModule.declared` holds the bit-3 names. |
+| Verifier (5.5) | One linear pass: decoding, branch targets, empty stack at labels, operand typing (including `struct.new`/`get`/`with` and the lane instructions), returns, `max_stack`, latency/purity flags. Type references may point forward, but a struct may not hold itself by value. Fuzz-tested. |
+| Lane types (3.1.1) | `vec2`, `vec3`, `quat` and `transform`: tuple literals, struct nodes, component-wise arithmetic, `Scale`, composition, `std.vec`/`std.quat`/`std.transform`, lane instructions in the `FB` prefix space and container flag bit 1. See *Vectors, rotations and transforms* below. |
 | VM (5–6) | Interpreter with exact fuel counting (5.7), faults with node-level tracebacks (6.9), a node hook that drives the editor's trace, linking against `std.*` natives and the host native `host.Log`. |
 
 ### Encoding choices the draft leaves open
@@ -287,11 +289,11 @@ Declarations are checked, and their names can be used as types in signatures, `l
 - A struct that holds itself by value, directly or through other structs, is `E0503`. Holding
   it in an array is fine.
 
-An enum value is written `Mode.Chase`: on a pin (`.b <- Mode.Flee`), as a default
-(`mode: Mode = Mode.Idle`) and in `@cases(Mode.Idle, Mode.Chase)`. On a pin it reads like a wire,
-so it means the enum value only when the graph has no node called `Mode`. A node with the same id
-as an enum is `E0102`. A missing enum or member is `E0501`, and a value of the wrong enum is
-`E0110`.
+An enum value is written `Mode::Chase`: on a pin (`.b <- Mode::Flee`), as a default
+(`mode: Mode = Mode::Idle`) and in `@cases(Mode::Idle, Mode::Chase)`. It never reads like a wire,
+so a node may be called `Mode` too. The dotted `Mode.Chase` of earlier drafts is still read where
+the graph has no node called `Mode`, and `wiretc fmt` rewrites it. A missing enum or member is
+`E0501`, and a value of the wrong enum is `E0110`.
 
 Struct nodes name their struct, and the field nodes name the field too:
 
@@ -323,8 +325,8 @@ They compile and run:
   struct pin.
 - `Eq` and `Ne` on structs compare field by field, inline. Arrays cannot be compared in this
   prototype, so `Eq` on a struct that holds an array is `E0110`.
-- `wiretc run` takes enum arguments as `Mode.Chase` and prints results as
-  `Vec2 { x: 1.0, y: 1.5 }` and `Mode.Chase`, and the debugger shows values the same way.
+- `wiretc run` takes enum arguments as `Mode::Chase` and prints results as
+  `Vec2 { x: 1.0, y: 1.5 }` and `Mode::Chase`, and the debugger shows values the same way.
   Struct arguments cannot be typed on the command line.
 
 In the editor:
@@ -342,6 +344,59 @@ In the editor:
 - Lesson 8 walks through a struct, an enum, `WithField` and a `Switch` on an enum.
 
 Struct and enum declarations are edited in the Source pane; there is no dialog for them yet.
+
+### Vectors, rotations and transforms
+
+`vec2`, `vec3`, `quat` and `transform` (Draft 0.13, section 3.1.1) are built-in structs with
+fixed `f32` fields that the VM holds unboxed, so vector math in a per-frame graph never
+allocates.
+
+```
+const Up: vec3 = (0, 1, 0)
+var spawn: transform = ((0, 2, 0), (0, 0, 0, 1), (1, 1, 1))
+
+func Step(p: vec3, v: vec3, dt: f32) -> (r: vec3) @pure = Add::<vec3>(
+  .a <- p,
+  .b <- Scale::<vec3>(
+    .v <- v,
+    .s <- dt,
+  ),
+)
+```
+
+- **Literals** are tuples, nested for a transform, on pins and as `const`, `var`, field,
+  parameter, `local` and `state` values. A tuple of the wrong length is `E0110`. The defaults
+  are the zero vectors, the identity rotation `(0, 0, 0, 1)` and the identity transform (scale
+  `(1, 1, 1)`), and so is the "zero value" a missing map key or an unbound `Exit` output gets.
+- **Struct nodes** work on them unchanged: `MakeStruct vec3`, `BreakStruct quat`,
+  `GetField vec3.y`, `GetField transform.rotation`, `WithField transform.scale`. A struct or enum
+  named `vec3` is `E0102`.
+- **Operators.** `Add Sub Mul Div Min Max Neg Abs` are component-wise on `vec2` and `vec3`;
+  the new kind `Scale::<T>` multiplies a vector by an `f32`; `Mul::<quat>` and
+  `Mul::<transform>` compose, `b` first and then `a`; `Eq`/`Ne` compare components (NaN is
+  never equal); `Select` and map keys take all four. Any other type argument is `E0110`.
+  `Convert` goes between `vec2` and `vec3` and to text, and `Format` writes them, as
+  `(1.0, 2.5, 3.0)`.
+- **Library.** `std.vec` (`Dot`, `Length`, `LengthSquared`, `Distance`, `Normalize`, `Lerp` and
+  `Reflect`, each `::<vec2>` or `::<vec3>`, plus `Cross` and `PerpDot`), `std.quat` (`Rotate`,
+  `Conjugate`, `Inverse`, `Normalize`, `FromAxisAngle`, `Slerp`, `Angle`) and `std.transform`
+  (`Apply`, `ApplyVector`, `Inverse`), with `std.math.Acos`. A generic one without its type
+  argument is `E0502`. `Normalize` of a zero vector gives zero, never a fault.
+- **Bytecode.** Type codes `76` to `73`, container flag bit 1 (the verifier refuses lane types
+  without it), and the lane instructions in the `FB` prefix space: `v3.add` is `FB 23`. Struct
+  nodes lower to `v3.make`, `v3.get f` and `v3.with f`, the arithmetic kinds to their lane
+  instruction, and the library functions that have one (`Dot`, `Cross`, `Rotate`, `Apply`, ...)
+  to it instead of a call, so `Step` above runs in six instructions and six units of fuel.
+  `FromAxisAngle`, `Slerp` and `Angle` are natives; in deterministic mode they use the bundled
+  `Sin`, `Cos` and `Acos`.
+- **Values.** A lane value is a tuple of floats in the VM and through `vm.call`, rounded to
+  `f32` after every operation, in the order section 3.1.1 writes each formula. `wiretc run` takes
+  them as `(1, 2, 3)` and prints them in the same form, and the disassembler names the field of
+  each `get` and `with`.
+
+Not yet in the prototype: `std.quat.FromEuler` and its `EulerOrder` enum (a standard-library
+enum needs cross-module enums), and a lesson. The palette lists every node above; lane pins
+use the struct colour.
 
 ### Maps and sets
 
@@ -381,10 +436,13 @@ The first Tier 2 item (section 4.6). `Try` has the exec outputs `body`, `fault` 
 the data outputs `message: string` and `code: i32`; `Throw` takes `message` and `code`.
 
 ```
-node t = Try
-node div = Div::<i32>
-  .a <- entry.a
-  .b <- entry.b
+node t = Try()
+node ok = Return(
+  .q <- Div::<i32>(
+    .a <- entry.a,
+    .b <- entry.b,
+  ),
+)
 ...
 flow {
   t.body -> ok
@@ -474,9 +532,9 @@ class Boss : Player {
   an implicit first parameter `self`, an output of its `Entry`. Canonical order inside a class:
   fields as written (they are the object layout), then funcs, then events, each by name.
 - **Nodes.** `New Player` (impure: it makes an identity) has `result`. `GetField` and
-  `SetField` take the bare field name inside the class's own methods (`GetField health`, as in
-  section 2.6) and `Class.field` anywhere else; `GetField` on an object has `reads` purity, so
-  it is evaluated at each consumer. `Cast Boss` and `IsValid` take any object (`anyref`):
+  `SetField` name `Class.field` (`GetField Player.health`, as in section 2.6); inside a method
+  the bare field name of its own class is also read, and the formatter writes it qualified.
+  `GetField` on an object has `reads` purity, so it is evaluated at each consumer. `Cast Boss` and `IsValid` take any object (`anyref`):
   `Cast` gives `result` (null when the object is not a `Boss`) and `ok`. `Eq` and `Ne` on a
   class compare identity. `null` is the class literal.
 - **Calls.** `Call Player.TakeDamage` has `self` as its first input. A method that is not
@@ -565,14 +623,16 @@ class Player {
   ...
 }
 
-node handler = CreateDelegate Counter.Add     // a method: its object is the target
-  .target <- counter.result
-node bind = Bind Player.OnHit
-  .obj <- player.result
-  .handler <- handler.result
-node fire = Broadcast OnHit                   // bare name inside Player's own methods
-  .obj <- entry.self
-  .amount <- 5
+node bind = Bind Player.OnHit(
+  .obj <- player,
+  .handler <- CreateDelegate Counter.Add(     // a method: its object is the target
+    .target <- counter,
+  ),
+)
+node fire = Broadcast Player.OnHit(
+  .obj <- entry.self,
+  .amount <- 5,
+)
 ```
 
 - **Delegates.** `delegate::<(i32) -> (bool)>` is a reference type: a function plus, for a
@@ -729,7 +789,7 @@ the wires a cascading delete removed, and the ids it retired in `wiret.ids`. A s
 | `delete_node` | `graph`, `node`, optional `cascade`; refused while wired, unless `cascade` |
 | `rename` | `id` (an `@id`) and `to`; or `graph`, `node` and `to` for a node id |
 
-A value is written as on the right of `<-`: `"plus.result"`, `"5"`, `"\"hi\""`, `"Mode.Chase"`.
+A value is written as on the right of `<-`: `"plus.result"`, `"5"`, `"\"hi\""`, `"Mode::Chase"`.
 A target is `graph` and `node` (a node or box), `graph` alone, or `decl` (any declaration).
 `set_meta` with a note adds one; with any other name it replaces it. Renaming by `@id` rewrites
 every reference: calls and macro uses, type names, struct and field symbols, enum values and
@@ -762,14 +822,12 @@ pins for results, and flow wires for a macro's exec parameters and results.
 
 ### Deviations and known gaps
 
-- **Exports.** Every `func` and `event` is exported, so the editor can run any of them. The
-  spec exports only `@export` declarations.
 - **Tier 2 in this prototype:** the language features are done (`Try`/`Throw`, fibers,
   classes, interfaces, delegates and dispatchers), and so are copy-on-write and capabilities.
   The prototype exists to show Wiret as a language, so the embedding and infrastructure items
   are out of its scope: the C API (the `VM` class's Python methods stand in for it), the
-  project manager (`wiret.toml` dependencies, `use` of other modules, `@export`-only exports,
-  `wiret.lock`, `WR_LOAD_LAZY_LINK` and `wr_link`), and debugger hooks as a host API (the
+  project manager (`wiret.toml` dependencies, `use` of other modules and linking against
+  their declared exports, `wiret.lock`, `WR_LOAD_LAZY_LINK` and `wr_link`), and debugger hooks as a host API (the
   editor has its own debugger). A module is one file.
 - **No `ref.share` removal.** Without `-O1` there is no liveness analysis, so a function that
   builds a local array and returns it still shares it, and the caller's first change to it
@@ -781,9 +839,6 @@ pins for results, and flow wires for a macro's exec parameters and results.
   implementations; this VM is one implementation on one interpreter.
 - **Optimisation.** There is no `-O1`, so the `cont.push`/`cont.pop` pairs are never replaced
   by direct branches.
-- **Example layout.** The spec's examples align the `=` signs; the canonical writer does not.
-  If it did, adding one longer node id would change every line of the graph, which breaks the
-  one-line-diff rule.
 - **Example literals.** The math pins in the registry have no declared defaults, so bindings
   such as `b: 0` are kept rather than omitted. This matches the §2.6 examples.
 

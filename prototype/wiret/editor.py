@@ -28,8 +28,8 @@ from .graphview import BG, DIM, TEXT, GraphView
 from .model import Box, Graph, Lit, Local, Module, Param, PinRef, note_text, set_note_text
 from .natives import STD
 from .parser import ParseError, parse, parse_literal
-from .printer import layout_hash, print_module, semantic_hash
-from .ids import assign_ids, find_project, retired_between
+from .printer import GraphNames, layout_hash, print_module, semantic_hash
+from .ids import assign_ids, attach_retired, find_project, retired_between
 from .registry import (ModuleIndex, STATIC_KINDS, can_convert, enum_values,
                        type_choices, type_ok)
 from .explain import explain, explain_runtime, type_words
@@ -42,13 +42,14 @@ module untitled
 extern func host.Log(message: string)
 
 func Main() {
-  node entry = Entry
-  node hello = Call host.Log
-    .message <- "Hello, Wiret!"
-
   flow {
     entry -> hello
   }
+
+  node entry = Entry()
+  node hello = Call host.Log(
+    .message <- "Hello, Wiret!",
+  )
 
   layout {
     entry at (0, 0)
@@ -382,9 +383,10 @@ class EditorApp:
         self.set_text(text, from_disk=True)
         self.after_text_parsed(fit=True)
         if self.module and self.module.comments:
-            self.log(f"{len(self.module.comments)} '//' comment(s) found. They are not part of the "
-                     f"model: use File > Convert // comments to notes before editing the graph, "
-                     f"or they will be offered for conversion on the first graph edit (W0603).",
+            self.log(f"{len(self.module.comments)} '//' comment(s) are not directly above a "
+                     f"statement, so they are attached to nothing: use File > Convert // comments "
+                     f"to notes before editing the graph, or they will be offered for conversion "
+                     f"on the first graph edit (W0603).",
                      "dim")
 
     # -- lessons ------------------------------------------------------------------
@@ -608,9 +610,9 @@ class EditorApp:
         if m.comments:
             ans = messagebox.askyesnocancel(
                 "Comments would be lost",
-                f"The source has {len(m.comments)} '//' comment(s). Comments are not part of the "
-                f"model, so saving the graph cannot keep them (W0603).\n\nYes: convert them to "
-                f"notes\nNo: drop them\nCancel: undo this edit")
+                f"The source has {len(m.comments)} '//' comment(s) that are not directly above "
+                f"a statement, so saving the graph cannot keep them (W0603).\n\nYes: convert "
+                f"them to notes\nNo: drop them\nCancel: undo this edit")
             if ans is None:
                 self.parse_text()
                 self.refresh()
@@ -625,8 +627,13 @@ class EditorApp:
             canvasedit.place_unplaced(g, self.auto_pos)
         if getattr(self, "project", None) is not None:   # editors always write @id (2.4)
             assign_ids(m, retired={r.id for r in self.project.retired})
+        attach_retired(m, getattr(self, "project", None))
         self.last_counts, self.fault = {}, {}
         self.view.run_counts, self.view.fault_node = {}, None
+        sel = self.view.selected
+        if g is not None and sel and sel[0] == "node":
+            # the text read back knows a node by the name it is written with (section 2.3)
+            self.view.selected = ("node", GraphNames(g, ModuleIndex(m)).name(sel[1]))
         text = print_module(m)
         if text != self.text:
             self.push_undo(self.text)
@@ -1122,7 +1129,7 @@ class EditorApp:
             if d == "in" and p and p.type in self.idx.enums:
                 sub = tk.Menu(menu, tearoff=0)
                 for member, _ in enum_values(self.idx.enums[p.type]):
-                    sub.add_command(label=f"{p.type}.{member}",
+                    sub.add_command(label=f"{p.type}::{member}",
                                     command=lambda m=member: self.set_enum_value(nid, pin,
                                                                                  p.type, m))
                 menu.add_cascade(label=f"Set '{pin}' to", menu=sub)
@@ -1185,7 +1192,8 @@ class EditorApp:
         bp = (self.graph_name, nid) in self.breakpoints
         menu.add_command(label=("Remove breakpoint" if bp else "Set breakpoint") + "  (F9)",
                          command=lambda: self.toggle_breakpoint(nid))
-        menu.add_command(label="Rename id…", command=lambda: self.rename_node(nid))
+        if "." not in nid:          # an inline node's name says where it is written
+            menu.add_command(label="Rename id…", command=lambda: self.rename_node(nid))
         menu.add_command(label="Label…", command=lambda: self.set_label(nid))
         menu.add_command(label="Colour…", command=lambda: self.set_color(nid))
         menu.add_command(label="Add note…", command=lambda: self.add_note(nid))
@@ -1362,6 +1370,7 @@ class EditorApp:
             for r in g.result_list:
                 if r.type == "exec":
                     add(mac, f"Exit {r.name}", "Exit", r.name)
+                    add(mac, f"Leave {r.name}", "Leave", r.name)
         if mac.index("end") is None:
             mac.add_command(label="(no macros: Graph > New macro…)", state="disabled")
         menu.add_cascade(label="Macro", menu=mac)
@@ -1425,7 +1434,8 @@ class EditorApp:
         self.console.configure(state="disabled")
         func = self.entry_var.get()
         t0 = time.perf_counter()
-        r = compile_module(self.module, self.text, debug=True, project=self.project)
+        r = compile_module(self.module, self.text, debug=True, project=self.project,
+                           export_all=True)     # Run can start any function (section 5.2)
         for d in r.diags:
             where = ".".join(x for x in (d.graph, d.node) if x)
             self.log(f"{d.severity} {d.code} {where}: {explain(d)}",

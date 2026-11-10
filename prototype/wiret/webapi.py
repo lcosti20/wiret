@@ -21,7 +21,7 @@ from .checker import GraphInfo
 from .compiler import compile_module
 from .explain import explain, explain_runtime
 from .parser import ParseError, Parser
-from .printer import print_module
+from .printer import GraphNames, print_module
 from .model import note_text
 from .registry import ModuleIndex, enum_values
 from .runner import format_results, format_value, run_function
@@ -68,7 +68,7 @@ def _compile(source: str, out: dict, debug: bool):
     m = _parse(source, out)
     if m is None:
         return None, None
-    r = compile_module(m, source, debug=debug)
+    r = compile_module(m, source, debug=debug, export_all=True)   # run any function by name
     out["diags"] = [_diag(d) for d in r.diags]
     return (m, r) if r.ok else (None, None)
 
@@ -169,7 +169,8 @@ def edit(source: str, graph: str, request: str) -> str:
     and optionally "geoms": {node: [x, y, width]} as drawn (to place an inserted Convert node)
     and "comments": "convert". The result is {"ok", "text", "message", "select"} (`select`: a
     node the edit added). When the edit is refused, `ok` is false and `message` says why. The
-    canonical text cannot keep `//` comments: then the result is {"ok": false, "comments": n}
+    canonical text cannot keep a `//` comment that is attached to nothing (not directly above
+    a statement, input or flow wire): then the result is {"ok": false, "comments": n}
     and nothing changes, so the page can ask and send the edit again with "comments":
     "convert", which turns them into notes."""
     req = json.loads(request)
@@ -270,8 +271,11 @@ def edit(source: str, graph: str, request: str) -> str:
             reason += " (" + "; ".join(dropped) + ")"
     canvasedit.place_unplaced(g, _REMEMBERED)
     added = [n.id for n in g.nodes if n.id not in before]
-    return json.dumps({"ok": True, "text": print_module(m), "message": reason,
-                       "select": added[0] if added else None})
+    # the page reads the new text back, where a node is known by the name it is written with
+    select = GraphNames(g, ModuleIndex(m)).name(added[0]) if added else None
+    if select and select != added[0]:
+        reason = reason.replace(added[0], select)
+    return json.dumps({"ok": True, "text": print_module(m), "message": reason, "select": select})
 
 def menu(source: str, graph: str, target: str) -> str:
     """The context menu for something on the canvas, entry for entry as the desktop editor's
@@ -319,7 +323,9 @@ def menu(source: str, graph: str, target: str) -> str:
         if target_graph:
             choice(f"Open {n.symbol}", client=f"open:{target_graph}")
         choice("Breakpoint  (F9)", client="breakpoint", node=nid)
-        choice("Rename id…", "rename", f"New id for '{nid}' (renames every wire):", nid, node=nid)
+        if "." not in nid:          # an inline node's name says where it is written
+            choice("Rename id…", "rename", f"New id for '{nid}' (renames every wire):", nid,
+                   node=nid)
         choice("Label…", "label", f"Display label for '{nid}' (layout only; empty to clear):",
                canvasedit.current_prop(g, nid, "label"), node=nid)
         choice("Colour…", "color", "Colour such as #C0392B (empty to clear):",
@@ -356,7 +362,7 @@ def menu(source: str, graph: str, target: str) -> str:
         if d == "in" and p.type in idx.enums:
             out.append({"label": f"Set '{pin}' to", "header": True})
             for member, _ in enum_values(idx.enums[p.type]):
-                out.append({"label": f"{p.type}.{member}", "indent": True,
+                out.append({"label": f"{p.type}::{member}", "indent": True,
                             "action": {"op": "set_enum", "node": nid, "pin": pin,
                                        "type": p.type, "member": member}})
         elif d == "in" and p.type in idx.structs:

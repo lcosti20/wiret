@@ -11,7 +11,7 @@ import struct
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from . import wbc
+from . import lanes, wbc
 from .natives import CArray, CMap, NO_FAULT, FaultValue, NativeFault, NativeSpec, Signal, _f32, all_natives
 from .verifier import VerifyError, verify
 from .wbc import (F32, F64, FAULT, I32, I64, SIGNAL, STRING, OPS, ArrayType, ClassType,
@@ -34,7 +34,8 @@ FIBER_READY, FIBER_RUNNING, FIBER_SUSPENDED, FIBER_DONE, FIBER_FAULTED = (
 
 VT_OF = {"bool": I32, "i8": I32, "u8": I32, "i16": I32, "u16": I32, "i32": I32, "u32": I32,
          "i64": I64, "u64": I64, "f32": F32, "f64": F64, "string": STRING,
-         "anyref": wbc.ANYREF, "fault": FAULT, "std.Signal": SIGNAL}
+         "anyref": wbc.ANYREF, "fault": FAULT, "std.Signal": SIGNAL,
+         **{name: vt for vt, name in wbc.LANE_VTS.items()}}
 
 MAX_FRAMES = 2000
 MAX_CONT = 10000
@@ -298,6 +299,7 @@ NUMERIC = _build_numeric()
  OP_DROP, OP_SELECT, OP_LGET, OP_LSET, OP_LTEE, OP_GGET, OP_GSET, OP_CONST) = (
     0x00, 0x01, 0x02, 0x03, 0x05, 0x06, 0x0A, 0x0B, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x20)
 OP_TRY_PUSH, OP_SUSPEND, OP_THROW = 0x0C, 0x0D, 0x0E
+OP_CONT_DEPTH, OP_CONT_TRUNC = 0x17, 0x18   # 0x0F is brk, reserved
 OP_CALL_VIRTUAL, OP_CALL_INTERFACE, OP_CALL_DELEGATE = 0x07, 0x08, 0x09
 OP_DELEGATE_NEW, OP_BIND, OP_UNBIND, OP_BROADCAST = 0xF4, 0xF5, 0xF6, 0xF7
 OP_REF_NULL, OP_REF_IS_NULL, OP_REF_EQ, OP_REF_CAST, OP_REF_TEST, OP_REF_VALID = range(0x25, 0x2B)
@@ -397,11 +399,15 @@ def normalise(vt, v, types=None):
         return float(v)
     if vt == FAULT or vt == SIGNAL:
         return v
+    if vt in wbc.LANE_VTS:              # a lane value: f32 components, as tuples
+        return lanes.normalise(wbc.LANE_VTS[vt], v)
     return str(v)
 
 
 ZERO = {I32: 0, I64: 0, F32: 0.0, F64: 0.0, STRING: "", FAULT: NO_FAULT, SIGNAL: None,
         wbc.ANYREF: None}
+# A lane type's zero value is its default: the identity for quat and transform (3.1.1).
+ZERO.update({vt: lanes.DEFAULTS[name] for vt, name in wbc.LANE_VTS.items()})
 
 
 def export(v):
@@ -669,6 +675,7 @@ class LoadedModule:
     global_names: dict = field(default_factory=dict)   # name -> global index
     classes: dict = field(default_factory=dict)        # class name -> ClassInfo
     capabilities: list = field(default_factory=list)   # wr.caps
+    declared: set = field(default_factory=set)         # exports marked @export (flag bit 3)
 
 
 def parse_pins(m: wbc.WbcModule, debug: dict) -> dict:
@@ -793,7 +800,7 @@ def parse_customs(m: wbc.WbcModule):
     if p:
         r = wbc.Reader(p)
         keys = ["module", "id", "compiler", "registry", "semantic_hash", "layout_hash",
-                "source_hash"]
+                "source_hash", "exports"]
         for k in keys:
             if r.eof():
                 break
@@ -835,6 +842,11 @@ class VM:
             for q, fn in BUNDLED2.items():
                 self.natives[q] = _replace_fn(self.natives[q],
                                               lambda _vm, a, b, fn=fn: (fn(a, b),))
+            from .detmath import acos, cos, sin
+            from .natives import LANE_TRIG, _lane_natives
+            bundled = _lane_natives(sin, cos, acos)
+            for q in LANE_TRIG:
+                self.natives[q] = bundled[q]
             self.natives = {q: s for q, s in self.natives.items() if s.deterministic}
         # Capabilities granted (wr_grant, section 6.5). This class is both libwiret and the
         # reference host: by default it grants what its own host natives need; pass a list,
@@ -981,6 +993,10 @@ class VM:
                     arg = arrays[ins.name[6:]]
                 elif ins.name.startswith(("map.", "set.")):
                     arg = containers(m.types[ins.imms[0]], ins.name)
+                elif ins.op > 0xFF:              # a lane instruction: (operands, function)
+                    field = ins.imms[0] if ins.imms else 0
+                    arg = (len(lanes.effect(ins.name, field)[0]),
+                           lanes.function(ins.name, field))
                 elif ins.name == "struct.new":
                     arg = len(m.types[ins.imms[0]].fields)
                 elif ins.name in ("struct.get", "struct.with", "class.get", "class.set"):
@@ -1032,7 +1048,8 @@ class VM:
                  for vt, _, init in m.globals]
         return LoadedModule(m, meta.get("module", ""), funcs, exports, gvals, m.data, meta,
                             local_names, parse_global_names(m),
-                            {c.name: c for c in classes.values()}, caps)
+                            {c.name: c for c in classes.values()}, caps,
+                            {name for name, _, _, flags in m.exports if flags & wbc.EX_DECLARED})
 
     # -- execution ----------------------------------------------------------------
     def _fiber(self, mod: LoadedModule, name: str, args: list) -> Fiber:
@@ -1258,6 +1275,17 @@ class VM:
                                 stack[-1] = fn(stack[-1], b)
                             else:
                                 stack[-1] = fn(stack[-1])
+                        elif op > 0xFF:                       # lane instructions (5.6)
+                            n, fn = arg
+                            if n == 1:
+                                stack[-1] = fn(stack[-1])
+                            elif n == 2:
+                                b = stack.pop()
+                                stack[-1] = fn(stack[-1], b)
+                            else:
+                                operands = stack[len(stack) - n:]
+                                del stack[len(stack) - n:]
+                                stack.append(fn(*operands))
                         elif op in _CONST_OPS or op == 0x24:
                             stack.append(arg)
                         elif op == OP_LTEE:
@@ -1277,6 +1305,12 @@ class VM:
                                 if type(k) is int:
                                     ip = k
                                     break
+                        elif op == OP_CONT_DEPTH:    # handler markers count (section 5.5)
+                            stack.append(len(cont))
+                        elif op == OP_CONT_TRUNC:
+                            d = stack.pop()
+                            if 0 <= d < len(cont):
+                                del cont[d:]
                         elif op == OP_SUSPEND:
                             # park the whole fiber, every frame included (section 4.5)
                             if arg == 1:

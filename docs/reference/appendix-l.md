@@ -1,0 +1,23 @@
+## Appendix L. Changes in Draft 0.13
+
+Draft 0.13 adds built-in vector, rotation and transform types, the first of the gaps between Wiret and engine scripting (section 9.2). All of it is implemented in the prototype with tests, except `std.quat.FromEuler`, whose `EulerOrder` enum would be the first enum of the standard library; section 3.1.1 stays **Provisional** until a native VM has run it. It adds to the canonical form (new type names and tuple literals) without changing how any existing file is written, and it adds type codes and instructions to WBC 1, which is still a draft. A module that uses them sets a new feature bit, so an older VM refuses it at load.
+
+| Change | Detail | Section |
+| --- | --- | --- |
+| Lane types | `vec2`, `vec3`, `quat` and `transform` are structs with fixed `f32` fields that the VM holds unboxed, as 2, 3, 4 and 10 lanes. Per-frame math no longer allocates a heap record per `MakeStruct` or `WithField`, and an array of them is packed. The defaults are the zero vectors, the identity rotation and the identity transform, and "the zero value" of a `quat` or `transform` means that default. | 3.1, 3.1.1, 5.3 |
+| Literals | A tuple of numbers, nested for a transform, is the literal of a lane type wherever a literal may stand: `.offset <- (0, 0.5, 0)`. A tuple of the wrong length is `E0110`. | 2.1, 2.2, 3.1.1 |
+| Struct nodes and operators | `MakeStruct`, `BreakStruct`, `GetField` and `WithField` work on them unchanged. `Add Sub Mul Div Min Max Neg Abs` are component-wise on vectors, `Mul` composes rotations and transforms in matrix order (`b` then `a`), the new kind `Scale::<T>` multiplies a vector by an `f32`, and `Eq` compares components. Any other type argument is `E0110`. | 3.1.1, 3.3, 4.7 |
+| Standard library | `std.vec` (`Dot`, `Cross`, `PerpDot`, `Length`, `LengthSquared`, `Distance`, `Normalize`, `Lerp`, `Reflect`), `std.quat` (`Rotate`, `Conjugate`, `Inverse`, `Normalize`, `FromAxisAngle`, `FromEuler`, `Slerp`, `Angle`) and `std.transform` (`Apply`, `ApplyVector`, `Inverse`), each defined by a formula with a fixed evaluation order. `std.math` gains `Acos`. `Normalize` of a zero vector gives zero rather than faulting. | 3.1.1, 3.4 |
+| Conversions | `vec2` to `vec3` and back, and every lane type to `string` in literal form, so `Format` accepts them. | 3.2, 3.3 |
+| No coordinate convention | No up axis or handedness is built in. Engine-specific rotations (look-at, an inspector's Euler order) are host natives. `transform` is translation, rotation and scale without shear; `Mul` and `Inverse` are exact for uniform scale. | 3.1.1 |
+| Bytecode | Type codes `76` to `73`, container feature bit 1, and the lane instructions in the `FB` prefix space (`v2.`, `v3.`, `q.`, `t.` blocks), each costing 1 fuel. The trigonometric `std.quat` functions are natives. | 5.2, 5.3, 5.6, 5.7 |
+| Determinism | Lane instructions are fixed sequences of IEEE `+ - * /` and `Sqrt`, so the existing floating-point rules cover them. SIMD is allowed only where it gives the same bits. | 4.10 |
+| Initialisers checked | Building the prototype showed that the checker tested `const`, `var`, parameter, `local` and `state` values only when they were enum values, so `const A: i32 = "x"` passed. Every initialiser is now checked against its type (`E0110`), which a vector tuple of the wrong length needs. | 2.2, 4.7 |
+| Embedding API | `wr_Vec2`, `wr_Vec3`, `wr_Quat` and `wr_Transform` with `wr_push_*` and `wr_to_*`, and four new `wr_Type` values appended to the enum. The structs match Godot's and Unity's single-precision layouts, while Unreal's double-precision types are narrowed at the boundary. | 6.7 |
+
+**Considered and not adopted.**
+
+- *Scalarising in the compiler* (a `vec3` becomes three `f32` locals and no new instructions). This keeps the VM unchanged, but a vector's pin then spans three locals in `wr.pins`, a function signature changes shape at the C boundary, and an array of vectors still needs a packed element type. One value per stack entry keeps the debugger, the host API and the verifier simple.
+- *Natives only* (`Call std.vec.Dot` as a native call). Every call would cost 5 fuel plus marshalling, which is the overhead that per-frame graphs can least afford.
+- *`f64` lanes.* Single precision matches Godot's default build and Unity, and halves the memory of packed arrays. Large-world `f64` vectors are listed in section 9.2.
+- *A `mat4` type instead of `transform`.* Translation, rotation and scale is what editors show and animation blends, and it has a cheap exact inverse for uniform scale. Matrices are listed in section 9.2.

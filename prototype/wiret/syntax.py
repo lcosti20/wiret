@@ -15,7 +15,7 @@ TOKEN = (r'"(?:[^"\\]|\\.)*"|//.*$|@[A-Za-z_.]+|#\[[A-Za-z_.]+|\]$|'
 _TOKEN_RE = re.compile(TOKEN)
 
 # Node kinds that are not in the registry's static kinds, but are coloured as kinds too.
-OTHER_KINDS = ("Entry", "Return", "Call", "Macro", "Exit", "Sequence", "Switch", "Reroute",
+OTHER_KINDS = ("Entry", "Return", "Call", "Macro", "Exit", "Leave", "Sequence", "Switch", "Reroute",
                "GetLocal", "SetLocal", "GetVar", "SetVar", "GetState", "SetState")
 KINDS = frozenset(STATIC_KINDS) | frozenset(OTHER_KINDS)
 
@@ -42,11 +42,21 @@ def tag_of(token: str) -> str | None:
     return None
 
 
+def is_name(line: str, start: int, end: int) -> bool:
+    """A keyword next to `.`, right before `(`, or before a single `:` is a name there (a
+    symbol, pin, field or node; section 2.1). No keyword is ever written in those places."""
+    before, after = line[:start].rstrip(), line[end:]
+    return (before.endswith(".") or after.startswith((".", "("))
+            or (after.lstrip().startswith(":") and not after.lstrip().startswith("::")))
+
+
 def spans(line: str) -> list:
     """(start, end, tag) for each coloured token in one line."""
     out = []
     for m in _TOKEN_RE.finditer(line):
         tag = tag_of(m.group(0))
+        if tag == "kw" and is_name(line, m.start(), m.end()):
+            tag = None
         if tag:
             out.append((m.start(), m.end(), tag))
     return out

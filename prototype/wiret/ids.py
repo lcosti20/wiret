@@ -136,11 +136,22 @@ class Retired:
         return f"@id '{self.id}'" if self.kind == "id" else             f"{self.kind} id '{self.id}' in {self.graph}"
 
 
+def attach_retired(m: Module, project: Optional["Project"]) -> Module:
+    """Tell the printer which node ids the project retired, so a node it declares under a
+    new name never reuses one (section 2.3)."""
+    if project is not None:
+        m.retired_nodes = {(r.graph, r.id) for r in project.retired
+                           if r.module == m.name and r.kind == "node"}
+    return m
+
+
 def ids_of(m: Module) -> set:
     """Every id in a module as registry entries: node and box ids per graph, and `@id`s."""
     out = {Retired(m.name, "-", "id", e.id) for e in elements(m) if e.id}
     for g in m.graphs():
-        out |= {Retired(m.name, g.name, "node", n.id) for n in g.nodes}
+        # an inline node's dotted name says where it is written, not which node it is, so
+        # it is never retired (section 2.3)
+        out |= {Retired(m.name, g.name, "node", n.id) for n in g.nodes if "." not in n.id}
         out |= {Retired(m.name, g.name, "box", b.id) for b in g.boxes}
     return out
 
@@ -253,7 +264,7 @@ def check_ids(m: Module, project: Project, D) -> None:
     a lone file cannot know which ids were retired."""
     for g in m.graphs():
         for n in g.nodes:
-            if Retired(m.name, g.name, "node", n.id) in project.retired:
+            if "." not in n.id and Retired(m.name, g.name, "node", n.id) in project.retired:
                 D("E0140", f"node id '{n.id}' was retired in wiret.ids and cannot be reused",
                   g.name, n.id)
         for b in g.boxes:

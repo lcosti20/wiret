@@ -248,6 +248,25 @@ def atan2(y: float, x: float) -> float:
         return _to_float(a)
 
 
+def acos(x: float) -> float:
+    """The angle in [0, pi] whose cosine is x; NaN outside [-1, 1] (C99 F.10.1.1)."""
+    if math.isnan(x) or abs(x) > 1:
+        return NAN
+    if x == 1:
+        return 0.0
+    if x == -1:
+        return math.pi
+    if x == 0:
+        return math.pi / 2
+    with localcontext() as ctx:
+        ctx.prec = WORK + 15
+        d = Decimal(x)
+        a = _atan(((1 - d) * (1 + d)).sqrt() / abs(d))
+        if x < 0:
+            a = _pi(WORK + 15) - a
+        return _to_float(a)
+
+
 BUNDLED = {"std.math.Sin": sin, "std.math.Cos": cos, "std.math.Tan": tan,
-           "std.math.Exp": exp, "std.math.Log": log}
+           "std.math.Exp": exp, "std.math.Log": log, "std.math.Acos": acos}
 BUNDLED2 = {"std.math.Pow": pow, "std.math.Atan2": atan2}

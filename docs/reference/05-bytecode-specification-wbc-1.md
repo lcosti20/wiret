@@ -34,7 +34,7 @@ All multi-byte fixed-width values are little-endian. Section 5.1.1 fixes how eac
 module  = magic version flags section*
 magic   = 00 57 42 43            ; NUL 'W' 'B' 'C'
 version = u32 (little endian)    ; 1
-flags   = u32                    ; bit 0: has embedded source (wr.graph); bits 1-31: required features, unknown bits are rejected
+flags   = u32                    ; bit 0: has embedded source (wr.graph); bits 1-31: required features, unknown bits are rejected; bit 1: lane types (5.3)
 section = id:u8 size:u32 payload ; ids ascending, custom sections (id 0) anywhere
 vec(X)  = n:u32 X*               name = vec(u8)  ; UTF-8, no NUL
 ```
@@ -44,7 +44,7 @@ vec(X)  = n:u32 X*               name = vec(u8)  ; UTF-8, no NUL
 | 0 | Custom | `name:name` then payload. Unknown custom sections are skipped. |
 | 1 | Type | `vec(typeentry)` |
 | 2 | Import | `vec(module:name field:name kind:u8=0 type:u32 flags:u8)`; kind 0 is a function. Flags: bit 0 pure, bit 1 reserved. `module` names a Wiret module or a host namespace; resolution order is in section 7.3. |
-| 3 | Function | `vec(typeidx:u32 flags:u8)` for each defined function. Flags: bit 0 pure, bit 1 latent, bit 2 event. Function indices count imports first. |
+| 3 | Function | `vec(typeidx:u32 flags:u8)` for each defined function. Flags: bit 0 pure, bit 1 latent, bit 2 event; the verifier rejects any other bit, a function that is both pure and latent, and an event that is not latent or has results. Function indices count imports first. |
 | 4 | Global | `vec(valtype mut:u8 init:const)` |
 | 5 | Export | `vec(name kind:u8 index:u32 flags:u8)`; kind 0 func, 1 global, 2 type. Flags: bit 0 event, 1 latent, 2 pure, 3 declared (the source marks it `@export`). Methods are exported as `Class.Method`. Which entries are present depends on the export mode, below. |
 | 6 | Data | `vec(vec(u8))`: string constants, UTF-8. |
@@ -52,7 +52,7 @@ vec(X)  = n:u32 X*               name = vec(u8)  ; UTF-8, no NUL
 
 A `const` is 8 bytes (numeric bit pattern), or a `u32` data index for `string`, or empty for references (always null); the exact layout is in section 5.1.1.
 
-**Export modes.** A normal build writes an export entry only for what the source marks `@export`, and sets flag bit 3 on each. An `--export-all` build (section 7) also writes an entry for every `func`, `event` and method, so that the editor can run any function by name; entries for `@export` items still carry bit 3, the others do not. Macros are inlined and never exported, and `var`s and types are exported only when marked `@export`. Export mode is a build option, not part of the source: it does not change the semantic hash or any function body, and `wr.meta` records which mode was used. The export table is the only thing that differs. **Linking** from another Wiret module resolves an import only against entries with bit 3 set, so `--export-all` does not make `@private` or unmarked functions importable by other modules. The host sees every entry, and tests bit 3 (`WR_EXPORT_DECLARED`, section 6) to find the public surface. `--export-all` builds are for development; release pipelines should build without it.
+**Export modes.** A normal build writes an export entry only for what the source marks `@export`, and sets flag bit 3 on each. An `--export-all` build (section 7) also writes an entry for every `func`, `event` and method, so that the editor can run any function by name; entries for `@export` items still carry bit 3, the others do not. Macros are inlined and never exported, and `var`s and types are exported only when marked `@export`. An enum has no type entry (it is its underlying integer), so it is never exported, and `@export` on one is `W0203`. Export mode is a build option, not part of the source: it does not change the semantic hash or any function body, and `wr.meta` records which mode was used. The export table is the only thing that differs. **Linking** from another Wiret module resolves an import only against entries with bit 3 set, so `--export-all` does not make `@private` or unmarked functions importable by other modules. The host sees every entry, and tests bit 3 (`WR_EXPORT_DECLARED`, section 6) to find the public surface. `--export-all` builds are for development; release pipelines should build without it.
 
 ### 5.3 Value types and type entries
 
@@ -61,6 +61,10 @@ A `const` is 8 bytes (numeric bit pattern), or a `u32` data index for `string`, 
 | `7F` | i32 (also bool and all narrow integers) |  | `78` | i8 (loads sign-extend, stores truncate) |
 | `7E` | i64 |  | `77` | i16 (same) |
 | `7D` | f32 |  |  |  |
+| `76` | vec2 (2 `f32` lanes) |  |  |  |
+| `75` | vec3 (3 lanes) |  |  |  |
+| `74` | quat (4 lanes) |  |  |  |
+| `73` | transform (10 lanes: translation, rotation, scale) |  |  |  |
 | `7C` | f64 |  |  |  |
 | `6E` | string (never null) |  |  |  |
 | `6B t` | nullable reference to type index `t` (class, struct, array, map, set, interface, delegate, dispatcher) |  |  |  |
@@ -80,7 +84,9 @@ A `const` is 8 bytes (numeric bit pattern), or a `u32` data index for `string`, 
 | `59` | delegate | `functype:u32` |
 | `58` | dispatcher | `functype:u32` (no results) |
 
-`field = storagetype flags:u8 [const]` where flag bit 0 says a default value follows. In a struct entry only number and string fields carry one. A struct's default value holds each field's default, else that field type's default (a nested struct's own default, an empty array); the VM builds struct locals and globals from it.
+**Lane types.** `76` to `73` are the built-in types of section 3.1.1. Each is one operand-stack entry and one local to the verifier, whatever its lane count, so `max_stack` counts entries; an implementation sizes its slots from the types the verifier computes. They are value types, never references: they are not subtypes of `anyref`, `ref.*` instructions reject them, and stack maps skip them. A module that uses one, in a type entry, local, global or instruction, sets container flag bit 1, so a VM without them rejects it at load instead of failing later. A constant of a lane type is its `f32` lanes in field order, each 4 bytes little-endian.
+
+`field = storagetype flags:u8 [const]` where flag bit 0 says a default value follows. In a struct entry only number, string and lane-type fields carry one. A struct's default value holds each field's default, else that field type's default (a nested struct's own default, an empty array); the VM builds struct locals and globals from it.
 
 ### 5.4 Custom sections defined by this version
 
@@ -156,6 +162,8 @@ Notation: `[in] -> [out]`. `L` is a branch target, an `s32` offset relative to t
 | 0D | `suspend` | kind: 0 yield, 1 timer, 2 signal | `[]`, `[f64]` or `[signal]` -> `[]` |
 | 0E | `throw` |  | `[fault]` -> . A `fault` is made with the native `std.fault.Make` and read with `std.fault.Message` and `std.fault.Code` (section 3.4). The type `fault` appears only in locals and function types. |
 | 0F | `brk` |  | Reserved for debuggers. Never appears in a file. |
+| 17 | `cont.depth` |  | `[]` -> `[i32]`: the number of entries on the frame's continuation stack, handler markers included. |
+| 18 | `cont.trunc` |  | `[i32 n]` -> `[]`: discards the entries above the first `n`; nothing when `n` is negative or not below the depth. `Leave` uses the pair (section 4.2). |
 
 **Variables and constants (10 to 2F)**
 
@@ -209,7 +217,7 @@ All `trunc` instructions are **saturating** and map NaN to 0. They never fault.
 | D1 / D2 | `struct.get` / `struct.with` | T, f | `[ref]` -> `[v]` / `[ref, v]` -> `[ref']` (copy with one field replaced) |
 | D3 | `class.new` | T | `[]` -> `[ref]`, fields set to declared defaults, dispatchers empty. |
 | D4 / D5 | `class.get` / `class.set` | T, f | `[ref]` -> `[v]` / `[ref, v]` -> `[]` |
-| D6 | `array.new` | T | `[i32 length]` -> `[ref]`, zero-filled, unshared. |
+| D6 | `array.new` | T | `[i32 length]` -> `[ref]`, filled with the element type's zero value (the identity for `quat` and `transform`, section 3.1.1), unshared. An array of a lane type stores its lanes packed, with no per-element object. |
 | D7 | `array.len` |  | `[ref]` -> `[i32]` |
 | D8 | `array.get` | T | `[ref, i32]` -> `[v]` (bounds-checked) |
 | D9 | `array.set` | T | `[ref, i32, v]` -> `[ref']` |
@@ -229,13 +237,24 @@ All `trunc` instructions are **saturating** and map NaN to 0. They never fault.
 | F4 | `delegate.new` | func, flags | `[]` or `[recv]` -> `[ref]`. Flag bit 0: bind a receiver as the first argument. Flag bit 1 (with bit 0): bind the receiver's override of `func`, as `call_virtual` would choose. The result's type is the module's delegate type for `func`'s signature without the receiver; the verifier requires one to exist. A latent function that is not an event cannot be bound. `call_delegate` on a delegate of an event queues the event on a new fiber and returns at once. |
 | F5 / F6 | `dispatcher.bind` / `.unbind` | T | `[ref, delegate]` -> `[]` |
 | F7 | `dispatcher.broadcast` | T | `[ref, args]` -> `[]`. Runs handlers in bind order; a handler's fault is reported to the host and does not stop the others. |
-| FB | *prefix* |  | Next byte is a LEB128 sub-opcode. Reserved for future instructions. |
+| FB | *prefix* |  | Next byte is a LEB128 sub-opcode: the lane instructions below. Sub-opcodes not listed are reserved. |
+
+**Lane instructions (FB 00 to FB 7F).** Four 32-slot blocks, laid out like the numeric blocks: the sub-opcode is the block base plus the index, so `v3.add` is `FB 23`. All are pure, never fault (an `f32` division by zero gives an infinity or NaN), and compute exactly the formulas of section 3.1.1 in the order given there. `make` pops one value per field in field order; `get` and `with` take a `u8` field index immediate (`v3.get 1` reads `y`; `t.get 1` reads the rotation). Comparisons return `i32`.
+
+| Block | Base | Operations (index order) and stack effect where not `[T, T] -> [T]` |
+| --- | --- | --- |
+| `v2.` | 00 | 0 `make` `[f32, f32] -> [v2]`, 1 `get` f `[v2] -> [f32]`, 2 `with` f `[v2, f32] -> [v2]`, 3 `add`, 4 `sub`, 5 `mul`, 6 `div`, 7 `min`, 8 `max`, 9 `neg` `[v2] -> [v2]`, 10 `abs` (same), 11 `scale` `[v2, f32] -> [v2]`, 12 `eq` and 13 `ne` `-> [i32]`, 14 `dot` `-> [f32]`, 15 `len` and 16 `lensq` `[v2] -> [f32]`, 17 `normalize` `[v2] -> [v2]`, 18 `lerp` `[v2, v2, f32] -> [v2]`, 19 `reflect`, 20 `perpdot` `-> [f32]` |
+| `v3.` | 20 | Indices 0 to 19 as for `v2` (with three `f32` for `make`), then 20 `cross`, 21 `from_v2` `[v2] -> [v3]`, 22 `to_v2` `[v3] -> [v2]` |
+| `q.` | 40 | 0 `make` (four `f32`), 1 `get` f, 2 `with` f, 3 `mul`, 4 `conj` `[q] -> [q]`, 5 `inverse` (same), 6 `normalize` (same), 7 `dot` `-> [f32]`, 8 `eq`, 9 `ne`, 10 `rotate` `[q, v3] -> [v3]` |
+| `t.` | 60 | 0 `make` `[v3, q, v3] -> [t]`, 1 `get` f, 2 `with` f, 3 `mul`, 4 `inverse` `[t] -> [t]`, 5 `apply` and 6 `apply_vector` `[t, v3] -> [v3]`, 7 `eq`, 8 `ne` |
+
+Every sub-opcode here is below `80`, so it encodes in one byte after `FB`. `FromAxisAngle`, `FromEuler`, `Slerp` and `Angle` are `std.quat` natives, since they need `Sin`, `Cos` and `Acos`.
 
 All other opcodes are invalid. Everything else a node needs (string formatting, math, sorting) is a native in `std.*`, which keeps the instruction set small and lets embedders replace library functions.
 
 ### 5.7 Fuel
 
-Each instruction costs 1 unit; `call`, `call_virtual`, `call_interface` and `call_delegate` cost 5; allocation adds 1 per 64 bytes (rounded up). Natives cost what they declare at registration, which may depend on their arguments (the container `Equals` natives: section 4.9). When a fiber's fuel reaches 0 it stops with `WR_ERR_FUEL`, which is not catchable. Counting is exact and deterministic, so fuel is a valid replay and billing unit.
+Each instruction costs 1 unit, a lane instruction included; `call`, `call_virtual`, `call_interface` and `call_delegate` cost 5; allocation adds 1 per 64 bytes (rounded up). Natives cost what they declare at registration, which may depend on their arguments (the container `Equals` natives: section 4.9). When a fiber's fuel reaches 0 it stops with `WR_ERR_FUEL`, which is not catchable. Counting is exact and deterministic, so fuel is a valid replay and billing unit.
 
 ### 5.8 Disassembly
 

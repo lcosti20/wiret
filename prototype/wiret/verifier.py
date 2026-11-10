@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from .wbc import (ANYREF, F32, F64, FAULT, FN_LATENT, SIGNAL, FN_PURE, I32, I64, STRING, ArrayType, MapType,
                   ClassType, DelegateType, DispatcherType, FN_EVENT, InterfaceType, Ref,
-                  SetType, StructType, WbcError, WbcModule, decode_code, vt_name)
+                  SetType, StructType, WbcError, WbcModule, decode_code, vt_name,
+                  FLAG_LANES, LANE_VTS)
+from . import lanes
 
 REF_TYPES = (ArrayType, StructType, MapType, SetType, ClassType, InterfaceType, DelegateType,
              DispatcherType)
@@ -20,6 +22,14 @@ _INT_UN = {"neg", "not", "extend8_s", "extend16_s", "extend32_s"}
 _F_CMP = {"eq", "ne", "lt", "gt", "le", "ge"}
 _F_BIN = {"add", "sub", "mul", "div", "min", "max", "copysign"}
 _F_UN = {"neg", "abs", "sqrt", "ceil", "floor", "trunc", "nearest"}
+# Wiret type names of the operands of lane instructions -> value types
+_LANE_VT = {"f32": F32, "bool": I32, **{name: vt for vt, name in LANE_VTS.items()}}
+
+
+def lane_effect(name: str, field: int = 0):
+    """(pops, pushes) of a lane instruction (section 5.6)."""
+    ins, out = lanes.effect(name, field)
+    return [_LANE_VT[t] for t in ins], [_LANE_VT[out]]
 
 
 class VerifyError(Exception):
@@ -71,13 +81,15 @@ def valid_vt(m: WbcModule, vt) -> bool:
     struct does not hold itself by value is `check_struct_cycles`."""
     if isinstance(vt, Ref):
         return vt.type < len(m.types) and isinstance(m.types[vt.type], REF_TYPES)
+    if vt in LANE_VTS:                  # only in a module that declares them (section 5.2)
+        return bool(m.flags & FLAG_LANES)
     return vt in VALTYPES
 
 
 def key_vt_ok(m: WbcModule, vt, depth=0) -> bool:
     """A map key or set element: a number, a string, or a struct of those (section 3.1)."""
     if not isinstance(vt, Ref):
-        return vt in VALTYPES
+        return vt in VALTYPES or (vt in LANE_VTS and bool(m.flags & FLAG_LANES))
     entry = m.types[vt.type] if vt.type < len(m.types) else None
     if not isinstance(entry, StructType) or depth > 64:
         return False
@@ -262,8 +274,12 @@ def verify(m: WbcModule) -> list:
     for i, (t, flags) in enumerate(m.funcs):
         if not is_func_type(m, t):
             raise VerifyError(f"function has bad type index {t}", i)
+        if flags & ~(FN_PURE | FN_LATENT | FN_EVENT):
+            raise VerifyError(f"function has unknown flag bits {flags:#04x}", i)
         if flags & FN_PURE and flags & FN_LATENT:
             raise VerifyError("a pure function is never latent", i)
+        if flags & FN_EVENT and (m.types[t][1] or not flags & FN_LATENT):
+            raise VerifyError("an event is latent and has no results", i)
     if len(m.bodies) != len(m.funcs):
         raise VerifyError("function and code section counts differ")
     check_classes(m, len(m.imports) + len(m.funcs))
@@ -277,7 +293,9 @@ def verify(m: WbcModule) -> list:
             raise VerifyError(f"export '{name}' names function {index}, out of range")
         if kind == 1 and index >= len(m.globals):
             raise VerifyError(f"export '{name}' names global {index}, out of range")
-        if kind not in (0, 1):
+        if kind == 2 and index >= len(m.types):
+            raise VerifyError(f"export '{name}' names type {index}, out of range")
+        if kind not in (0, 1, 2):
             raise VerifyError(f"export '{name}' has unsupported kind {kind}")
     for gi, (vt, mut, init) in enumerate(m.globals):
         if vt != SIGNAL and not valid_vt(m, vt):
@@ -357,6 +375,15 @@ def verify_function(m: WbcModule, i: int):
             raise VerifyError("unreachable instruction without a label", fidx, ins.pc)
         n = ins.name
         eff = simple_effect(n)
+        if ins.op > 0xFF:                  # a lane instruction
+            if not m.flags & FLAG_LANES:
+                raise VerifyError(f"{n}: lane instructions need feature flag bit 1", fidx,
+                                  ins.pc)
+            field = ins.imms[0] if ins.imms else 0
+            ty = lanes.BLOCKS[n.partition(".")[0]][1]
+            if ins.imms and field >= len(lanes.LANE_FIELDS[ty]):
+                raise VerifyError(f"{n}: {ty} has no field {field}", fidx, ins.pc)
+            eff = lane_effect(n, field)
         if eff is not None:
             for t in reversed(eff[0]):
                 pop(t, ins)
@@ -395,6 +422,10 @@ def verify_function(m: WbcModule, i: int):
         elif n == "cont.pop":
             if stack:
                 raise VerifyError("cont.pop with a non-empty operand stack", fidx, ins.pc)
+        elif n == "cont.depth":
+            stack.append(I32)
+        elif n == "cont.trunc":
+            pop(I32, ins)
         elif n == "return":
             if len(stack) != len(results) or not all(is_sub(m, g, r)
                                                       for g, r in zip(stack, results)):

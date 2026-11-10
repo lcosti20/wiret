@@ -7,7 +7,9 @@ from .model import Lit, Module
 from .natives import float_to_text
 from .parser import ParseError, Parser, parse_literal
 from .registry import (FLOAT_TYPES, ModuleIndex, array_elem, enum_values, is_container,
-                       lit_fits, map_types, set_elem)
+                       lit_fits, map_types, set_elem, lane_lit_fits, lane_value)
+from . import lanes
+from .lanes import LANE_FIELDS
 
 
 def lit_value(lit: Lit, ty: str, name: str, idx: Optional[ModuleIndex] = None):
@@ -32,6 +34,11 @@ def lit_value(lit: Lit, ty: str, name: str, idx: Optional[ModuleIndex] = None):
             raise ValueError(f"argument {name}: write a map as {{\"a\": 1, \"b\": 2}}")
         return {lit_value(k, kv[0], name, idx): lit_value(v, kv[1], name, idx)
                 for k, v in lit.value}
+    if ty in LANE_FIELDS:               # a lane literal: (0, 1, 0), nested for a transform
+        if not lane_lit_fits(lit, ty):
+            example = "((0, 0, 0), (0, 0, 0, 1), (1, 1, 1))" if ty == "transform" else                 "(" + ", ".join("0" for _ in LANE_FIELDS[ty]) + ")"
+            raise ValueError(f"argument {name}: write a {ty} as {example}")
+        return lanes.normalise(ty, lane_value(lit, ty))
     if idx is not None and ty in idx.structs:
         raise ValueError(f"argument {name}: a {ty} struct cannot be typed as an argument; "
                          f"call a function that makes one instead")
@@ -39,7 +46,7 @@ def lit_value(lit: Lit, ty: str, name: str, idx: Optional[ModuleIndex] = None):
         values = dict(enum_values(idx.enums[ty]))
         member = lit.value.split(".", 1)[1] if lit.kind == "enum" else None
         if not lit_fits(lit, ty) or member not in values:
-            names = ", ".join(f"{ty}.{m}" for m in values)
+            names = ", ".join(f"{ty}::{m}" for m in values)
             raise ValueError(f"argument {name}: write one of {names}")
         return values[member]
     if not lit_fits(lit, ty):
@@ -107,6 +114,8 @@ def format_value(ty: Optional[str], v, idx: Optional[ModuleIndex] = None) -> str
         inner = ", ".join(f"{n}: {format_value(t, x, idx) if not hasattr(x, 'cls') else '<' + x.cls.name + '>'}"
                           for n, t, x in zip(names, types, v.fields))
         return f"{v.cls.name} {{ {inner} }}" if inner else f"{v.cls.name} {{}}"
+    if ty in LANE_FIELDS and isinstance(v, tuple):     # the literal form (section 3.2)
+        return lanes.to_text(v, lambda x: format_value("f32", x))
     if idx is not None and ty in idx.structs and isinstance(v, tuple):
         fields = idx.structs[ty].fields
         inner = ", ".join(f"{f.name}: {format_value(f.type, x, idx)}" for f, x in zip(fields, v))
@@ -115,7 +124,7 @@ def format_value(ty: Optional[str], v, idx: Optional[ModuleIndex] = None) -> str
         base = idx.enum_base(ty)
         for name, value in enum_values(idx.enums[ty]):
             if format_value(base, value) == format_value(base, v):
-                return f"{ty}.{name}"
+                return f"{ty}::{name}"
         return f"{ty}({format_value(base, v)})"   # Convert does not check membership
     if isinstance(v, dict):           # a map {k: v} or a set {a, b}
         kv = map_types(ty) if ty else None

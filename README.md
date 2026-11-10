@@ -18,25 +18,6 @@ extern func host.Log(message: string)
 #[note("Try it: (1) Step through (F11) and watch the Variables panel in the Debugger tab: score changes from 0 to 10 to 15. (2) Change the bonus: double-click pin b on the Add node and type 100.")]
 func Main() {
   local score: i32
-  #[note("Log needs text, so Convert turns the number into text.")]
-  node as_text = Convert::<i32, string>
-    .value <- now.value
-  node bonus = SetLocal score
-    .value <- plus.result
-  node entry = Entry
-  node line = Call std.string.Concat
-    .a <- "Your score is "
-    .b <- as_text.result
-  node now = GetLocal score
-  node old = GetLocal score
-  #[note("Add reads the score (10) and adds 5.")]
-  node plus = Add::<i32>
-    .a <- old.value
-    .b <- 5
-  node show = Call host.Log
-    .message <- line.result
-  node start = SetLocal score
-    .value <- 10
 
   flow {
     bonus -> show
@@ -44,15 +25,36 @@ func Main() {
     start -> bonus
   }
 
+  node bonus = SetLocal score(
+    .value <- Add::<i32>(
+      .a <- GetLocal score(),
+      .b <- 5,
+    ),
+  )
+  node entry = Entry()
+  node show = Call host.Log(
+    .message <- Call std.string.Concat(
+      .a <- "Your score is ",
+      .b <- Convert::<i32, string>(
+        .value <- GetLocal score(),
+      ),
+    ),
+  )
+  node start = SetLocal score(
+    .value <- 10,
+  )
+
   layout {
-    as_text at (600, 320)
     bonus at (560, 0)
+    #[note("Add reads the score (10) and adds 5.")]
+    bonus.value at (360, 160)
+    bonus.value.a at (180, 260)
     entry at (0, 0)
-    line at (780, 180)
-    now at (440, 420)
-    old at (180, 260)
-    plus at (360, 160)
     show at (980, 0)
+    show.message at (780, 180)
+    #[note("Log needs text, so Convert turns the number into text.")]
+    show.message.b at (600, 320)
+    show.message.b.value at (440, 420)
     start at (200, 0)
   }
 }

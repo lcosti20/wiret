@@ -210,20 +210,27 @@ def explain(d: Diag) -> str:
         ty = data.get("type", "")
         return (f"Input {here} isn't connected and has no default, so it will be "
                 f"{zero_words(ty)}. Connect a wire, or double-click the pin to type a value.")
+    if c == "W0203":
+        return (f"Enum '{_quoted(m)}' is marked @export, but an enum is saved as plain numbers, so "
+                f"there is nothing to export and the mark does nothing. Remove @export; "
+                f"functions that are exported can still take and return its values.")
     if c == "W0301":
         return ("Nothing leads to this node, so it will never run. Connect a white exec wire into "
                 "it from the step that should come before it.")
     if c == "W0302":
         return ("The function can stop here without reaching a Return node, so it would return "
                 "zero. Connect this path to a Return.")
-    if c == "W0310":
+    if c == "E0310":
         return (f"This uses a result from '{_quoted(m)}', but '{_quoted(m)}' doesn't run on every "
-                f"path before this node. When it hasn't run, the value is zero. Store the value "
+                f"path before this node, so there might be no value to use. Store the value "
                 f"in a local variable on every path instead.")
-    if c == "W0320":
-        return (f"'{_quoted(m)}' reads a variable and is used by more than one step, and each step "
-                f"may see a different value. If they should all see the same value, store it in "
-                f"a local variable first.")
+    if c == "E0320":
+        return (f"'{_quoted(m)}' reads something that can change (a field, a variable or "
+                f"state), and it is read again at each step that uses it. Two of those steps can "
+                f"run one after the other, so the second may see a different value than the "
+                f"first. To use one value, store it in a local before the first step (Set, then "
+                f"Get the local). If each step should see the value as it is then, mark the "
+                f"node @live.")
     if c == "E0130":
         return ("Nodes that change an array, map or set need to know which one to change: the "
                 "name of a local variable or module variable that holds it, written after the "
@@ -233,8 +240,16 @@ def explain(d: Diag) -> str:
     if c == "W0602":
         return f"'{_quoted(m)}' is listed in two boxes; it belongs to the first one."
     if c == "W0603":
-        return ("This '//' comment isn't saved with the graph. Use File → Convert // comments to "
-                "notes to keep it.")
+        return ("A '//' comment is kept when it stands directly above a declaration, a "
+                "statement, an input or a flow wire, with no blank line between. This one "
+                "doesn't (it has a blank line under it, ends a line of code, or is in the "
+                "layout block), so formatting would drop it. Move it, or use File → Convert // "
+                "comments to notes to keep it as a note.")
+    if c == "W0605":
+        return ("A line in the layout block names a node that is no longer in this graph, "
+                "usually because a node written inside another one moved, which changes its "
+                "dotted name. The line and its notes are kept. Rename the line to the node's "
+                "new name, or delete it.")
     if c == "W0604":
         return "This note was attached to something that has been deleted."
     return m

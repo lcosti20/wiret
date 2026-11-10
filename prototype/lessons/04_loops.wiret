@@ -7,32 +7,6 @@ extern func host.Log(message: string)
 #[note("Try it: (1) Turn on Animate and press Run to watch the loop go round. (2) Count to 10 instead of 5. (3) What total do you get for 1 to 100?")]
 func Main() {
   local total: i32
-  node count = Macro std.flow.ForRange
-    .first <- 1
-    .last <- 5
-  node entry = Entry
-  node final = GetLocal total
-  #[note("Adds index to the running total each time round.")]
-  node keep = SetLocal total
-    .value <- plus.result
-  node line = Call std.string.Concat
-    .a <- "Counting: "
-    .b <- num_text.result
-  node num_text = Convert::<i32, string>
-    .value <- count.index
-  node old = GetLocal total
-  node plus = Add::<i32>
-    .a <- old.value
-    .b <- count.index
-  node report = Call host.Log
-    .message <- report_line.result
-  node report_line = Call std.string.Concat
-    .a <- "Total: "
-    .b <- total_text.result
-  node say = Call host.Log
-    .message <- line.result
-  node total_text = Convert::<i32, string>
-    .value <- final.value
 
   flow {
     count.each -> say
@@ -41,18 +15,47 @@ func Main() {
     say -> keep
   }
 
+  node count = Macro std.flow.ForRange(
+    .first <- 1,
+    .last <- 5,
+  )
+  node entry = Entry()
+  node keep = SetLocal total(
+    .value <- Add::<i32>(
+      .a <- GetLocal total(),
+      .b <- count.index,
+    ),
+  )
+  node report = Call host.Log(
+    .message <- Call std.string.Concat(
+      .a <- "Total: ",
+      .b <- Convert::<i32, string>(
+        .value <- GetLocal total(),
+      ),
+    ),
+  )
+  node say = Call host.Log(
+    .message <- Call std.string.Concat(
+      .a <- "Counting: ",
+      .b <- Convert::<i32, string>(
+        .value <- count.index,
+      ),
+    ),
+  )
+
   layout {
     count at (200, 0)
     entry at (0, 0)
-    final at (564, 361)
+    #[note("Adds index to the running total each time round.")]
     keep at (1160, 0)
-    line at (541, 240)
-    num_text at (302, 260)
-    old at (844, 115)
-    plus at (1021, 155)
+    keep.value at (1021, 155)
+    keep.value.a at (844, 115)
     report at (1200, 268)
-    report_line at (986, 341)
+    report.message at (986, 341)
+    report.message.b at (760, 361)
+    report.message.b.value at (564, 361)
     say at (820, 0)
-    total_text at (760, 361)
+    say.message at (541, 240)
+    say.message.b at (302, 260)
   }
 }

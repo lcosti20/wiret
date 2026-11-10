@@ -9,24 +9,25 @@ class Animal {
 
   #[note("What any animal says, unless its own class says otherwise. GetField reads this animal's name: self is the animal Speak was called on.")]
   func Speak() -> (line: string) {
-    node entry = Entry
-    node line = Call std.string.Concat
-      .a <- name.value
-      .b <- " makes a sound."
-    node name = GetField name
-      .obj <- entry.self
-    node ret = Return
-      .line <- line.result
-
     flow {
       entry -> ret
     }
 
+    node entry = Entry()
+    node ret = Return(
+      .line <- Call std.string.Concat(
+        .a <- GetField Animal.name(
+          .obj <- entry.self,
+        ),
+        .b <- " makes a sound.",
+      ),
+    )
+
     layout {
       entry at (0, 0)
-      line at (387, 82)
-      name at (208, 82)
       ret at (678, 0)
+      ret.line at (387, 82)
+      ret.line.a at (208, 82)
     }
   }
 }
@@ -35,24 +36,25 @@ class Animal {
 class Cat : Animal {
   #[note("Cat replaces Speak completely: an override. A Cat still has a name, inherited from Animal.")]
   func Speak() -> (line: string) {
-    node entry = Entry
-    node line = Call std.string.Concat
-      .a <- name.value
-      .b <- " says Meow."
-    node name = GetField name
-      .obj <- entry.self
-    node ret = Return
-      .line <- line.result
-
     flow {
       entry -> ret
     }
 
+    node entry = Entry()
+    node ret = Return(
+      .line <- Call std.string.Concat(
+        .a <- GetField Cat.name(
+          .obj <- entry.self,
+        ),
+        .b <- " says Meow.",
+      ),
+    )
+
     layout {
       entry at (0, 0)
-      line at (449, 71)
-      name at (244, 71)
       ret at (711, 0)
+      ret.line at (449, 71)
+      ret.line.a at (244, 71)
     }
   }
 }
@@ -61,24 +63,25 @@ class Cat : Animal {
 class Dog : Animal {
   #[note("Dog keeps what Animal says and adds to it: CallParent runs Animal's Speak on this same dog.")]
   func Speak() -> (line: string) {
-    node entry = Entry
-    node line = Call std.string.Concat
-      .a <- parent.line
-      .b <- " Woof!"
-    node parent = CallParent Speak
-    node ret = Return
-      .line <- line.result
-
     flow {
       entry -> parent
       parent -> ret
     }
 
+    node entry = Entry()
+    node parent = CallParent Speak()
+    node ret = Return(
+      .line <- Call std.string.Concat(
+        .a <- parent,
+        .b <- " Woof!",
+      ),
+    )
+
     layout {
       entry at (0, 0)
-      line at (362, 67)
       parent at (138, 0)
       ret at (590, 0)
+      ret.line at (362, 67)
     }
   }
 }
@@ -87,30 +90,6 @@ class Dog : Animal {
 #[note("Try it: (1) Step (F11) into Speak and look at self in the Variables panel. (2) Give Animal a second field, 'legs: i32 = 4', and use it in Speak. (3) Delete Cat's Speak: Tom now speaks like any animal.")]
 func Main() {
   local pets: array::<Animal>
-  node add_cat = ArrayAdd::<Animal> pets
-    .item <- cat.result
-  node add_dog = ArrayAdd::<Animal> pets
-    .item <- dog.result
-  node add_other = ArrayAdd::<Animal> pets
-    .item <- other.result
-  node all = GetLocal pets
-  node cat = New Cat
-  node dog = New Dog
-  node entry = Entry
-  node loop = Macro std.flow.ForEach::<Animal>
-    .array <- all.value
-  node name_cat = SetField Animal.name
-    .obj <- cat.result
-    .value <- "Tom"
-  node name_dog = SetField Animal.name
-    .obj <- dog.result
-    .value <- "Rex"
-  node other = New Animal
-  node say = Call host.Log
-    .message <- speak.line
-  #[note("Each pet runs its own class's Speak, though the array only knows they are Animals.")]
-  node speak = Call Animal.Speak
-    .self <- loop.item
 
   flow {
     add_cat -> other
@@ -126,19 +105,51 @@ func Main() {
     speak -> say
   }
 
+  node add_cat = ArrayAdd::<Animal> pets(
+    .item <- cat,
+  )
+  node add_dog = ArrayAdd::<Animal> pets(
+    .item <- dog,
+  )
+  node add_other = ArrayAdd::<Animal> pets(
+    .item <- other,
+  )
+  node cat = New Cat()
+  node dog = New Dog()
+  node entry = Entry()
+  node loop = Macro std.flow.ForEach::<Animal>(
+    .array <- GetLocal pets(),
+  )
+  node name_cat = SetField Animal.name(
+    .obj <- cat,
+    .value <- "Tom",
+  )
+  node name_dog = SetField Animal.name(
+    .obj <- dog,
+    .value <- "Rex",
+  )
+  node other = New Animal()
+  node say = Call host.Log(
+    .message <- speak,
+  )
+  node speak = Call Animal.Speak(
+    .self <- loop.item,
+  )
+
   layout {
     add_cat at (1500, 0)
     add_dog at (750, 0)
     add_other at (2000, 0)
-    all at (2050, 110)
     cat at (1000, 0)
     dog at (250, 0)
     entry at (0, 0)
     loop at (2250, 0)
+    loop.array at (2050, 110)
     name_cat at (1250, 0)
     name_dog at (500, 0)
     other at (1750, 0)
     say at (2934, 0)
+    #[note("Each pet runs its own class's Speak, though the array only knows they are Animals.")]
     speak at (2659, 0)
   }
 }

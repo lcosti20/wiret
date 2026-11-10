@@ -120,6 +120,12 @@ def check(module: Module, comments_ok=False, project=None) -> list:
                     D("E0110", f"default of '{p.name}' is a {default.value.split('.')[0]} value, "
                                f"not {ty}", getattr(it, "name", None), pin=p.name, literal=True,
                       dst=ty)
+            elif default is not None and not (lit_fits(default, ty, idx)
+                                              and lit_in_range(default, ty)):
+                # a const, var, parameter, local or state initialiser (E0110), including a
+                # vector tuple of the wrong length (section 3.1.1)
+                D("E0110", f"the value of '{p.name}' does not fit type {ty}",
+                  getattr(it, "name", None), pin=p.name, literal=True, dst=ty)
     check_type_decls(module, idx, D)
     check_attr_names(module, D)
     check_capabilities(module, project, D)
@@ -133,8 +139,9 @@ def check(module: Module, comments_ok=False, project=None) -> list:
                   getattr(owner, "name", None) if owner is not module else None)
     if module.comments and not comments_ok:
         for c in module.comments:
-            D("W0603", f"line {c.line}: '//' comment is not part of the model and would be dropped; "
-                       f"convert it to a note")
+            D("W0603", f"line {c.line}: this '//' comment is not directly above a statement, "
+                       f"input or flow wire, so it is attached to nothing and would be dropped; "
+                       f"move it above what it explains, or convert it to a note")
 
     for g in module.graphs():
         if g.tparams:   # check a generic macro through one instance of it
@@ -194,6 +201,10 @@ def check_type_decls(module: Module, idx: ModuleIndex, D):
                       it.name, pin=f.name, literal=True, dst=f.type)
         else:
             base = it.base or "i32"
+            if any(a.name == "export" for a in it.attrs):
+                D("W0203", f"enum '{it.name}' is marked @export, but an enum is stored as its "
+                           f"{base} values and has no type entry, so it is not in the export "
+                           f"table; remove @export", it.name)
             lo, hi = INT_RANGES[base]
             for name, v in enum_values(it):
                 if not lo <= v <= hi:
@@ -317,7 +328,8 @@ def check_enum_value(lit: Lit, idx: ModuleIndex, D, graph=None, node=None, pin=N
     name, _, member = lit.value.partition(".")
     en = idx.enums.get(name)
     if en is None:
-        D("E0501", f"unknown enum '{name}' in value '{lit.value}'", graph, node, pin)
+        D("E0501", f"unknown enum '{name}' in value '{lit.value.replace('.', '::', 1)}'",
+          graph, node, pin)
         return False
     if en.member(member) is None:
         D("E0501", f"enum '{name}' has no member '{member}'", graph, node, pin,
@@ -422,11 +434,11 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
         sig = sigs[n.id]
         if sig.error:
             D(sig.error[0], sig.error[1], G, n.id)
-        if n.id in idx.enums:
-            D("E0102", f"node id '{n.id}' is also the name of an enum, so '{n.id}.x' could be "
-                       f"a wire or an enum value; rename the node", G, n.id)
         if n.kind == "Switch" and not sig.error:
             check_switch_cases(n, sig, idx, G, D)
+        if n.attr("live") is not None and not sig.pure:
+            D("E0104", "@live belongs on a node without exec pins: it says that each consumer "
+                       "re-reads the node's value (section 4.3)", G, n.id)
         # data bindings
         bound = set()
         for b in n.bindings:
@@ -444,7 +456,10 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
             if isinstance(b.value, PinRef):
                 src = nodes.get(b.value.node)
                 if src is None:
-                    D("E0101", f"unknown node '{b.value.node}'", G, n.id, b.pin)
+                    D("E0101", f"unknown node '{b.value.node}'" + (
+                        "" if b.value.pin else f" (a node written in place has its inputs in "
+                                               f"parentheses, as in '{b.value.node}()')"),
+                      G, n.id, b.pin)
                     continue
                 spin = sigs[src.id].output(b.value.pin)
                 if spin is None:
@@ -465,7 +480,7 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
                 if not lit_fits(b.value, pin.type, idx):
                     D("E0110", f"literal does not fit pin type {pin.type}", G, n.id, b.pin,
                       dst=pin.type, literal=True)
-        if not sig.error and n.kind != "Exit":
+        if not sig.error and n.kind not in ("Exit", "Leave"):
             for p in sig.data_ins:
                 if p.name not in bound and p.default is None:
                     D("W0201", f"input '{p.name}' is unbound and has no default", G, n.id, p.name,
@@ -735,27 +750,59 @@ def check_flow(info: GraphInfo, G, D):
             if kind == "Entry":
                 continue
             if prod not in dom[nid] or prod == nid:
-                D("W0310", f"reads '{prod}.{pin}', but '{prod}' does not run on every path to "
-                           f"this node (zero value if it has not run)", G, nid, cpin)
+                D("E0310", f"reads '{prod}.{pin}', but '{prod}' does not run on every path to "
+                           f"this node (store it in a local on every path instead)", G, nid, cpin)
 
-    # W0320: a node reading mutable state feeds several impure consumers
-    for rid, sig in info.sigs.items():
-        if sig.purity != "reads":
+    # E0320: a node reading mutable state is evaluated again at each impure consumer; two
+    # consumers that can run one after the other may see different values (section 4.3)
+    later = _runs_after(info, impure, succ)
+    live = {nid for nid, n in info.nodes.items() if n.attr("live") is not None}
+    for rid, sig in sorted(info.sigs.items()):
+        if sig.purity != "reads" or rid in live:
             continue
-        consumers = set()
-        for nid in impure:
-            if rid in _pure_closure(info, nid):
-                consumers.add(nid)
-        if len(consumers) > 1:
-            D("W0320", f"'{rid}' reads mutable state and feeds {len(consumers)} impure nodes "
-                       f"({', '.join(sorted(consumers))}); they may see different values", G, rid)
+        # a path through a @live node re-reads on purpose, so it does not count
+        consumers = sorted(nid for nid in impure if rid in _pure_closure(info, nid, live))
+        pair = next(((a, b) for a in consumers for b in consumers
+                     if a != b and b in later.get(a, ())), None)
+        if pair is None:
+            continue
+        a, b = pair
+        D("E0320", f"'{rid}' reads mutable state and is evaluated again at '{a}' and at '{b}', "
+                   f"which can run one after the other, so they may see different values; "
+                   f"store it in a local before '{a}' (SetLocal, then GetLocal), or mark it "
+                   f"@live if each should read the current value", G, rid)
 
 
-def _pure_closure(info: GraphInfo, nid: str) -> set:
+def _runs_after(info: GraphInfo, impure: list, succ: dict) -> dict:
+    """For each impure node, the impure nodes that can run after it in the same call: those
+    reachable along exec wires, where a chain that ends inside a Sequence, a Try or a macro
+    resumes that node (section 4.2), so its other outputs, and a loop's next pass, follow."""
+    ext = {nid: list(succ.get(nid, [])) for nid in impure}
+
+    def reach(starts, edges):
+        seen, todo = set(), list(starts)
+        while todo:
+            cur = todo.pop()
+            if cur in seen or cur not in edges:
+                continue
+            seen.add(cur)
+            todo.extend(edges[cur])
+        return seen
+
+    for nid in impure:
+        if info.nodes[nid].kind in ("Sequence", "Try", "Macro"):
+            for r in reach(succ.get(nid, []), succ):
+                if r != nid:
+                    ext[r].append(nid)
+    return {nid: reach(ext[nid], ext) for nid in impure}
+
+
+def _pure_closure(info: GraphInfo, nid: str, stop: set = frozenset()) -> set:
+    """The pure nodes evaluated with `nid`, not looking past the nodes in `stop`."""
     out, todo = set(), list(pure_deps(info, nid))
     while todo:
         d = todo.pop()
-        if d in out or not info.sigs[d].pure:
+        if d in out or d in stop or not info.sigs[d].pure:
             continue
         out.add(d)
         todo += pure_deps(info, d)
@@ -817,6 +864,12 @@ def check_attr_names(module: Module, D):
 
 
 def check_layout(g: Graph, ids: set, G, D):
+    nodes = {n.id for n in g.nodes}
+    for name in sorted({p.id for p in g.places} | set(g.orphan_meta)):
+        if name not in nodes:
+            D("W0605", f"the layout block has a line for '{name}', which is not a node of "
+                       f"this graph; move its position and notes to the node they belong to, "
+                       f"or delete the line", G, name)
     owner = {}
     for b in sorted(g.boxes, key=lambda b: b.id):
         for m in b.members():

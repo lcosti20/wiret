@@ -7,47 +7,6 @@ extern func host.Log(message: string)
 #[note("Try it: (1) Add a fifth fruit to the array (right-click 'fruits', more inputs) and run again. (2) Step (F11) through the first loop and watch counts grow in the Variables panel. (3) Change the key type: what has to change with it?")]
 func Main() {
   local counts: map::<string, i32>
-  node amount = Convert::<i32, string>
-    .value <- show.value
-  #[note("A key that is not there yet gives 0, so the first apple counts as 0 + 1.")]
-  node count = MapSet::<string, i32> counts
-    .key <- loop.item
-    .value <- plus.result
-  node each_line = Call std.string.Concat
-    .a <- name.result
-    .b <- amount.result
-  node entry = Entry
-  node find = MapFind::<string, i32>
-    .map <- got.value
-    .key <- loop.item
-  node fruits = MakeArray::<string> @count(4)
-    .item0 <- "apple"
-    .item1 <- "pear"
-    .item2 <- "apple"
-    .item3 <- "kiwi"
-  node got = GetLocal counts
-  node how_many = MapLength::<string, i32>
-    .map <- got.value
-  node log = Call host.Log
-    .message <- each_line.result
-  node log_total = Call host.Log
-    .message <- total.result
-  node loop = Macro std.flow.ForEach::<string>
-    .array <- fruits.result
-  node name = Call std.string.Concat
-    .a <- show.key
-    .b <- ": "
-  node number = Convert::<i32, string>
-    .value <- how_many.length
-  node plus = Add::<i32>
-    .a <- find.value
-    .b <- 1
-  #[note("ForEachMap visits every key in the order it was first added, with its value.")]
-  node show = Macro std.flow.ForEachMap::<string, i32>
-    .map <- got.value
-  node total = Call std.string.Concat
-    .a <- number.result
-    .b <- " different fruits"
 
   flow {
     entry -> loop
@@ -57,22 +16,70 @@ func Main() {
     show.done -> log_total
   }
 
+  node count = MapSet::<string, i32> counts(
+    .key <- loop.item,
+    .value <- Add::<i32>(
+      .a <- MapFind::<string, i32>(
+        .map <- got,
+        .key <- loop.item,
+      ).value,
+      .b <- 1,
+    ),
+  )
+  node entry = Entry()
+  node fruits = MakeArray::<string>(
+    .item0 <- "apple",
+    .item1 <- "pear",
+    .item2 <- "apple",
+    .item3 <- "kiwi",
+  ) @count(4)
+  node got = GetLocal counts()
+  node log = Call host.Log(
+    .message <- Call std.string.Concat(
+      .a <- Call std.string.Concat(
+        .a <- show.key,
+        .b <- ": ",
+      ),
+      .b <- Convert::<i32, string>(
+        .value <- show.value,
+      ),
+    ),
+  )
+  node log_total = Call host.Log(
+    .message <- Call std.string.Concat(
+      .a <- Convert::<i32, string>(
+        .value <- MapLength::<string, i32>(
+          .map <- got,
+        ),
+      ),
+      .b <- " different fruits",
+    ),
+  )
+  node loop = Macro std.flow.ForEach::<string>(
+    .array <- fruits,
+  )
+  node show = Macro std.flow.ForEachMap::<string, i32>(
+    .map <- got,
+  )
+
   layout {
-    amount at (1203, 436)
+    #[note("A key that is not there yet gives 0, so the first apple counts as 0 + 1.")]
     count at (1476, 2)
-    each_line at (1528, 347)
+    count.value at (1146, 92)
+    count.value.a at (795, 92)
     entry at (0, 0)
-    find at (795, 92)
     fruits at (-83, 74)
     got at (-109, 381)
-    how_many at (261, 560)
     log at (1719, 254)
+    log.message at (1528, 347)
+    log.message.a at (1232, 347)
+    log.message.b at (1203, 436)
     log_total at (1165, 540)
+    log_total.message at (804, 560)
+    log_total.message.a at (542, 560)
+    log_total.message.a.value at (261, 560)
     loop at (217, 0)
-    name at (1232, 347)
-    number at (542, 560)
-    plus at (1146, 92)
+    #[note("ForEachMap visits every key in the order it was first added, with its value.")]
     show at (628, 253)
-    total at (804, 560)
   }
 }

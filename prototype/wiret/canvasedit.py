@@ -17,7 +17,7 @@ from .checker import GraphInfo
 from .explain import type_words
 from .model import Attr, Box, Graph, Lit, PinRef, set_note_text
 from .parser import ParseError, parse_literal
-from .registry import can_convert, enum_values, lit_fits
+from .registry import PRIM_TYPES, can_convert, enum_values, lit_fits
 
 # geom(node id) -> (x, y, width) of a node as drawn, or None; used to place an inserted node
 Geom = Callable[[str], Optional[tuple]]
@@ -48,7 +48,10 @@ def connect(g: Graph, info, idx, a: tuple, b: tuple, geom: Geom) -> Optional[str
         single = sig_a.exec_outs[0].name if len(sig_a.exec_outs) == 1 else None
         ops.wire_exec(g, na, pa, nb, pb, single)
         return f"Wired {na}.{pa} -> {nb}" + ("" if pb == "in" else f".{pb}")
-    if out.type == inp.type:
+    target = g.node(nb)
+    if out.type == inp.type or (target is not None and target.kind == "Format"
+                                and out.type in PRIM_TYPES):
+        # a Format input takes the type of what is bound to it (section 3.3)
         ops.bind(g, nb, pb, PinRef(na, pa))
         return f"Bound {nb}.{pb} = {na}.{pa}"
     if can_convert(out.type, inp.type, idx):
@@ -147,8 +150,8 @@ def set_literal(g: Graph, info, idx, nid: str, pin: str, text: str) -> str:
         return f"Unbound {nid}.{pin}"
     if p.type == "string" and not text.startswith('"'):
         text = '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
-    if p.type in idx.enums and "." not in text:
-        text = f"{p.type}.{text}"           # a bare member name is enough
+    if p.type in idx.enums and "." not in text and "::" not in text:
+        text = f"{p.type}::{text}"          # a bare member name is enough
     try:
         lit = parse_literal(text)
     except ParseError as e:
@@ -241,10 +244,13 @@ def make_for_pin(g: Graph, nid: str, pin: str, ty: str, geom: Geom) -> tuple:
 
 def rename_node(g: Graph, nid: str, new: str) -> Optional[str]:
     """Give a node a new id; every wire follows. None when the id is unchanged."""
-    from .parser import KEYWORDS
+    from .parser import RESERVED
     if not new or new == nid:
         return None
-    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", new) or new in KEYWORDS:
+    if "." in nid:
+        raise Refused(f"'{nid}' is written inside the input it feeds, so its name says where it "
+                      f"is. Wire its output into a second input to give it a name of its own.")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", new) or new in RESERVED:
         raise Refused("Not a valid identifier.")
     if g.node(new) or g.box(new):
         raise Refused(f"'{new}' is already used in this graph (E0102).")
@@ -331,7 +337,7 @@ def set_cases(g: Graph, idx, nid: str, text: str) -> str:
     ty = n.targs[0] if n.targs else None
     parts = [t.strip() for t in next(csv.reader([text], skipinitialspace=True), []) if t.strip()]
     if ty in idx.enums:      # bare member names are enough: Idle, Chase
-        parts = [t if "." in t else f"{ty}.{t}" for t in parts]
+        parts = [t if "." in t or "::" in t else f"{ty}::{t}" for t in parts]
     try:
         vals = [parse_literal(t) for t in parts]
     except ParseError as e:
