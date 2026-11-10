@@ -14,7 +14,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Optional
 
-from . import wbc
+from . import lanes, wbc
 from .checker import Diag, check, has_errors
 from .model import Const, Extern, Graph, Lit, Module, Node, PinRef, Var
 from .natives import INTERNAL, STD
@@ -23,7 +23,8 @@ from .registry import (class_field_target, field_place, parent_method, delegate_
                        ARRAY_MUTATORS, FLOAT_TYPES, INT_TYPES, MAP_PURE, PLACE_MUTATORS,
                        REGISTRY_NAME, REGISTRY_VERSION, SET_PURE,
                        SIGNED_TYPES, ModuleIndex, Pin, Sig, array_elem, attr_int, enum_values,
-                       format_parts, is_container, map_types, set_elem, signature, zero_lit)
+                       format_parts, is_container, map_types, set_elem, signature, zero_lit,
+                       lane_value)
 
 # map and set kinds -> their instruction (section 5.6)
 CONTAINER_OPS = {"MapFind": "map.find", "MapHas": "map.has", "MapLength": "map.len",
@@ -39,6 +40,13 @@ VT = {"bool": I32, "i8": I32, "u8": I32, "i16": I32, "u16": I32, "i32": I32, "u3
       "i64": I64, "u64": I64, "f32": F32, "f64": F64, "string": STRING, "fault": FAULT,
       "std.Signal": SIGNAL}
 PFX = {I32: "i32", I64: "i64", F32: "f32", F64: "f64"}
+# The lane types (section 3.1.1): their value types and instruction prefixes.
+LANE_VT = {name: vt for vt, name in wbc.LANE_VTS.items()}
+LP = lanes.PREFIX                          # "vec3" -> "v3"
+# arithmetic kinds -> lane operation, for the types section 3.1.1 allows them on
+LANE_ARITH = {"Add": "add", "Sub": "sub", "Mul": "mul", "Div": "div", "Min": "min",
+              "Max": "max", "Neg": "neg", "Abs": "abs", "Scale": "scale", "Eq": "eq",
+              "Ne": "ne"}
 
 
 def wrap_int(ty: str, v: int) -> int:
@@ -136,6 +144,7 @@ class Compiler:
         self.funcs = sorted(module.graphs(("func", "event")), key=lambda g: g.name)
         self.func_names = {g.name: i for i, g in enumerate(self.funcs)}
         self.caps = set()
+        self.uses_lanes = False
 
     # -- tables -------------------------------------------------------------------
     def vt(self, ty: str):
@@ -143,6 +152,9 @@ class Compiler:
         structs become references to type entries."""
         if ty == "anyref":
             return wbc.ANYREF
+        if ty in LANE_VT:
+            self.uses_lanes = True           # container feature bit 1 (section 5.2)
+            return LANE_VT[ty]
         elem = array_elem(ty)
         if elem is not None:
             return wbc.Ref(self.array_type(elem))
@@ -263,6 +275,8 @@ class Compiler:
 
     def const_value(self, lit: Lit, ty: str):
         """A literal as the number or data index stored for a global or field default."""
+        if ty in LANE_VT:                    # f32 lanes, nested for a transform
+            return lanes.normalise(ty, lane_value(lit, ty))
         if ty == "string":
             return self.string_index(lit.value)
         if ty == "bool":
@@ -320,7 +334,9 @@ class Compiler:
         if name in self.global_index:
             return self.global_index[name]
         lit = init if init is not None else zero_lit(ty)
-        if is_container(ty) or ty in self.idx.structs or ty in self.idx.classes or \
+        if ty in LANE_VT:
+            value = self.const_value(lit, ty)
+        elif is_container(ty) or ty in self.idx.structs or ty in self.idx.classes or \
                 ty in self.idx.interfaces or ty == "std.Signal":
             value = None                 # the VM builds the default array or struct
         else:
@@ -429,6 +445,8 @@ class Compiler:
         mod.customs = self.custom_sections(lowered, assembled)
         if self.embed_source:
             mod.flags |= wbc.FLAG_HAS_SOURCE
+        if self.uses_lanes:
+            mod.flags |= wbc.FLAG_LANES
         # The verifier computes the operand stack height; record it and verify again.
         for body, (_, max_h) in zip(mod.bodies, verify(mod)):
             body.max_stack = max_h
@@ -709,8 +727,13 @@ class FuncLowerer:
                     ir.extra["place"] = ("global", self.c.global_index[n.symbol])
             elif n.kind == "CallParent":
                 ir.extra["func"] = ("func", parent_method(n, ctx.graph, self.c.idx).name)
+            elif n.kind == "Call" and self.c.idx.callee(n.symbol, n.targs).name \
+                    in lanes.INTRINSICS:
+                op = lanes.INTRINSICS[self.c.idx.callee(n.symbol, n.targs).name]
+                ir.extra["intrinsic"] = [op] if isinstance(op, str) else op
+                self.c.uses_lanes = True
             elif n.kind == "Call":
-                callee = self.c.idx.callee(n.symbol)
+                callee = self.c.idx.callee(n.symbol, n.targs)
                 if callee.kind in ("func", "event"):
                     ir.extra["func"] = ("func", callee.name)
                 elif callee.kind != "interface":
@@ -1339,6 +1362,15 @@ class FuncLowerer:
         if elem is not None:
             self.E("set.new", self.c.set_type(elem))
             return
+        if ty in LANE_VT:             # a tuple literal: its lanes, then make (3.1.1)
+            if ty == "transform":
+                for x, (_, ft) in zip(lit.value, lanes.LANE_FIELDS[ty]):
+                    self.emit_const(x, ft)
+            else:
+                for x in lit.value:
+                    self.E("f32.const", float(x.value))
+            self.E(f"{LP[ty]}.make")
+            return
         if ty in self.c.idx.structs:  # structs have no literal: this is the default struct
             for f in self.c.idx.structs[ty].fields:
                 self.emit_const(f.default if f.default is not None else zero_lit(f.type), f.type)
@@ -1411,6 +1443,9 @@ class FuncLowerer:
             return
         if ty in self.c.idx.classes or ty in self.c.idx.interfaces:   # identity (3.1)
             self.E("ref.eq")
+            return
+        if ty in LANE_VT:
+            self.E(f"{LP[ty]}.eq")
             return
         if ty in self.c.idx.structs:
             t = self.c.struct_type(ty)
@@ -1513,6 +1548,10 @@ class FuncLowerer:
             self.E("local.get", self.local_index["self"])
         for _, _, s in n.inputs:          # Eq and Ne only compare, so they do not share
             self.eval(s, ep, keep=k not in ("Eq", "Ne"))
+        if k == "Call" and "intrinsic" in n.extra:     # a std.vec, std.quat, std.transform
+            for op in n.extra["intrinsic"]:              # function with a lane instruction
+                self.E(op)
+            return
         if k == "Call":
             self.emit_call(n)
             return
@@ -1529,6 +1568,9 @@ class FuncLowerer:
             self.E("i32.xor")
             return
         T = n.targs[0]
+        if T in LANE_VT:                      # component-wise, or composition (3.1.1)
+            self.E(f"{LP[T]}.{LANE_ARITH[k]}")
+            return
         if T in self.c.idx.structs or T in self.c.idx.classes or T in self.c.idx.interfaces \
                 or is_container(T):
             # only Eq and Ne take these
@@ -1618,6 +1660,22 @@ class FuncLowerer:
         """MakeStruct, BreakStruct, GetField, WithField. All are pure."""
         k = n.kind
         name, _, fname = (n.symbol or "").partition(".")
+        if name in LANE_VT:                   # unboxed: lane instructions, no struct.* (5.6)
+            for _, _, src in n.inputs:
+                self.eval(src, ep)
+            p = LP[name]
+            names = [f for f, _ in lanes.LANE_FIELDS[name]]
+            if k == "MakeStruct":
+                self.E(f"{p}.make")
+            elif k in ("GetField", "WithField"):
+                self.E(f"{p}.{'get' if k == 'GetField' else 'with'}", names.index(fname))
+            else:
+                tmp = self.temp(name)
+                self.E("local.set", tmp)
+                for i in range(len(names)):
+                    self.E("local.get", tmp)
+                    self.E(f"{p}.get", i)
+            return
         t = self.c.struct_type(name)
         for _, _, src in n.inputs:            # fields in order, or obj (and value)
             self.eval(src, ep)
@@ -1655,6 +1713,12 @@ class FuncLowerer:
     def emit_convert(self, f: str, t: str):
         f, t = self.c.base(f), self.c.base(t)    # an enum converts to its integer as-is
         if f == t:
+            return
+        if f in LANE_VT:                         # to text, or vec2 <-> vec3 (section 3.2)
+            if t == "string":
+                self.E("call", self.c.import_ref(f"std.convert.From{f.capitalize()}"))
+            else:
+                self.E("v3.from_v2" if f == "vec2" else "v3.to_v2")
             return
         vf, vt = VT[f], VT[t]
         if t == "string":

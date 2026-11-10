@@ -719,6 +719,13 @@ class Parser:
 
     def literal(self) -> Lit:
         t = self.peek()
+        if self.at_p("("):          # a lane literal, `(0, 1, 0)`, nested for a transform (3.1.1)
+            items = self._seq("(", ")")
+            for x in items:
+                if x.kind not in ("int", "float", "tuple"):
+                    raise ParseError("a vector literal holds numbers, as in (0, 1.5, 0)",
+                                     t.line, t.col)
+            return Lit("tuple", items)
         if t.kind == "int":
             self.next()
             return Lit("int", t.value[0], t.value[1])

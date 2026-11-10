@@ -11,7 +11,7 @@ import struct
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from . import wbc
+from . import lanes, wbc
 from .natives import CArray, CMap, NO_FAULT, FaultValue, NativeFault, NativeSpec, Signal, _f32, all_natives
 from .verifier import VerifyError, verify
 from .wbc import (F32, F64, FAULT, I32, I64, SIGNAL, STRING, OPS, ArrayType, ClassType,
@@ -34,7 +34,8 @@ FIBER_READY, FIBER_RUNNING, FIBER_SUSPENDED, FIBER_DONE, FIBER_FAULTED = (
 
 VT_OF = {"bool": I32, "i8": I32, "u8": I32, "i16": I32, "u16": I32, "i32": I32, "u32": I32,
          "i64": I64, "u64": I64, "f32": F32, "f64": F64, "string": STRING,
-         "anyref": wbc.ANYREF, "fault": FAULT, "std.Signal": SIGNAL}
+         "anyref": wbc.ANYREF, "fault": FAULT, "std.Signal": SIGNAL,
+         **{name: vt for vt, name in wbc.LANE_VTS.items()}}
 
 MAX_FRAMES = 2000
 MAX_CONT = 10000
@@ -398,11 +399,15 @@ def normalise(vt, v, types=None):
         return float(v)
     if vt == FAULT or vt == SIGNAL:
         return v
+    if vt in wbc.LANE_VTS:              # a lane value: f32 components, as tuples
+        return lanes.normalise(wbc.LANE_VTS[vt], v)
     return str(v)
 
 
 ZERO = {I32: 0, I64: 0, F32: 0.0, F64: 0.0, STRING: "", FAULT: NO_FAULT, SIGNAL: None,
         wbc.ANYREF: None}
+# A lane type's zero value is its default: the identity for quat and transform (3.1.1).
+ZERO.update({vt: lanes.DEFAULTS[name] for vt, name in wbc.LANE_VTS.items()})
 
 
 def export(v):
@@ -837,6 +842,11 @@ class VM:
             for q, fn in BUNDLED2.items():
                 self.natives[q] = _replace_fn(self.natives[q],
                                               lambda _vm, a, b, fn=fn: (fn(a, b),))
+            from .detmath import acos, cos, sin
+            from .natives import LANE_TRIG, _lane_natives
+            bundled = _lane_natives(sin, cos, acos)
+            for q in LANE_TRIG:
+                self.natives[q] = bundled[q]
             self.natives = {q: s for q, s in self.natives.items() if s.deterministic}
         # Capabilities granted (wr_grant, section 6.5). This class is both libwiret and the
         # reference host: by default it grants what its own host natives need; pass a list,
@@ -983,6 +993,10 @@ class VM:
                     arg = arrays[ins.name[6:]]
                 elif ins.name.startswith(("map.", "set.")):
                     arg = containers(m.types[ins.imms[0]], ins.name)
+                elif ins.op > 0xFF:              # a lane instruction: (operands, function)
+                    field = ins.imms[0] if ins.imms else 0
+                    arg = (len(lanes.effect(ins.name, field)[0]),
+                           lanes.function(ins.name, field))
                 elif ins.name == "struct.new":
                     arg = len(m.types[ins.imms[0]].fields)
                 elif ins.name in ("struct.get", "struct.with", "class.get", "class.set"):
@@ -1261,6 +1275,17 @@ class VM:
                                 stack[-1] = fn(stack[-1], b)
                             else:
                                 stack[-1] = fn(stack[-1])
+                        elif op > 0xFF:                       # lane instructions (5.6)
+                            n, fn = arg
+                            if n == 1:
+                                stack[-1] = fn(stack[-1])
+                            elif n == 2:
+                                b = stack.pop()
+                                stack[-1] = fn(stack[-1], b)
+                            else:
+                                operands = stack[len(stack) - n:]
+                                del stack[len(stack) - n:]
+                                stack.append(fn(*operands))
                         elif op in _CONST_OPS or op == 0x24:
                             stack.append(arg)
                         elif op == OP_LTEE:

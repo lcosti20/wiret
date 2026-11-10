@@ -33,7 +33,7 @@ Comments are for whoever reads the text. Explanations that the graph editor show
 | Other literals | `true`, `false`, `null` |
 | Enum value | `Mode::Chase`: the enum's name, `::` and one of its members (section 2.3) |
 | String | `"text"` with escapes `\\n`, `\\t`, `\\"`, `\\\\` and `\\u{1F600}` |
-| Tuple / list / map | `(1, 2)`, `[a, b]`, `{k: v}`; used only inside attributes |
+| Tuple / list / map | `(1, 2)`, `[a, b]`, `{k: v}`; used only inside attributes, except that a tuple of numbers is also the literal of a vector type, `(0, 1, 0)` (section 3.1.1) |
 | Semantic attribute | `@pure`, `@count(2)`; at the end of the line it modifies (section 2.4) |
 | Metadata attribute | `#[doc("text")]`; on its own line, above what it describes (section 2.4) |
 
@@ -78,7 +78,8 @@ type       = prim | qname | "exec"
            | "delegate" "::" "<" tlist [ "->" tlist ] ">" | "dispatcher" "::" "<" tlist ">" ;
 tlist      = "(" [ type { "," type } ] ")" ;
 prim       = "bool" | "i8" | "u8" | "i16" | "u16" | "i32" | "u32"
-           | "i64" | "u64" | "f32" | "f64" | "string" ;
+           | "i64" | "u64" | "f32" | "f64" | "string"
+           | "vec2" | "vec3" | "quat" | "transform" ;
 ```
 
 Notes on the declarations:
@@ -92,6 +93,7 @@ Notes on the declarations:
 - A `macro` is inlined at every use, so it may contain `exec` pins as parameters and results. Everything else exposes `exec` pins implicitly.
 - `extern func host.Log(message: string)` imports a host native. The import module is every segment but the last (`host`), the import name is the last (`Log`).
 - `exec` is a type only for macro parameters and for the type arguments of `Reroute`.
+- `vec2`, `vec3`, `quat` and `transform` are built-in struct types (section 3.1.1). Their literals are tuples, nested for a transform: `const Up: vec3 = (0, 1, 0)`, `.offset <- (0, 0.5, 0)`, `spawn: transform = ((0, 2, 0), (0, 0, 0, 1), (1, 1, 1))`. The formatter writes each component as it writes an `f32` literal.
 - An enum member without `= INT` is one more than the member before it, and the first member is 0. Every value must fit the underlying type, `i32` unless one is written (`E0110`).
 - Struct fields and enum members keep the order they are written in (section 2.5). Field names, and member names, are unique within their declaration (`E0102`), and a struct or enum may not take the name of a built-in type (`E0102`).
 - A struct may not hold itself by value, directly or through other structs (`E0503`): it would have no finite default value. Holding it in an array is allowed, since an array starts empty, so `struct Tree` may have a field `children: array::<Tree>`.

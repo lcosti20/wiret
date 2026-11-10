@@ -120,6 +120,12 @@ def check(module: Module, comments_ok=False, project=None) -> list:
                     D("E0110", f"default of '{p.name}' is a {default.value.split('.')[0]} value, "
                                f"not {ty}", getattr(it, "name", None), pin=p.name, literal=True,
                       dst=ty)
+            elif default is not None and not (lit_fits(default, ty, idx)
+                                              and lit_in_range(default, ty)):
+                # a const, var, parameter, local or state initialiser (E0110), including a
+                # vector tuple of the wrong length (section 3.1.1)
+                D("E0110", f"the value of '{p.name}' does not fit type {ty}",
+                  getattr(it, "name", None), pin=p.name, literal=True, dst=ty)
     check_type_decls(module, idx, D)
     check_attr_names(module, D)
     check_capabilities(module, project, D)

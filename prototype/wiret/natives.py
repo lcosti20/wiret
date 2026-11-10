@@ -10,6 +10,8 @@ import struct
 from dataclasses import dataclass
 from typing import Callable, Optional
 
+from . import lanes as L
+
 
 class CArray(list):
     """An array value (section 4.9): a list plus the copy-on-write `shared` flag."""
@@ -218,6 +220,62 @@ STD: dict[str, NativeSpec] = {
                                   "next advance of time."),
 }
 
+STD["std.math.Acos"] = NativeSpec([("x", F)], [("result", F)], "pure", _f64_unary(math.acos))
+
+
+# The lane types' library (section 3.1.1). Each function with a lane instruction is lowered
+# to it by the compiler (lanes.INTRINSICS); the natives here serve the rest, and also a call
+# the compiler did not lower, so both give the same bits.
+def _lane_natives(sin, cos, acos) -> dict:
+    out = {}
+
+    def nat(name, params, results, fn, doc=""):
+        out[name] = NativeSpec(params, results, "pure",
+                               lambda _vm, *a, fn=fn: (fn(*a),), doc)
+    for t in L.VECTORS:
+        nat(f"std.vec.Dot::<{t}>", [("a", t), ("b", t)], [("result", "f32")], L.dot)
+        nat(f"std.vec.Length::<{t}>", [("v", t)], [("result", "f32")], L.length)
+        nat(f"std.vec.LengthSquared::<{t}>", [("v", t)], [("result", "f32")], L.lensq)
+        nat(f"std.vec.Distance::<{t}>", [("a", t), ("b", t)], [("result", "f32")], L.distance)
+        nat(f"std.vec.Normalize::<{t}>", [("v", t)], [("result", t)], L.normalize,
+            "The vector scaled to length 1; the zero vector when it has no direction.")
+        nat(f"std.vec.Lerp::<{t}>", [("a", t), ("b", t), ("t", "f32")], [("result", t)], L.lerp)
+        nat(f"std.vec.Reflect::<{t}>", [("v", t), ("n", t)], [("result", t)], L.reflect)
+    nat("std.vec.Cross", [("a", "vec3"), ("b", "vec3")], [("result", "vec3")], L.cross)
+    nat("std.vec.PerpDot", [("a", "vec2"), ("b", "vec2")], [("result", "f32")], L.perpdot)
+    nat("std.quat.Rotate", [("q", "quat"), ("v", "vec3")], [("result", "vec3")], L.rotate,
+        "Rotate a vector by a unit quaternion.")
+    nat("std.quat.Conjugate", [("q", "quat")], [("result", "quat")], L.conj)
+    nat("std.quat.Inverse", [("q", "quat")], [("result", "quat")], L.qinverse)
+    nat("std.quat.Normalize", [("q", "quat")], [("result", "quat")], L.qnormalize)
+    axis_angle, slerp, angle = L.quat_natives(sin, cos, acos)
+    nat("std.quat.FromAxisAngle", [("axis", "vec3"), ("angle", "f32")], [("result", "quat")],
+        axis_angle, "The rotation by `angle` radians about `axis`.")
+    nat("std.quat.Slerp", [("a", "quat"), ("b", "quat"), ("t", "f32")], [("result", "quat")],
+        slerp, "Interpolate between two rotations along the shorter arc.")
+    nat("std.quat.Angle", [("a", "quat"), ("b", "quat")], [("result", "f32")], angle,
+        "The angle in radians between two rotations.")
+    nat("std.transform.Apply", [("t", "transform"), ("p", "vec3")], [("result", "vec3")],
+        L.apply, "Transform a point: scale, rotate, then translate.")
+    nat("std.transform.ApplyVector", [("t", "transform"), ("v", "vec3")],
+        [("result", "vec3")], L.apply_vector, "Transform a direction: no translation.")
+    nat("std.transform.Inverse", [("t", "transform")], [("result", "transform")], L.tinverse)
+    return out
+
+
+def _safe(fn):
+    def f(x):
+        try:
+            return fn(x)
+        except (ValueError, OverflowError):
+            return math.nan
+    return f
+
+
+STD.update(_lane_natives(_safe(math.sin), _safe(math.cos), _safe(math.acos)))
+# The natives that deterministic mode replaces with ones built on the bundled math (4.10).
+LANE_TRIG = ("std.quat.FromAxisAngle", "std.quat.Slerp", "std.quat.Angle")
+
 # Natives the compiler calls on its own to lower `Convert<X, string>` and float `Rem`.
 INTERNAL: dict[str, NativeSpec] = {
     "std.convert.FromBool": NativeSpec([("v", "i32")], [("r", "string")], "pure",
@@ -234,6 +292,10 @@ INTERNAL: dict[str, NativeSpec] = {
                                       lambda _vm, v: (float_to_text(v, single=True),)),
     "std.convert.FromF64": NativeSpec([("v", "f64")], [("r", "string")], "pure",
                                       lambda _vm, v: (float_to_text(v),)),
+    **{f"std.convert.From{t.capitalize()}": NativeSpec(
+        [("v", t)], [("r", "string")], "pure",
+        lambda _vm, v: (L.to_text(v, lambda x: float_to_text(x, single=True)),))
+       for t in ("vec2", "vec3", "quat", "transform")},
     "std.math.FRem32": NativeSpec([("a", "f32"), ("b", "f32")], [("r", "f32")], "pure",
                                   lambda _vm, a, b: (_f32(math.fmod(a, b)) if b else math.nan,)),
     "std.math.FRem64": NativeSpec([("a", "f64"), ("b", "f64")], [("r", "f64")], "pure",
