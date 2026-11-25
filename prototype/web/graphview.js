@@ -321,9 +321,10 @@ export class GraphView {
       const toggle = h("button", "gv-notes-toggle", open ? "Hide notes" : `✎ Notes (${graphNotes.length})`);
       toggle.onclick = (e) => {
         e.stopPropagation();
+        // the view stays where it is: refitting here made the graph jump each time the
+        // notes were folded or unfolded (but only while the view was untouched)
         this.notesOpen = !open;
         this.render();
-        if (this.autoFit) this.fit(true);
       };
       toggle.onpointerdown = (e) => e.stopPropagation();
       this.notesBox.append(...(open ? graphNotes : []), toggle);
