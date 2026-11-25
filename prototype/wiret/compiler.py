@@ -184,7 +184,7 @@ class Compiler:
 
     def struct_type(self, name: str) -> int:
         """Index of the struct's `5F` type entry. The index is reserved before the fields are
-        lowered, so `children: array::<Tree>` inside `Tree` can refer to it."""
+        lowered, so `children: array#<Tree>` inside `Tree` can refer to it."""
         key = ("struct", name)
         if key not in self.type_keys:
             self.type_keys[key] = len(self.types)
@@ -217,7 +217,7 @@ class Compiler:
                     default = self.const_value(f.default, f.type)
                 fields.append((vt, default))
             for d in c.dispatchers:             # after the fields: one dispatcher per object
-                fields.append((self.vt(f"dispatcher::<({', '.join(p.type for p in d.params)})>"),
+                fields.append((self.vt(f"dispatcher#<({', '.join(p.type for p in d.params)})>"),
                                None))
             for _, ty, default in self.idx.class_state(name):   # then the methods' state
                 vt = self.vt(ty)
@@ -255,6 +255,8 @@ class Compiler:
         out = list(self.slots(c.base)) if c.base else []
         names = [s for s, _ in out]
         for g in self.idx.methods(cls):
+            if g.static:                     # a static method is called directly, never virtual
+                continue
             if g.short_name in names:
                 out[names.index(g.short_name)] = (g.short_name, g.name)
             else:
@@ -402,7 +404,7 @@ class Compiler:
             flags = (wbc.FN_PURE if g.has_attr("pure") else 0) | \
                     (wbc.FN_EVENT | wbc.FN_LATENT if g.kind == "event" else 0) | \
                     (wbc.FN_LATENT if g.has_attr("latent") else 0)
-            t = type_index(([self.vt(g.owner)] if g.owner else [])
+            t = type_index(([self.vt(g.receiver)] if g.receiver else [])
                            + [self.vt(p.type) for p in g.params],
                            [self.vt(r.type) for r in g.result_list])
             mod.funcs.append((t, flags))
@@ -570,7 +572,7 @@ class FuncLowerer:
         self.local_defaults: list = []    # [(local name, Lit)]
         self.pin_map: dict[int, tuple] = {}
         entry_id = next((n.id for n in g.nodes if n.kind == "Entry"), "entry")
-        params = ([("self", g.owner)] if g.owner else []) + [(p.name, p.type) for p in g.params]
+        params = ([("self", g.receiver)] if g.receiver else []) + [(p.name, p.type) for p in g.params]
         for name, ty in params:
             self.add_local(name, ty)
             self.pin_map[self.local_index[name]] = (entry_id, name)
@@ -605,7 +607,7 @@ class FuncLowerer:
         g = self.g
         ctx = Ctx(g, "", None, self.sigs_for(g))
         ctx.params = {p.name: p.name for p in g.params}
-        if g.owner:
+        if g.receiver:
             ctx.params["self"] = "self"
         for l in sorted(g.locals, key=lambda l: l.name):
             ctx.locals[l.name] = l.name
@@ -638,7 +640,10 @@ class FuncLowerer:
         if t is None or depth > 64:
             return None
         if t.kind == "Macro":
-            return f"{ctx.prefix}{tid}!{tpin or 'in'}"
+            if not tpin:                     # the macro's first exec input (section 2.3)
+                ins = ctx.sigs[tid].exec_ins if tid in ctx.sigs else []
+                tpin = ins[0].name if ins else "in"
+            return f"{ctx.prefix}{tid}!{tpin}"
         if t.kind == "Reroute":
             if not t.execs:
                 return None
@@ -763,7 +768,7 @@ class FuncLowerer:
             elif n.kind in ("Bind", "Unbind", "Broadcast"):
                 cls, name = dispatcher_target(n, ctx.graph, self.c.idx)
                 d = self.c.idx.class_dispatcher(cls, name)[1]
-                dtype = f"dispatcher::<({', '.join(p.type for p in d.params)})>"
+                dtype = f"dispatcher#<({', '.join(p.type for p in d.params)})>"
                 ir.extra["dispatcher"] = (self.c.class_type(cls),
                                           self.c.class_field_index(cls, name),
                                           self.c.vt(dtype).type)

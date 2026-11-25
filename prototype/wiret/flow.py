@@ -3,13 +3,13 @@ from __future__ import annotations
 
 from .checker import GraphInfo
 from .model import Graph, Module, PinRef
-from .printer import IND, fmt_graph, print_module
-from .registry import ModuleIndex
+from .printer import print_module
 
 
 def flow_order(g: Graph, info: GraphInfo) -> list:
     """Depth-first from Entry along exec outputs in pin order; each pure node immediately
-    before its first consumer; unreachable nodes last, sorted by id."""
+    before its first consumer; unreachable nodes last, sorted by id. `wiretc diff` lists
+    changed nodes in this order."""
     out, seen = [], set()
 
     def emit_pure(nid):
@@ -41,15 +41,7 @@ def flow_order(g: Graph, info: GraphInfo) -> list:
 
 
 def view_flow(m: Module) -> str:
-    """The canonical text with every graph's node statements and `flow` wires in flow order."""
-    idx = ModuleIndex(m)
-    canonical = print_module(m)
-    out = []
-    for g in m.graphs():
-        info = GraphInfo(g, idx)
-        outer = IND if g.owner else ""      # a method is printed inside its class
-        before = "\n".join(fmt_graph(g, idx, outer))
-        out.append((before, "\n".join(fmt_graph(g, idx, outer, order=flow_order(g, info)))))
-    for before, after in out:
-        canonical = canonical.replace(before, after, 1)
-    return canonical
+    """The module in flow order. The canonical text is already written in the order each graph
+    runs (section 2.3), so this is the canonical text; it stays a command so the Git
+    `textconv` set up by `wiretc init-git` keeps working."""
+    return print_module(m)

@@ -18,8 +18,8 @@ TYPE_WORDS = {
 
 
 def type_words(ty: str) -> str:
-    if ty.startswith("array::<") and ty.endswith(">"):
-        inner = ty[8:-1]
+    if ty.startswith("array#<") and ty.endswith(">"):
+        inner = ty[len("array#<"):-1]
         words = type_words(inner).split(" (")[0]
         for article in ("a ", "an "):
             if words.startswith(article):
@@ -162,7 +162,7 @@ def explain(d: Diag) -> str:
             return (f"{kind} needs to know which struct it works on. Write it like "
                     f"'{example}', using your own struct's name.")
         if "takes no type arguments; the struct" in m:
-            return ("Struct nodes don't take a ::<...> type. The struct's name already says "
+            return ("Struct nodes don't take a #<...> type. The struct's name already says "
                     "what type the node works with.")
         if "unknown struct" in m:
             if "is an enum" in m:
@@ -205,7 +205,7 @@ def explain(d: Diag) -> str:
     if c == "E0502":
         kind = m.split()[0]
         return (f"{kind} needs to know what kind of value it works with. Write it like "
-                f"{kind}::<i32> for whole numbers or {kind}::<f64> for decimals.")
+                f"{kind}#<i32> for whole numbers or {kind}#<f64> for decimals.")
     if c == "W0201":
         ty = data.get("type", "")
         return (f"Input {here} isn't connected and has no default, so it will be "
@@ -234,22 +234,12 @@ def explain(d: Diag) -> str:
     if c == "E0130":
         return ("Nodes that change an array, map or set need to know which one to change: the "
                 "name of a local variable or module variable that holds it, written after the "
-                "type, as in ArrayAdd::<i32> scores or MapSet::<string, i32> ages.")
-    if c == "W0601":
-        return f"This box lists '{_quoted(m, 1)}' as a member, but nothing has that name."
-    if c == "W0602":
-        return f"'{_quoted(m)}' is listed in two boxes; it belongs to the first one."
+                "type, as in ArrayAdd#<i32> scores or MapSet#<string, i32> ages.")
     if c == "W0603":
         return ("A '//' comment is kept when it stands directly above a declaration, a "
-                "statement, an input or a flow wire, with no blank line between. This one "
-                "doesn't (it has a blank line under it, ends a line of code, or is in the "
-                "layout block), so formatting would drop it. Move it, or use File → Convert // "
-                "comments to notes to keep it as a note.")
-    if c == "W0605":
-        return ("A line in the layout block names a node that is no longer in this graph, "
-                "usually because a node written inside another one moved, which changes its "
-                "dotted name. The line and its notes are kept. Rename the line to the node's "
-                "new name, or delete it.")
+                "statement or an input, with no blank line between. This one doesn't (it has "
+                "a blank line under it, or ends a line of code), so formatting would drop it. "
+                "Move it, or use File → Convert // comments to notes to keep it as a note.")
     if c == "W0604":
         return "This note was attached to something that has been deleted."
     return m

@@ -1,22 +1,26 @@
 """`wiretc edit`: the editing protocol for tools and LLMs (spec section 7.2).
 
 A request is JSON: `{"if_hash": "<layout hash>", "ops": [ ... ]}`. Each op is an object with
-an `"op"` field. Values for inputs are written exactly as on the right of `<-` in the text
-(`"plus.result"`, `"5"`, `"\\"hi\\""`, `"Mode.Chase"`), attributes as they are written
-(`"@count(3)"`, `"#[doc(\\"Adds one.\\")]"`). The whole request is applied to a copy of the
-model; if any op fails, nothing changes. A stale `if_hash` is E0900.
+an `"op"` field. Nodes are named by their id: a named node's name, else its execution
+position (`"1"`, `"1.body.0"`, `"1.message"`). Values for inputs are written as on the right of
+`<-` in the text, with the output named (`"plus.result"`, `"1.message.result"`, `"5"`,
+`"\\"hi\\""`, `"Mode::Chase"`), decorators as they are written (`"@pure"`,
+`"@doc(\\"Adds one.\\")"`) and a node's named generics the same way (`"#count<3>"`). The
+whole request is applied to a copy of the model; if any op fails, nothing changes. A stale
+`if_hash` is E0900.
 """
 from __future__ import annotations
 
 import copy
 import difflib
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
 from .checker import check
 from .ids import Project, attach_retired, retired_between
-from .model import Attr, Enum, Graph, Lit, Module, PinRef
+from .model import Attr, Graph, Lit, Module, NODE_GENERICS, PinRef, SEMANTIC_ATTRS
 from .ops import (bind, create_node, delete_node, place, rename_node, unbind, unwire_exec,
                   wire_exec)
 from .parser import ParseError, Parser, parse, resolve_enum_values
@@ -113,19 +117,15 @@ def node_of(g: Graph, nid: str):
 
 
 def value_of(m: Module, g: Graph, text: str):
-    """The right-hand side of `.pin <- text`: a pin reference or a literal."""
-    p = Parser(str(text))
-    p.skip_nl()
-    if p.at("id") and p.at_p(".", 1) and p.at("id", k=2):
-        j = p.i
-        node, _, pin = p.qname().rpartition(".")  # an inline node's name has dots too
-        if not p.at("nl") and not p.at("eof"):
-            p.i = j
-            raise EditError("request", f"unexpected text after '{text}'")
-        enums = {it.name for it in m.items if isinstance(it, Enum)}
-        if g.node(node) is None and node in enums:   # the parser's rule (section 2.3)
-            return Lit("enum", f"{node}.{pin}")
+    """The right-hand side of `.pin <- text`: a pin reference, `node.pin` with the node's id
+    (a name, or an execution position such as `1.message`), or a literal."""
+    s = str(text).strip()
+    node, _, pin = s.rpartition(".")
+    if node and re.fullmatch(r"[A-Za-z_]\w*", pin) and (
+            g.node(node) is not None or re.fullmatch(r"[A-Za-z_]\w*(\.\w+)*", node)):
         return PinRef(node, pin)
+    p = Parser(s)
+    p.skip_nl()
     try:
         lit = p.literal()
     except ParseError as e:
@@ -137,28 +137,46 @@ def value_of(m: Module, g: Graph, text: str):
 
 
 def attr_of(text: str, meta: bool) -> Attr:
-    """`@name(args)` or `#[name(args)]`."""
+    """A decorator, `@name(args)`, or a node's named generic, `#count<3>` (section 2.4).
+    `meta` says which kind the op sets: metadata (`set_meta`) or what changes the program
+    (`set_attr`)."""
     src = str(text).strip()
     p = Parser(src + "\n")
     p.skip_nl()
     try:
-        if meta:
-            if not src.startswith("#["):
-                raise EditError("request", f"metadata is written #[name(...)], not '{src}'")
-            p.next()                               # the #[
+        if p.at_p("#") and p.at("id", k=1):
+            p.next()
+            name = p.ident()
+            if name not in NODE_GENERICS:
+                raise EditError("request", f"unknown named generic '#{name}'")
+            p.expect_p("<")
+            args = []
+            while not p.at_p(">"):
+                args.append((None, p.value()))
+                if p.at_p(","):
+                    p.next()
+            p.next()
+            a = Attr(name, args)
+        elif p.at_p("@"):
+            p.next()
             name = p.qname()
+            if name in NODE_GENERICS:
+                raise EditError("request", f"'@{name}' is a named generic: write '#{name}<...>'")
             a = Attr(name, p.attr_args() if p.at_p("(") else None)
-            p.expect_p("]")
-            return a
-        if not src.startswith("@"):
-            raise EditError("request", f"a semantic attribute is written @name(...), not '{src}'")
-        attrs = p.attrs()
-        if len(attrs) != 1:
-            raise EditError("request", f"expected one attribute in '{src}'")
-        return attrs[0]
+        else:
+            raise EditError("request", f"a decorator is written @name(...), as in "
+                                       f"@note(\"...\"), not '{src}'")
+        p.skip_nl()
+        if not p.at("eof"):
+            raise EditError("request", f"expected one decorator in '{src}'")
     except ParseError as e:
         raise EditError("request", f"'{src}': {e.msg}")
-
+    semantic = a.name in SEMANTIC_ATTRS or a.name in NODE_GENERICS
+    if meta and semantic:
+        raise EditError("request", f"'{src}' changes the program; set it with set_attr")
+    if not meta and not semantic:
+        raise EditError("request", f"'{src}' is metadata; set it with set_meta")
+    return a
 
 def target_of(m: Module, op: dict):
     """What an attribute op changes: a node or box (`graph` + `node`), a graph (`graph`),
@@ -236,7 +254,7 @@ def apply_op(m: Module, op: dict) -> list:
             a = attr_of(op["attr"], meta=False)
             t.attrs = [x for x in t.attrs if x.name != a.name] + [a]
         else:
-            name = str(op["name"]).lstrip("@")
+            name = str(op["name"]).lstrip("@#")
             t.attrs = [x for x in t.attrs if x.name != name]
         return []
     if kind in ("set_meta", "remove_meta"):
@@ -248,7 +266,7 @@ def apply_op(m: Module, op: dict) -> list:
             else:
                 t.meta = [x for x in t.meta if x.name != a.name] + [a]
         else:
-            name, text_ = str(op["name"]).lstrip("#[").rstrip("]"), op.get("text")
+            name, text_ = str(op["name"]).lstrip("@"), op.get("text")
             t.meta = [x for x in t.meta if not (x.name == name and (
                 text_ is None or (x.arg() is not None and x.arg().value == text_)))]
         return []
@@ -262,10 +280,6 @@ def apply_op(m: Module, op: dict) -> list:
         target = g.box(nid) or g.place(nid)
         for key, value in (op.get("props") or {}).items():
             target.set_prop(key, None if value is None else _prop_value(value))
-        if "members" in op:
-            if g.box(nid) is None:
-                raise EditError("request", f"'{nid}' is not a box")
-            target.set_prop("members", Lit("list", [Lit("ident", x) for x in op["members"]]))
         return []
     if kind == "delete_node":
         g = graph_of(m, op)
@@ -288,6 +302,8 @@ def apply_op(m: Module, op: dict) -> list:
             return []
         g = graph_of(m, op)
         node_of(g, op["node"])
+        if not re.fullmatch(r"[A-Za-z_]\w*", str(op["to"])):
+            raise EditError("request", f"a node's name is an identifier, not '{op['to']}'")
         if g.node(op["to"]) or g.box(op["to"]):
             raise EditError("E0102", f"'{op['to']}' is already used in {g.name}")
         rename_node(g, op["node"], op["to"])

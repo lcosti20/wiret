@@ -1,268 +1,244 @@
 wiret 1
 module std.flow
 
-#[doc("Lets execution through at most n times, until reset.")]
+@doc("Lets execution through at most n times, until reset.")
 macro DoN(in: exec, reset: exec, n: i32) -> (out: exec, counter: i32) {
   state count: i32
 
-  flow {
-    bump -> fire
-    entry.in -> test
-    entry.reset -> clear
-    test.then -> bump
-  }
+  @live
+  node cur = GetState count()
 
-  node bump = SetState count(
-    .value <- Add::<i32>(
-      .a <- cur,
-      .b <- 1,
-    ),
-  )
-  node clear = SetState count(
-    .value <- 0,
-  )
-  node cur = GetState count() @live
-  node entry = Entry()
-  node fire = Exit out(
-    .counter <- cur,
-  )
-  node test = Branch(
-    .cond <- Lt::<i32>(
-      .a <- cur,
-      .b <- entry.n,
-    ),
-  )
+  exec Entry().in -> {
+    exec Branch(
+      .cond <- Lt#<i32>(
+        .a <- cur
+        .b <- n
+      )
+    ).then -> {
+      exec SetState count(
+        .value <- Add#<i32>(
+          .a <- cur
+          .b <- 1
+        )
+      )
+      exec Exit out(
+        .counter <- cur
+      )
+    }
+  }.reset -> {
+    exec SetState count(
+      .value <- 0
+    )
+  }
 }
 
-#[doc("Lets execution through once, until reset.")]
+@doc("Lets execution through once, until reset.")
 macro DoOnce(in: exec, reset: exec) -> (out: exec) {
   state fired: bool
 
-  flow {
-    check.else -> mark
-    entry.in -> check
-    entry.reset -> clear
-    mark -> fire
+  exec Entry().in -> {
+    exec Branch(
+      .cond <- GetState fired()
+    ).else -> {
+      exec SetState fired(
+        .value <- true
+      )
+      exec Exit out()
+    }
+  }.reset -> {
+    exec SetState fired(
+      .value <- false
+    )
   }
-
-  node check = Branch(
-    .cond <- GetState fired(),
-  )
-  node clear = SetState fired(
-    .value <- false,
-  )
-  node entry = Entry()
-  node fire = Exit out()
-  node mark = SetState fired(
-    .value <- true,
-  )
 }
 
-#[doc("Alternates between output a and output b each time it runs.")]
+@doc("Alternates between output a and output b each time it runs.")
 macro FlipFlop(in: exec) -> (a: exec, b: exec, is_a: bool) {
   state on_b: bool
 
-  flow {
-    check.then -> to_a
-    check.else -> to_b
-    entry -> check
-    to_a -> exit_a
-    to_b -> exit_b
+  exec Entry()
+  exec Branch(
+    .cond <- GetState on_b()
+  ).then -> {
+    exec SetState on_b(
+      .value <- false
+    )
+    exec Exit a(
+      .is_a <- true
+    )
+  }.else -> {
+    exec SetState on_b(
+      .value <- true
+    )
+    exec Exit b()
   }
-
-  node check = Branch(
-    .cond <- GetState on_b(),
-  )
-  node entry = Entry()
-  node exit_a = Exit a(
-    .is_a <- true,
-  )
-  node exit_b = Exit b()
-  node to_a = SetState on_b(
-    .value <- false,
-  )
-  node to_b = SetState on_b(
-    .value <- true,
-  )
 }
 
-#[doc("Loops over an array: runs 'each' once for every item, in order (index counts 0, 1, 2, ...), then runs 'done'. Wiring 'break' ends the loop early and runs 'done' at once.")]
-macro ForEach::<T>(in: exec, break: exec, array: array::<T>) -> (each: exec, done: exec, item: T, index: i32) {
+@doc("Loops over an array: runs 'each' once for every item, in order (index counts 0, 1, 2, ...), then runs 'done'. Wiring 'break' ends the loop early and runs 'done' at once.")
+macro ForEach#<T>(in: exec, break: exec, array: array#<T>) -> (each: exec, done: exec, item: T, index: i32) {
   local i: i32
 
-  flow {
-    bump -> test
-    entry.in -> init
-    entry.break -> stop
-    init -> test
-    seq.then0 -> each_out
-    seq.then1 -> bump
-    test.then -> seq
-    test.else -> finish
-  }
-
-  node bump = SetLocal i(
-    .value <- Add::<i32>(
-      .a <- cur,
-      .b <- 1,
-    ),
-  )
   node cur = GetLocal i()
-  node each_out = Exit each(
-    .item <- got.item,
-    .index <- cur,
+  node got = ArrayGet#<T>(
+    .array <- array
+    .index <- cur
   )
-  node entry = Entry()
-  node finish = Exit done()
-  node got = ArrayGet::<T>(
-    .array <- entry.array,
-    .index <- cur,
+  node len = ArrayLength#<T>(
+    .array <- array
   )
-  node init = SetLocal i(
-    .value <- 0,
-  )
-  node len = ArrayLength::<T>(
-    .array <- entry.array,
-  )
-  node seq = Sequence() @count(2)
-  node stop = Leave done()
   node test = Branch(
-    .cond <- Lt::<i32>(
-      .a <- cur,
-      .b <- len.length,
-    ),
+    .cond <- Lt#<i32>(
+      .a <- cur
+      .b <- len.length
+    )
   )
+
+  exec Entry().in -> {
+    exec SetLocal i(
+      .value <- 0
+    )
+    exec test.then -> {
+      exec Sequence#count<2>().then0 -> {
+        exec Exit each(
+          .item <- got.item
+          .index <- cur
+        )
+      }.then1
+      exec SetLocal i(
+        .value <- Add#<i32>(
+          .a <- cur
+          .b <- 1
+        )
+      )
+      goto test
+    }.else -> {
+      exec Exit done()
+    }
+  }.break -> {
+    exec Leave done()
+  }
 }
 
-#[doc("Loops over a map: runs 'each' once for every entry, in the order the keys were first added, then runs 'done'. Wiring 'break' ends the loop early and runs 'done' at once.")]
-macro ForEachMap::<K, V>(in: exec, break: exec, map: map::<K, V>) -> (each: exec, done: exec, key: K, value: V, index: i32) {
+@doc("Loops over a map: runs 'each' once for every entry, in the order the keys were first added, then runs 'done'. Wiring 'break' ends the loop early and runs 'done' at once.")
+macro ForEachMap#<K, V>(in: exec, break: exec, map: map#<K, V>) -> (each: exec, done: exec, key: K, value: V, index: i32) {
   local i: i32
 
-  flow {
-    bump -> test
-    entry.in -> init
-    entry.break -> stop
-    init -> test
-    seq.then0 -> each_out
-    seq.then1 -> bump
-    test.then -> seq
-    test.else -> finish
-  }
-
-  node bump = SetLocal i(
-    .value <- Add::<i32>(
-      .a <- cur,
-      .b <- 1,
-    ),
-  )
   node cur = GetLocal i()
-  node each_out = Exit each(
-    .key <- got_key.key,
-    .value <- got_value.value,
-    .index <- cur,
+  node got_key = MapKeyAt#<K, V>(
+    .map <- map
+    .index <- cur
   )
-  node entry = Entry()
-  node finish = Exit done()
-  node got_key = MapKeyAt::<K, V>(
-    .map <- entry.map,
-    .index <- cur,
+  node got_value = MapValueAt#<K, V>(
+    .map <- map
+    .index <- cur
   )
-  node got_value = MapValueAt::<K, V>(
-    .map <- entry.map,
-    .index <- cur,
+  node len = MapLength#<K, V>(
+    .map <- map
   )
-  node init = SetLocal i(
-    .value <- 0,
-  )
-  node len = MapLength::<K, V>(
-    .map <- entry.map,
-  )
-  node seq = Sequence() @count(2)
-  node stop = Leave done()
   node test = Branch(
-    .cond <- Lt::<i32>(
-      .a <- cur,
-      .b <- len.length,
-    ),
+    .cond <- Lt#<i32>(
+      .a <- cur
+      .b <- len.length
+    )
   )
+
+  exec Entry().in -> {
+    exec SetLocal i(
+      .value <- 0
+    )
+    exec test.then -> {
+      exec Sequence#count<2>().then0 -> {
+        exec Exit each(
+          .key <- got_key.key
+          .value <- got_value.value
+          .index <- cur
+        )
+      }.then1
+      exec SetLocal i(
+        .value <- Add#<i32>(
+          .a <- cur
+          .b <- 1
+        )
+      )
+      goto test
+    }.else -> {
+      exec Exit done()
+    }
+  }.break -> {
+    exec Leave done()
+  }
 }
 
-#[doc("Runs 'each' once for every number from first to last (inclusive), then runs 'done'. Wiring 'break' ends the loop early and runs 'done' at once.")]
+@doc("Runs 'each' once for every number from first to last (inclusive), then runs 'done'. Wiring 'break' ends the loop early and runs 'done' at once.")
 macro ForRange(in: exec, break: exec, first: i32, last: i32) -> (each: exec, done: exec, index: i32) {
   local i: i32
 
-  flow {
-    bump -> test
-    entry.in -> init
-    entry.break -> stop
-    init -> test
-    seq.then0 -> each_out
-    seq.then1 -> bump
-    test.then -> seq
-    test.else -> finish
-  }
-
-  node bump = SetLocal i(
-    .value <- Add::<i32>(
-      .a <- cur,
-      .b <- 1,
-    ),
-  )
   node cur = GetLocal i()
-  node each_out = Exit each(
-    .index <- cur,
-  )
-  node entry = Entry()
-  node finish = Exit done()
-  node init = SetLocal i(
-    .value <- entry.first,
-  )
-  node seq = Sequence() @count(2)
-  node stop = Leave done()
   node test = Branch(
-    .cond <- Le::<i32>(
-      .a <- cur,
-      .b <- entry.last,
-    ),
+    .cond <- Le#<i32>(
+      .a <- cur
+      .b <- last
+    )
   )
+
+  exec Entry().in -> {
+    exec SetLocal i(
+      .value <- first
+    )
+    exec test.then -> {
+      exec Sequence#count<2>().then0 -> {
+        exec Exit each(
+          .index <- cur
+        )
+      }.then1
+      exec SetLocal i(
+        .value <- Add#<i32>(
+          .a <- cur
+          .b <- 1
+        )
+      )
+      goto test
+    }.else -> {
+      exec Exit done()
+    }
+  }.break -> {
+    exec Leave done()
+  }
 }
 
-#[doc("Runs 'body' the given number of times (index counts 0, 1, 2, ...), then runs 'done'. Wiring 'break' ends the loop early and runs 'done' at once.")]
+@doc("Runs 'body' the given number of times (index counts 0, 1, 2, ...), then runs 'done'. Wiring 'break' ends the loop early and runs 'done' at once.")
 macro Repeat(in: exec, break: exec, times: i32) -> (body: exec, done: exec, index: i32) {
   local i: i32
 
-  flow {
-    bump -> test
-    entry.in -> init
-    entry.break -> stop
-    init -> test
-    seq.then0 -> body_out
-    seq.then1 -> bump
-    test.then -> seq
-    test.else -> finish
-  }
-
-  node body_out = Exit body(
-    .index <- cur,
-  )
-  node bump = SetLocal i(
-    .value <- Add::<i32>(
-      .a <- cur,
-      .b <- 1,
-    ),
-  )
   node cur = GetLocal i()
-  node entry = Entry()
-  node finish = Exit done()
-  node init = SetLocal i(
-    .value <- 0,
-  )
-  node seq = Sequence() @count(2)
-  node stop = Leave done()
   node test = Branch(
-    .cond <- Lt::<i32>(
-      .a <- cur,
-      .b <- entry.times,
-    ),
+    .cond <- Lt#<i32>(
+      .a <- cur
+      .b <- times
+    )
   )
+
+  exec Entry().in -> {
+    exec SetLocal i(
+      .value <- 0
+    )
+    exec test.then -> {
+      exec Sequence#count<2>().then0 -> {
+        exec Exit body(
+          .index <- cur
+        )
+      }.then1
+      exec SetLocal i(
+        .value <- Add#<i32>(
+          .a <- cur
+          .b <- 1
+        )
+      )
+      goto test
+    }.else -> {
+      exec Exit done()
+    }
+  }.break -> {
+    exec Leave done()
+  }
 }

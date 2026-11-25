@@ -23,16 +23,19 @@ class Lit:
     suffix: Optional[str] = None
 
 
-# Semantic attributes (`@name`, section 2.4). Any other `@` name is E0104.
+# Semantic decorators (section 2.4): they change the program. Any other `@` name is metadata.
 SEMANTIC_ATTRS = {"id", "pure", "reads", "final", "private", "export", "inline", "deprecated",
-                  "count", "cases", "disabled", "capability", "latent", "live"}
-# Metadata attributes (`#[name]`) in canonical order; any other name follows them (section 2.5).
+                  "disabled", "capability", "latent", "live"}
+# Named generic arguments of a node, `#count<3>` and `#cases<...>` (section 2.3).
+NODE_GENERICS = ("count", "cases")
+# Metadata decorators in canonical order; any other metadata name follows them (section 2.5).
 META_ORDER = ["doc", "category", "keywords", "note"]
 
 
 @dataclass
 class Attr:
-    """A semantic attribute (`@name(...)`) or, in a `meta` list, a metadata line (`#[name(...)]`)."""
+    """A decorator, `@name(...)`: semantic in an `attrs` list, metadata in a `meta` list. A
+    node's named generic (`#count<3>`) is also kept in its `attrs`."""
     name: str
     args: Optional[list] = None  # None: written without parentheses; else [(key|None, Lit)]
 
@@ -49,7 +52,7 @@ class Attr:
 
 
 def note(text: str, detached: Optional[str] = None) -> Attr:
-    """A `#[note("text")]` line; `detached` names the deleted target it came from (section 2.4)."""
+    """An `@note("text")` line; `detached` names the deleted target it came from (section 2.4)."""
     args = [(None, Lit("string", text))]
     if detached is not None:
         args.append(("detached", Lit("string", detached)))
@@ -75,7 +78,7 @@ def notes(meta: list) -> list:
 
 
 def meta_value(meta: list, name: str) -> Optional[str]:
-    """The string argument of the first `#[name("...")]` line, e.g. a declaration's doc."""
+    """The string argument of the first `@name("...")` decorator, e.g. a declaration's doc."""
     for a in meta:
         if a.name == name and a.arg() is not None and a.arg().kind == "string":
             return a.arg().value
@@ -97,11 +100,12 @@ class Binding:
 
 @dataclass
 class ExecOut:
-    """One exec wire, written in the graph's `flow` block and stored on its source node."""
-    pin: Optional[str]          # None: the `source -> target` shorthand
+    """One exec wire, stored on its source node. In the text it is where one `exec`
+    statement follows another, an exec output's block, or a `goto` (section 2.3)."""
+    pin: Optional[str]          # None: the node's one exec output
     target: str
     target_pin: Optional[str] = None
-    comment: list = field(default_factory=list)    # the `//` lines directly above its line in the flow block
+    comment: list = field(default_factory=list)    # the `//` lines above its `goto`
 
 
 @dataclass
@@ -113,8 +117,14 @@ class Node:
     bindings: list = field(default_factory=list)   # [Binding]
     execs: list = field(default_factory=list)      # [ExecOut]
     attrs: list = field(default_factory=list)      # [Attr]
-    meta: list = field(default_factory=list)       # [Attr], written as `#[...]` lines above
+    meta: list = field(default_factory=list)       # [Attr]: its metadata decorators (`@note`)
     comment: list = field(default_factory=list)    # the `//` lines directly above it (section 2.1)
+    # declared by name with a `node` statement (section 2.3). Anonymous nodes are named by
+    # their execution position; the printer names one when it must (a shared output, a goto)
+    named: bool = False
+    # whether its last exec output was written flattened (`}.then`, continuing in the same
+    # block) or as a block (`}.then -> { ... }`); None: the canonical default (section 2.5)
+    flat: Optional[bool] = None
 
     def binding(self, pin: str) -> Optional[Binding]:
         for b in self.bindings:
@@ -168,16 +178,13 @@ class Place:
 
 @dataclass
 class Box(Place):
+    """`box {title="...", pos=(x, y), size=(w, h), ...}`: a frame drawn behind nodes. It has
+    no name and no member list; moving it moves the nodes inside it (section 2.3). Its `id`
+    is its place among the graph's boxes, for the editor."""
     title: str = ""
     w: int = 200
     h: int = 120
     meta: list = field(default_factory=list)
-
-    def members(self) -> list:
-        m = self.prop("members")
-        if m is None or m.kind != "list":
-            return []
-        return [v.value for v in m.value if v.kind == "ident"]
 
 
 @dataclass
@@ -196,12 +203,15 @@ class Graph:
     nodes: list = field(default_factory=list)      # [Node]
     meta: list = field(default_factory=list)       # [Attr]: doc, graph-level notes, ...
     comment: list = field(default_factory=list)    # the `//` lines directly above it (section 2.1)
-    places: list = field(default_factory=list)     # [Place]
-    # layout-block metadata above a name that is no node of the graph (W0605): kept as
-    # written until someone moves it above a node's line or deletes it
-    orphan_meta: dict = field(default_factory=dict)    # {name: [Attr]}
+    places: list = field(default_factory=list)     # [Place]: a node's `{pos=..., ...}` attributes
     boxes: list = field(default_factory=list)      # [Box]
     owner: Optional[str] = None                    # the class of a method
+    static: bool = False                           # a method declared without `self`
+
+    @property
+    def receiver(self) -> Optional[str]:
+        """The class of `self`: the owner of an instance method, None otherwise."""
+        return self.owner if self.owner and not self.static else None
 
     @property
     def short_name(self) -> str:
@@ -273,7 +283,7 @@ class Extern:
     kind: str                     # func | type
     name: str                     # qualified
     params: list = field(default_factory=list)
-    results: Optional[list] = None
+    results: Optional[list] = None   # None: no `->`; []: written `-> ()`
     attrs: list = field(default_factory=list)
     meta: list = field(default_factory=list)
     comment: list = field(default_factory=list)    # the `//` lines directly above it (section 2.1)
@@ -352,7 +362,7 @@ class Class:
 @dataclass
 class Dispatcher:
     """`dispatcher Name(params) @attrs` in a class: a multicast event slot on each object
-    (section 2.2), of type `dispatcher::<(param types)>`."""
+    (section 2.2), of type `dispatcher#<(param types)>`."""
     name: str
     params: list = field(default_factory=list)     # [Param]
     attrs: list = field(default_factory=list)

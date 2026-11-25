@@ -1,4 +1,9 @@
-"""Canonical writer and hashes (spec section 2.5)."""
+"""Canonical writer and hashes (spec section 2.5).
+
+A graph is written as its `exec` statements in the order they run, walked from its Entry
+node (section 2.3). The writer decides how each node is written: inline in the one input it
+feeds, as an `exec` statement where control reaches it, under a name (`node name = ...`) when
+it is read or entered from more than one place, or after a `!` when nothing reaches it."""
 from __future__ import annotations
 
 import copy
@@ -8,14 +13,19 @@ import re
 import unicodedata
 
 from .model import (Attr, Binding, Box, Class, Const, Enum, Interface, ExecOut, Extern, Graph, ITEM_ORDER, Lit,
-                    META_ORDER, Module, Node, PinRef, SEMANTIC_ATTRS, Struct, Use, Var,
+                    META_ORDER, Module, NODE_GENERICS, Node, PinRef, SEMANTIC_ATTRS, Struct, Use, Var,
                     item_kind, strip_comments)
 from .registry import (PLACE_MUTATORS, ModuleIndex, Sig, field_place, lit_equal, lit_fits,
                        signature)
 
 IND = "  "
 
-PLACE_PROP_ORDER = ["label", "color", "size", "collapsed", "hidden", "members"]
+PLACE_PROP_ORDER = ["pos", "label", "color", "size", "collapsed", "hidden"]
+BOX_PROP_ORDER = ["title", "pos", "size", "color"]
+_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*$")
+# names the printer does not choose for a node it has to name: values and `self`. Keywords
+# are contextual, so a node a person named `exec` or `box` keeps that name (section 2.1)
+_NOT_NAMES = {"true", "false", "null", "self"}
 
 
 # -- values ----------------------------------------------------------------------
@@ -74,6 +84,11 @@ def fmt_lit(v: Lit) -> str:
     raise ValueError(k)
 
 
+def fmt_type(t: str) -> str:
+    """A type as written: the model spells generic types `array#<i32>`, the text `array#<i32>`."""
+    return t.replace("#<", "#<")
+
+
 def fmt_args(a: Attr) -> str:
     if a.args is None:
         return ""
@@ -85,13 +100,14 @@ def fmt_attr(a: Attr) -> str:
 
 
 def sorted_attrs(attrs: list) -> list:
-    """Known semantic attributes alphabetically, then unknown ones (E0104) as written."""
+    """Known semantic attributes alphabetically, then unknown ones as written."""
     sem = sorted((a for a in attrs if a.name in SEMANTIC_ATTRS), key=lambda a: a.name)
     return sem + [a for a in attrs if a.name not in SEMANTIC_ATTRS]
 
 
 def fmt_attrs(attrs: list) -> str:
-    return "".join(" " + fmt_attr(a) for a in sorted_attrs(attrs))
+    """Semantic decorators written before an element on its line: `@id("p1") `."""
+    return "".join(fmt_attr(a) + " " for a in sorted_attrs(attrs))
 
 
 def sorted_meta(meta: list) -> list:
@@ -101,10 +117,10 @@ def sorted_meta(meta: list) -> list:
 
 
 def fmt_meta(meta: list, indent: str, semantic=False) -> list:
-    """The `#[...]` lines above a statement (section 2.4); none in the semantic text."""
+    """The metadata decorator lines above an element (section 2.4); none in the semantic text."""
     if semantic:
         return []
-    return [f"{indent}#[{a.name}{fmt_args(a)}]" for a in sorted_meta(meta)]
+    return [f"{indent}{fmt_attr(a)}" for a in sorted_meta(meta)]
 
 
 def fmt_comment(lines: list, indent: str) -> list:
@@ -112,20 +128,50 @@ def fmt_comment(lines: list, indent: str) -> list:
     return [f"{indent}//" + (f" {c}" if c else "") for c in lines]
 
 
+def decorator_lines(x, indent: str, semantic=False, attrs=True) -> list:
+    """What stands directly above a declaration or statement: its `//` lines, its metadata
+    decorators, then (with `attrs`) its semantic decorators, one per line."""
+    out = fmt_comment(getattr(x, "comment", []) or [], indent) + \
+        fmt_meta(getattr(x, "meta", []) or [], indent, semantic)
+    if attrs:
+        out += [f"{indent}{fmt_attr(a)}" for a in sorted_attrs(getattr(x, "attrs", []) or [])]
+    return out
+
+
 def above(x, indent: str, semantic=False) -> list:
-    """What stands directly above a declaration: its `//` lines, then its `#[...]` lines."""
-    return fmt_comment(getattr(x, "comment", []), indent) + fmt_meta(x.meta, indent, semantic)
+    return decorator_lines(x, indent, semantic)
 
 
-def fmt_params(ps: list) -> str:
-    parts = []
-    for p in ps:
-        s = f"{p.name}: {p.type}"
-        if p.default is not None:
-            s += f" = {fmt_lit(p.default)}"
-        s += fmt_attrs(p.attrs)
-        parts.append(s)
+def fmt_param(p) -> str:
+    s = f"{fmt_attrs(p.attrs)}{p.name}: {fmt_type(p.type)}"
+    if p.default is not None:
+        s += f" = {fmt_lit(p.default)}"
+    return s
+
+
+def fmt_params(ps: list, receiver: bool = False) -> str:
+    parts = (["self"] if receiver else []) + [fmt_param(p) for p in ps or []]
     return "(" + ", ".join(parts) + ")"
+
+
+def fmt_props(props: list, order=PLACE_PROP_ORDER) -> str:
+    """`{key=value, ...}`: a node's or box's attribute block (section 2.3)."""
+    rank = {k: i for i, k in enumerate(order)}
+    ps = sorted(props, key=lambda kv: rank.get(kv[0], len(rank)))
+    return "{" + ", ".join(f"{k}={fmt_lit(v)}" for k, v in ps) + "}"
+
+
+def place_props(g: Graph, nid: str) -> list:
+    p = g.place(nid)
+    if p is None:
+        return []
+    return [("pos", Lit("tuple", [Lit("int", p.x), Lit("int", p.y)]))] + list(p.props)
+
+
+def box_props(b: Box) -> list:
+    return ([("title", Lit("string", b.title)),
+             ("pos", Lit("tuple", [Lit("int", b.x), Lit("int", b.y)])),
+             ("size", Lit("tuple", [Lit("int", b.w), Lit("int", b.h)]))] + list(b.props))
 
 
 # -- nodes -----------------------------------------------------------------------
@@ -151,34 +197,14 @@ def _ordered_execs(node: Node, sig: Sig) -> list:
     return sorted(node.execs, key=lambda e: order.get(e.pin, len(order)) if e.pin else -1)
 
 
-def fmt_target(e: ExecOut, names: "GraphNames" = None) -> str:
-    return (names.name(e.target) if names else e.target) + (f".{e.target_pin}" if e.target_pin else "")
-
-
-def fmt_wires(node: Node, sig: Sig, names: "GraphNames" = None) -> list:
-    """The node's exec wires as `flow` lines (without indentation), each after its `//` lines."""
-    execs = _ordered_execs(node, sig)
-    single = len(sig.exec_outs) == 1 or (not sig.exec_outs and len(execs) == 1 and execs[0].pin is None)
-    nid = names.name(node.id) if names else node.id
-    out = []
-    for e in execs:
-        if single and len(execs) == 1:
-            src = nid                                         # shorthand
-        else:
-            src = f"{nid}.{e.pin or (sig.exec_outs[0].name if sig.exec_outs else 'then')}"
-        out.extend(fmt_comment(e.comment, ""))
-        out.append(f"{src} -> {fmt_target(e, names)}")
-    return out
-
-
 def fmt_targs(targs: list) -> str:
-    return "::<" + ", ".join(targs) + ">" if targs else ""
+    return "#<" + ", ".join(fmt_type(t) for t in targs) + ">" if targs else ""
 
 
 def qualified_symbol(node: Node, g: Graph, idx: ModuleIndex) -> str:
     """The symbol as the canonical form writes it. Inside a method the reader also accepts a
     member of the method's class by its bare name (`GetField health`, `Broadcast OnDied`,
-    `ArrayAdd::<i32> items`); it is written `Player.health` everywhere, so a node reads the
+    `ArrayAdd#<i32> items`); it is written `Player.health` everywhere, so a node reads the
     same in a method and in a free function (section 2.3, rule 3)."""
     sym = node.symbol
     if not sym or "." in sym or g is None or not g.owner or g.owner not in idx.classes:
@@ -191,53 +217,96 @@ def qualified_symbol(node: Node, g: Graph, idx: ModuleIndex) -> str:
 
 
 def fmt_head(node: Node, names: "GraphNames" = None) -> str:
-    """`Kind symbol::<targs>`, or `ArrayAdd::<i32> acc` for a place mutator (section 3.3)."""
+    """`Kind symbol#<targs>#count<n>`, or `ArrayAdd#<i32> acc` for a place mutator (3.3)."""
     targs = fmt_targs(node.targs)
     sym = names.symbol(node) if names is not None else node.symbol
     if node.kind == "Format" and sym is not None:       # its template is a string
         sym = fmt_string(sym)
     if node.kind in PLACE_MUTATORS:
-        return node.kind + targs + (f" {sym}" if sym else "")
-    return node.kind + (f" {sym}" if sym else "") + targs
+        head = node.kind + targs + (f" {sym}" if sym else "")
+    else:
+        head = node.kind + (f" {sym}" if sym else "") + targs
+    for a in node.attrs:
+        if a.name in NODE_GENERICS:
+            head += f"#{a.name}<" + ", ".join(fmt_lit(v) for _, v in a.args or []) + ">"
+    return head
 
 
-_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*$")
+def node_decorators(node: Node) -> list:
+    """The semantic decorators of a node: all but its named generics."""
+    return [a for a in node.attrs if a.name not in NODE_GENERICS]
+
+
+class _Exec:
+    """An `exec` statement of the tree: a node and its exec outputs' blocks. A block of
+    None is the flattened last output: the statements after it continue from it."""
+    __slots__ = ("nid", "outs", "comment")
+
+    def __init__(self, nid, comment=None):
+        self.nid = nid
+        self.outs = []          # [[pin, [statements] | None]]
+        self.comment = comment or []
+
+
+class _Goto:
+    __slots__ = ("target", "tpin", "comment", "bound")
+
+    def __init__(self, target, tpin, comment):
+        self.target, self.tpin, self.comment = target, tpin, comment
+        self.bound = False      # `goto pin`: an exec input bound by an enclosing block
 
 
 class GraphNames:
-    """How a graph's nodes are written (section 2.3): which nodes are written inline, inside
-    the one input they feed, and the name each node is written with.
+    """How a graph's nodes are written (section 2.3).
 
-    A node is written inline when it has no exec pins, carries no semantic attribute or
-    `//` comment, and exactly one input in the graph reads it. Its name is then its consumer's name, a dot and
-    the input's name (`show.message`). Every other node is declared with a `node` statement
-    under its id; an id that is not an identifier (a node that was inline and now feeds
-    several inputs) is declared with its dots turned into underscores, followed by `_2`,
-    `_3`, ... when that name is the id of another node or retired in the project."""
+    - A node is written **inline**, inside the one input that reads it, when it has no exec
+      pins, is not named, carries no `//` comment and exactly one input reads it. Its id is
+      its consumer's id, a dot and the input (`3.message`).
+    - A node with exec pins is an **`exec` statement** where control first reaches it. Its id
+      is its **execution position**: its index among the `exec` statements of its block,
+      after the block's own position (`1.body.0`).
+    - A node is **named** (`node name = ...`) when it was named, when its output is read
+      somewhere it cannot be written inline or bound by a block, or when it is entered from
+      more than one place (a `goto`). Its id is its name.
+    - A node that nothing reaches is written after a `!`, with the id `~r`, or `~r.k` inside
+      a `!{ }` block, `r` counting the `!` statements."""
 
-    def __init__(self, g: Graph, idx: ModuleIndex, sigs: dict = None):
-        self.g, self.idx = g, idx
-        self.bare = None            # in an expression body: Entry, whose outputs are bare
-        self.current = None         # the node whose inputs are being written
+    def __init__(self, g: Graph, idx: ModuleIndex, sigs: dict = None, semantic=False):
+        self.g, self.idx, self.semantic = g, idx, semantic
+        self.current = None
         self.sigs = sigs if sigs is not None else {n.id: signature(n, g, idx) for n in g.nodes}
-        nodes = {}
+        self.nodes = {}
         for n in g.nodes:
-            nodes.setdefault(n.id, n)
+            self.nodes.setdefault(n.id, n)
+        self.entry = next((n.id for n in g.nodes if n.kind == "Entry"), None)
+        self.params = {p.name for p in g.params} | ({"self"} if g.receiver else set())
+        self._inline()
+        self._tree()
+        self._names()
+        self._ids()
+
+    # -- which nodes are inline ------------------------------------------------
+    def _inline(self):
+        g, nodes = self.g, self.nodes
         refs = {}                   # node id -> [(consumer id, pin)]
         for n in g.nodes:
             for b in n.bindings:
                 if isinstance(b.value, PinRef) and b.value.node in nodes:
                     refs.setdefault(b.value.node, []).append((n.id, b.pin))
-        targets = {e.target for n in g.nodes for e in n.execs}
+        self.refs = refs
+        self.targets = {}
+        for n in g.nodes:
+            for e in n.execs:
+                self.targets.setdefault(e.target, []).append((n.id, e))
         ids = [n.id for n in g.nodes]
         self.parent = {}            # inline node id -> (consumer id, pin)
         for n in g.nodes:
             sig = self.sigs.get(n.id)
             r = refs.get(n.id, [])
             if (sig is not None and len(r) == 1 and r[0][0] != n.id and ids.count(n.id) == 1
-                    and ids.count(r[0][0]) == 1 and not n.attrs and not n.execs
+                    and ids.count(r[0][0]) == 1 and not n.named and not n.execs
                     and not n.comment
-                    and n.id not in targets and not sig.error and not sig.exec_ins
+                    and n.id not in self.targets and not sig.error and not sig.exec_ins
                     and not sig.exec_outs and n.kind not in ("Entry", "Return", "Exit", "Leave")
                     and sum(1 for b in nodes[r[0][0]].bindings if b.pin == r[0][1]) == 1):
                 self.parent[n.id] = r[0]
@@ -253,28 +322,415 @@ class GraphNames:
         self.children = {}          # consumer id -> {pin: inline node}
         for nid, (c, pin) in self.parent.items():
             self.children.setdefault(c, {})[pin] = nodes[nid]
-        self.names = {}
-        taken = {i for i in ids if _IDENT_RE.match(i)}
-        module = getattr(idx, "module", None)
-        taken |= {i for gn, i in getattr(module, "retired_nodes", ()) if gn == g.name}
-        for nid in sorted(set(ids)):
-            if nid in self.parent:
-                continue
-            if _IDENT_RE.match(nid):
-                self.names[nid] = nid
-                continue
-            base = re.sub(r"[^A-Za-z0-9_]", "_", nid)
-            base = base if _IDENT_RE.match(base) else "n_" + base
-            name, k = base, 2
-            while name in taken:
-                name, k = f"{base}_{k}", k + 1
-            taken.add(name)
-            self.names[nid] = name
 
-        def name(nid):
+    def root(self, nid):
+        """The node whose statement an inline node is written in."""
+        seen = set()
+        while nid in self.parent and nid not in seen:
+            seen.add(nid)
+            nid = self.parent[nid][0]
+        return nid
+
+    def is_exec(self, nid) -> bool:
+        """Whether a node that is not inline is written as an `exec` statement."""
+        n, sig = self.nodes[nid], self.sigs[nid]
+        # a node whose signature is unknown (an error, or a type parameter of a generic
+        # macro) is an exec statement only when nothing reads it
+        return bool(sig.exec_ins or sig.exec_outs or n.execs or nid in self.targets
+                    or (sig.error and not self.refs.get(nid))
+                    or n.kind in ("Entry", "Return", "Exit", "Leave"))
+
+    def default_in(self, nid, tpin) -> bool:
+        """Whether an exec wire enters `nid` at its default input."""
+        if tpin is None:
+            return True
+        n = self.nodes.get(nid)
+        if n is None:
+            return False
+        ins = self.sigs[nid].exec_ins
+        return bool(ins) and ins[0].name == tpin
+
+    # -- the exec tree ---------------------------------------------------------
+    def _tree(self):
+        """The statements, walked from Entry along exec wires in pin order. Every block is
+        kept first; the last output of a node is flattened afterwards unless its block binds
+        a name."""
+        self.owner = {}             # node entered from several places -> the edge it is written at
+        self.regions = []           # ("exec", [stmts]) | ("block", [stmts]) | ("pure", nid)
+        if self.entry is not None:
+            self._choose_owners()
+            self.placed, self.top = set(), []
+            self._walk(self.entry, self.top)
+            missed = {s.target for s in self._gotos(self.top)} - self.placed
+            if any(t in self.nodes and self._reaches(self.entry, t) for t in missed):
+                self.owner = {}     # an owner the walk never reached: write each where first met
+                self.placed, self.top = set(), []
+                self._walk(self.entry, self.top)
+        else:
+            self.placed, self.top = set(), []
+        rest = [n.id for n in self.g.nodes if n.id not in self.parent and n.id not in self.placed
+                and self.is_exec(n.id)]
+        if self.semantic:
+            rest.sort(key=lambda i: (self.nodes[i].kind, self.nodes[i].symbol or "", i))
+        seen = set()
+        rest = [i for i in rest if not (i in seen or seen.add(i))]
+        # a region starts at a node that no other unreached node wires into
+        fed = {e.target for i in rest for e in self.nodes[i].execs}
+        for nid in [i for i in rest if i not in fed] + rest:
+            if nid in self.placed:
+                continue
+            stmts = []
+            self._walk(nid, stmts)
+            alone = len(stmts) == 1 and not stmts[0].outs
+            self.regions.append(("exec" if alone else "block", stmts))
+        pure = [n.id for n in self.g.nodes if n.id not in self.parent and n.id not in self.placed
+                and not self.is_exec(n.id) and not n.named and not self.refs.get(n.id)]
+        if self.semantic:
+            pure.sort(key=lambda i: (self.nodes[i].kind, self.nodes[i].symbol or "", i))
+        for nid in pure:
+            self.regions.append(("pure", nid))
+        self._flatten_all()
+
+    def _gotos(self, stmts):
+        for st in stmts:
+            if isinstance(st, _Goto):
+                yield st
+            else:
+                for _pin, blk in st.outs:
+                    yield from self._gotos(blk or [])
+
+    def _reaches(self, a, b) -> bool:
+        """Whether exec wires lead from `a` to `b`."""
+        seen, work = set(), [a]
+        while work:
+            x = work.pop()
+            if x == b:
+                return True
+            if x in seen or x not in self.nodes:
+                continue
+            seen.add(x)
+            work.extend(e.target for e in self.nodes[x].execs)
+        return False
+
+    def _choose_owners(self):
+        """Where to write a node that several exec wires enter: at the entering wire whose
+        statement is least deeply nested, the first such one met, never at a wire that comes
+        back from the node itself (a loop's back edge). Every other wire is a `goto`.
+
+        A probe walk measures depth: a node's last exec output continues in its block (depth
+        unchanged, as it is usually flattened), any other output opens a block (depth + 1)."""
+        preds = {}
+        for n in self.g.nodes:
+            for e in n.execs:
+                if self.default_in(e.target, e.target_pin):
+                    preds.setdefault(e.target, []).append(e)
+        multi = {t for t, es in preds.items() if len(es) > 1 and t in self.nodes}
+        if not multi:
+            return
+        depth, seen_edges = {self.entry: 0}, []
+        self.placed = set()
+        self._probe(self.entry, 0, depth, seen_edges)
+        best = {}
+        for k, (src, e, d) in enumerate(seen_edges):
+            t = e.target
+            if t not in multi or self._reaches(t, src):
+                continue
+            if t not in best or (d, k) < best[t][0]:
+                best[t] = ((d, k), e)
+        self.owner = {t: e for t, (_key, e) in best.items()}
+
+    def _probe(self, nid, d, depth, seen_edges):
+        stack = [(nid, d)]
+        while stack:
+            nid, d = stack.pop()
+            if nid in self.placed or nid not in self.nodes:
+                continue
+            self.placed.add(nid)
+            n, sig = self.nodes[nid], self.sigs[nid]
+            edges = _ordered_execs(n, sig)
+            nxt = []
+            single = len(edges) == 1 and len(sig.exec_outs) <= 1
+            for i, e in enumerate(edges):
+                last = i == len(edges) - 1
+                cd = d if single or (last and self.flattens(nid)) else d + 1
+                seen_edges.append((nid, e, cd))
+                t = e.target
+                if t in self.nodes and t not in self.parent and self.is_exec(t):
+                    nxt.append((t, cd))
+            stack.extend(reversed(nxt))
+
+    def _walk(self, nid, stmts):
+        """Place `nid` in `stmts` and follow its wires: one output continues in the same
+        block, several open a block each."""
+        while True:
+            self.placed.add(nid)
+            st = _Exec(nid)
+            stmts.append(st)
+            n, sig = self.nodes[nid], self.sigs[nid]
+            edges = _ordered_execs(n, sig)
+            if not edges:
+                return
+            outs = sig.exec_outs
+            single = len(edges) == 1 and len(outs) <= 1 and (
+                edges[0].pin is None or (outs and edges[0].pin == outs[0].name))
+            if not single:
+                for e in edges:
+                    blk = []
+                    st.outs.append([e.pin or (outs[0].name if outs else "then"), blk])
+                    nxt = self._follow(e, blk)
+                    if nxt is not None:
+                        self._walk(nxt, blk)
+                return
+            nxt = self._follow(edges[0], stmts)
+            if nxt is None:
+                return
+            nid = nxt
+
+    def _follow(self, e: ExecOut, stmts):
+        """The node an exec wire places next, or None after writing a `goto` for it."""
+        t = e.target
+        owner = self.owner.get(t)
+        if t in self.nodes and t not in self.placed and t not in self.parent \
+                and self.default_in(t, e.target_pin) and self.is_exec(t) \
+                and (owner is None or owner is e):
+            if e.comment:
+                self.nodes[t].comment = list(e.comment) + list(self.nodes[t].comment)
+            return t
+        stmts.append(_Goto(t, None if self.default_in(t, e.target_pin) else e.target_pin,
+                           list(e.comment)))
+        return None
+
+    def _flatten_all(self):
+        """Flatten each node's last output into the block it is in, unless that output's block
+        binds a name: a read of one of the node's outputs or a `goto` to one of its other exec
+        inputs, from inside it."""
+        uses = self._uses()
+        for stmts in [self.top] + [s for k, s in self.regions if k != "pure"]:
+            self._flatten(stmts, uses)
+
+    def _flatten(self, stmts, uses):
+        i = 0
+        while i < len(stmts):
+            st = stmts[i]
+            if isinstance(st, _Exec) and st.outs:
+                for out in st.outs:
+                    if out[1] is not None:
+                        self._flatten(out[1], uses)
+                last = st.outs[-1]
+                if last[1] is not None and (st.nid, last[0]) not in uses \
+                        and self.flattens(st.nid):
+                    stmts[i + 1:i + 1] = last[1]
+                    last[1] = None
+            i += 1
+
+    def flattens(self, nid) -> bool:
+        """Whether a node's last exec output continues in its block: as it was written, else
+        for a Try or Sequence, whose last output means "and then" (section 2.5)."""
+        n = self.nodes[nid]
+        if n.flat is not None and not self.semantic:
+            return n.flat
+        return n.kind in ("Try", "Sequence")
+
+    def _sites(self):
+        """For each statement node and goto: the blocks around it, outermost first, as
+        (node, output pin) pairs."""
+        self.site = {}
+        self.goto_sites = []
+
+        def visit(stmts, anc):
+            for st in stmts:
+                if isinstance(st, _Goto):
+                    self.goto_sites.append((st, anc))
+                    continue
+                self.site[st.nid] = anc
+                for pin, blk in st.outs:
+                    if blk is not None:
+                        visit(blk, anc + [(st.nid, pin)])
+
+        visit(self.top, [])
+        for kind, s in self.regions:
+            if kind != "pure":
+                visit(s, [])
+
+    def reads(self):
+        """(site blocks, producer id, output pin, consumer id) for every data wire that is
+        not written inline."""
+        out = []
+        for n in self.g.nodes:
+            if n.id in self.parent:
+                continue
+            root = self.root(n.id)
+            anc = [] if self._declared(root) else self.site.get(root, [])
+            for b in n.bindings:
+                if isinstance(b.value, PinRef) and b.value.node in self.nodes and \
+                        self.parent.get(b.value.node, (None,))[0] != n.id:
+                    out.append((anc, b.value.node, b.value.pin, n.id))
+        for nid in self.parent:     # reads from inside inline nodes
+            n = self.nodes[nid]
+            root = self.root(nid)
+            anc = [] if self._declared(root) else self.site.get(root, [])
+            for b in n.bindings:
+                if isinstance(b.value, PinRef) and b.value.node in self.nodes and \
+                        self.parent.get(b.value.node, (None,))[0] != nid:
+                    out.append((anc, b.value.node, b.value.pin, nid))
+        return out
+
+    def _declared(self, nid) -> bool:
+        """Whether a node is declared with `node`, at the top of the function, where no
+        block's names are in scope."""
+        return nid in getattr(self, "name_of", {}) or self.nodes[nid].named
+
+    def _uses(self):
+        """(node, pin) of every block that a read or goto inside it needs to bind a name in."""
+        self.site = {}
+        self._sites()
+        uses = set()
+        for anc, x, pin, _c in self.reads():
+            for blk in anc:
+                if blk[0] == x and x != self.entry:
+                    uses.add(blk)
+        for st, anc in self.goto_sites:
+            if st.tpin is not None:
+                for blk in anc:
+                    if blk[0] == st.target:
+                        uses.add(blk)
+        return uses
+
+    # -- names -----------------------------------------------------------------
+    def _names(self):
+        """Which nodes are named, and which names each block binds (a fixed point: naming a
+        node removes its bindings, which can only remove conflicts)."""
+        self._sites()
+        g = self.g
+        self.named = [n.id for n in g.nodes if n.named and n.id not in self.parent]
+        if self.semantic:
+            self.named.sort()
+        self.name_of = {nid: nid for nid in self.named}
+        taken = set(self.name_of.values()) | self.params
+        module = getattr(self.idx, "module", None)
+        taken |= {i for gn, i in getattr(module, "retired_nodes", ()) if gn == g.name}
+        self._taken = taken
+        need = set()
+        for nid in self.nodes:      # a pure node read by several inputs, or with a comment
+            if nid in self.parent or nid in self.name_of or self.is_exec(nid):
+                continue
+            if self.refs.get(nid) or self.nodes[nid].comment:
+                need.add(nid)
+        for st, _anc in self.goto_sites:
+            if st.tpin is None and st.target in self.nodes:
+                need.add(st.target)
+        while True:
+            for nid in sorted(need - set(self.name_of), key=self._order):
+                self._name(nid)
+            reads = self.reads()
+            self.bound = {}         # (node, pin) of a block -> {name: (node, pin)}
+            more = set()
+            for anc, x, pin, _c in reads:
+                if x == self.entry or x in self.name_of or x in self.parent \
+                        or not self.is_exec(x):
+                    continue
+                blk = next((b for b in anc if b[0] == x), None)
+                if blk is None:
+                    more.add(x)
+                else:
+                    self.bound.setdefault(blk, {})[pin] = (x, pin)
+            for st, anc in self.goto_sites:
+                if st.tpin is None or st.target in self.name_of or st.target not in self.nodes:
+                    continue
+                blk = next((b for b in anc if b[0] == st.target), None)
+                if blk is None:
+                    more.add(st.target)
+                else:
+                    self.bound.setdefault(blk, {})[st.tpin] = (st.target, st.tpin)
+            names = set(self.name_of.values()) | self.params
+            for blk, bound in self.bound.items():
+                if names & set(bound):
+                    more.add(blk[0])
+            for anc, x, pin, _c in reads:   # an inner block that binds the same name
+                if x in self.name_of or x == self.entry:
+                    continue
+                inside = False
+                for b in anc:
+                    if b[0] == x:
+                        inside = True
+                        continue
+                    if inside and pin in self.bound.get(b, {}) and self.bound[b][pin][0] != x:
+                        more.add(x)
+            if not more - set(self.name_of) - {None}:
+                break
+            need |= more
+        # a parameter a named node hides is read through a named Entry
+        if self.entry is not None and self.entry not in self.name_of and \
+                self.params & (set(self.name_of.values()) - set(self.named)):
+            self._name(self.entry)
+        elif self.entry is not None and self.entry not in self.name_of and \
+                self.params & set(self.named):
+            self._name(self.entry)
+        for st, anc in self.goto_sites:
+            if st.tpin is not None and st.target not in self.name_of:
+                st.bound = True
+
+    def _order(self, nid):
+        return [n.id for n in self.g.nodes].index(nid) if nid in self.nodes else 0
+
+    def _name(self, nid):
+        """A name for a node that must be named: its id when that is a free identifier, else
+        one made from its kind and symbol, `_2`, `_3`, ... added when it is taken."""
+        n = self.nodes[nid]
+        if _IDENT_RE.match(nid) and nid not in self._taken and nid not in _NOT_NAMES:
+            name = nid
+        else:
+            last = (n.symbol or "").split(".")[-1]
+            base = "entry" if n.kind == "Entry" else \
+                last if last and _IDENT_RE.match(last) and n.kind != "Format" else n.kind
+            base = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", base).lower()
+            base = re.sub(r"[^a-z0-9_]", "_", base).strip("_") or "node"
+            if not _IDENT_RE.match(base) or base in _NOT_NAMES:
+                base = "n_" + base
+            name, k = base, 2
+            while name in self._taken:
+                name, k = f"{base}_{k}", k + 1
+        self._taken.add(name)
+        self.name_of[nid] = name
+        self.named.append(nid)
+
+    # -- ids -------------------------------------------------------------------
+    def _ids(self):
+        """The id each node gets when the text is read back: its name, its execution
+        position, or (inline) its consumer's id and the input."""
+        self.names = dict(self.name_of)
+
+        def block(stmts, prefix):
+            k = 0
+            for st in stmts:
+                if isinstance(st, _Goto):
+                    continue
+                if st.nid not in self.names:
+                    self.names[st.nid] = f"{prefix}{k}"
+                k += 1
+                for pin, blk in st.outs:
+                    if blk is not None:
+                        block(blk, f"{self.names[st.nid]}.{pin}.")
+
+        block(self.top, "")
+        for r, (kind, s) in enumerate(self.regions):
+            if kind == "pure":
+                self.names.setdefault(s, f"~{r}")
+            elif kind == "exec":
+                self.names.setdefault(s[0].nid, f"~{r}")
+                for pin, blk in s[0].outs:
+                    if blk is not None:
+                        block(blk, f"{self.names[s[0].nid]}.{pin}.")
+            else:
+                block(s, f"~{r}.")
+        for nid in self.nodes:
+            if nid not in self.names and nid not in self.parent:
+                self.names[nid] = nid
+
+        def name(nid, depth=0):
             if nid not in self.names:
                 c, pin = self.parent[nid]
-                self.names[nid] = f"{name(c)}.{pin}"
+                self.names[nid] = f"{name(c, depth + 1)}.{pin}"
             return self.names[nid]
 
         for nid in self.parent:
@@ -289,17 +745,19 @@ class GraphNames:
     def inline(self, nid: str) -> bool:
         return nid in self.parent
 
-    def declared(self, nodes: list) -> list:
-        """The nodes written as `node` statements, sorted by the name they are written with."""
-        return sorted((n for n in nodes if n.id not in self.parent), key=lambda n: self.name(n.id))
+    def is_named(self, nid: str) -> bool:
+        return nid in self.name_of
+
+    def declared(self, nodes: list = None) -> list:
+        """The named nodes, in the order they were named."""
+        return [self.nodes[nid] for nid in self.named if nid in self.nodes]
 
 
 def implied_output(ref: PinRef, names: GraphNames) -> bool:
-    """Whether a wire from a declared node is written with its id alone (section 2.3): the
-    node has one data output and is not an Entry or a macro, whose outputs are named
-    parameters and results."""
+    """Whether a wire from a named node is written with its name alone (section 2.3): the
+    node has one data output and is not a macro, whose outputs are named results."""
     sig = names.sigs.get(ref.node)
-    if sig is None or sig.error or not _IDENT_RE.match(names.name(ref.node)):
+    if sig is None or sig.error or not names.is_named(ref.node):
         return False
     n = names.g.node(ref.node)
     outs = sig.data_outs
@@ -307,185 +765,217 @@ def implied_output(ref: PinRef, names: GraphNames) -> bool:
             and outs[0].name == ref.pin)
 
 
-def fmt_value(b: Binding, names: GraphNames = None) -> str:
-    if isinstance(b.value, PinRef) and names is not None and b.value.node == names.bare:
-        return b.value.pin
-    if isinstance(b.value, PinRef) and not b.value.pin:      # a node that does not exist
-        return names.name(b.value.node) if names else b.value.node
-    if isinstance(b.value, PinRef) and names is not None and implied_output(b.value, names):
-        return names.name(b.value.node)
-    if isinstance(b.value, PinRef):
-        return f"{names.name(b.value.node) if names else b.value.node}.{b.value.pin}"
-    return fmt_lit(b.value)
+def fmt_value(b: Binding, names: GraphNames = None, scope: dict = None) -> str:
+    v = b.value
+    if not isinstance(v, PinRef):
+        return fmt_lit(v)
+    if names is None:
+        return f"{v.node}.{v.pin}" if v.pin else v.node
+    if v.node not in names.nodes:           # a node that does not exist (E0101)
+        return v.node if not v.pin else f"{v.node}.{v.pin}"
+    if v.node == names.entry and not names.is_named(v.node):
+        return v.pin                         # a parameter
+    if scope is not None and scope.get(v.pin) == (v.node, v.pin):
+        return v.pin                         # a name bound by an enclosing block
+    if implied_output(v, names) and (scope is None or names.name(v.node) not in scope):
+        return names.name(v.node)
+    return f"{names.name(v.node)}.{v.pin}"
 
 
-def fmt_input(b: Binding, indent: str, names: GraphNames = None) -> str:
+def fmt_input(b: Binding, indent: str, names: GraphNames = None, scope: dict = None) -> str:
     """The value of a binding. An inline node is written in place, followed by the pin it is
     read from, `Call F(...).x`, unless that is its one data output: `Call F(...)`."""
     kids = names.children.get(names.current, {}) if names is not None else {}
     kid = kids.get(b.pin)
     if kid is None or not isinstance(b.value, PinRef) or b.value.node != kid.id:
-        return fmt_value(b, names)
+        return fmt_value(b, names, scope)
     sig = names.sigs[kid.id]
-    text = fmt_expr(kid, sig, indent, names)
+    text = fmt_expr(kid, sig, indent, names, scope=scope)
     outs = sig.data_outs
     if not sig.error and len(outs) == 1 and outs[0].name == b.value.pin:
         return text
     return f"{text}.{b.value.pin}"
 
 
-def fmt_expr(node: Node, sig: Sig, indent: str, names: GraphNames = None) -> str:
-    """`Kind symbol::<targs>(`, one `.pin <- value,` line per bound input (after its `//`
-    lines) and `)`, or `Kind()` when no input is bound. An inline node is written in place of
-    the value it feeds (`fmt_input`)."""
+def _implicit_self(node: Node, b: Binding, names: GraphNames) -> bool:
+    """A method call's `self` input that takes the calling method's `self` (section 2.2)."""
+    from .parser import self_receiver
+    return (b.pin == "self" and isinstance(b.value, PinRef) and b.value.node == names.entry
+            and b.value.pin == "self" and not b.comment and not names.is_named(names.entry)
+            and self_receiver(node, names.g, names.idx))
+
+
+def fmt_expr(node: Node, sig: Sig, indent: str, names: GraphNames = None, semantic=False,
+             scope: dict = None) -> str:
+    """`Kind symbol#<targs>{attrs}(`, one `.pin <- value` line per bound input (after its `//`
+    lines and the decorators of the node written in it) and `)`, or `Kind{attrs}()` when no
+    input is bound."""
     bindings = _ordered_bindings(node, sig)
+    if names is not None:
+        bindings = [b for b in bindings if not _implicit_self(node, b, names)]
+    head = fmt_head(node, names)
+    if names is not None and not semantic and not names.semantic:
+        props = place_props(names.g, node.id)
+        if props:
+            head += fmt_props(props)
     if not bindings:
-        return fmt_head(node, names) + "()"
-    lines = [fmt_head(node, names) + "("]
+        return head + "()"
+    lines = [head + "("]
     for b in bindings:
         if names is not None:
             names.current = node.id
-        val = fmt_input(b, indent + IND, names)
+        kid = names.children.get(node.id, {}).get(b.pin) if names is not None else None
+        val = fmt_input(b, indent + IND, names, scope)
         lines.extend(fmt_comment(b.comment, indent + IND))
-        lines.append(f"{indent}{IND}.{b.pin} <- {val},")
+        if kid is not None and isinstance(b.value, PinRef) and b.value.node == kid.id:
+            lines.extend(decorator_lines(Node("", "", meta=kid.meta,
+                                              attrs=node_decorators(kid)),
+                                         indent + IND, semantic or names.semantic))
+        lines.append(f"{indent}{IND}.{b.pin} <- {val}")
     lines.append(f"{indent})")
     return "\n".join(lines)
 
 
-def fmt_node(node: Node, sig: Sig, indent: str, semantic=False, names: GraphNames = None) -> str:
-    """The node statement `node id = Kind(...) @attrs`, with its inputs one per line and its
-    inline nodes written in place (section 2.3). Its metadata lines are in the layout block."""
-    nid = names.name(node.id) if names else node.id
-    return "\n".join(fmt_comment(node.comment, indent) + [
-        f"{indent}node {nid} = {fmt_expr(node, sig, indent, names)}{fmt_attrs(node.attrs)}"])
-
-
 # -- graphs and module -----------------------------------------------------------
 def fmt_local(kw, l, indent, semantic=False) -> list:
-    s = f"{indent}{kw} {l.name}: {l.type}"
+    s = f"{indent}{fmt_attrs(l.attrs)}{kw} {l.name}: {fmt_type(l.type)}"
     if l.default is not None:
         s += f" = {fmt_lit(l.default)}"
-    return above(l, indent, semantic) + [s + fmt_attrs(l.attrs)]
-
-
-def fmt_props(props: list, sort_members=True) -> str:
-    if not props:
-        return ""
-    order = {k: i for i, k in enumerate(PLACE_PROP_ORDER)}
-    ps = sorted(props, key=lambda kv: order.get(kv[0], len(order)))
-    parts = []
-    for k, v in ps:
-        if k == "members" and v.kind == "list" and sort_members:
-            v = Lit("list", sorted(v.value, key=lambda x: str(x.value)))
-        parts.append(f"{k} = {fmt_lit(v)}")
-    return " [" + ", ".join(parts) + "]"
+    return decorator_lines(l, indent, semantic, attrs=False) + [s]
 
 
 def expr_value(g: Graph, names: GraphNames):
-    """The binding a function is written `= value` with (section 2.3), or None. That is a
-    function outside a class with one result whose graph is `entry`, wired to `ret`, and the
-    nodes written inline in `ret`'s one input, with nothing else to keep: no locals, no
-    attributes, comments or metadata on the two nodes, and no layout."""
+    """The binding a function is written `= value` with (section 2.3), or None: a function
+    outside a class with one result whose graph is Entry wired to Return and the nodes
+    written inline in Return's one input, with nothing else to keep: no locals, positions,
+    boxes, names, decorators or comments on the two nodes."""
     if g.kind != "func" or g.owner or g.results is None or len(g.results) != 1 or g.locals \
-            or g.states or g.places or g.boxes or g.orphan_meta \
-            or any(n.meta for n in g.nodes):
+            or g.states or g.places or g.boxes or any(n.meta for n in g.nodes) or names.regions:
         return None
-    entry, ret = g.node("entry"), g.node("ret")
-    if entry is None or ret is None or entry.kind != "Entry" or ret.kind != "Return" \
-            or [n.id for n in names.declared(g.nodes)] != ["entry", "ret"]:
+    if len(names.top) != 2 or not all(isinstance(s, _Exec) for s in names.top):
+        return None
+    entry, ret = names.nodes[names.top[0].nid], names.nodes[names.top[1].nid]
+    if entry.kind != "Entry" or ret.kind != "Return" or names.named:
         return None
     if entry.bindings or entry.attrs or entry.comment or ret.attrs or ret.comment or ret.execs:
         return None
-    if len(entry.execs) != 1:
-        return None
-    e = entry.execs[0]
-    if e.target != "ret" or e.target_pin or e.comment or e.pin not in (None, "then"):
+    if len(entry.execs) != 1 or entry.execs[0].comment:
         return None
     if len(ret.bindings) != 1 or ret.bindings[0].pin != g.results[0].name \
             or ret.bindings[0].comment:
         return None
+    if len(g.nodes) != 2 + sum(1 for nid in names.parent if names.root(nid) == ret.id):
+        return None
     return ret.bindings[0]
 
 
-def fmt_graph(g: Graph, idx: ModuleIndex, indent: str = "", semantic=False,
-              order: list = None) -> list:
-    """A graph: its locals and states, its `flow` block, its node statements and its layout
-    block (section 2.5, rule 3). `order` (node ids) lists the node statements and wires in
-    that order instead of by name, for `wiretc view --flow`."""
-    head = f"{indent}{g.kind} {g.short_name}"
-    if g.tparams:
-        head += fmt_targs(g.tparams)
-    head += fmt_params(g.params)
-    if g.results is not None:
-        head += " -> " + fmt_params(g.results)
-    head = above(g, indent, semantic) + [head + fmt_attrs(g.attrs)]
-    names = GraphNames(g, idx)
-    value = expr_value(g, names)
-    if value is not None:
-        names.bare, names.current = "entry", "ret"
-        return head[:-1] + [head[-1] + " = " + fmt_input(value, indent, names)]
-    lines = head[:-1] + [head[-1] + " {"]
-    top = len(lines)
-    inner = indent + IND
-    for l in sorted(g.locals, key=lambda l: l.name):
-        lines.extend(fmt_local("local", l, inner, semantic))
-    for l in sorted(g.states, key=lambda l: l.name):
-        lines.extend(fmt_local("state", l, inner, semantic))
-    declared = names.declared(g.nodes)
-    if order is not None:
-        rank = {nid: i for i, nid in enumerate(order)}
-        declared.sort(key=lambda n: rank.get(n.id, len(rank)))
-    wires = [w for n in declared for w in fmt_wires(n, names.sigs[n.id], names)]
-    if wires:
-        if len(lines) > top:
-            lines.append("")
-        lines.append(f"{inner}flow {{")
-        lines.extend(f"{inner}{IND}{w}" for w in wires)
-        lines.append(f"{inner}}}")
-    if declared and len(lines) > top:
-        lines.append("")
-    for n in declared:
-        lines.append(fmt_node(n, names.sigs[n.id], inner, semantic, names))
-    if not semantic:
-        lines.extend(fmt_layout(g, names, inner))
-    lines.append(indent + "}")
+def _bound_list(names: GraphNames, nid: str, pin: str) -> str:
+    bound = names.bound.get((nid, pin), {})
+    if not bound:
+        return ""
+    sig = names.sigs[nid]
+    order = {p.name: i for i, p in enumerate(sig.data_outs + sig.exec_ins)}
+    return "(" + ", ".join(sorted(bound, key=lambda k: order.get(k, len(order)))) + ")"
+
+
+def fmt_stmts(stmts: list, names: GraphNames, indent: str, scope: dict, semantic: bool) -> list:
+    lines = []
+    for st in stmts:
+        if isinstance(st, _Goto):
+            if not semantic:
+                lines.extend(fmt_comment(st.comment, indent))
+            if st.bound:
+                lines.append(f"{indent}goto {st.tpin}")
+            else:
+                t = names.name(st.target)
+                lines.append(f"{indent}goto {t}" + (f".{st.tpin}" if st.tpin else ""))
+            continue
+        lines.extend(fmt_exec(st, names, indent, scope, semantic))
     return lines
 
 
-def fmt_layout(g: Graph, names: GraphNames, inner: str) -> list:
-    """The layout block: for each node, by the name it is written with, its metadata lines
-    and its `place` line (just the name when it has no position), then the boxes."""
-    places = {}
-    for p in g.places:
-        places.setdefault(p.id, p)
-    metas = {}
-    for n in g.nodes:
-        if n.meta:
-            metas.setdefault(n.id, n.meta)
-    for nid, meta in g.orphan_meta.items():     # stale names (W0605), kept as written
-        if nid not in metas:
-            metas[nid] = meta
-    ids = sorted(set(places) | set(metas), key=lambda i: names.name(i))
-    if not ids and not g.boxes:
-        return []
-    out = ["", f"{inner}layout {{"]
-    for nid in ids:
-        out.extend(fmt_meta(metas.get(nid, []), inner + IND))
-        p = places.get(nid)
-        pos = f" at ({p.x}, {p.y}){fmt_props(p.props)}" if p else ""
-        out.append(f"{inner}{IND}{names.name(nid)}{pos}")
-    for b in sorted(g.boxes, key=lambda b: b.id):
-        out.extend(fmt_meta(b.meta, inner + IND))
-        props = b.props
-        m = b.prop("members")
-        if m is not None and m.kind == "list":
-            props = [(k, Lit("list", [Lit("ident", names.name(x.value)) if x.kind == "ident" else x
-                                      for x in v.value]) if k == "members" else v)
-                     for k, v in b.props]
-        out.append(f"{inner}{IND}box {b.id} {fmt_string(b.title)} at ({b.x}, {b.y}) "
-                   f"size ({b.w}, {b.h}){fmt_props(props)}")
-    out.append(f"{inner}}}")
-    return out
+def fmt_exec(st: _Exec, names: GraphNames, indent: str, scope: dict, semantic: bool,
+             bang: str = "") -> list:
+    n, sig = names.nodes[st.nid], names.sigs[st.nid]
+    if names.is_named(st.nid):
+        lines = [f"{indent}{bang}exec {names.name(st.nid)}"]
+    else:
+        deco = decorator_lines(Node("", "", meta=n.meta, attrs=node_decorators(n),
+                                    comment=n.comment), indent, semantic)
+        lines = deco + (f"{indent}{bang}exec " + fmt_expr(n, sig, indent, names, semantic,
+                                                         scope)).split("\n")
+    for pin, blk in st.outs:
+        # the first output follows the node's `)`; each later one follows the `}` that
+        # closes the block before it
+        if blk is None:             # the flattened last output: `}.pin`
+            lines[-1] += f".{pin}"
+            continue
+        inner = dict(scope)
+        inner.update(names.bound.get((st.nid, pin), {}))
+        lines[-1] += f".{pin}{_bound_list(names, st.nid, pin)} -> {{"
+        lines.extend(fmt_stmts(blk, names, indent + IND, inner, semantic))
+        lines.append(f"{indent}}}")
+    return lines
+
+def fmt_graph(g: Graph, idx: ModuleIndex, indent: str = "", semantic=False) -> list:
+    """A graph: its decorators and head, then its locals and states, its boxes, its named
+    nodes, its `exec` statements from Entry, and the statements that nothing reaches."""
+    head = f"{indent}{g.kind} {g.short_name}"
+    if g.tparams:
+        head += "#<" + ", ".join(g.tparams) + ">"
+    head += fmt_params(g.params, receiver=bool(g.receiver))
+    if g.results is not None:
+        head += " -> " + fmt_params(g.results)
+    names = GraphNames(g, idx, semantic=semantic)
+    lines = decorator_lines(g, indent, semantic) + [head]
+    value = expr_value(g, names)
+    if value is not None:
+        names.current = names.top[1].nid
+        return lines[:-1] + [lines[-1] + " = " + fmt_input(value, indent, names, {})]
+    lines[-1] += " {"
+    inner = indent + IND
+    groups = []
+    loc = []
+    for l in sorted(g.locals, key=lambda l: l.name):
+        loc.extend(fmt_local("local", l, inner, semantic))
+    for l in sorted(g.states, key=lambda l: l.name):
+        loc.extend(fmt_local("state", l, inner, semantic))
+    groups.append(loc)
+    if not semantic:
+        bx = []
+        for b in g.boxes:
+            bx.extend(fmt_meta(b.meta, inner))
+            bx.append(f"{inner}box {fmt_props(box_props(b), BOX_PROP_ORDER)}")
+        groups.append(bx)
+    decl = []
+    for n in names.declared():
+        sig = names.sigs[n.id]
+        deco = decorator_lines(Node("", "", meta=n.meta, attrs=node_decorators(n),
+                                    comment=n.comment), inner, semantic)
+        decl.extend(deco)
+        decl.extend((f"{inner}node {names.name(n.id)} = "
+                     + fmt_expr(n, sig, inner, names, semantic, {})).split("\n"))
+    groups.append(decl)
+    groups.append(fmt_stmts(names.top, names, inner, {}, semantic))
+    for kind, s in names.regions:
+        if kind == "pure":
+            n = names.nodes[s]
+            deco = decorator_lines(Node("", "", meta=n.meta, attrs=node_decorators(n),
+                                        comment=n.comment), inner, semantic)
+            groups.append(deco + (f"{inner}!" + fmt_expr(n, names.sigs[s], inner, names,
+                                                         semantic, {})).split("\n"))
+        elif kind == "exec":
+            groups.append(fmt_exec(s[0], names, inner, {}, semantic, bang="!"))
+        else:
+            groups.append([f"{inner}!{{"] + fmt_stmts(s, names, inner + IND, {}, semantic)
+                          + [f"{inner}}}"])
+    body = []
+    for grp in groups:
+        if grp:
+            if body:
+                body.append("")
+            body.extend(grp)
+    return lines + body + [indent + "}"]
 
 
 def fmt_type_decl(it, semantic=False) -> list:
@@ -495,22 +985,21 @@ def fmt_type_decl(it, semantic=False) -> list:
         head = f"struct {it.name}"
         members = []
         for f in it.fields:
-            line = f"{IND}{f.name}: {f.type}"
+            line = f"{IND}{fmt_attrs(f.attrs)}{f.name}: {fmt_type(f.type)}"
             if f.default is not None:
                 line += f" = {fmt_lit(f.default)}"
-            members.append((f, line + fmt_attrs(f.attrs)))
+            members.append((f, line))
     else:
         head = f"enum {it.name}" + (f": {it.base}" if it.base else "")
         members = []
         for m in it.members:
-            line = f"{IND}{m.name}" + (f" = {m.value}" if m.value is not None else "")
-            members.append((m, line + fmt_attrs(m.attrs)))
-    head += fmt_attrs(it.attrs)
+            line = f"{IND}{fmt_attrs(m.attrs)}{m.name}" + (f" = {m.value}" if m.value is not None else "")
+            members.append((m, line))
     if not members:
         return [head + " {}"]
     lines = [head + " {"]
     for m, line in members:
-        lines.extend(above(m, IND, semantic))
+        lines.extend(decorator_lines(m, IND, semantic, attrs=False))
         lines.append(line)
     return lines + ["}"]
 
@@ -519,44 +1008,44 @@ def fmt_class(c: Class, methods: list, idx: ModuleIndex, semantic=False) -> list
     """A class: fields in the order written (their layout), then its methods, funcs before
     events, each by name, with a blank line before each method."""
     head = (f"class {c.name}" + (f" : {c.base}" if c.base else "")
-            + (f" impl {', '.join(c.impls)}" if c.impls else "") + fmt_attrs(c.attrs))
+            + (f" impl {', '.join(c.impls)}" if c.impls else ""))
     if not c.fields and not c.dispatchers and not methods:
         return [head + " {}"]
     lines = [head + " {"]
     for f in c.fields:
-        line = f"{IND}{f.name}: {f.type}"
+        line = f"{IND}{fmt_attrs(f.attrs)}{f.name}: {fmt_type(f.type)}"
         if f.default is not None:
             line += f" = {fmt_lit(f.default)}"
-        lines.extend(above(f, IND, semantic))
-        lines.append(line + fmt_attrs(f.attrs))
+        lines.extend(decorator_lines(f, IND, semantic, attrs=False))
+        lines.append(line)
     for d in c.dispatchers:
-        lines.extend(above(d, IND, semantic))
-        lines.append(f"{IND}dispatcher {d.name}{fmt_params(d.params)}{fmt_attrs(d.attrs)}")
+        lines.extend(decorator_lines(d, IND, semantic))
+        lines.append(f"{IND}dispatcher {d.name}{fmt_params(d.params)}")
     for g in sorted(methods, key=lambda g: (g.kind != "func", g.name)):
         if len(lines) > 1:
             lines.append("")
-        lines.extend(fmt_graph(g, idx, IND, semantic))     # its #[...] lines included
+        lines.extend(fmt_graph(g, idx, IND, semantic))     # its decorator lines included
     return lines + ["}"]
 
 
 def fmt_interface(it: Interface, semantic=False) -> list:
     """An interface: its method signatures in the order written (their dispatch slots)."""
-    head = f"interface {it.name}{fmt_attrs(it.attrs)}"
+    head = f"interface {it.name}"
     if not it.methods:
         return [head + " {}"]
     lines = [head + " {"]
     for m in it.methods:
-        s = f"{IND}func {m.name}{fmt_params(m.params)}"
+        s = f"{IND}func {m.name}{fmt_params(m.params, receiver=True)}"
         if m.results is not None:
             s += " -> " + fmt_params(m.results)
-        lines.extend(above(m, IND, semantic))
-        lines.append(s + fmt_attrs(m.attrs))
+        lines.extend(decorator_lines(m, IND, semantic))
+        lines.append(s)
     return lines + ["}"]
 
 
 def fmt_item(it, idx: ModuleIndex, semantic=False, methods=None) -> list:
     if isinstance(it, Graph):
-        return fmt_graph(it, idx, "", semantic)        # its `//` and #[...] lines included
+        return fmt_graph(it, idx, "", semantic)
     if isinstance(it, Interface):
         return above(it, "", semantic) + fmt_interface(it, semantic)
     if isinstance(it, Class):
@@ -568,19 +1057,19 @@ def fmt_item(it, idx: ModuleIndex, semantic=False, methods=None) -> list:
 
 def _fmt_decl(it) -> list:
     if isinstance(it, Use):
-        return [f"use {it.name}" + (f" as {it.alias}" if it.alias else "") + fmt_attrs(it.attrs)]
+        return [f"use {it.name}" + (f" as {it.alias}" if it.alias else "")]
     if isinstance(it, Extern):
         if it.kind == "type":
-            return [f"extern type {it.name}{fmt_attrs(it.attrs)}"]
+            return [f"extern type {it.name}"]
         s = f"extern func {it.name}{fmt_params(it.params)}"
         if it.results is not None:
             s += " -> " + fmt_params(it.results)
-        return [s + fmt_attrs(it.attrs)]
+        return [s]
     if isinstance(it, Const):
-        return [f"const {it.name}: {it.type} = {fmt_lit(it.value)}{fmt_attrs(it.attrs)}"]
+        return [f"const {it.name}: {fmt_type(it.type)} = {fmt_lit(it.value)}"]
     if isinstance(it, Var):
         d = f" = {fmt_lit(it.default)}" if it.default is not None else ""
-        return [f"var {it.name}: {it.type}{d}{fmt_attrs(it.attrs)}"]
+        return [f"var {it.name}: {fmt_type(it.type)}{d}"]
     raise TypeError(it)
 
 
@@ -589,8 +1078,7 @@ def print_module(m: Module, semantic=False) -> str:
         m = copy.deepcopy(m)
         strip_comments(m)
     idx = ModuleIndex(m)
-    lines = ([f"wiret {m.version}"] + above(m, "", semantic)
-             + [f"module {m.name}{fmt_attrs(m.attrs)}"])
+    lines = ([f"wiret {m.version}"] + above(m, "", semantic) + [f"module {m.name}"])
     owned = {}
     for it in m.items:
         if isinstance(it, Graph) and it.owner:
@@ -601,10 +1089,12 @@ def print_module(m: Module, semantic=False) -> str:
     for it in items:
         k = item_kind(it)
         block = isinstance(it, (Graph, Struct, Enum, Class, Interface))
-        if block or k != prev_kind:
+        decorated = bool(getattr(it, "meta", None) or getattr(it, "attrs", None)
+                         or getattr(it, "comment", None))
+        if block or k != prev_kind or decorated:
             lines.append("")
         lines.extend(fmt_item(it, idx, semantic, owned.get(it.name)))
-        prev_kind = k if not block else None
+        prev_kind = k if not (block or decorated) else None
     text = "\n".join(lines) + "\n"
     return unicodedata.normalize("NFC", text)
 

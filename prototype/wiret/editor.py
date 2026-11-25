@@ -42,19 +42,10 @@ module untitled
 extern func host.Log(message: string)
 
 func Main() {
-  flow {
-    entry -> hello
-  }
-
-  node entry = Entry()
-  node hello = Call host.Log(
-    .message <- "Hello, Wiret!",
+  exec Entry{pos=(0, 0)}()
+  exec Call host.Log{pos=(200, 0)}(
+    .message <- "Hello, Wiret!"
   )
-
-  layout {
-    entry at (0, 0)
-    hello at (200, 0)
-  }
 }
 """
 
@@ -927,14 +918,17 @@ class EditorApp:
         self.commit(f"Deleted box {bid}")
 
     def rename_node(self, nid):
-        new = simpledialog.askstring("Rename node", f"New id for '{nid}' (renames every wire):",
-                                     initialvalue=nid, parent=self.root)
+        n = self.graph.node(nid)
+        new = simpledialog.askstring("Name node", f"Name for '{nid}' (a named node is declared at "
+                                     f"the top of the function, and every wire follows):",
+                                     initialvalue=nid if n is not None and n.named else "",
+                                     parent=self.root)
         if not new:
             return
         try:
             reason = canvasedit.rename_node(self.graph, nid, new)
         except canvasedit.Refused as e:
-            messagebox.showerror("Rename", str(e))
+            messagebox.showerror("Name", str(e))
             return
         if reason is None:
             return
@@ -1006,14 +1000,6 @@ class EditorApp:
         if reason:
             self.commit(reason)
 
-    def edit_members(self, bid):
-        b = self.graph.box(bid)
-        text = simpledialog.askstring("Members", "Member node/box ids, comma separated "
-                                                 "(membership is explicit, section 2.3):",
-                                      initialvalue=", ".join(b.members()), parent=self.root)
-        if text is None:
-            return
-        self.commit(canvasedit.set_members(self.graph, bid, text))
 
     def resize_box(self, bid):
         b = self.graph.box(bid)
@@ -1148,7 +1134,6 @@ class EditorApp:
         elif h[0] in ("box", "boxtitle"):
             bid = h[1]
             menu.add_command(label="Rename title…", command=lambda: self.rename_box(bid))
-            menu.add_command(label="Edit members…", command=lambda: self.edit_members(bid))
             menu.add_command(label="Resize…", command=lambda: self.resize_box(bid))
             menu.add_command(label="Colour…", command=lambda: self.set_color(bid))
             menu.add_command(label="Add note…", command=lambda: self.add_note(bid))
@@ -1192,16 +1177,15 @@ class EditorApp:
         bp = (self.graph_name, nid) in self.breakpoints
         menu.add_command(label=("Remove breakpoint" if bp else "Set breakpoint") + "  (F9)",
                          command=lambda: self.toggle_breakpoint(nid))
-        if "." not in nid:          # an inline node's name says where it is written
-            menu.add_command(label="Rename id…", command=lambda: self.rename_node(nid))
+        menu.add_command(label="Name…", command=lambda: self.rename_node(nid))
         menu.add_command(label="Label…", command=lambda: self.set_label(nid))
         menu.add_command(label="Colour…", command=lambda: self.set_color(nid))
         menu.add_command(label="Add note…", command=lambda: self.add_note(nid))
         if n.kind == "Sequence":
-            menu.add_command(label="Set output count (@count)…",
+            menu.add_command(label="Set output count (#count)…",
                              command=lambda: self.set_int_attr(nid, "count", "Number of outputs:"))
         if n.kind == "Switch":
-            menu.add_command(label="Set cases (@cases)…", command=lambda: self.set_cases(nid))
+            menu.add_command(label="Set cases (#cases)…", command=lambda: self.set_cases(nid))
         if n.kind not in ("Entry",):
             menu.add_command(label=("Enable" if n.attr("disabled") else "Disable") + " (@disabled)",
                              command=lambda: self.toggle_attr(nid, "disabled"))

@@ -1,61 +1,41 @@
 wiret 1
 module lessons.loops
 
-extern func host.Log(message: string)
+extern func host.Log(message: string) -> ()
 
-#[note("Lesson 4: Loops. ForRange runs the 'each' path once for every number from first to last. index is the current number. When the 'each' path reaches its end, the loop goes round again. After the last number it follows 'done'.")]
-#[note("Try it: (1) Turn on Animate and press Run to watch the loop go round. (2) Count to 10 instead of 5. (3) What total do you get for 1 to 100?")]
+@note("Lesson 4: Loops. ForRange runs the 'each' path once for every number from first to last. index is the current number. When the 'each' path reaches its end, the loop goes round again. After the last number it follows 'done'.")
+@note("Try it: (1) Turn on Animate and press Run to watch the loop go round. (2) Count to 10 instead of 5. (3) What total do you get for 1 to 100?")
 func Main() {
   local total: i32
 
-  flow {
-    count.each -> say
-    count.done -> report
-    entry -> count
-    say -> keep
-  }
-
-  node count = Macro std.flow.ForRange(
-    .first <- 1,
-    .last <- 5,
-  )
-  node entry = Entry()
-  node keep = SetLocal total(
-    .value <- Add::<i32>(
-      .a <- GetLocal total(),
-      .b <- count.index,
-    ),
-  )
-  node report = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- "Total: ",
-      .b <- Convert::<i32, string>(
-        .value <- GetLocal total(),
-      ),
-    ),
-  )
-  node say = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- "Counting: ",
-      .b <- Convert::<i32, string>(
-        .value <- count.index,
-      ),
-    ),
-  )
-
-  layout {
-    count at (200, 0)
-    entry at (0, 0)
-    #[note("Adds index to the running total each time round.")]
-    keep at (1160, 0)
-    keep.value at (1021, 155)
-    keep.value.a at (844, 115)
-    report at (1200, 268)
-    report.message at (986, 341)
-    report.message.b at (760, 361)
-    report.message.b.value at (564, 361)
-    say at (820, 0)
-    say.message at (541, 240)
-    say.message.b at (302, 260)
+  exec Entry{pos=(0, 0)}()
+  exec Macro std.flow.ForRange{pos=(200, 0)}(
+    .first <- 1
+    .last <- 5
+  ).each(index) -> {
+    exec Call host.Log{pos=(820, 0)}(
+      .message <- Call std.string.Concat{pos=(541, 240)}(
+        .a <- "Counting: "
+        .b <- Convert#<i32, string>{pos=(302, 260)}(
+          .value <- index
+        )
+      )
+    )
+    @note("Adds index to the running total each time round.")
+    exec SetLocal total{pos=(1160, 0)}(
+      .value <- Add#<i32>{pos=(1021, 155)}(
+        .a <- GetLocal total{pos=(844, 115)}()
+        .b <- index
+      )
+    )
+  }.done -> {
+    exec Call host.Log{pos=(1200, 268)}(
+      .message <- Call std.string.Concat{pos=(986, 341)}(
+        .a <- "Total: "
+        .b <- Convert#<i32, string>{pos=(760, 361)}(
+          .value <- GetLocal total{pos=(564, 361)}()
+        )
+      )
+    )
   }
 }

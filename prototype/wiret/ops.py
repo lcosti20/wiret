@@ -31,8 +31,10 @@ def fresh_id(g: Graph, base: str, rng=random) -> str:
 
 
 def create_node(g: Graph, kind: str, symbol=None, targs=None, x=0, y=0, nid=None) -> Node:
+    """A new node. Given an id it is a named node (`node nid = ...`); otherwise it is anonymous
+    and its id is a placeholder until the text is read back (section 2.3)."""
     base = (symbol.split(".")[-1] if symbol and kind in ("Call", "Macro") else kind)
-    n = Node(nid or fresh_id(g, base), kind, symbol, list(targs or []))
+    n = Node(nid or fresh_id(g, base), kind, symbol, list(targs or []), named=nid is not None)
     g.nodes.append(n)
     g.places.append(Place(n.id, int(x), int(y)))
     return n
@@ -83,17 +85,15 @@ def delete_node(g: Graph, node_id: str) -> list:
             if e.target == node_id:
                 n.execs.remove(e)
                 removed.append(f"{n.id}.{e.pin or 'then'} -> {node_id}")
-    prune_box_members(g)
     return removed
 
 
 def delete_box(g: Graph, box_id: str) -> None:
-    """Delete a box (not its members). Its notes move to the graph, detached."""
+    """Delete a box (not the nodes inside it). Its notes move to the graph, detached."""
     b = g.box(box_id)
     if b is not None:
         detach_notes(g, b)
     g.boxes = [x for x in g.boxes if x.id != box_id]
-    prune_box_members(g)
 
 
 def detach_notes(g: Graph, owner) -> None:
@@ -104,20 +104,16 @@ def detach_notes(g: Graph, owner) -> None:
     owner.meta = [a for a in owner.meta if a.name != "note"]
 
 
-def prune_box_members(g: Graph) -> None:
-    """Drop member ids that name nothing (W0601: removed on the next editor save)."""
-    ids = {n.id for n in g.nodes} | {b.id for b in g.boxes}
-    for b in g.boxes:
-        m = b.prop("members")
-        if m is not None and m.kind == "list":
-            b.set_prop("members", Lit("list", [v for v in m.value
-                                               if v.kind != "ident" or v.value in ids]))
-
-
 def rename_node(g: Graph, old: str, new: str) -> None:
-    for n in g.nodes:
+    """Name a node, or rename a named one. A node named for the first time goes after the
+    names already there (section 2.3)."""
+    for n in list(g.nodes):
         if n.id == old:
             n.id = new
+            if not n.named:
+                n.named = True
+                g.nodes.remove(n)
+                g.nodes.append(n)
         for b in n.bindings:
             if isinstance(b.value, PinRef) and b.value.node == old:
                 b.value.node = new
@@ -127,17 +123,19 @@ def rename_node(g: Graph, old: str, new: str) -> None:
     for p in g.places:
         if p.id == old:
             p.id = new
-    for b in g.boxes:
-        m = b.prop("members")
-        if m is not None and m.kind == "list":
-            for v in m.value:
-                if v.kind == "ident" and v.value == old:
-                    v.value = new
+
+
+def inside(b: Box, p: Place) -> bool:
+    return b.x <= p.x <= b.x + b.w and b.y <= p.y <= b.y + b.h
 
 
 def place(g: Graph, nid: str, x: int, y: int) -> None:
+    """Move a node, or a box and every node that lies inside it (section 2.3)."""
     b = g.box(nid)
     if b is not None:
+        dx, dy = int(x) - b.x, int(y) - b.y
+        for p in [p for p in g.places if inside(b, p)]:
+            p.x, p.y = p.x + dx, p.y + dy
         b.x, b.y = int(x), int(y)
         return
     p = g.place(nid)
@@ -148,7 +146,7 @@ def place(g: Graph, nid: str, x: int, y: int) -> None:
 
 
 def add_note(g: Graph, on: Optional[str], text: str) -> Attr:
-    """Add a `#[note]` to a node or box (`on`), or to the whole graph (`on` is None)."""
+    """Add an `@note` to a node or box (`on`), or to the whole graph (`on` is None)."""
     nt = note(text)
     g.note_owner(on).meta.append(nt)
     return nt
@@ -176,7 +174,7 @@ def delete_note(g: Graph, key: str) -> None:
 
 
 def convert_comments(m: Module) -> list:
-    """`--convert-comments`: turn each `//` comment into a `#[note]` above the next node or
+    """`--convert-comments`: turn each `//` comment into an `@note` above the next node or
     graph, so it stays where it was written (section 2.1).
 
     Returns messages for comments that had nothing to attach to and were dropped.

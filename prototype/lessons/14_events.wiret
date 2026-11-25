@@ -1,171 +1,107 @@
 wiret 1
 module lessons.events
 
-extern func host.Log(message: string)
+extern func host.Log(message: string) -> ()
 
-#[doc("A button that tells whoever is listening when it is clicked.")]
+@doc("A button that tells whoever is listening when it is clicked.")
 class Button {
   dispatcher OnClick(times: i32)
 
-  #[note("Click counts its clicks in a state slot, which every button keeps for itself, then tells every listener with Broadcast.")]
-  func Click() {
+  @note("Click counts its clicks in a state slot, which every button keeps for itself, then tells every listener with Broadcast.")
+  func Click(self) {
     state clicks: i32
 
-    flow {
-      entry -> save
-      save -> tell
-    }
-
-    node entry = Entry()
-    node save = SetState clicks(
-      .value <- Add::<i32>(
-        .a <- GetState clicks(),
-        .b <- 1,
-      ),
+    exec Entry{pos=(0, 0)}()
+    exec SetState clicks{pos=(250, 0)}(
+      .value <- Add#<i32>{pos=(50, 110)}(
+        .a <- GetState clicks{pos=(-141, 110)}()
+        .b <- 1
+      )
     )
-    node tell = Broadcast Button.OnClick(
-      .obj <- entry.self,
-      .times <- GetState clicks(),
+    exec Broadcast Button.OnClick{pos=(500, 0)}(
+      .obj <- self
+      .times <- GetState clicks{pos=(300, 110)}()
     )
-
-    layout {
-      entry at (0, 0)
-      save at (250, 0)
-      save.value at (50, 110)
-      save.value.a at (-141, 110)
-      tell at (500, 0)
-      tell.times at (300, 110)
-    }
   }
 }
 
-#[doc("Counts the clicks it hears.")]
+@doc("Counts the clicks it hears.")
 class Counter {
   heard: i32
 
-  #[note("Heard is a handler: its inputs match OnClick, so it can listen to a button.")]
-  func Heard(times: i32) {
-    flow {
-      entry -> save
-    }
-
-    node entry = Entry()
-    node save = SetField Counter.heard(
-      .obj <- entry.self,
-      .value <- Add::<i32>(
-        .a <- GetField Counter.heard(
-          .obj <- entry.self,
-        ),
-        .b <- 1,
-      ),
+  @note("Heard is a handler: its inputs match OnClick, so it can listen to a button.")
+  func Heard(self, times: i32 = 1) {
+    exec Entry{pos=(0, 0)}()
+    exec SetField Counter.heard{pos=(581, 0)}(
+      .obj <- self
+      .value <- Add#<i32>{pos=(393, 78)}(
+        .a <- GetField Counter.heard{pos=(213, 78)}(
+          .obj <- self
+        )
+        .b <- 1
+      )
     )
-
-    layout {
-      entry at (0, 0)
-      save at (581, 0)
-      save.value at (393, 78)
-      save.value.a at (213, 78)
-    }
   }
 }
 
-#[note("Announce is another handler, a plain function this time.")]
+@note("Announce is another handler, a plain function this time.")
 func Announce(times: i32) {
-  flow {
-    entry -> say
-  }
-
-  node entry = Entry()
-  node say = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- "Click number ",
-      .b <- Convert::<i32, string>(
-        .value <- entry.times,
-      ),
-    ),
+  exec Entry{pos=(0, 0)}()
+  exec Call host.Log{pos=(719, 0)}(
+    .message <- Call std.string.Concat{pos=(452, 53)}(
+      .a <- "Click number "
+      .b <- Convert#<i32, string>{pos=(185, 73)}(
+        .value <- times
+      )
+    )
   )
-
-  layout {
-    entry at (0, 0)
-    say at (719, 0)
-    say.message at (452, 53)
-    say.message.b at (185, 73)
-  }
 }
 
-#[note("Lesson 14: Events. A dispatcher is a list of listeners on an object: Bind adds one, Unbind removes one, and Broadcast calls them all. A listener is a delegate, made with CreateDelegate from a function, or from a method plus the object to call it on.")]
-#[note("Try it: (1) Move the Unbind to the end: Announce hears all three clicks. (2) Make a second Counter and bind it too. (3) Change Heard to an event with a Delay: a delegate starts an event on its own, so Click does not wait.")]
+@note("Lesson 14: Events. A dispatcher is a list of listeners on an object: Bind adds one, Unbind removes one, and Broadcast calls them all. A listener is a delegate, made with CreateDelegate from a function, or from a method plus the object to call it on.")
+@note("Try it: (1) Move the Unbind to the end: Announce hears all three clicks. (2) Make a second Counter and bind it too. (3) Change Heard to an event with a Delay: a delegate starts an event on its own, so Click does not wait.")
 func Main() {
-  flow {
-    b -> c
-    bind_a -> bind_c
-    bind_c -> click1
-    c -> bind_a
-    click1 -> click2
-    click2 -> unbind_a
-    click3 -> say
-    entry -> b
-    unbind_a -> click3
-  }
+  node b = New Button{pos=(250, 0)}()
+  node c = New Counter{pos=(500, 0)}()
+  node announce = CreateDelegate Announce{pos=(381, 214)}()
 
-  node announce = CreateDelegate Announce()
-  node b = New Button()
-  node bind_a = Bind Button.OnClick(
-    .obj <- b,
-    .handler <- announce,
+  exec Entry{pos=(0, 0)}()
+  exec b
+  exec c
+  exec Bind Button.OnClick{pos=(750, 0)}(
+    .obj <- b
+    .handler <- announce
   )
-  node bind_c = Bind Button.OnClick(
-    .obj <- b,
-    .handler <- CreateDelegate Counter.Heard(
-      .target <- c,
-    ),
+  exec Bind Button.OnClick{pos=(1000, 0)}(
+    .obj <- b
+    .handler <- CreateDelegate Counter.Heard{pos=(698, 154)}(
+      .target <- c
+    )
   )
-  node c = New Counter()
-  node click1 = Call Button.Click(
-    .self <- b,
+  exec Call Button.Click{pos=(1250, 0)}(
+    .self <- b
   )
-  node click2 = Call Button.Click(
-    .self <- b,
+  exec Call Button.Click{pos=(1500, 0)}(
+    .self <- b
   )
-  node click3 = Call Button.Click(
-    .self <- b,
+  @note("After this, Announce stops listening, but the counter goes on.")
+  exec Unbind Button.OnClick{pos=(1750, 0)}(
+    .obj <- b
+    .handler <- announce
   )
-  node entry = Entry()
-  node say = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- "The counter heard ",
-      .b <- Call std.string.Concat(
-        .a <- Convert::<i32, string>(
-          .value <- GetField Counter.heard(
-            .obj <- c,
-          ),
-        ),
-        .b <- " clicks",
-      ),
-    ),
+  exec Call Button.Click{pos=(2000, 0)}(
+    .self <- b
   )
-  node unbind_a = Unbind Button.OnClick(
-    .obj <- b,
-    .handler <- announce,
+  exec Call host.Log{pos=(2250, 0)}(
+    .message <- Call std.string.Concat{pos=(1981, 141)}(
+      .a <- "The counter heard "
+      .b <- Call std.string.Concat{pos=(1764, 161)}(
+        .a <- Convert#<i32, string>{pos=(1522, 161)}(
+          .value <- GetField Counter.heard{pos=(1276, 161)}(
+            .obj <- c
+          )
+        )
+        .b <- " clicks"
+      )
+    )
   )
-
-  layout {
-    announce at (381, 214)
-    b at (250, 0)
-    bind_a at (750, 0)
-    bind_c at (1000, 0)
-    bind_c.handler at (698, 154)
-    c at (500, 0)
-    click1 at (1250, 0)
-    click2 at (1500, 0)
-    click3 at (2000, 0)
-    entry at (0, 0)
-    say at (2250, 0)
-    say.message at (1981, 141)
-    say.message.b at (1764, 161)
-    say.message.b.a at (1522, 161)
-    say.message.b.a.value at (1276, 161)
-    #[note("After this, Announce stops listening, but the counter goes on.")]
-    unbind_a at (1750, 0)
-  }
 }

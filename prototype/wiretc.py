@@ -153,7 +153,7 @@ def main(argv=None):
     p = sub.add_parser("diff")
     p.add_argument("a")
     p.add_argument("b")
-    p.add_argument("--raw", action="store_true", help="the id-ordered text diff instead")
+    p.add_argument("--raw", action="store_true", help="the plain text diff instead")
     p = sub.add_parser("merge")
     p.add_argument("base")
     p.add_argument("ours")

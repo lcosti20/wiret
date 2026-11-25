@@ -1,233 +1,193 @@
 wiret 1
-module game.demo @id("mod_k3f9")
+@id("mod_k3f9")
+module game.demo
 
-extern func host.Log(message: string) @capability("console.write")
+@capability("console.write")
+extern func host.Log(message: string)
 
 var runs: i32 = 0
 
 macro DoOnce(in: exec, reset: exec) -> (out: exec) {
   state fired: bool
 
-  flow {
-    check.else -> mark
-    entry.in -> check
-    entry.reset -> clear
-    mark -> fire
+  exec Entry().in -> {
+    exec Branch(
+      .cond <- GetState fired()
+    ).else -> {
+      exec SetState fired(
+        .value <- true
+      )
+      exec Exit out()
+    }
+  }.reset -> {
+    exec SetState fired(
+      .value <- false
+    )
   }
-
-  node check = Branch(
-    .cond <- GetState fired(),
-  )
-  node clear = SetState fired(
-    .value <- false,
-  )
-  node entry = Entry()
-  node fire = Exit out()
-  node mark = SetState fired(
-    .value <- true,
-  )
 }
 
 macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, index: i32) {
   local i: i32
 
-  flow {
-    bump -> test
-    entry -> init
-    init -> test
-    seq.then0 -> each_out
-    seq.then1 -> bump
-    test.then -> seq
-    test.else -> finish
-  }
-
-  node bump = SetLocal i(
-    .value <- Add::<i32>(
-      .a <- cur,
-      .b <- 1,
-    ),
-  )
   node cur = GetLocal i()
-  node each_out = Exit each(
-    .index <- cur,
-  )
-  node entry = Entry()
-  node finish = Exit done()
-  node init = SetLocal i(
-    .value <- entry.first,
-  )
-  node seq = Sequence() @count(2)
   node test = Branch(
-    .cond <- Le::<i32>(
-      .a <- cur,
-      .b <- entry.last,
-    ),
+    .cond <- Le#<i32>(
+      .a <- cur
+      .b <- last
+    )
   )
+
+  exec Entry()
+  exec SetLocal i(
+    .value <- first
+  )
+  exec test.then -> {
+    exec Sequence#count<2>().then0 -> {
+      exec Exit each(
+        .index <- cur
+      )
+    }.then1
+    exec SetLocal i(
+      .value <- Add#<i32>(
+        .a <- cur
+        .b <- 1
+      )
+    )
+    goto test
+  }.else -> {
+    exec Exit done()
+  }
 }
 
-func Clamp01(v: f32) -> (result: f32) @pure = Min::<f32>(
-  .a <- Max::<f32>(
-    .a <- v,
-    .b <- 0.0,
-  ),
-  .b <- 1.0,
+@pure
+func Clamp01(v: f32) -> (result: f32) = Min#<f32>(
+  .a <- Max#<f32>(
+    .a <- v
+    .b <- 0.0
+  )
+  .b <- 1.0
 )
 
-func Divide(a: i32, b: i32) -> (result: i32) = Div::<i32>(
-  .a <- a,
-  .b <- b,
+func Divide(a: i32, b: i32) -> (result: i32) = Div#<i32>(
+  .a <- a
+  .b <- b
 )
 
-func Fib(n: i32) -> (result: i32) @pure {
-  flow {
-    entry -> is_base
-    is_base.then -> ret_n
-    is_base.else -> ret_sum
+@pure
+func Fib(n: i32) -> (result: i32) {
+  exec Entry()
+  exec Branch(
+    .cond <- Lt#<i32>(
+      .a <- n
+      .b <- 2
+    )
+  ).then -> {
+    exec Return(
+      .result <- n
+    )
+  }.else -> {
+    exec Return(
+      .result <- Add#<i32>(
+        .a <- Call Fib(
+          .n <- Sub#<i32>(
+            .a <- n
+            .b <- 1
+          )
+        )
+        .b <- Call Fib(
+          .n <- Sub#<i32>(
+            .a <- n
+            .b <- 2
+          )
+        )
+      )
+    )
   }
-
-  node entry = Entry()
-  node is_base = Branch(
-    .cond <- Lt::<i32>(
-      .a <- entry.n,
-      .b <- 2,
-    ),
-  )
-  node ret_n = Return(
-    .result <- entry.n,
-  )
-  node ret_sum = Return(
-    .result <- Add::<i32>(
-      .a <- Call Fib(
-        .n <- Sub::<i32>(
-          .a <- entry.n,
-          .b <- 1,
-        ),
-      ),
-      .b <- Call Fib(
-        .n <- Sub::<i32>(
-          .a <- entry.n,
-          .b <- 2,
-        ),
-      ),
-    ),
-  )
 }
 
-#[note("Logs Fib(i) for the even numbers 1..10, then SumTo(100).")]
-func Main() @id("fn_main") {
-  flow {
-    count_run -> hello
-    entry -> count_run
-    hello -> loop
-    log_sum -> ret
-    loop.each -> parity
-    loop.done -> sum
-    parity.then -> log_fib
-    sum -> log_sum
-  }
+@note("Logs Fib(i) for the even numbers 1..10, then SumTo(100).")
+@id("fn_main")
+func Main() {
+  box {title="Report each even Fibonacci number", pos=(930, -40), size=(760, 600), color="#2E86C1"}
 
-  node count_run = SetVar runs(
-    .value <- Add::<i32>(
-      .a <- GetVar runs(),
-      .b <- 1,
-    ),
-  )
-  node entry = Entry()
-  node hello = Call host.Log(
-    .message <- "Hello from Wiret!",
-  )
-  node log_fib = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- Call std.string.Concat(
-        .a <- Call std.string.Concat(
-          .a <- "Fib(",
-          .b <- Convert::<i32, string>(
-            .value <- loop.index,
-          ),
-        ),
-        .b <- ") = ",
-      ),
-      .b <- Convert::<i32, string>(
-        .value <- Call Fib(
-          .n <- loop.index,
-        ),
-      ),
-    ),
-  )
-  node log_sum = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- "SumTo(100) = ",
-      .b <- Convert::<i32, string>(
-        .value <- sum,
-      ),
-    ),
-  )
-  node loop = Macro ForRange(
-    .first <- 1,
-    .last <- 10,
-  )
-  node parity = Branch(
-    .cond <- Eq::<i32>(
-      .a <- Rem::<i32>(
-        .a <- loop.index,
-        .b <- 2,
-      ),
-      .b <- 0,
-    ),
-  )
-  node ret = Return()
-  node sum = Call SumTo(
-    .n <- 100,
+  node sum = Call SumTo{pos=(960, -200)}(
+    .n <- 100
   )
 
-  layout {
-    count_run at (200, 0)
-    count_run.value at (150, 140)
-    count_run.value.a at (-20, 140)
-    entry at (0, 0)
-    hello at (420, 0) [label = "Say hello"]
-    log_fib at (1240, 0)
-    log_fib.message at (1400, 320)
-    log_fib.message.a at (1400, 440)
-    log_fib.message.a.a at (1160, 440)
-    log_fib.message.a.a.b at (960, 440)
-    #[note("The Fib call is pure: it is re-evaluated at log_fib's evaluation point.")]
-    log_fib.message.b at (1160, 320)
-    log_fib.message.b.value at (960, 320)
-    log_sum at (1460, -280)
-    log_sum.message at (1420, -120)
-    log_sum.message.b at (1200, -120)
-    loop at (680, 0)
-    parity at (960, 0)
-    parity.cond at (800, 220)
-    parity.cond.a at (640, 220)
-    ret at (1720, -280)
-    sum at (960, -200)
-    box report "Report each even Fibonacci number" at (930, -40) size (760, 600) [color = "#2E86C1", members = [log_fib, log_fib.message, log_fib.message.a, log_fib.message.a.a, log_fib.message.a.a.b, log_fib.message.b, log_fib.message.b.value, parity]]
+  exec Entry{pos=(0, 0)}()
+  exec SetVar runs{pos=(200, 0)}(
+    .value <- Add#<i32>{pos=(150, 140)}(
+      .a <- GetVar runs{pos=(-20, 140)}()
+      .b <- 1
+    )
+  )
+  exec Call host.Log{pos=(420, 0), label="Say hello"}(
+    .message <- "Hello from Wiret!"
+  )
+  exec Macro ForRange{pos=(680, 0)}(
+    .first <- 1
+    .last <- 10
+  ).each(index) -> {
+    exec Branch{pos=(960, 0)}(
+      .cond <- Eq#<i32>{pos=(800, 220)}(
+        .a <- Rem#<i32>{pos=(640, 220)}(
+          .a <- index
+          .b <- 2
+        )
+        .b <- 0
+      )
+    ).then -> {
+      exec Call host.Log{pos=(1240, 0)}(
+        .message <- Call std.string.Concat{pos=(1400, 320)}(
+          .a <- Call std.string.Concat{pos=(1400, 440)}(
+            .a <- Call std.string.Concat{pos=(1160, 440)}(
+              .a <- "Fib("
+              .b <- Convert#<i32, string>{pos=(960, 440)}(
+                .value <- index
+              )
+            )
+            .b <- ") = "
+          )
+          @note("The Fib call is pure: it is re-evaluated at log_fib's evaluation point.")
+          .b <- Convert#<i32, string>{pos=(1160, 320)}(
+            .value <- Call Fib{pos=(960, 320)}(
+              .n <- index
+            )
+          )
+        )
+      )
+    }
+  }.done -> {
+    exec sum
+    exec Call host.Log{pos=(1460, -280)}(
+      .message <- Call std.string.Concat{pos=(1420, -120)}(
+        .a <- "SumTo(100) = "
+        .b <- Convert#<i32, string>{pos=(1200, -120)}(
+          .value <- sum
+        )
+      )
+    )
+    exec Return{pos=(1720, -280)}()
   }
 }
 
 func SumTo(n: i32) -> (total: i32) {
   local acc: i32
 
-  flow {
-    entry -> loop
-    loop.each -> add
-    loop.done -> ret
+  exec Entry()
+  exec Macro ForRange(
+    .first <- 1
+    .last <- n
+  ).each(index) -> {
+    exec SetLocal acc(
+      .value <- Add#<i32>(
+        .a <- GetLocal acc()
+        .b <- index
+      )
+    )
+  }.done -> {
+    exec Return(
+      .total <- GetLocal acc()
+    )
   }
-
-  node add = SetLocal acc(
-    .value <- Add::<i32>(
-      .a <- GetLocal acc(),
-      .b <- loop.index,
-    ),
-  )
-  node entry = Entry()
-  node loop = Macro ForRange(
-    .first <- 1,
-    .last <- entry.n,
-  )
-  node ret = Return(
-    .total <- GetLocal acc(),
-  )
 }

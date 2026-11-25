@@ -233,14 +233,14 @@ def _lane_natives(sin, cos, acos) -> dict:
         out[name] = NativeSpec(params, results, "pure",
                                lambda _vm, *a, fn=fn: (fn(*a),), doc)
     for t in L.VECTORS:
-        nat(f"std.vec.Dot::<{t}>", [("a", t), ("b", t)], [("result", "f32")], L.dot)
-        nat(f"std.vec.Length::<{t}>", [("v", t)], [("result", "f32")], L.length)
-        nat(f"std.vec.LengthSquared::<{t}>", [("v", t)], [("result", "f32")], L.lensq)
-        nat(f"std.vec.Distance::<{t}>", [("a", t), ("b", t)], [("result", "f32")], L.distance)
-        nat(f"std.vec.Normalize::<{t}>", [("v", t)], [("result", t)], L.normalize,
+        nat(f"std.vec.Dot#<{t}>", [("a", t), ("b", t)], [("result", "f32")], L.dot)
+        nat(f"std.vec.Length#<{t}>", [("v", t)], [("result", "f32")], L.length)
+        nat(f"std.vec.LengthSquared#<{t}>", [("v", t)], [("result", "f32")], L.lensq)
+        nat(f"std.vec.Distance#<{t}>", [("a", t), ("b", t)], [("result", "f32")], L.distance)
+        nat(f"std.vec.Normalize#<{t}>", [("v", t)], [("result", t)], L.normalize,
             "The vector scaled to length 1; the zero vector when it has no direction.")
-        nat(f"std.vec.Lerp::<{t}>", [("a", t), ("b", t), ("t", "f32")], [("result", t)], L.lerp)
-        nat(f"std.vec.Reflect::<{t}>", [("v", t), ("n", t)], [("result", t)], L.reflect)
+        nat(f"std.vec.Lerp#<{t}>", [("a", t), ("b", t), ("t", "f32")], [("result", t)], L.lerp)
+        nat(f"std.vec.Reflect#<{t}>", [("v", t), ("n", t)], [("result", t)], L.reflect)
     nat("std.vec.Cross", [("a", "vec3"), ("b", "vec3")], [("result", "vec3")], L.cross)
     nat("std.vec.PerpDot", [("a", "vec2"), ("b", "vec2")], [("result", "f32")], L.perpdot)
     nat("std.quat.Rotate", [("q", "quat"), ("v", "vec3")], [("result", "vec3")], L.rotate,

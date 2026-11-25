@@ -5,10 +5,11 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Optional
 
-from .model import Enum, Graph, Lit, Module, Node, PinRef, SEMANTIC_ATTRS, Struct, note_detached, notes
+from .model import (Enum, Graph, Lit, Module, NODE_GENERICS, Node, PinRef, SEMANTIC_ATTRS, Struct,
+                    note_detached, notes)
 from .model import Const, Extern, Var
 
-# Names that are metadata, not semantic attributes: `@doc` is `#[doc]` (section 2.4).
+# Decorators that are metadata: they explain the program and never change it (section 2.4).
 META_NAMES = {"doc", "category", "keywords", "note"}
 from .registry import (HANDLE_TYPES, assignable, field_place, handle_ok, parent_method, BUILTIN_TYPE_NAMES, PLACE_MUTATORS, INT_RANGES, ModuleIndex, Sig,
                        array_elem, enum_values, instantiate, lit_fits, lit_in_range, signature,
@@ -52,8 +53,12 @@ def has_errors(diags) -> bool:
     return any(d.severity == "error" for d in diags)
 
 
-def exec_target_pin(target_node: Node, pin: Optional[str]) -> str:
-    return pin or "in"
+def exec_target_pin(target_node: Node, pin: Optional[str], sig: Optional[Sig] = None) -> str:
+    """The exec input a wire enters: the one it names, else the node's first (section 2.3)."""
+    if pin:
+        return pin
+    ins = sig.exec_ins if sig is not None else []
+    return ins[0].name if ins else "in"
 
 
 class GraphInfo:
@@ -139,8 +144,8 @@ def check(module: Module, comments_ok=False, project=None) -> list:
                   getattr(owner, "name", None) if owner is not module else None)
     if module.comments and not comments_ok:
         for c in module.comments:
-            D("W0603", f"line {c.line}: this '//' comment is not directly above a statement, "
-                       f"input or flow wire, so it is attached to nothing and would be dropped; "
+            D("W0603", f"line {c.line}: this '//' comment is not directly above a statement "
+                       f"or an input, so it is attached to nothing and would be dropped; "
                        f"move it above what it explains, or convert it to a note")
 
     for g in module.graphs():
@@ -153,7 +158,7 @@ def check(module: Module, comments_ok=False, project=None) -> list:
 
 
 def unknown_type_message(ty: str, module_name: str) -> str:
-    if "dispatcher::<" in ty:
+    if "dispatcher#<" in ty:
         return (f"type '{ty}': a dispatcher is declared as a class member, "
                 f"'dispatcher OnDied(amount: i32)', and is not a type you can store")
     if any(h in ty for h in HANDLE_TYPES) and ty not in HANDLE_TYPES:
@@ -414,12 +419,13 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
     ids = set()
     for n in g.nodes:
         if n.id in ids:
-            D("E0102", f"duplicate node id '{n.id}'", G, n.id)
+            D("E0102", f"two nodes are named '{n.id}'", G, n.id)
         ids.add(n.id)
-    for b in g.boxes:
-        if b.id in ids:
-            D("E0102", f"box id '{b.id}' collides with another id", G, b.id)
-        ids.add(b.id)
+    seen = set()
+    for l in list(g.locals) + list(g.states):
+        if l.name in seen:
+            D("E0102", f"'{l.name}' is declared twice in '{g.name}'", G, pin=l.name)
+        seen.add(l.name)
 
     entries = [n for n in g.nodes if n.kind == "Entry"]
     if not entries:
@@ -471,7 +477,7 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
                     D("E0120", f"'{src.id}.{spin.name}' is an exec output", G, n.id, b.pin)
                 elif not assignable(spin.type, pin.type, idx):
                     D("E0110", f"wire type mismatch: {spin.type} -> {pin.type}; insert "
-                               f"Convert::<{spin.type}, {pin.type}>", G, n.id, b.pin,
+                               f"Convert#<{spin.type}, {pin.type}>", G, n.id, b.pin,
                       src=spin.type, dst=pin.type)
             else:
                 if b.value.kind == "enum" and not check_enum_value(b.value, idx, D, G, n.id,
@@ -504,7 +510,7 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
             if tgt is None:
                 D("E0101", f"exec target names unknown node '{e.target}'", G, n.id, pname)
                 continue
-            tpin_name = exec_target_pin(tgt, e.target_pin)
+            tpin_name = exec_target_pin(tgt, e.target_pin, sigs[tgt.id])
             tpin = sigs[tgt.id].input(tpin_name)
             if tpin is None:
                 if not sigs[tgt.id].error:
@@ -835,50 +841,47 @@ def check_capabilities(module: Module, project, D):
 
 
 def check_attr_names(module: Module, D):
-    """E0104: an `@` name that is not a semantic attribute (section 2.4)."""
-    def walk(owner, attrs, graph=None, node=None):
-        for a in attrs:
-            if a.name in SEMANTIC_ATTRS:
-                continue
-            if a.name in META_NAMES:
-                D("E0104", f"'@{a.name}' is metadata, written on its own line above "
-                           f"{owner}: #[{a.name}(...)]", graph, node)
-            else:
-                D("E0104", f"unknown attribute '@{a.name}' on {owner}; '@' is only for semantic "
-                           f"attributes, metadata is written #[{a.name}(...)] on the line above",
-                  graph, node)
+    """E0104: a decorator that does not exist (section 2.4). Every decorator is written `@name`;
+    a name without a dot is reserved for this specification, so one that is neither semantic
+    nor known metadata is a typo, while a dotted name (`@x.acme.review`) is third-party
+    metadata and is kept as written."""
+    known = ", ".join("@" + n for n in sorted(SEMANTIC_ATTRS | set(META_NAMES)))
 
-    walk(f"module {module.name}", module.attrs)
+    def walk(owner, attrs, graph=None, node=None, meta=()):
+        for a in list(attrs) + list(meta):
+            # a dotted name is a third party's; a capitalised one is derived data (2.4)
+            if a.name in SEMANTIC_ATTRS or a.name in META_NAMES or "." in a.name \
+                    or a.name[:1].isupper():
+                continue
+            if node is not None and a.name in NODE_GENERICS:
+                continue
+            if a.name in NODE_GENERICS:
+                D("E0104", f"'#{a.name}<...>' belongs on a node, after its kind", graph, node)
+                continue
+            D("E0104", f"unknown decorator '@{a.name}' on {owner}; the decorators are {known}, "
+                       f"and a third party's are named with a dot, as in @x.acme.{a.name}",
+              graph, node)
+
+    walk(f"module {module.name}", module.attrs, meta=module.meta)
     for it in module.items:
         name = getattr(it, "name", "")
-        walk(name, it.attrs, name if isinstance(it, Graph) else None)
+        walk(name, it.attrs, name if isinstance(it, Graph) else None, meta=it.meta)
         for p in list(getattr(it, "params", []) or []) + list(getattr(it, "results", []) or []):
             walk(f"parameter '{p.name}'", p.attrs, name)
-        for f in list(getattr(it, "fields", []) or []) + list(getattr(it, "members", []) or []):
-            walk(f"'{name}.{f.name}'", f.attrs)
+        for f in list(getattr(it, "fields", []) or []) + list(getattr(it, "members", []) or []) \
+                + list(getattr(it, "methods", []) or []) + list(getattr(it, "dispatchers", []) or []):
+            walk(f"'{name}.{f.name}'", f.attrs, meta=f.meta)
         if isinstance(it, Graph):
             for l in it.locals + it.states:
-                walk(f"'{l.name}'", l.attrs, name)
+                walk(f"'{l.name}'", l.attrs, name, meta=l.meta)
             for n in it.nodes:
-                walk(f"node '{n.id}'", n.attrs, name, n.id)
-
+                walk(f"node '{n.id}'", n.attrs, name, n.id, meta=n.meta)
+            for b in it.boxes:
+                walk("a box", [], name, meta=b.meta)
 
 def check_layout(g: Graph, ids: set, G, D):
-    nodes = {n.id for n in g.nodes}
-    for name in sorted({p.id for p in g.places} | set(g.orphan_meta)):
-        if name not in nodes:
-            D("W0605", f"the layout block has a line for '{name}', which is not a node of "
-                       f"this graph; move its position and notes to the node they belong to, "
-                       f"or delete the line", G, name)
-    owner = {}
-    for b in sorted(g.boxes, key=lambda b: b.id):
-        for m in b.members():
-            if m not in ids:
-                D("W0601", f"box '{b.id}' lists '{m}', which names no node or box", G, b.id)
-            elif m in owner:
-                D("W0602", f"'{m}' is a member of both '{owner[m]}' and '{b.id}'", G, b.id)
-            else:
-                owner[m] = b.id
+    """W0604 for a note left on the graph by a deleted node or box. (W0601, W0602 and W0605
+    were about box member lists and the layout block, which no longer exist.)"""
     for nt in notes(g.meta):
         if note_detached(nt) is not None:
             D("W0604", f"a note is detached from '{note_detached(nt)}', which was deleted", G)

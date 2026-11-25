@@ -15,7 +15,7 @@ export function makeHighlighter(rules) {
   const tagOf = (t) => {
     if (t.startsWith('"')) return "str";
     if (t.startsWith("//")) return "comment";
-    if (t.startsWith("@") || t.startsWith("#[") || t === "]") return "attr";
+    if (t.startsWith("@") || t.startsWith("#")) return "attr";
     if (/^[0-9-]/.test(t)) return "num";
     if (keywords.has(t)) return "kw";
     if (kinds.has(t)) return "kind";
@@ -29,11 +29,17 @@ export function makeHighlighter(rules) {
     for (let m; (m = token.exec(line)); ) {
       if (!m[0]) { token.lastIndex++; continue; }
       let tag = tagOf(m[0]);
-      if (tag === "kw") {      // as syntax.is_name: next to `.` or before a single `:`, a name
-        const before = line.slice(0, m.index).trimEnd(), after = line.slice(m.index + m[0].length);
-        const rest = after.trimStart();
-        if (before.endsWith(".") || after.startsWith(".") || after.startsWith("(") ||
+      if (tag === "kw") {      // as syntax.is_name: a keyword only where a statement starts
+        const before = line.slice(0, m.index), after = line.slice(m.index + m[0].length);
+        const rest = after.trimStart(), word = m[0];
+        if (after.startsWith(".") || after.startsWith("(") || rest.startsWith("=") ||
             (rest.startsWith(":") && !rest.startsWith("::"))) tag = null;
+        else if (!/^\s*!?\s*$/.test(before)) {
+          const prev = before.trim().split(/\s+/);
+          const last = prev[prev.length - 1];
+          if (!((last === "extern" && (word === "func" || word === "type")) ||
+                (word === "impl" && prev[0] === "class"))) tag = null;
+        }
       }
       if (tag) out.push([m.index, m.index + m[0].length, tag]);
     }

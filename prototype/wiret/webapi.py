@@ -165,12 +165,12 @@ def edit(source: str, graph: str, request: str) -> str:
                        "context": the pin a wire was dragged from, to wire the new node to
     and the context menu's edits (see `menu`, which builds these requests): set_enum,
     make_struct, break_struct, rename, label, color, toggle_attr, int_attr, cases, add_note,
-    edit_note, delete_note, add_box, members, resize, retitle and add_local.
+    edit_note, delete_note, add_box, resize, retitle and add_local.
     and optionally "geoms": {node: [x, y, width]} as drawn (to place an inserted Convert node)
     and "comments": "convert". The result is {"ok", "text", "message", "select"} (`select`: a
     node the edit added). When the edit is refused, `ok` is false and `message` says why. The
     canonical text cannot keep a `//` comment that is attached to nothing (not directly above
-    a statement, input or flow wire): then the result is {"ok": false, "comments": n}
+    a statement or an input): then the result is {"ok": false, "comments": n}
     and nothing changes, so the page can ask and send the edit again with "comments":
     "convert", which turns them into notes."""
     req = json.loads(request)
@@ -246,8 +246,7 @@ def edit(source: str, graph: str, request: str) -> str:
             reason = canvasedit.delete_note(g, req["key"])
         elif op == "add_box":
             reason = canvasedit.add_box(g, req.get("x", 0), req.get("y", 0), req["text"], req.get("member"))
-        elif op == "members":
-            reason = canvasedit.set_members(g, req["box"], req["text"])
+
         elif op == "resize":
             reason = canvasedit.resize_box(g, req["box"], req["text"])
         elif op == "retitle":
@@ -323,20 +322,21 @@ def menu(source: str, graph: str, target: str) -> str:
         if target_graph:
             choice(f"Open {n.symbol}", client=f"open:{target_graph}")
         choice("Breakpoint  (F9)", client="breakpoint", node=nid)
-        if "." not in nid:          # an inline node's name says where it is written
-            choice("Rename id…", "rename", f"New id for '{nid}' (renames every wire):", nid,
-                   node=nid)
+        n_ = g.node(nid)
+        named = n_ is not None and n_.named
+        choice("Name…", "rename", f"Name for '{nid}' (a named node is declared at the top of the "
+               f"function, and every wire follows):", nid if named else "", node=nid)
         choice("Label…", "label", f"Display label for '{nid}' (layout only; empty to clear):",
                canvasedit.current_prop(g, nid, "label"), node=nid)
         choice("Colour…", "color", "Colour such as #C0392B (empty to clear):",
                canvasedit.current_prop(g, nid, "color"), node=nid)
         choice("Add note…", "add_note", f"Note text on '{nid}':", on=nid)
         if n.kind == "Sequence":
-            choice("Set output count (@count)…", "int_attr", "Number of outputs:",
+            choice("Set output count (#count)…", "int_attr", "Number of outputs:",
                    str(canvasedit.int_attr(g, nid, "count")), node=nid, name="count")
         if n.kind == "Switch":
             prompt, cur = canvasedit.cases_prompt(g, idx, nid)
-            choice("Set cases (@cases)…", "cases", prompt, cur, node=nid)
+            choice("Set cases (#cases)…", "cases", prompt, cur, node=nid)
         if n.kind not in ("Entry",):
             choice(("Enable" if n.attr("disabled") else "Disable") + " (@disabled)", "toggle_attr",
                    node=nid, name="disabled")
@@ -380,9 +380,7 @@ def menu(source: str, graph: str, target: str) -> str:
         if b is None:
             return "[]"
         choice("Rename title…", "retitle", "Title:", b.title, box=bid)
-        choice("Edit members…", "members",
-               "Member node/box ids, comma separated (membership is explicit, section 2.3):",
-               ", ".join(b.members()), box=bid)
+
         choice("Resize…", "resize", "width, height:", f"{b.w}, {b.h}", box=bid)
         choice("Colour…", "color", "Colour such as #C0392B (empty to clear):",
                canvasedit.current_prop(g, bid, "color"), node=bid)

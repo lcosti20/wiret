@@ -1,76 +1,50 @@
 wiret 1
 module lessons.decisions
 
-extern func host.Log(message: string)
+extern func host.Log(message: string) -> ()
 
-#[doc("Prints whether a person of this age is an adult or a child.")]
-#[note("CheckAge asks one question: is age at least 18? Branch follows 'then' when the answer is true and 'else' when it is false.")]
+@doc("Prints whether a person of this age is an adult or a child.")
+@note("CheckAge asks one question: is age at least 18? Branch follows 'then' when the answer is true and 'else' when it is false.")
 func CheckAge(age: i32) {
-  flow {
-    decide.then -> adult
-    decide.else -> child
-    entry -> decide
-  }
+  @note("This node is used in multiple places, so it needs to be named.")
+  node age_text = Convert#<i32, string>{pos=(337, -189)}(
+    .value <- age
+  )
 
-  node adult = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- age_text,
-      .b <- " is an adult.",
-    ),
-  )
-  node age_text = Convert::<i32, string>(
-    .value <- entry.age,
-  )
-  node child = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- age_text,
-      .b <- " is a child.",
-    ),
-  )
-  node decide = Branch(
-    .cond <- Ge::<i32>(
-      .a <- entry.age,
-      .b <- 18,
-    ),
-  )
-  node entry = Entry()
-
-  layout {
-    adult at (900, -120)
-    adult.message at (637, -190)
-    age_text at (337, -189)
-    child at (900, 120)
-    child.message at (666, 226)
-    decide at (420, 0)
-    decide.cond at (221, 76)
-    entry at (0, 0)
+  exec Entry{pos=(0, 0)}()
+  exec Branch{pos=(420, 0)}(
+    .cond <- Ge#<i32>{pos=(221, 76)}(
+      .a <- age
+      .b <- 18
+    )
+  ).then -> {
+    exec Call host.Log{pos=(900, -120)}(
+      .message <- Call std.string.Concat{pos=(637, -190)}(
+        .a <- age_text
+        .b <- " is an adult."
+      )
+    )
+  }.else -> {
+    exec Call host.Log{pos=(900, 120)}(
+      .message <- Call std.string.Concat{pos=(666, 226)}(
+        .a <- age_text
+        .b <- " is a child."
+      )
+    )
   }
 }
 
-#[note("Lesson 3: Decisions. Main asks CheckAge about three ages. Double-click a CheckAge node to see how it decides.")]
-#[note("Try it: (1) Predict the three lines before you press Run. (2) Change 18 to 21 inside CheckAge. (3) Use Step (F11) and watch which way the Branch goes.")]
+@note("Lesson 3: Decisions. Main asks CheckAge about three ages. Double-click a CheckAge node to see how it decides.")
+@note("Try it: (1) Predict the three lines before you press Run. (2) Change 18 to 21 inside CheckAge. (3) Use Step (F11) and watch which way the Branch goes.")
 func Main() {
-  flow {
-    entry -> first
-    first -> second
-    second -> third
-  }
-
-  node entry = Entry()
-  node first = Call CheckAge(
-    .age <- 12,
+  exec Entry{pos=(0, 0)}()
+  exec Call CheckAge{pos=(220, 0)}(
+    .age <- 12
   )
-  node second = Call CheckAge(
-    .age <- 30,
+  exec Call CheckAge{pos=(480, 0)}(
+    .age <- 30
   )
-  node third = Call CheckAge(
-    .age <- 18,
+  exec Call CheckAge{pos=(740, 0)}(
+    .age <- 18
   )
-
-  layout {
-    entry at (0, 0)
-    first at (220, 0)
-    second at (480, 0)
-    third at (740, 0)
-  }
 }

@@ -9,8 +9,9 @@ import re
 from .parser import KEYWORDS
 from .registry import STATIC_KINDS
 
-# One match per token, applied to one line at a time.
-TOKEN = (r'"(?:[^"\\]|\\.)*"|//.*$|@[A-Za-z_.]+|#\[[A-Za-z_.]+|\]$|'
+# One match per token, applied to one line at a time. `@name` is a decorator and `#count`
+# a node's named generic, both coloured as attributes (section 2.4).
+TOKEN = (r'"(?:[^"\\]|\\.)*"|//.*$|@[A-Za-z_.]+|#[A-Za-z_]+|'
          r'\b[A-Za-z_]\w*\b|-?\b\d[\w.]*')
 _TOKEN_RE = re.compile(TOKEN)
 
@@ -31,7 +32,7 @@ def tag_of(token: str) -> str | None:
         return "str"
     if token.startswith("//"):
         return "comment"
-    if token.startswith(("@", "#[")) or token == "]":
+    if token.startswith(("@", "#")):
         return "attr"
     if token[0].isdigit() or token[0] == "-":
         return "num"
@@ -42,12 +43,26 @@ def tag_of(token: str) -> str | None:
     return None
 
 
+# Keywords that start a statement inside a body; anywhere else on the line they are names
+# (`exec box`, `goto node`). A `!` may stand before `exec`.
+_LEAD = re.compile(r"^\s*!?\s*$")
+
+
 def is_name(line: str, start: int, end: int) -> bool:
-    """A keyword next to `.`, right before `(`, or before a single `:` is a name there (a
-    symbol, pin, field or node; section 2.1). No keyword is ever written in those places."""
-    before, after = line[:start].rstrip(), line[end:]
-    return (before.endswith(".") or after.startswith((".", "("))
-            or (after.lstrip().startswith(":") and not after.lstrip().startswith("::")))
+    """Keywords are contextual (section 2.1): a keyword is one only where a statement starts,
+    first on its line (after a `!`, for `exec`) and not followed by `.`, `(` or a single `:`.
+    `extern func`, `extern type` and `class X impl` are the keywords that follow another."""
+    before, after = line[:start], line[end:]
+    word = line[start:end]
+    rest = after.lstrip()
+    if after.startswith((".", "(")) or (rest.startswith(":") and not rest.startswith("::")) \
+            or rest.startswith("="):
+        return True
+    if _LEAD.match(before):
+        return False
+    prev = before.split()
+    return not ((prev and prev[-1] == "extern" and word in ("func", "type"))
+                or (word == "impl" and prev and prev[0] == "class"))
 
 
 def spans(line: str) -> list:
