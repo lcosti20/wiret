@@ -77,6 +77,38 @@ def spans(line: str) -> list:
     return out
 
 
+def block_end(lines: list, line: int) -> int:
+    """The last line (1-based) of the node written on `line`: where its parenthesised input
+    block closes. Parentheses inside its {…} attributes, strings and comments do not count.
+    The web page's blockEnd does the same, so both editors mark the same lines."""
+    depth = braces = 0
+    for i in range(line - 1, len(lines)):
+        s = lines[i]
+        j = 0
+        while j < len(s):
+            c = s[j]
+            if c == "/" and s[j + 1:j + 2] == "/":
+                break
+            if c == '"':
+                j += 1
+                while j < len(s) and s[j] != '"':
+                    j += 2 if s[j] == "\\" else 1
+            elif c == "{":
+                braces += 1
+            elif c == "}":
+                braces -= 1
+            elif braces == 0 and c == "(":
+                depth += 1
+            elif braces == 0 and c == ")":
+                depth -= 1
+                if depth == 0:
+                    return i + 1
+            j += 1
+        if depth <= 0:
+            return line                     # no input block opened on the node's line
+    return line
+
+
 def rules() -> dict:
     """Everything a highlighter in another language needs: the token pattern, the word lists
     and the colours."""

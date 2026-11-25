@@ -52,6 +52,8 @@ class GraphView(tk.Canvas):
         self.fault_node = None
         self.current_node = None     # the node the debugger is paused before
         self.pin_values: dict = {}   # (node, output pin) -> value at the pause
+        self.notes_open = None       # the graph's notes unfolded; None: only on a wide canvas
+        self._notes_shown = False
         self._fonts = {}
         self.bind("<ButtonPress-1>", self.on_press)
         self.bind("<B1-Motion>", self.on_motion)
@@ -187,6 +189,9 @@ class GraphView(tk.Canvas):
         if self.drag and self.drag[0] == "wire":
             _, nid, d, pin, sx, sy, cx, cy = self.drag
             self.draw_curve(sx, sy, cx, cy, SELECT, 2, d == "in", tags=("temp",))
+        mark = getattr(self.app, "mark_selected_source", None)
+        if mark:
+            mark()
 
     def draw_grid(self):
         w, h = self.winfo_width(), self.winfo_height()
@@ -507,7 +512,9 @@ class GraphView(tk.Canvas):
                     self.tag_raise(t, r)
 
     def draw_notes(self, g):
-        y = 10
+        """Notes under their node, and the graph's own notes at the top left of the view. Those
+        can be folded away with the button below them, and start folded on a narrow canvas."""
+        graph_notes = []
         for on, i, nt in g.all_notes():
             key = note_key(on, i)
             if on and on in self.geoms:
@@ -517,14 +524,39 @@ class GraphView(tk.Canvas):
                                  width=max(140, gm.w * self.scale * 1.4), font=self.font(9),
                                  tags=("note", f"t={key}"))
             else:
-                gone = note_detached(nt)
-                detached = gone is not None
-                text = ("✎ (detached from %s) " % gone if detached else "✎ ") + note_text(nt)
-                item = self.create_text(10, y, anchor="nw", text=text, width=460,
-                                        fill=DIM if detached else "#f7dc6f",
-                                        font=("Helvetica", 12),
-                                        tags=("note", "graphnote", f"t={key}"))
-                y = self.bbox(item)[3] + 8
+                graph_notes.append((key, nt))
+        if not graph_notes:
+            return
+        is_open = self.notes_open if self.notes_open is not None else self.winfo_width() >= 600
+        y = 10
+        for key, nt in graph_notes if is_open else []:
+            gone = note_detached(nt)
+            detached = gone is not None
+            text = ("✎ (detached from %s) " % gone if detached else "✎ ") + note_text(nt)
+            item = self.create_text(10, y, anchor="nw", text=text, width=460,
+                                    fill=DIM if detached else "#f7dc6f",
+                                    font=("Helvetica", 12),
+                                    tags=("note", "graphnote", f"t={key}"))
+            y = self.bbox(item)[3] + 8
+        label = "Hide notes" if is_open else f"✎ Notes ({len(graph_notes)})"
+        t = self.create_text(18, y + 4, anchor="nw", text=label, fill=DIM,
+                             font=("Helvetica", 11), tags=("graphnote", "notestoggle"))
+        bx = self.bbox(t)
+        r = self.create_rectangle(10, y, bx[2] + 8, bx[3] + 4, fill="#2b2e35", outline="#3a3e47",
+                                  tags=("graphnote", "notestoggle"))
+        self.tag_raise(t, r)
+        self._notes_shown = is_open
+
+    def on_notes_toggle(self, x, y) -> bool:
+        """Fold or unfold the graph's notes if (x, y) is on their button. The view stays where
+        it is, so the graph does not jump each time."""
+        items = self.find_overlapping(x, y, x, y)
+        if not any("notestoggle" in self.gettags(it) for it in items):
+            return False
+        self.notes_open = not self._notes_shown
+        self.drag = None
+        self.redraw()
+        return True
 
     # -- hit testing --------------------------------------------------------------
     def hit(self, x, y):
@@ -559,6 +591,8 @@ class GraphView(tk.Canvas):
     # -- events -------------------------------------------------------------------
     def on_press(self, e):
         self.focus_set()
+        if self.on_notes_toggle(e.x, e.y):
+            return
         h = self.hit(e.x, e.y)
         if h and h[0] == "field":
             self.drag = None

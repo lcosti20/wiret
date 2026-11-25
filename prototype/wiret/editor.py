@@ -25,10 +25,10 @@ from .textchanges import changes
 from .compiler import compile_module
 from .debugstate import DebugState
 from .disasm import disassemble
-from .graphview import BG, DIM, TEXT, GraphView
+from .graphview import BG, DIM, SELECT, TEXT, GraphView
 from .model import Box, Graph, Lit, Local, Module, Param, PinRef, note_text, set_note_text
 from .natives import STD
-from .parser import ParseError, parse, parse_literal
+from .parser import ParseError, Parser, parse, parse_literal
 from .printer import GraphNames, layout_hash, print_module, semantic_hash
 from .ids import assign_ids, attach_retired, find_project, retired_between
 from .registry import (ModuleIndex, STATIC_KINDS, can_convert, enum_values,
@@ -141,6 +141,7 @@ class EditorApp:
         self._suppress_text_event = False
         self._parse_job = None
         self._flash_job = None
+        self.node_lines: dict = {}      # (graph, node) -> the 1-based line its node is written on
         self.run_thread = None
         self.vm: Optional[VM] = None
         self.out_queue: queue.Queue = queue.Queue()
@@ -255,10 +256,18 @@ class EditorApp:
                            insertbackground="white", selectbackground="#3a4a63")
         ys = ttk.Scrollbar(src_frame, orient="vertical", command=self.src.yview)
         xs = ttk.Scrollbar(src_frame, orient="horizontal", command=self.src.xview)
-        self.src.configure(yscrollcommand=ys.set, xscrollcommand=xs.set)
+
+        def scrolled(*a):
+            ys.set(*a)
+            self.mark_selected_source()
+        self.src.configure(yscrollcommand=scrolled, xscrollcommand=xs.set)
         ys.pack(side="right", fill="y")
         xs.pack(side="bottom", fill="x")
+        # the strip at the edge of the text that marks the selected node's whole block
+        self.src_edge = tk.Canvas(src_frame, width=4, bg=SOURCE_BG, highlightthickness=0, bd=0)
+        self.src_edge.pack(side="left", fill="y")
         self.src.pack(fill="both", expand=True)
+        self.src.bind("<Configure>", lambda _e: self.mark_selected_source(), add="+")
         self.src.bind("<<Modified>>", self.on_text_modified)
         for tag, color in syntax.COLORS.items():
             self.src.tag_configure(tag, foreground=color)
@@ -542,8 +551,11 @@ class EditorApp:
     def parse_text(self) -> bool:
         self.src.tag_remove("err", "1.0", "end")
         try:
-            self.module = parse(self.text)
+            p = Parser(self.text)
+            self.module = p.parse_module()
             self.parse_error = None
+            self.node_lines = {(a[1], a[2]): p.toks[i].line
+                               for i, a in p.anchors if a and a[0] == "node"}
             return True
         except ParseError as e:
             self.parse_error = e
@@ -603,6 +615,31 @@ class EditorApp:
         for i, line in enumerate(self.text.split("\n"), start=1):
             for start, end, tag in syntax.spans(line):
                 t.tag_add(tag, f"{i}.{start}", f"{i}.{end}")
+
+    def mark_selected_source(self):
+        """A bar at the edge of the Source pane beside every line of the selected node, from
+        its `node` line to where its input block closes (as the web page marks it)."""
+        edge = getattr(self, "src_edge", None)
+        if edge is None:
+            return
+        edge.delete("all")
+        sel = self.view.selected if hasattr(self, "view") else None
+        if not sel or sel[0] != "node" or self.parse_error is not None:
+            return
+        first = self.node_lines.get((self.graph_name, sel[1]))
+        if first is None:
+            return
+        last = syntax.block_end(self.text.split("\n"), first)
+        top, bottom = self.src.index("@0,0"), self.src.index(f"@0,{self.src.winfo_height()}")
+        lo, hi = max(first, int(top.split(".")[0])), min(last, int(bottom.split(".")[0]))
+        y0 = y1 = None
+        for line in range(lo, hi + 1):
+            info = self.src.dlineinfo(f"{line}.0")
+            if info:
+                y0 = info[1] if y0 is None else y0
+                y1 = info[1] + info[3]
+        if y0 is not None:
+            edge.create_rectangle(0, y0, 3, y1, fill=SELECT, width=0)
 
     def flash_changes(self, old: str, new: str):
         """Mark what an edit changed in the Source pane and fade it (see FLASH_LINE)."""
