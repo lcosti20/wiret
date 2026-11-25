@@ -1,0 +1,29 @@
+## Appendix M. Changes in Draft 0.14
+
+Draft 0.14 changes the text syntax so that a graph reads in the order it runs. Before it, a body was a list of node statements sorted by id, a `flow` block of exec wires, and a `layout` block of positions and notes, and a reader had to follow wires from line to line to see what happened when. Now each function is written as its `exec` statements from `Entry`, with the blocks of a branching node nested where they run, and a node's position, notes and decorators stand with the node. The change was driven by rewriting the fourteen prototype lessons by hand in the new form. It changes the text only: the model, the compiled code and WBC 1 are unchanged, except for static methods and parameter defaults, which are new. The prototype implements all of it; the old syntax is no longer read.
+
+| Change | Detail | Section |
+| --- | --- | --- |
+| Exec statements | `exec Kind(...)` places a node on the path; each runs after the one before it in its block. The `flow` block is removed. | 2.3 |
+| Output blocks | A node with several exec outputs writes each wired output as a block, `.then -> { ... }`. The last may be written `.pin` alone to continue in the enclosing block (*flattening*). A block may bind the node's data outputs and other exec inputs by name, `.each(index, break) -> { ... }`. | 2.3 |
+| Named nodes and `goto` | A node is anonymous unless it is used from more than one place. A named node is declared at the top of the body, `node name = ...`, read as `name` or `name.pin`, placed once with `exec name`, and entered from anywhere else with `goto name` (or `goto name.pin`). Names keep the order they were given in. | 2.3 |
+| Execution positions | An anonymous node is identified by its identifier and its execution position (`1.body.0`, `1.fault.0.message`), used by diagnostics, the debugger, `wiretc edit` and the merge. Positions are never retired in `wiret.ids`. | 2.3, 7.1, 7.3 |
+| Disabled statements | Code that nothing reaches is kept after a `!`: `!exec` for a node whose exec input is not wired, `!{ ... }` for a chain that is wired but not reached, `!Kind(...)` for a node nothing reads. `@disabled` keeps its meaning: a node on the path that is skipped. | 2.3, 2.4 |
+| Attribute blocks | Positions and display properties move from the `layout` block into the node, `Kind{pos=(x, y), label="..."}(...)`. The `layout` block is removed. | 2.3 |
+| Boxes | `box {title=..., pos=..., size=..., color=...}` at the top of a body. A box has no id and no member list; moving it moves the nodes inside it, as a Blueprint comment box does. `W0601` and `W0602` (box members) and `W0605` (stale layout line) no longer occur. | 2.3, 2.4 |
+| Decorators | Every decorator is written `@name(...)` on the line above what it describes, or before a parameter, field or enum member on its line. `#[...]` metadata is now `@doc(...)`, `@note(...)`; semantic and metadata decorators are told apart by name. A decorator after what it describes is a syntax error. | 2.1, 2.4 |
+| Generics | Generic arguments are written `#<...>`: `Add#<i32>`, `array#<i32>`, `macro ForEach#<T>`. The node parameters `@count(n)` and `@cases(...)` become named generic arguments, `#count<n>` and `#cases<...>`. | 2.2, 2.3 |
+| Commas | Inside parentheses, braces and brackets, a newline separates items like a comma, and the formatter writes one input per line without commas. | 2.1, 2.5 |
+| Parameters by name | A graph reads its parameters by bare name, `.b <- amount`, never `entry.amount`. | 2.3 |
+| `self` and static methods | An instance method declares `self` first in its parameter list; a method without it is static. Inside an instance method, a call to a method of its class, a base class or an implemented interface may leave out `self` and takes the caller's. | 2.2 |
+| Parameter defaults | A parameter may declare a default, `by: i32 = 1`, which a call that leaves the input unbound passes. | 2.2 |
+| Empty results | `extern func F() -> ()` may say it returns nothing, like `void`; leaving the arrow out still means the same. | 2.2 |
+| Canonical form and hashes | The canonical form follows the exec walk from `Entry`; a node entered from several places is written at its least deeply nested entry. The semantic hash is computed over the text without attribute blocks, boxes and metadata decorators. | 2.5 |
+
+**Merging.** The id-sorted storage format of Drafts 0.3 to 0.13 was chosen so that line-based merges would rarely conflict. Writing the text in run order makes it much easier to read and review, and `wiretc view --flow` now prints the stored text as it is. The cost is that rewiring moves whole statements and blocks, and shifts the positions of anonymous nodes after it, so concurrent restructuring of one function conflicts more often in a plain line merge. The keyed merge of section 7.1 recovers much of this by matching nodes in the model, and naming a node fixes its identity. Section 9.1's review trial is the place to measure whether that is enough.
+
+**Considered and not adopted.**
+
+- *Keeping the `flow` block next to nested `exec` statements.* Two ways of writing the same wire would mean two places to edit and a canonical choice between them.
+- *Box membership lists.* An explicit list made a box's contents survive moves, but it had to be maintained by hand, could name nodes that no longer exist (`W0601`) and could put a node in two boxes (`W0602`). A box that carries what lies inside it matches what Blueprint users expect.
+- *Disabling with `@disabled` only.* A node that nothing reaches is not skipped, it is never on the path, and a newly added node has no exec wires yet. Writing it after `!` keeps it in the file, drawn grayed out, without inventing a wire.

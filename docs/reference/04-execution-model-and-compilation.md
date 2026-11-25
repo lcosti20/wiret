@@ -47,22 +47,22 @@ An exec input with several producers is a **join**. There is no merge of state a
 
 #### Worked trace: one `ForRange` iteration
 
-`SumTo(2)` from section 2.6, after macro expansion. The call site is `loop` with the flow wires `loop.each -> add` and `loop.done -> ret`. Macro nodes carry path-style ids (`loop/test`, ...). `S` is shown with the top at the right; `[]` is empty. `i` is the macro local, `acc` is the caller's local.
+`SumTo(2)` from section 2.6, after macro expansion. Its nodes are anonymous, so their ids are their execution positions (section 2.3): `0` is `Entry`, the loop is `1`, the `SetLocal` in its `each` block is `1.each.0` and the `Return` after its flattened `done` is `2`. Macro nodes carry path-style ids after the call site's: `1/test` is the macro's named `test` node, and `1/test.then.1` is the `SetLocal` that bumps `i`. `S` is shown with the top at the right; `[]` is empty. `i` is the macro local, `acc` is the caller's local.
 
 | Step | Node | Action | `S` after |
 | --- | --- | --- | --- |
-| 1 | `entry` | start; follow to `loop` | `[]` |
-| 2 | `loop/init` | `i := 1` | `[]` |
-| 3 | `loop/test` | `1 <= 2` is true; follow `then` | `[]` |
-| 4 | `loop/seq` | push the entry of output 1 (`loop/bump`); jump to output 0 | `[loop/bump]` |
-| 5 | `loop/each_out` | `Exit each (index: i)`: `loop.index := 1`; jump to caller target `add`. `S` untouched | `[loop/bump]` |
-| 6 | `add` | `acc := acc + loop.index = 1`. No exec output: chain end, pop `loop/bump` | `[]` |
-| 7 | `loop/bump` | `i := 2`; follow to `loop/test` | `[]` |
-| 8 | `loop/test`, `loop/seq`, `loop/each_out`, `add` | as steps 3 to 6 with `i = 2`: `acc := 3`; chain end pops `loop/bump` | `[]` |
-| 9 | `loop/bump` | `i := 3`; follow to `loop/test` | `[]` |
-| 10 | `loop/test` | `3 <= 2` is false; follow `else` | `[]` |
-| 11 | `loop/finish` | `Exit done`: jump to caller target `ret` | `[]` |
-| 12 | `ret` | `Return(total: acc = 3)`; frame discarded | n/a |
+| 1 | `0` | start; follow to `1` | `[]` |
+| 2 | `1/1` | `i := 1` | `[]` |
+| 3 | `1/test` | `1 <= 2` is true; follow `then` | `[]` |
+| 4 | `1/test.then.0` | the `Sequence`: push the entry of output 1 (`1/test.then.1`); jump to output 0 | `[1/test.then.1]` |
+| 5 | `1/test.then.0.then0.0` | `Exit each (index: i)`: `index := 1`; jump to caller target `1.each.0`. `S` untouched | `[1/test.then.1]` |
+| 6 | `1.each.0` | `acc := acc + index = 1`. No exec output: chain end, pop `1/test.then.1` | `[]` |
+| 7 | `1/test.then.1` | `i := 2`; `goto test` | `[]` |
+| 8 | `1/test` to `1.each.0` | as steps 3 to 6 with `i = 2`: `acc := 3`; chain end pops `1/test.then.1` | `[]` |
+| 9 | `1/test.then.1` | `i := 3`; `goto test` | `[]` |
+| 10 | `1/test` | `3 <= 2` is false; follow `else` | `[]` |
+| 11 | `1/test.else.0` | `Exit done`: jump to caller target `2` | `[]` |
+| 12 | `2` | `Return(total: acc = 3)`; frame discarded | n/a |
 
 Two properties follow from the trace. The stack is balanced on every iteration (pushed at step 4, popped at step 6), so its depth depends on how deeply loops are nested and not on how many iterations run. And the continuation that resumes the macro after the caller's chain is the one `Sequence` pushed; `Exit` contributes nothing. That is the whole mechanism, which is why `ForRange` needs neither a loop primitive nor a call node.
 
@@ -72,7 +72,7 @@ Section 7.4 requires each of these as a trace test (expected `S` after every ste
 
 1. **Nested loops.** A `ForRange` inside the `each` chain of another. At the inner `each` body, `S` holds the outer `bump` below the inner `bump`; the inner `done` returns to the outer chain's next node.
 2. **`Sequence` inside a macro body.** A macro that sequences two `Exit`s, to confirm the later one runs only after the caller's chain for the earlier one has ended.
-3. **Early exit.** A `Return` inside the `each` chain discards the pending `bump` with the frame. A chain inside the loop wired to the loop's `break` input reaches `Leave done`, which drops the pending `bump`, and any continuation the body itself pushed, and runs `done`. From a loop nested in another, `break` of the outer loop also drops the inner loop's continuations.
+3. **Early exit.** A `Return` inside the `each` chain discards the pending `bump` with the frame. A `goto break` inside the loop's block (the `each` block binds `break`) reaches `Leave done`, which drops the pending `bump`, and any continuation the body itself pushed, and runs `done`. From a loop nested in another, `break` of the outer loop also drops the inner loop's continuations.
 4. **Unwired `Exit`.** `Exit` to an unwired caller output behaves as a chain end and pops a pending continuation if one exists.
 5. **Faults.** A fault in the `each` chain with a `Try` outside the loop pops the pending `bump` and everything above the marker; a `Try` entirely inside the `each` chain leaves the macro's continuation untouched.
 6. **Join.** Two producers wired to one exec input, each storing a value in a local that the join reads; a read of an impure output whose producer is on only one of the paths is rejected (`E0310`).
@@ -117,7 +117,6 @@ The compiler, not the verifier, checks effect-freedom and the read restrictions 
 | Function | Callable, may recurse, returns results. A function that may suspend is declared `@latent`, and the compiler checks the declaration (`E0201`): a function that contains a latent node, or calls a latent function or event, must be latent. A latent function is never `@pure` or `@reads`. Unlike Blueprint functions, Wiret allows this, but only when it is declared. |
 | Event | A function with no results, intended as an entry point. Events are implicitly latent. Invoked by the host (`wr_push_func` plus `wr_call` or `wr_start`) or by `Call` from another latent graph. |
 | Macro | Expanded in place before type-checking the caller's body. Macro locals are renamed per expansion, so two expansions never share state; `state` slots are one per expansion site. After expansion, node ids are path-style (`loop/test`), and each macro exec pin gets a synthetic stub id (`loop!each`), so debug data and diagnostics point into the macro's own nodes. A macro may not expand itself, directly or indirectly (`E0401`). |
-| Collapsed group | Editor-only. A layout `box` with `collapsed = true` and explicit `members` is drawn as a single node whose pins are the wires crossing the box edge. The compiler sees the flat graph. |
 
 ### 4.5 Latent nodes and fibers
 
@@ -158,13 +157,13 @@ Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber
 
 | Code | Meaning |
 | --- | --- |
-| `E0101` / `E0102` | Binding or exec target names an unknown node / a duplicate: node id, declaration, struct field or enum member; also a struct or enum named like a built-in type, and a node id that is also an enum's name (section 2.3). |
+| `E0101` / `E0102` | A binding, bare name or `goto` names nothing (no named node, block name or parameter) / a duplicate: node name, local, declaration, struct field or enum member; also a struct or enum named like a built-in type (section 2.3). |
 | `E0103` | Unknown pin on a node. |
-| `E0104` | Unknown `@` attribute. For a metadata name such as `@doc`, the message shows the `#[...]` form (section 2.4). |
-| `E0110` | Wire type mismatch (and no supertype relation); also a literal, field default, enum member value or `@cases` value that does not fit its type, including a vector tuple of the wrong length; and a type argument the kind does not accept, such as `Add::<quat>` (section 3.1.1). |
+| `E0104` | A decorator name without a dot that is neither a semantic nor a metadata decorator, or a decorator where it does not apply (section 2.4). |
+| `E0110` | Wire type mismatch (and no supertype relation); also a literal, field default, enum member value or `#cases` value that does not fit its type, including a vector tuple of the wrong length; and a type argument the kind does not accept, such as `Add#<quat>` (section 3.1.1). |
 | `E0111` | The same input pin is bound twice. |
 | `E0120` | Exec output wired to a data pin, or a data wire to an exec pin. |
-| `E0121` | An exec output has more than one wire in the `flow` block. |
+| `E0121` | An exec output has more than one wire: the same output written as two blocks. |
 | `E0130` | Container mutation node does not target a place (local, variable or field). |
 | `E0140` | A node, box or `@id` reuses an id recorded as retired in `wiret.ids` (section 7.3). |
 | `E0150` | A method overrides a `@final` method, or its parameters, results or latency differ from the method it overrides (section 2.2). |
@@ -186,13 +185,10 @@ Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber
 | `W0201` | Input left unbound and no declared default. |
 | `W0202` | Element in a project has no `@id` (section 2.4). A file outside a project gets no `W0202`. |
 | `W0203` | An `enum` is marked `@export`. An enum is its underlying integer type in WBC and has no type entry, so it is not exported (section 5.2). |
-| `W0301` | Node unreachable from any entry. |
+| `W0301` | Node unreachable from any entry: a disabled `!` statement (section 2.3). |
 | `W0302` | Chain can end in a function that declares results. |
-| `W0601` | A box lists a member id that names no node or box. |
-| `W0602` | A node or box is listed as a member of more than one box. |
 | `W0603` | `wiretc fmt` would drop a `//` comment (section 2.1). |
-| `W0604` | A `#[note]` is detached: its target was deleted and the note was moved to the enclosing graph (section 2.4). |
-| `W0605` | A layout line, or its metadata, names no node of the graph. It is kept as written (section 2.3). |
+| `W0604` | A `@note` is detached: its target was deleted and the note was moved to the enclosing graph (section 2.4). |
 
 Diagnostics are structured records, not only text: `code`, `severity`, `message`, `module`, `graph`, `node` and `pin`. `wiretc check --json` prints one record per line. An editor uses `node` and `pin` to highlight the exact place on the graph, and an LLM agent feeds the records back to itself until the check is clean (section 7.2). Diagnostics that arise inside an expanded macro carry the path-style node id (section 4.4).
 
@@ -208,13 +204,13 @@ Diagnostics are structured records, not only text: `code`, `severity`, `message`
 
 ### 4.9 Containers have value semantics
 
-`array::<T>`, `set::<T>` and `map::<K,V>` are value types, as arrays are in Blueprints. Assigning one, passing it to a function, storing it in a field or returning it gives the receiver its own logical copy, and changing one never changes another. Two variables never alias one array.
+`array#<T>`, `set#<T>` and `map#<K,V>` are value types, as arrays are in Blueprints. Assigning one, passing it to a function, storing it in a field or returning it gives the receiver its own logical copy, and changing one never changes another. Two variables never alias one array.
 
 Copying eagerly would make a loop that appends to an array quadratic, so the VM implements the rule as **copy-on-write** with a single `shared` flag per container object:
 
 - **Fresh containers are unshared.** `array.new`, `array.clone` and the result of any mutating instruction start unshared.
 - **Letting a reference escape marks sharing.** When the value of a container variable, field, parameter or element is bound to anything that can retain it (another variable or field, a call argument, a return value, a macro input), the compiler emits `ref.share` after the read. `ref.share` sets the flag and returns the same reference. Read-only nodes (`ArrayGet`, `ArrayLength`, `MapFind` and the other map and set queries, and `Eq`/`Ne`) do not need it. Without the optimiser this is decided per consumer pin: every container input whose consumer can keep the value is shared, and the rest are not.
-- **Mutating instructions return the container.** `array.push` and the other mutators take the container and return one. If it is unshared they change it in place and return the same reference. If it is shared they change a fresh copy and return that. The compiler stores the result back into the place being changed, which is how `ArrayAdd::<i32> acc` (with `.item <- x`) works.
+- **Mutating instructions return the container.** `array.push` and the other mutators take the container and return one. If it is unshared they change it in place and return the same reference. If it is shared they change a fresh copy and return that. The compiler stores the result back into the place being changed, which is how `ArrayAdd#<i32> acc` (with `.item <- x`) works.
 - **A mutation node reads its own place without marking it.** A loop that keeps adding to a local array therefore changes it in place, at constant cost per iteration, as long as nothing else has read it.
 - **The flag is never cleared.** A holder that still points at a shared object copies it once on its next mutation and then owns an unshared copy. That costs at most one extra copy per sharing event and needs no reference counts, so the tracing collector is unchanged and every run behaves identically.
 
@@ -223,7 +219,7 @@ Consequences:
 - `ForEach` iterates the array as it was when the loop started, because a macro input is captured (and so marked shared) at entry. Changing the variable inside the body does not disturb the iteration.
 - A struct that contains a container holds it by shared reference. Because every read marks it shared, nothing can change a struct through its array.
 - Containers of containers follow the same rule at each level: reading an element that is itself a container marks it shared.
-- Classes, delegates and host handles stay reference types. An `array::<Player>` copies the references, not the players.
+- Classes, delegates and host handles stay reference types. An `array#<Player>` copies the references, not the players.
 - The optimiser removes a `ref.share` when liveness analysis shows the source holder is dead after the read, which is the common case when a function builds a local array and returns it.
 - A default container that many holders start from (a local's or field's starting value, the value `MapFind` gives for a missing key) is created shared, so the first change to it makes a copy.
 - `Eq` and `Ne` on containers are structural: element-wise for arrays; the same items for sets, and the same keys with equal values for maps, ignoring insertion order. Each element, value and field uses its own type's equality, so a container holding NaN is not equal to itself. Keys, however, match as they do in a lookup, where every NaN is one key (section 3.1), so two sets that each hold NaN are equal. A struct that holds a container is compared field by field as below, and that field with these rules.
