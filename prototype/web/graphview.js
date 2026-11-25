@@ -119,6 +119,12 @@ export class GraphView {
     this.#applyView();
   }
 
+  /** Put a cancelled drag back: the dragged item, and the nodes a box carried. */
+  #unmove(d) {
+    d.item.x = d.x0; d.item.y = d.y0;
+    for (const [n, x0, y0] of d.inside ?? []) { n.x = x0; n.y = y0; }
+  }
+
   #applyView() {
     this.world.style.transform = `translate(${this.ox}px, ${this.oy}px) scale(${this.scale})`;
     const step = 40 * this.scale;
@@ -582,7 +588,7 @@ export class GraphView {
         const [a, b] = [...pointers.values()];
         pinch = { dist: Math.hypot(a[0] - b[0], a[1] - b[1]), scale: this.scale };
         this.temp.replaceChildren();
-        if (drag?.kind === "move" && drag.moved) { drag.item.x = drag.x0; drag.item.y = drag.y0; this.render(); }
+        if (drag?.kind === "move" && drag.moved) { this.#unmove(drag); this.render(); }
         drag = null;
         return;
       }
@@ -612,7 +618,13 @@ export class GraphView {
         const id = nodeEl ? nodeEl.dataset.id : boxTitle.dataset.box;
         const item = nodeEl ? this.graph.nodes.find((n) => n.id === id)
                             : this.graph.boxes.find((b) => b.id === id);
-        if (item) Object.assign(drag, { kind: "move", id, item, x0: item.x, y0: item.y });
+        if (item) {
+          // a box carries the nodes that lie inside it (they are not members of it: section 2.3)
+          const inside = nodeEl ? [] : this.graph.nodes
+            .filter((n) => n.x >= item.x && n.x <= item.x + item.w && n.y >= item.y && n.y <= item.y + item.h)
+            .map((n) => [n, n.x, n.y]);
+          Object.assign(drag, { kind: "move", id, item, x0: item.x, y0: item.y, inside });
+        }
       }
     });
 
@@ -647,6 +659,9 @@ export class GraphView {
       } else if (drag.kind === "move") {
         drag.item.x = Math.round(drag.x0 + dx / this.scale);
         drag.item.y = Math.round(drag.y0 + dy / this.scale);
+        for (const [n, x0, y0] of drag.inside) {
+          n.x = x0 + drag.item.x - drag.x0; n.y = y0 + drag.item.y - drag.y0;
+        }
         this.render();
       } else if (drag.kind === "wire" && drag.at) {
         const end = world([x, y]);
@@ -667,7 +682,7 @@ export class GraphView {
       if (!d) return;
       clearTimeout(d.timer);
       if (e.type !== "pointerup") {         // cancelled: put a dragged node back
-        if (d.kind === "move" && d.moved) { d.item.x = d.x0; d.item.y = d.y0; this.render(); }
+        if (d.kind === "move" && d.moved) { this.#unmove(d); this.render(); }
         return;
       }
       if (!d.moved) return this.#click(d.target, local(e));
