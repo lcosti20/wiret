@@ -10,7 +10,7 @@ from .palette import describe
 from .model import Graph, Lit, PinRef, note_detached, note_text
 from .ops import note_key
 from .printer import fmt_lit
-from .registry import FLOAT_TYPES, INT_TYPES
+from .registry import FLOAT_TYPES, INT_RANGES, INT_TYPES
 
 HEADER = 24     # node header height, in graph units
 ROW = 20        # height of one pin row
@@ -79,6 +79,54 @@ def input_label(n, pin) -> str:
     if b is None and pin.default is not None and n.kind not in ("Exit", "Leave"):
         return f"{pin.name} ({fmt_lit(pin.default_lit())})"
     return pin.name
+
+
+def input_editor(n, pin, idx=None):
+    """The form control the canvas shows on an input that nothing is wired to, or None: an
+    exec pin, a wired one, or a type with no typed value (a struct, a class, ...).
+    {"kind": "text" | "int" | "float" | "bool" | "enum", "value": the value set in the source
+    as it is typed in the control (a string without its quotes, an enum member without its
+    type), or None when there is none, "placeholder": the pin's default the same way, or None,
+    and for an int its "min" and "max", for an enum its "options"}."""
+    if pin.is_exec:
+        return None
+    b = n.binding(pin.name)
+    if b is not None and not isinstance(b.value, Lit):
+        return None
+    ty = pin.type
+    enum = idx.enums.get(ty) if idx is not None else None
+    if ty == "string":
+        kind = "text"
+    elif ty == "bool":
+        kind = "bool"
+    elif ty in INT_TYPES:
+        kind = "int"
+    elif ty in FLOAT_TYPES:
+        kind = "float"
+    elif enum is not None:
+        kind = "enum"
+    else:
+        return None
+
+    def shown(lit):
+        if lit is None:
+            return None
+        if kind == "text" and lit.kind == "string":
+            return lit.value
+        if kind == "bool" and lit.kind == "bool":
+            return bool(lit.value)
+        if kind == "enum" and lit.kind == "enum":
+            return lit.value.split(".", 1)[1]
+        return fmt_lit(lit)
+
+    default = pin.default_lit() if n.kind not in ("Exit", "Leave") else None
+    ed = {"kind": kind, "value": shown(b.value) if b is not None else None,
+          "placeholder": shown(default)}
+    if kind == "int" and ty in INT_RANGES:
+        ed["min"], ed["max"] = INT_RANGES[ty]
+    if enum is not None:
+        ed["options"] = [m.name for m in enum.members]
+    return ed
 
 
 def output_label(sig, pin) -> str:
@@ -206,6 +254,7 @@ def graph_json(g: Graph, info, idx, diags=(), remembered=None, module=None) -> d
             "ins": [{"name": p.name, "exec": p.is_exec, "type": type_words(p.type),
                      "color": type_color(p.type, idx),
                      "label": input_label(n, p), "bound": n.binding(p.name) is not None,
+                     "editor": input_editor(n, p, idx),
                      "filled": p.name in connected or (p.is_exec and (n.id, p.name) in targets)}
                     for p in sig.exec_ins + sig.data_ins],
             "outs": [{"name": p.name, "exec": p.is_exec, "type": type_words(p.type),

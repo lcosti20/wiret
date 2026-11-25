@@ -159,7 +159,8 @@ def edit(source: str, graph: str, request: str) -> str:
       connect_to_node  "a": [node, "in"/"out", pin], "node": the node it was dropped on
       disconnect       "node", "dir", "pin": the wires at that pin
       delete           "node": a node (with its wires) or a box
-      literal          "node", "pin", "text": the value typed for an input (empty unbinds it)
+      literal          "node", "pin", "text": the value typed for an input (empty unbinds it);
+                       "verbatim": true takes a string input's text as the string itself
       toggle           "node", "pin": flip a bool input
       add              "kind", "symbol", "targs" (a palette item), "x", "y", and optionally
                        "context": the pin a wire was dragged from, to wire the new node to
@@ -218,7 +219,8 @@ def edit(source: str, graph: str, request: str) -> str:
             else:
                 reason = None
         elif op == "literal":
-            reason = canvasedit.set_literal(g, info, idx, req["node"], req["pin"], req["text"])
+            reason = canvasedit.set_literal(g, info, idx, req["node"], req["pin"], req["text"],
+                                            verbatim=bool(req.get("verbatim")))
         elif op == "toggle":
             reason = canvasedit.toggle_bool(g, req["node"], req["pin"])
         elif op == "set_enum":

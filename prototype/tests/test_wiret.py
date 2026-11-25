@@ -8346,6 +8346,38 @@ class WebApiTests(unittest.TestCase):
         self.assertNotIn(".cond <-", r["text"])          # false is cond's default, so it is not written
         self.assertIn(".cond <- true", self.edit(r["text"], "CheckAge", op="toggle", node="1", pin="cond")["text"])
 
+    def test_edit_values_verbatim(self):
+        """A canvas text field sends the string as typed: spaces and quotes kept, never parsed."""
+        text = lesson("02_variables.wiret")
+        r = self.edit(text, "Main", op="literal", node="3.message", pin="a", text=' "hi" ',
+                      verbatim=True)
+        self.assertIn('.a <- " \\"hi\\" "', r["text"])
+        r = self.edit(text, "Main", op="literal", node="3.message", pin="a", text="", verbatim=True)
+        self.assertNotIn('.a <- "Your score', r["text"])          # empty: removed from the source
+        # a wired input takes no value
+        r = self.edit(text, "Main", op="literal", node="3.message", pin="b", text="x", verbatim=True)
+        self.assertFalse(r["ok"])
+        self.assertIn("is wired", r["message"])
+
+    def test_input_editors(self):
+        """The form control each unwired input shows on the canvas (graph_json ins[].editor)."""
+        from wiret import webapi
+
+        def editors(text, graph):
+            g = next(x for x in json.loads(webapi.check(text))["graphs"] if x["name"] == graph)
+            return {(n["id"], p["name"]): p.get("editor") for n in g["nodes"] for p in n["ins"]}
+
+        ins = editors(lesson("02_variables.wiret"), "Main")
+        self.assertEqual(ins[("2.value", "b")], {"kind": "int", "value": "5", "placeholder": None,
+                                                 "min": -2**31, "max": 2**31 - 1})
+        self.assertIsNone(ins[("2.value", "a")])                    # wired: no field
+        self.assertEqual(ins[("3.message", "a")]["kind"], "text")
+        self.assertEqual(ins[("3.message", "a")]["value"], "Your score is ")   # no quotes
+        self.assertIsNone(ins[("3", "in")])                         # exec: no field
+        mood = editors(lesson("08_structs.wiret"), "Main")[("3.value", "value")]
+        self.assertEqual(mood["kind"], "enum")
+        self.assertIn("Sleepy", mood["options"])
+
     def test_edit_wires(self):
         text = lesson("02_variables.wiret")
         # an i32 into a string input: a visible Convert node goes in between, and is selected

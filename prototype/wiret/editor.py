@@ -871,6 +871,20 @@ class EditorApp:
             return
         self.commit(reason)
 
+    def set_pin_text(self, nid, pin, text, verbatim=False):
+        """A value typed in an input's field on the canvas; empty text removes the input from
+        the source, so it takes its default."""
+        if not self.can_edit():
+            return
+        try:
+            reason = canvasedit.set_literal(self.graph, self.info, self.idx, nid, pin, text,
+                                            verbatim=verbatim)
+        except canvasedit.Refused as e:
+            messagebox.showerror("Invalid value", str(e))
+            self.view.redraw()
+            return
+        self.commit(reason)
+
     def set_enum_value(self, nid, pin, ty, member):
         if not self.can_edit():
             return

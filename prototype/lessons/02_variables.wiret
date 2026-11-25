@@ -4,7 +4,7 @@ module lessons.variables
 extern func host.Log(message: string) -> ()
 
 @note("Lesson 2: Variables. A local variable (here: score) is a named box that holds one value. SetLocal puts a value in the box. GetLocal reads what is in the box right now.")
-@note("Try it: (1) Step through (F11) and watch the Variables panel in the Debugger tab: score changes from 0 to 10 to 15. (2) Change the bonus: double-click pin b on the Add node and type 100.")
+@note("Try it: (1) Step through (F11) and watch the Variables panel in the Debugger tab: score changes from 0 to 10 to 15. (2) Change the bonus: type 100 in the b box on the Add node.")
 func Main() {
   local score: i32
 

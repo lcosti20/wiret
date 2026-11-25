@@ -17,6 +17,7 @@ from .checker import GraphInfo
 from .explain import type_words
 from .model import Attr, Box, Graph, Lit, PinRef, set_note_text
 from .parser import ParseError, parse_literal
+from .printer import fmt_string
 from .registry import PRIM_TYPES, can_convert, enum_values, lit_fits
 
 # geom(node id) -> (x, y, width) of a node as drawn, or None; used to place an inserted node
@@ -136,14 +137,21 @@ def literal_prompt(g: Graph, info, idx, nid: str, pin: str) -> Optional[dict]:
     return {"type": p.type, "current": current, "hint": hint}
 
 
-def set_literal(g: Graph, info, idx, nid: str, pin: str, text: str) -> str:
+def set_literal(g: Graph, info, idx, nid: str, pin: str, text: str, verbatim: bool = False) -> str:
     """Set an input to the value typed for it. Empty text unbinds it (it takes its default).
-    A string needs no quotes, and an enum member no type name."""
+    A string needs no quotes, and an enum member no type name. With `verbatim` (a text field
+    on the canvas), the text of a string input is the string itself, spaces and quotes kept."""
     p = info.sigs[nid].input(pin)
     if p is None or p.is_exec:
         raise Refused(f"{nid}.{pin} takes no value.")
     if p.type in idx.structs:
         raise Refused(f"A {p.type} has no typed value. Wire a 'Make {p.type}' node into {nid}.{pin}.")
+    b = g.node(nid).binding(pin)
+    if verbatim and b is not None and not isinstance(b.value, Lit):
+        raise Refused(f"{nid}.{pin} is wired. Disconnect it to type a value.")
+    if verbatim and p.type == "string" and text:
+        ops.bind(g, nid, pin, Lit("string", text))
+        return f"Set {nid}.{pin} = {fmt_string(text)}"
     text = text.strip()
     if not text:
         ops.unbind(g, nid, pin)

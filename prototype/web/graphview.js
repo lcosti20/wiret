@@ -36,7 +36,7 @@ export class GraphView {
   /** host: an empty element to fill. on: {select(nodeId|null), open(graphName),
    *  toggleBreakpoint(nodeId), canEdit() -> true or the reason not, message(text),
    *  move(id, x, y), connect(a, b), connectToNode(a, nodeId), disconnect(node, dir, pin),
-   *  deleteNode(id), editPin(node, pin, [screenX, screenY]),
+   *  deleteNode(id), editPin(node, pin, [screenX, screenY]), setPin(node, pin, text),
    *  palette([worldX, worldY], [screenX, screenY], pin or null),
    *  menu(target, [screenX, screenY], [worldX, worldY])}. A pin is [node, "in"/"out", pin];
    *  screen points are relative to the canvas. A menu target is as webapi.menu takes it. */
@@ -135,6 +135,11 @@ export class GraphView {
   // ---------- drawing ----------
   render() {
     const g = this.graph, st = this.state;
+    // a value field that has the focus keeps it across the redraw an edit makes
+    const act = document.activeElement;
+    const keep = act?.dataset?.field && this.world.contains(act)
+      ? { key: act.dataset.field, sel: act.type === "text" ? [act.selectionStart, act.selectionEnd] : null }
+      : null;
     this.world.replaceChildren();
     this.notesBox.replaceChildren();
     this.geoms = new Map();
@@ -166,9 +171,15 @@ export class GraphView {
       const body = h("div", "gv-body");
       const ins = h("div", "gv-col"), outs = h("div", "gv-col gv-outs");
       for (const p of n.ins) {
-        const r = h("div", "gv-pin", p.label);
+        const r = h("div", "gv-pin", p.editor ? p.name : p.label);
         if (!p.bound && !p.exec) r.classList.add("gv-unbound");
-        if (!p.exec) { r.dataset.row = p.name; r.title = `${p.name}: ${p.type}\nDouble-click to type a value`; }
+        if (p.editor) {
+          r.classList.add("gv-hasfield");
+          r.title = `${p.name}: ${p.type}` + (p.editor.placeholder != null ? `\nEmpty: the default, ${p.editor.placeholder}` : "");
+          r.append(this.#field(n.id, p));
+        } else if (!p.exec) {
+          r.dataset.row = p.name; r.title = `${p.name}: ${p.type}\nDouble-click to type a value`;
+        }
         ins.append(r);
       }
       for (const p of n.outs) outs.append(h("div", "gv-pin", p.label));
@@ -331,6 +342,73 @@ export class GraphView {
       over.append(d);
     }
     this.#applyView();
+    if (keep) {
+      const f = this.world.querySelector(`[data-field="${CSS.escape(keep.key)}"]`);
+      if (f) {
+        f.focus({ preventScroll: true });
+        if (keep.sel) try { f.setSelectionRange(...keep.sel); } catch { /* not a text field */ }
+      }
+    }
+  }
+
+  /** The form control on an input that nothing is wired to (p.editor, from
+   *  viewmodel.input_editor): a text box, a number box, a checkbox or a list of enum members.
+   *  A change reports on.setPin(node, pin, text) with the value as the source writes it, or ""
+   *  to remove the input from the source so that it takes its default (the placeholder). */
+  #field(nodeId, p) {
+    const ed = p.editor, key = `${nodeId}|${p.name}`;
+    const set = (text) => this.on.setPin(nodeId, p.name, text);
+    const ph = ed.placeholder;
+    let f;
+    if (ed.kind === "bool") {
+      f = h("input");
+      f.type = "checkbox";
+      f.checked = ed.value ?? ph ?? false;
+      if (ed.value == null) f.classList.add("gv-default");
+      // the default needs no line in the source; with no default, the value is always written
+      f.onchange = () => set(ph != null && f.checked === ph ? "" : String(f.checked));
+    } else if (ed.kind === "enum") {
+      f = h("select");
+      f.append(new Option(ph != null ? `${ph} (default)` : "—", ""));
+      for (const m of ed.options) f.append(new Option(m, m));
+      f.value = ed.value ?? "";
+      if (ed.value == null) f.classList.add("gv-default");
+      f.onchange = () => set(f.value);
+    } else {
+      f = h("input");
+      if (ed.kind === "text") {
+        f.type = "text";
+        f.size = Math.max(4, Math.min(24, (ed.value ?? ph ?? "").length + 1));
+      } else {
+        f.type = "number";
+        f.step = ed.kind === "int" ? "1" : "any";
+        if (ed.min != null) { f.min = ed.min; f.max = ed.max; }
+      }
+      f.value = ed.value ?? "";
+      f.placeholder = ph ?? (ed.kind === "text" ? "" : p.type);
+      const commit = () => {
+        const v = f.value;
+        if (v === (ed.value ?? "")) return;
+        set(ed.kind === "text" ? v : v.trim());     // a string input takes the text as typed
+      };
+      f.onchange = commit;
+      f.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); commit(); f.blur(); }
+        else if (e.key === "Escape") { f.value = ed.value ?? ""; f.blur(); }
+      });
+      if (f.type === "number" && ed.value != null && f.value === "") {
+        f.type = "text";                // a value a number box cannot show (e.g. 1_000, 2.5f32)
+        f.value = ed.value;
+      }
+    }
+    f.classList.add("gv-field");
+    f.dataset.field = key;
+    f.setAttribute("aria-label", `${nodeId}.${p.name}`);
+    // the field takes its own pointer and keys: no drag, pan, palette or delete from here
+    for (const ev of ["pointerdown", "keydown", "dblclick"]) {
+      f.addEventListener(ev, (e) => e.stopPropagation());
+    }
+    return f;
   }
 
   #nodeTip(n) {
