@@ -189,7 +189,7 @@
   #code { position: relative; flex: 1; min-width: 0; }
   #hl { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
   #hl div { position: absolute; left: 0; right: 0; height: var(--lh); }
-  #hl .sel { background: var(--sel-bg); box-shadow: inset 3px 0 var(--sel-edge); }
+  #hl .sel { box-shadow: inset 3px 0 var(--sel-edge); }
   #hl .cur { background: var(--cur-bg); box-shadow: inset 3px 0 var(--cur-edge); }
   #hl .frame { background: var(--frame-bg); }
   #hl .bad { background: var(--bad-bg); box-shadow: inset 3px 0 var(--error); }
@@ -919,16 +919,39 @@ function renderHighlights() {
     if (line) strips.push([line, "bad"]);
   }
   const sl = selected ? lineOf(graphName, selected) : null;
-  if (sl) strips.push([sl, "sel"]);
+  if (sl) strips.push([sl, "sel", blockEnd(sl) - sl + 1]);
   const f = selectedFrame();
   const cl = f ? lineOf(f.graph, f.node) : null;
   if (cl) strips.push([cl, frameSel < 0 || frameSel === session.current.frames.length - 1 ? "cur" : "frame"]);
-  $("hl").replaceChildren(...strips.map(([line, cls]) => {
+  $("hl").replaceChildren(...strips.map(([line, cls, span = 1]) => {
     const d = el("div", cls);
     d.dataset.line = line;
+    d.style.height = `${span * LH}px`;
     return d;
   }));
   syncScroll();
+}
+
+/** The last line of the node written on `line`: where its parenthesised input block closes.
+ *  Parentheses inside its {…} attributes, strings and comments do not count. */
+function blockEnd(line) {
+  const lines = $("src").value.split("\n");
+  let depth = 0, braces = 0;
+  for (let i = line - 1; i < lines.length; i++) {
+    const s = lines[i];
+    for (let j = 0; j < s.length; j++) {
+      const c = s[j];
+      if (c === "/" && s[j + 1] === "/") break;
+      if (c === '"') {
+        for (j++; j < s.length && s[j] !== '"'; j++) if (s[j] === "\\") j++;
+      } else if (c === "{") braces++;
+      else if (c === "}") braces--;
+      else if (braces === 0 && c === "(") depth++;
+      else if (braces === 0 && c === ")" && --depth === 0) return i + 1;
+    }
+    if (depth <= 0) return line;                       // no input block opened on the node's line
+  }
+  return line;
 }
 
 function syncScroll() {
