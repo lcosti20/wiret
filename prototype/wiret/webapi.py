@@ -15,7 +15,7 @@ import json
 from collections import Counter
 from typing import Optional
 
-from . import canvasedit, ops, syntax as syn
+from . import canvasedit, ops, syntax as syn, textchanges
 from . import palette as pal
 from .checker import GraphInfo
 from .compiler import compile_module
@@ -401,6 +401,11 @@ def menu(source: str, graph: str, target: str) -> str:
         choice("Edit note…", "edit_note", "Text:", note_text(nt), key=t["note"])
         choice("Delete note", "delete_note", key=t["note"])
     return json.dumps(out)
+
+
+def changes(old: str, new: str) -> str:
+    """What an edit changed in the source, for the Source pane to flash (textchanges.py)."""
+    return json.dumps(textchanges.changes(old, new))
 
 
 def syntax() -> str:

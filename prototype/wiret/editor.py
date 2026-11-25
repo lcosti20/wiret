@@ -21,6 +21,7 @@ from typing import Optional
 
 from . import canvasedit, ops, palette, palettepopup, syntax, viewmodel
 from .checker import GraphInfo, check
+from .textchanges import changes
 from .compiler import compile_module
 from .debugstate import DebugState
 from .disasm import disassemble
@@ -52,6 +53,20 @@ func Main() {
 FROZEN = getattr(sys, "frozen", False)          # running from a PyInstaller build
 HERE = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LESSONS_DIR = os.path.join(HERE, "lessons")       # read-only originals
+
+# A graph edit flashes what it changed in the Source pane: the lines in grey, the changed
+# columns in yellow, fading in FLASH_MS from full strength to 25% over the background.
+SOURCE_BG = "#15171a"
+FLASH_LINE, FLASH_LINE_DIM = "#868788", "#313336"
+FLASH_COL, FLASH_COL_DIM = "#ffef88", "#655f36"
+FLASH_MS, FLASH_STEPS = 1000, 25
+
+
+def mix(c1: str, c2: str, t: float) -> str:
+    """The colour t of the way from c1 to c2 (both #rrggbb)."""
+    a = [int(c1[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(c2[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(a, b))
 
 
 def user_dir() -> str:
@@ -125,6 +140,7 @@ class EditorApp:
         self.redo_stack: list = []
         self._suppress_text_event = False
         self._parse_job = None
+        self._flash_job = None
         self.run_thread = None
         self.vm: Optional[VM] = None
         self.out_queue: queue.Queue = queue.Queue()
@@ -235,7 +251,7 @@ class EditorApp:
         self.notebook = nb
 
         src_frame = ttk.Frame(nb)
-        self.src = tk.Text(src_frame, wrap="none", undo=True, font=MONO, bg="#15171a", fg=TEXT,
+        self.src = tk.Text(src_frame, wrap="none", undo=True, font=MONO, bg=SOURCE_BG, fg=TEXT,
                            insertbackground="white", selectbackground="#3a4a63")
         ys = ttk.Scrollbar(src_frame, orient="vertical", command=self.src.yview)
         xs = ttk.Scrollbar(src_frame, orient="horizontal", command=self.src.xview)
@@ -248,6 +264,10 @@ class EditorApp:
             self.src.tag_configure(tag, foreground=color)
         self.src.tag_configure("err", background="#5c1f1f")
         self.src.tag_configure("hl", background="#3a3f4b")
+        self.src.tag_configure("chg_line")
+        self.src.tag_configure("chg_col")
+        self.src.tag_raise("chg_line", "hl")
+        self.src.tag_raise("chg_col", "chg_line")
         nb.add(src_frame, text="Source (.wiret)")
 
         prob = ttk.Frame(nb)
@@ -506,6 +526,7 @@ class EditorApp:
     def set_text(self, text, from_disk=False):
         """Replace the source pane's contents and parse them."""
         self._suppress_text_event = True
+        self.clear_flash()
         y = self.src.yview()[0]
         ins = self.src.index("insert")
         self.src.delete("1.0", "end")
@@ -537,6 +558,7 @@ class EditorApp:
         self.src.edit_modified(False)
         if self._suppress_text_event:
             return
+        self.clear_flash()
         if self._parse_job:
             self.root.after_cancel(self._parse_job)
         self._parse_job = self.root.after(350, self.text_edited)
@@ -581,6 +603,35 @@ class EditorApp:
         for i, line in enumerate(self.text.split("\n"), start=1):
             for start, end, tag in syntax.spans(line):
                 t.tag_add(tag, f"{i}.{start}", f"{i}.{end}")
+
+    def flash_changes(self, old: str, new: str):
+        """Mark what an edit changed in the Source pane and fade it (see FLASH_LINE)."""
+        ch = changes(old, new)
+        t = self.src
+        for line in ch["lines"]:
+            t.tag_add("chg_line", f"{line}.0", f"{line + 1}.0")
+        for line, start, end in ch["spans"]:
+            t.tag_add("chg_col", f"{line}.{start}", f"{line}.{end}")
+        if ch["lines"]:
+            t.update_idletasks()
+            first = t.dlineinfo(f"{ch['lines'][0]}.0")
+            if first is None:                  # off screen: bring it into view
+                t.see(f"{ch['lines'][0]}.0")
+        self._flash_step(0)
+
+    def _flash_step(self, i: int):
+        k = i / FLASH_STEPS
+        self.src.tag_configure("chg_line", background=mix(FLASH_LINE, FLASH_LINE_DIM, k))
+        self.src.tag_configure("chg_col", background=mix(FLASH_COL, FLASH_COL_DIM, k))
+        self._flash_job = (self.root.after(FLASH_MS // FLASH_STEPS, self._flash_step, i + 1)
+                           if i < FLASH_STEPS else None)
+
+    def clear_flash(self):
+        if self._flash_job:
+            self.root.after_cancel(self._flash_job)
+            self._flash_job = None
+        self.src.tag_remove("chg_line", "1.0", "end")
+        self.src.tag_remove("chg_col", "1.0", "end")
 
     def push_undo(self, text):
         self.undo_stack.append(text)
@@ -627,9 +678,11 @@ class EditorApp:
             self.view.selected = ("node", GraphNames(g, ModuleIndex(m)).name(sel[1]))
         text = print_module(m)
         if text != self.text:
-            self.push_undo(self.text)
+            prev = self.text
+            self.push_undo(prev)
             self.write_file(text)
             self.set_text(text)
+            self.flash_changes(prev, text)
         self.status(f"{reason} — saved {os.path.basename(self.path or '')}")
         self.refresh()
         return True
@@ -639,9 +692,10 @@ class EditorApp:
             self.status("Nothing to undo.")
             return
         self.redo_stack.append(self.text)
-        text = self.keep_ids(self.undo_stack.pop())
+        prev, text = self.text, self.keep_ids(self.undo_stack.pop())
         self.write_file(text)
         self.set_text(text)
+        self.flash_changes(prev, text)
         self.after_text_parsed()
         self.status("Undone.")
 
@@ -649,9 +703,10 @@ class EditorApp:
         if not self.redo_stack:
             return
         self.undo_stack.append(self.text)
-        text = self.keep_ids(self.redo_stack.pop())
+        prev, text = self.text, self.keep_ids(self.redo_stack.pop())
         self.write_file(text)
         self.set_text(text)
+        self.flash_changes(prev, text)
         self.after_text_parsed()
 
     def format_now(self):

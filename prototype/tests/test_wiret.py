@@ -9290,5 +9290,30 @@ class LaneTypeTests(unittest.TestCase):
         self.assertEqual(format_value("vec3", (1.0, 2.5, 0.0)), "(1.0, 2.5, 0.0)")
 
 
+class TextChangesTests(unittest.TestCase):
+    """What the Source pane flashes after a graph edit (wiret/textchanges.py)."""
+
+    def setUp(self):
+        from wiret.textchanges import changes
+        self.changes = changes
+        self.text = "func Main() {\n  exec Entry{pos=(0, 0)}()\n  exec Call host.Log{pos=(200, 0)}(\n" \
+                    "    .message <- \"Hi\"\n  )\n}\n"
+
+    def test_changed_number_is_shown_whole(self):
+        new = self.text.replace("(200, 0)", "(220, 40)")
+        self.assertEqual(self.changes(self.text, new), {"lines": [3], "spans": [[3, 26, 33]]})
+
+    def test_inserted_line_is_marked_without_its_indent(self):
+        new = self.text.replace('"Hi"\n', '"Hi"\n    .level <- 2\n')
+        self.assertEqual(self.changes(self.text, new), {"lines": [5], "spans": [[5, 4, 15]]})
+
+    def test_deleted_lines_mark_where_they_were(self):
+        new = self.text.replace('    .message <- "Hi"\n', "")
+        self.assertEqual(self.changes(self.text, new), {"lines": [4], "spans": []})
+
+    def test_no_change(self):
+        self.assertEqual(self.changes(self.text, self.text), {"lines": [], "spans": []})
+
+
 if __name__ == "__main__":
     unittest.main()

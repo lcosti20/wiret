@@ -193,6 +193,12 @@
   #hl .cur { background: var(--cur-bg); box-shadow: inset 3px 0 var(--cur-edge); }
   #hl .frame { background: var(--frame-bg); }
   #hl .bad { background: var(--bad-bg); box-shadow: inset 3px 0 var(--error); }
+  /* what the last graph edit changed: bright, then faded to 25% so the text reads (1 s) */
+  #flash { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+  #flash div { position: absolute; height: var(--lh); animation: flash 1s ease-out forwards; }
+  #flash .line { left: 0; right: 0; background: #868788; }
+  #flash .col { background: #ffef88; }
+  @keyframes flash { from { opacity: 1; } to { opacity: .25; } }
   /* the text is drawn twice: coloured in #paint, and transparent in the textarea above it,
      which keeps editing, the caret, selection and undo */
   #paint { position: absolute; inset: 0; margin: 0; padding: 10px; overflow: hidden;
@@ -282,7 +288,7 @@
       <div class="tabpane" id="pane-source" role="tabpanel">
         <div id="editor">
           <div id="gutter-clip"><div id="gutter"></div></div>
-          <div id="code"><div id="hl"></div><pre id="paint" aria-hidden="true"><div></div></pre><textarea id="src" spellcheck="false" aria-label="Source"></textarea></div>
+          <div id="code"><div id="hl"></div><div id="flash"></div><pre id="paint" aria-hidden="true"><div></div></pre><textarea id="src" spellcheck="false" aria-label="Source"></textarea></div>
         </div>
       </div>
       <div class="tabpane" id="pane-debugger" role="tabpanel" hidden><div id="dbg-body"></div></div>
@@ -394,13 +400,48 @@ function applyEdit(req) {
 
 /** Replace the source text after a graph edit, undo or redo; the last run is now stale. */
 function setText(text) {
-  const ta = $("src"), top = ta.scrollTop;
+  const ta = $("src"), top = ta.scrollTop, before = ta.value;
   if (trace) stop();
   counts = fault = null;
   ta.value = text;
   ta.scrollTop = top;
   recheck();
   setButtons();
+  flashChanges(before, text);
+}
+
+/** Mark what an edit changed in the source: the lines in grey, the changed columns in yellow,
+ *  fading as #flash's CSS says. Typing or the next edit clears it. */
+function flashChanges(before, after) {
+  const box = $("flash");
+  box.replaceChildren();
+  if (!api || before === after) return;
+  const ch = JSON.parse(api.changes(before, after));
+  const strip = (cls, line, start, end) => {
+    const d = el("div", cls);
+    d.dataset.line = line;
+    if (cls === "col") { d.dataset.start = start; d.dataset.end = end; }
+    return d;
+  };
+  box.append(...ch.lines.map((l) => strip("line", l)),
+             ...ch.spans.map(([l, s, e]) => strip("col", l, s, e)));
+  if (ch.lines.length) scrollToLine(ch.lines[0]);
+  syncScroll();
+}
+
+/** The width of one character of the source, for placing the column strips. It is measured
+ *  in #paint, which draws the text in the same font as the textarea: the computed `font`
+ *  shorthand cannot be used, since browsers leave it empty when font-variant-ligatures is set. */
+let charW = 0;
+function charWidth() {
+  if (!charW) {
+    const probe = el("span", null, "x".repeat(100));
+    probe.style.cssText = "position: absolute; visibility: hidden; white-space: pre";
+    $("paint").append(probe);
+    charW = probe.getBoundingClientRect().width / 100;
+    probe.remove();
+  }
+  return charW;
 }
 
 function undo() {
@@ -511,6 +552,7 @@ import os
     stop();
     $("src").value = py.FS.readFile("/app/" + $("lesson").value, { encoding: "utf8" });
     $("src").scrollTop = 0;
+    $("flash").replaceChildren();                      // the last edit's changes were in the old text
     breakpoints.clear();
     undoStack.length = redoStack.length = 0;
     counts = fault = null;
@@ -894,6 +936,14 @@ function syncScroll() {
   $("gutter").style.transform = `translateY(${-top}px)`;
   $("paint").firstElementChild.style.transform = `translate(${-$("src").scrollLeft}px, ${-top}px)`;
   for (const d of $("hl").children) d.style.top = `${PAD + (d.dataset.line - 1) * LH - top}px`;
+  const left = PAD - $("src").scrollLeft;
+  for (const d of $("flash").children) {
+    d.style.top = `${PAD + (d.dataset.line - 1) * LH - top}px`;
+    if (d.dataset.start !== undefined) {
+      d.style.left = `${left + d.dataset.start * charWidth()}px`;
+      d.style.width = `${(d.dataset.end - d.dataset.start) * charWidth()}px`;
+    }
+  }
 }
 
 function scrollToLine(line) {
@@ -944,6 +994,7 @@ let checkJob = null;
 $("src").addEventListener("input", () => {
   if (trace) stop();                                   // the last run was of other text
   counts = fault = null;
+  $("flash").replaceChildren();
   renderGutter();
   clearTimeout(checkJob);
   checkJob = setTimeout(recheck, 350);
