@@ -42,11 +42,11 @@ macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, inde
     .value <- first
   )
   exec test.then -> {
-    exec Sequence#count<2>().then0 -> {
+    exec Sequence#count<2>().then[0] -> {
       exec Exit each(
         .index <- cur
       )
-    }.then1
+    }.then[1]
     exec SetLocal i(
       .value <- Add#<i32>(
         .a <- cur

@@ -117,9 +117,9 @@ box       = "box" attrs NL ;
 named     = "node" IDENT "=" expr NL ;
 stmt      = exec | goto ;
 exec      = "exec" ( expr | IDENT ) { out } NL ;
-out       = "." IDENT [ input ] [ "|" IDENT { "," IDENT } "|" ] "->" "{" { decos stmt } "}"
-          | "." IDENT [ input ] ;            (* only last: continue in this block *)
-                                             (* input: the output's value, `.case0 Mode::Idle` *)
+out       = "." IDENT [ "[" INT "]" ] [ input ] [ "|" IDENT { "," IDENT } "|" ] "->" "{" { decos stmt } "}"
+          | "." IDENT [ "[" INT "]" ] [ input ] ;            (* only last: continue in this block *)
+                                             (* input: the output's value, `.case[0] Mode::Idle` *)
 goto      = "goto" IDENT [ "." IDENT ] NL ;
 disabled  = "!" ( "exec" ( expr | IDENT ) { out } | "{" { decos stmt } "}" | expr ) NL ;
 expr      = KIND [ symbol | STRING ] [ targs ] { named_gen } [ attrs ]
@@ -166,7 +166,8 @@ exec Branch(
 
 - **Flattening.** The last output may be written `.pin` alone, without a block. Then the statements that follow in the enclosing block are that output's block: they continue from it. `Try`'s `.then`, which runs after the body or the fault, and `Sequence`'s last output read most naturally this way, and so does an `if` without an `else` (`}.else` followed by the rest of the function). Flattening is notation only: the graph is the same either way, and the formatter keeps the form that is written. A node created by an editor flattens its last output when it is a `Try` or a `Sequence`.
 - **Output names.** An output's block may bind names between bars, `.each|index, item| -> { ... }`. A name is one of the node's data outputs, read in the block as a bare name (`.b <- index`), or one of its other exec inputs, run with `goto` (`.each|index, break| -> { ... goto break }`). Names are matched by pin name, not position, so `.each|item|` binds only `item`; the bars, unlike parentheses, do not read as a call's arguments. A name is in scope in its block and in the blocks inside it, and an inner block's name hides an outer one's. A named node may bind names too, as a shorthand for `name.pin`. A flattened output binds no names. The parenthesised form of earlier drafts, `.each(index) -> {`, is a syntax error that shows the bars.
-- **Output values.** Some exec outputs take a value: a `Switch`'s `case0`, `case1`, ... (section 3.3). The value is written after the output's name and before its names or `->`, `.case0 Mode::Idle -> { ... }`, and is the node's data input of the same name: a literal, an enum value, a name, `name.pin` or a node written inline, as on the right of `.pin <- value`. It is read in the enclosing block's scope. An output that takes a value is written even when nothing is wired to it, with an empty block, `.case1 Mode::Chase -> {}`, so its value is kept; an empty block is never flattened. Writing a value on an output that takes none is `E0103`.
+- **Indexed outputs.** A node with a variable number of exec outputs, counted by a named generic argument (`Sequence#count<n>`, `Switch#cases<n>`), names them with an index in brackets: `.then[0]`, `.case[1]`. The brackets mark them as one list, the outputs a graph editor adds and removes, and the outputs after them (a `Switch`'s `default`) are set apart: the canvas draws a line above them. An index is a plain number. Writing `.case1` is `E0103`, with a message that shows `.case[1]`.
+- **Output values.** Some exec outputs take a value: a `Switch`'s `case[0]`, `case[1]`, ... (section 3.3). The value is written after the output's name and before its names or `->`, `.case[0] Mode::Idle -> { ... }`, and is the node's data input of the same name: a literal, an enum value, a name, `name.pin` or a node written inline, as on the right of `.pin <- value`. It is read in the enclosing block's scope. An output that takes a value is written even when nothing is wired to it, with an empty block, `.case[1] Mode::Chase -> {}`, so its value is kept; an empty block is never flattened. Writing a value on an output that takes none is `E0103`.
 - A node whose output must be read anywhere else (after its blocks, or from a grandparent's block) is named, and its outputs are read as `name.pin` (see *Named nodes*).
 
 #### Named nodes
@@ -304,7 +305,7 @@ Personal view state (zoom, scroll, selection, open panels) is never written to t
 
 1. **Kind** is a PascalCase built-in (`Add`, `Branch`, `SetLocal`, ...; section 3.3). Calling a declared function is always `Call`, so the closed set of built-in kinds never collides with user names.
 2. **Symbol** (optional) names the thing the node acts on: `Call std.math.Sqrt`, `GetField Player.health`, `SetLocal acc`, `GetState done`, `New Player`, `Cast Player`, `Macro ForRange`, `Exit done`, and for `Format` its template, a string: `Format "Total: {total}"` (section 3.3). A struct node names its struct, and a field node the struct and the field: `MakeStruct Vec2`, `GetField Vec2.x`. A member of a class (a field, a dispatcher, or a field that a container node changes) is always written with its class: `GetField Player.health`, `Broadcast Player.OnHit`, `ArrayAdd#<i32> Player.items`. Inside a method the reader also accepts a member of the method's own class by its bare name, `GetField health`, and the formatter writes it qualified with that class.
-3. **Generic arguments** follow the symbol: `Add#<i32>`, `Convert#<i32, string>`, `Call std.array.Get#<f32>`, and come before the symbol of a container node: `ArrayAdd#<i32> scores`. They are always written out, never inferred. Every generic argument list in Wiret, on a node, a declaration (`macro ForEach#<T>`) or a type (`array#<i32>`), is introduced by `#`; a bare `<` would read like a comparison. A node's **named generic arguments**, which change its pins, follow its type arguments: `Sequence#count<3>()`, `MakeArray#<i32>#count<4>(...)`, `Switch#<Mode>#cases<2>(...)`. They are written with `#` so they are never confused with decorators. `#cases` counts a `Switch`'s cases; each case's value follows its output, `.case0 Mode::Idle -> { ... }` (output values, above). Listing the values in `#cases`, as earlier drafts did, is `E0502` with a message that shows the new form.
+3. **Generic arguments** follow the symbol: `Add#<i32>`, `Convert#<i32, string>`, `Call std.array.Get#<f32>`, and come before the symbol of a container node: `ArrayAdd#<i32> scores`. They are always written out, never inferred. Every generic argument list in Wiret, on a node, a declaration (`macro ForEach#<T>`) or a type (`array#<i32>`), is introduced by `#`; a bare `<` would read like a comparison. A node's **named generic arguments**, which change its pins, follow its type arguments: `Sequence#count<3>()`, `MakeArray#<i32>#count<4>(...)`, `Switch#<Mode>#cases<2>(...)`. They are written with `#` so they are never confused with decorators. `#cases` counts a `Switch`'s cases; each case's value follows its output, `.case[0] Mode::Idle -> { ... }` (output values, above). Listing the values in `#cases`, as earlier drafts did, is `E0502` with a message that shows the new form.
 4. **Bindings** connect input pins: `.pin <- value`, one per line, or separated by commas on one line: `Call host.Log(.message <- "hi")`. The canonical form puts each binding on its own line, indented one level further than the node, without commas (section 2.5). A node with no bound inputs is written with empty parentheses, `Entry()`, so every node reads the same way. `<-` mirrors the `->` of an output's block: data flows *into* the pin. An enum value is written `Mode::Chase`, which never reads like a pin reference. An input that is not listed takes the pin's default value (the declared default, otherwise the zero value of its type); the compiler warns (`W0201`) about unlisted inputs that have no declared default.
 5. **Exec inputs.** A wire enters a node at its first exec input, `in` for most nodes and a macro's first exec parameter. `goto name.pin` enters another one.
 6. **Data wires** may fan out freely: any number of inputs may read the same output of a named node.
@@ -537,11 +538,11 @@ macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, inde
     .value <- first
   )
   exec test.then -> {
-    exec Sequence#count<2>().then0 -> {
+    exec Sequence#count<2>().then[0] -> {
       exec Exit each(
         .index <- cur
       )
-    }.then1
+    }.then[1]
     exec SetLocal i(
       .value <- Add#<i32>(
         .a <- cur
@@ -623,7 +624,7 @@ Things to notice:
 - `TakeDamage` stores the new health in a local before using it twice. The `GetField` written inline in the `SetLocal` is pure, so it would be re-evaluated by every impure consumer; reading `health` again after the `SetField` would subtract the damage a second time (section 4.3).
 - Positions and labels are in each node's attribute block (`{pos=(960, -40), label="Log death"}`), which never changes the semantic hash. Moving a node edits only that part of its line. Each input is its own line, so changing one literal input changes exactly one line.
 - `@capability` and `@pure` are semantic decorators and change what is compiled. `@doc` and `@category` above `Clamp01`, and the `@note` above the `SetLocal`, are metadata; deleting all of them changes neither the semantic hash nor the bytecode. `@id` on the module line is the module's stable identity.
-- `Sequence#count<2>` has two exec outputs, written as a `.then0` block and a flattened `.then1`. `DoOnce`'s macro `Entry` has two exec parameters, so it writes an `.in` block and a flattened `.reset`.
+- `Sequence#count<2>` has two exec outputs, written as a `.then[0]` block and a flattened `.then[1]`. `DoOnce`'s macro `Entry` has two exec parameters, so it writes an `.in` block and a flattened `.reset`.
 - `SumTo`'s loop body binds the loop's `index` output, `.each|index| -> { ... }`, and reads it by name. The `SetLocal` in it has no exec output wired: a chain that ends returns control to whatever pushed it, here the macro (section 4.2), which is what makes the loop continue.
 - `Respawn` is an `event`, which is implicitly latent, so it may contain `Delay`. `TakeDamage` has no latent nodes and is not latent, so a host can call it with `wr_call` and rely on getting a result (section 4.5). Both are instance methods and take `self`.
 - `DoOnce` keeps its flag in a `state` slot. Each expansion of the macro gets its own slot, so two `DoOnce` nodes in one graph do not interfere.

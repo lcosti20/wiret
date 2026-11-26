@@ -382,7 +382,7 @@ class GraphNames:
             stmts = []
             self._walk(nid, stmts)
             # alone: one node with nothing wired after it (its outputs, if any, are the empty
-            # blocks of outputs that take a value, `.case0 Mode::Idle -> {}`)
+            # blocks of outputs that take a value, `.case[0] Mode::Idle -> {}`)
             alone = len(stmts) == 1 and not any(blk for _, blk in stmts[0].outs)
             self.regions.append(("exec" if alone else "block", stmts))
         pure = [n.id for n in self.g.nodes if n.id not in self.parent and n.id not in self.placed
@@ -484,7 +484,7 @@ class GraphNames:
                     if nxt is not None:
                         self._walk(nxt, blk)
                 # an output that takes a value is written even when nothing is wired to it,
-                # with an empty block: `.case1 Mode::Chase -> {}`
+                # with an empty block: `.case[1] Mode::Chase -> {}`
                 wired = {o[0] for o in st.outs}
                 st.outs.extend([p, []] for p in valued if p not in wired)
                 order = {p.name: i for i, p in enumerate(outs)}
@@ -921,7 +921,7 @@ def fmt_exec(st: _Exec, names: GraphNames, indent: str, scope: dict, semantic: b
     for pin, blk in st.outs:
         # the first output follows the node's `)`; each later one follows the `}` that
         # closes the block before it. An output that takes a value has it after its name,
-        # in the enclosing block's scope: `.case0 Mode::Idle -> {`
+        # in the enclosing block's scope: `.case[0] Mode::Idle -> {`
         head = f".{pin}"
         b = n.binding(pin) if pin in valued else None
         if b is not None:

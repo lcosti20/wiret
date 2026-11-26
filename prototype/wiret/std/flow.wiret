@@ -98,12 +98,12 @@ macro ForEach#<T>(in: exec, break: exec, array: array#<T>) -> (each: exec, done:
       .value <- 0
     )
     exec test.then -> {
-      exec Sequence#count<2>().then0 -> {
+      exec Sequence#count<2>().then[0] -> {
         exec Exit each(
           .item <- got.item
           .index <- cur
         )
-      }.then1
+      }.then[1]
       exec SetLocal i(
         .value <- Add#<i32>(
           .a <- cur
@@ -147,13 +147,13 @@ macro ForEachMap#<K, V>(in: exec, break: exec, map: map#<K, V>) -> (each: exec, 
       .value <- 0
     )
     exec test.then -> {
-      exec Sequence#count<2>().then0 -> {
+      exec Sequence#count<2>().then[0] -> {
         exec Exit each(
           .key <- got_key.key
           .value <- got_value.value
           .index <- cur
         )
-      }.then1
+      }.then[1]
       exec SetLocal i(
         .value <- Add#<i32>(
           .a <- cur
@@ -186,11 +186,11 @@ macro ForRange(in: exec, break: exec, first: i32, last: i32) -> (each: exec, don
       .value <- first
     )
     exec test.then -> {
-      exec Sequence#count<2>().then0 -> {
+      exec Sequence#count<2>().then[0] -> {
         exec Exit each(
           .index <- cur
         )
-      }.then1
+      }.then[1]
       exec SetLocal i(
         .value <- Add#<i32>(
           .a <- cur
@@ -223,11 +223,11 @@ macro Repeat(in: exec, break: exec, times: i32) -> (body: exec, done: exec, inde
       .value <- 0
     )
     exec test.then -> {
-      exec Sequence#count<2>().then0 -> {
+      exec Sequence#count<2>().then[0] -> {
         exec Exit body(
           .index <- cur
         )
-      }.then1
+      }.then[1]
       exec SetLocal i(
         .value <- Add#<i32>(
           .a <- cur

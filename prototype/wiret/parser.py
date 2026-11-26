@@ -983,7 +983,7 @@ class Parser:
     def exec_stmt(self, st: _Body, pos: str, cur, scope, meta, attrs, cm, tok):
         """`exec Kind(...)` or `exec name`, then its exec outputs: `.pin|names| -> { ... }`
         blocks, the last of which may be written `.pin` alone to continue in this block. An
-        output that takes a value (a Switch's `case0`) has it after its name, `.case0 Mode::Idle
+        output that takes a value (a Switch's `case[0]`) has it after its name, `.case[0] Mode::Idle
         -> { ... }`: it is the node's input of the same name. Returns the exec output the next
         statement continues from."""
         g = st.g
@@ -1023,6 +1023,15 @@ class Parser:
             pt = self.peek()
             pin = self.ident("exec output")
             nt = self.peek()
+            if self.at_p("[") and nt.line == pt.line and nt.col == pt.col + len(pin):
+                # one of a node's variable outputs, `.case[0]` (section 2.3)
+                self.next()
+                k = self.expect("int", None, "the output's index, as in 'case[0]'")
+                if k.value[1] or k.value[0] < 0:
+                    self.error("an output's index is a plain number, as in 'case[0]'", k)
+                self.expect_p("]")
+                pin = f"{pin}[{k.value[0]}]"
+                nt = self.peek()
             if self.at_p("(") and nt.line == pt.line and nt.col == pt.col + len(pin):
                 self.error(f"an exec output's block binds names between bars: "
                            f"'.{pin}|name, ...| -> {{ ... }}'")

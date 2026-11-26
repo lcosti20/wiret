@@ -55,7 +55,7 @@ An exec input with several producers is a **join**. There is no merge of state a
 | 2 | `1/1` | `i := 1` | `[]` |
 | 3 | `1/test` | `1 <= 2` is true; follow `then` | `[]` |
 | 4 | `1/test.then.0` | the `Sequence`: push the entry of output 1 (`1/test.then.1`); jump to output 0 | `[1/test.then.1]` |
-| 5 | `1/test.then.0.then0.0` | `Exit each (index: i)`: `index := 1`; jump to caller target `1.each.0`. `S` untouched | `[1/test.then.1]` |
+| 5 | `1/test.then.0.then[0].0` | `Exit each (index: i)`: `index := 1`; jump to caller target `1.each.0`. `S` untouched | `[1/test.then.1]` |
 | 6 | `1.each.0` | `acc := acc + index = 1`. No exec output: chain end, pop `1/test.then.1` | `[]` |
 | 7 | `1/test.then.1` | `i := 2`; `goto test` | `[]` |
 | 8 | `1/test` to `1.each.0` | as steps 3 to 6 with `i = 2`: `acc := 3`; chain end pops `1/test.then.1` | `[]` |

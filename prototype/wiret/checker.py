@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass
 from typing import Optional
 
@@ -12,8 +13,8 @@ from .model import Const, Extern, Var
 # Decorators that are metadata: they explain the program and never change it (section 2.4).
 META_NAMES = {"doc", "category", "keywords", "note"}
 from .registry import (HANDLE_TYPES, assignable, field_place, handle_ok, parent_method, BUILTIN_TYPE_NAMES, PLACE_MUTATORS, INT_RANGES, ModuleIndex, Sig,
-                       array_elem, enum_values, instantiate, lit_fits, lit_in_range,
-                       output_values, signature, substitute, type_ok)
+                       COUNTED_OUTPUTS, array_elem, enum_values, instantiate, lit_fits,
+                       lit_in_range, output_values, signature, substitute, type_ok)
 
 
 @dataclass
@@ -344,7 +345,7 @@ def check_enum_value(lit: Lit, idx: ModuleIndex, D, graph=None, node=None, pin=N
 
 
 def check_switch_cases(n: Node, sig: Sig, idx: ModuleIndex, G, D):
-    """Each case's value, written after its output (`.case0 Mode::Idle -> { ... }`), must be a
+    """Each case's value, written after its output (`.case[0] Mode::Idle -> { ... }`), must be a
     value of the Switch's type (section 3.3). A wired value is checked as any wire is."""
     vin = sig.input("value")
     if vin is None:
@@ -518,7 +519,11 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
             listed.add(pname)
             out = sig.output(pname)
             if out is None and not sig.error:
-                D("E0103", f"{n.kind} has no exec output '{pname}'", G, n.id, pname)
+                m = re.fullmatch(r"([A-Za-z_]+)(\d+)", pname)
+                hint = (f"; its numbered outputs are written with brackets, "
+                        f"'{m.group(1)}[{m.group(2)}]'" if m and n.kind in COUNTED_OUTPUTS
+                        else "")
+                D("E0103", f"{n.kind} has no exec output '{pname}'{hint}", G, n.id, pname)
             elif out is not None and not out.is_exec:
                 D("E0120", f"'{pname}' is a data output, not an exec output", G, n.id, pname)
             tgt = nodes.get(e.target)

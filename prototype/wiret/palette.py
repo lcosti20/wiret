@@ -17,7 +17,7 @@ DESCRIBE = {
     "Return": ("Finishes the function and hands back its results.", "end exit result output"),
     "Branch": ("If/else: follows 'then' when the condition is true, otherwise 'else'.",
                "if else condition when check decide"),
-    "Sequence": ("Does several things in order: everything after then0 first, then then1, …",
+    "Sequence": ("Does several things in order: everything after then[0] first, then then[1], …",
                  "order steps first then do"),
     "Switch": ("Chooses a path by comparing a value with several cases.",
                "case match choose which"),

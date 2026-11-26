@@ -76,9 +76,9 @@ macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, inde
   exec entry
   exec init
   exec test.then -> {
-    exec seq.then0 -> {
+    exec seq.then[0] -> {
       exec each_out
-    }.then1
+    }.then[1]
     exec bump
     goto test
   }.else -> {
@@ -316,8 +316,8 @@ func F() {
                            ("exec Add#<i32>(.a <- Call host.Log())", "no output"),
                            ('exec Call host.Log() .message <- "hi"', "-> {"),
                            ("exec Sequence() @count(2)", "#count<2>"),
-                           ("exec Sequence().then0(a) -> {\n  }", "'.then0|name, ...| -> {"),
-                           ("exec Sequence().then0|a| ", "write '.then0|a| -> {"),
+                           ("exec Sequence().then[0](a) -> {\n  }", "'.then[0]|name, ...| -> {"),
+                           ("exec Sequence().then[0]|a| ", "write '.then[0]|a| -> {"),
                            ("node entry = Entry()\n  entry -> entry", "expected 'exec'")):
             with self.subTest(body):
                 with self.assertRaises(ParseError) as cm:
@@ -1067,9 +1067,9 @@ func Step(e: Enemy) -> (out: Enemy, fleeing: bool) {
   )
 
   exec entry
-  exec sw.case0 Mode::Idle -> {
+  exec sw.case[0] Mode::Idle -> {
     exec r1
-  }.case1 Mode::Chase -> {
+  }.case[1] Mode::Chase -> {
     goto r1
   }.default -> {
     exec r2
@@ -1098,7 +1098,7 @@ class StructNodeTests(unittest.TestCase):
         self.assertEqual(codes(text), [])
         g = m.graph("Step")
         self.assertEqual(g.node("r1.fleeing").binding("b").value.kind, "enum")
-        self.assertEqual(g.node("sw").binding("case1").value, Lit("enum", "Mode.Chase"))
+        self.assertEqual(g.node("sw").binding("case[1]").value, Lit("enum", "Mode.Chase"))
         enemy = next(it for it in m.items if it.name == "Enemy")
         self.assertEqual(enemy.field("mode").default.kind, "enum")
         # MakeStruct inputs default to the field's declared default, else to the zero value
@@ -1230,11 +1230,11 @@ func F(p: A = B::Y) {
   node Mode = Branch()
 
   exec entry
-  exec a.case0 Mode::Idle -> {}.case1 3 -> {}.case2 Mode::Nope -> {}
-  !exec b.case0 1 -> {}.case1 "two" -> {}
-  !exec c.case0 300 -> {}
-"""), [("E0110", "a", "case1"), ("E0110", "b", "case1"),       # a node may be called Mode
-       ("E0110", "c", "case0"), ("E0501", "a", "case2")])
+  exec a.case[0] Mode::Idle -> {}.case[1] 3 -> {}.case[2] Mode::Nope -> {}
+  !exec b.case[0] 1 -> {}.case[1] "two" -> {}
+  !exec c.case[0] 300 -> {}
+"""), [("E0110", "a", "case[1]"), ("E0110", "b", "case[1]"),       # a node may be called Mode
+       ("E0110", "c", "case[0]"), ("E0501", "a", "case[2]")])
 
     def test_switch_case_values_follow_their_outputs(self):
         # the old form, case values in #cases, says where they go now
@@ -1251,7 +1251,7 @@ func G(m: Mode) {
 }
 """, macros=False)))
         d = next(d for d in diags if d.code == "E0502")
-        self.assertIn("'.case0 Mode::Idle -> { ... }'", d.message)
+        self.assertIn("'.case[0] Mode::Idle -> { ... }'", d.message)
         # a value on an output that takes none, and a case with no value
         text = module("""
 func G(v: i32) {
@@ -1261,14 +1261,31 @@ func G(v: i32) {
   ).true 3 -> {}
   !exec Switch#<i32>#cases<1>(
     .value <- v
-  ).case0 -> {}
+  ).case[0] -> {}
 }
 """, macros=False)
         diags = check(parse(text))
         self.assertIn(("E0103", "true"), [(d.code, d.pin) for d in diags])
         w = next(d for d in diags if d.code == "W0201")
-        self.assertEqual(w.pin, "case0")
+        self.assertEqual(w.pin, "case[0]")
         self.assertIn("never taken", w.message)
+
+    def test_indexed_outputs_are_written_with_brackets(self):
+        text = module("""
+func G() {
+  exec Entry()
+  exec Sequence#count<2>().then0 -> {
+    exec Call host.Log(
+      .message <- "hi"
+    )
+  }
+}
+""", macros=False)
+        d = next(d for d in check(parse(text)) if d.code == "E0103")
+        self.assertIn("'then[0]'", d.message)
+        with self.assertRaises(ParseError) as cm:
+            parse(text.replace(".then0", ".then[x]"))
+        self.assertIn("'case[0]'", cm.exception.msg)
 
     def test_switch_case_values_may_be_wired(self):
         """A case's value is an input: a literal, or a wire from a node or a parameter, read
@@ -1278,18 +1295,18 @@ func Pick(v: i32, lim: i32) -> (r: string) {
   exec Entry()
   exec Switch#<i32>#cases<3>(
     .value <- v
-  ).case0 lim -> {
+  ).case[0] lim -> {
     exec Return(
       .r <- "lim"
     )
-  }.case1 Add#<i32>(
+  }.case[1] Add#<i32>(
     .a <- lim
     .b <- 1
   ) -> {
     exec Return(
       .r <- "lim+1"
     )
-  }.case2 0 -> {}.default -> {
+  }.case[2] 0 -> {}.default -> {
     exec Return(
       .r <- "other"
     )
@@ -1301,7 +1318,7 @@ func Pick(v: i32, lim: i32) -> (r: string) {
         self.assertEqual(run(text, "Pick", 5, 5)[0], ["lim"])
         self.assertEqual(run(text, "Pick", 6, 5)[0], ["lim+1"])
         self.assertEqual(run(text, "Pick", 7, 5)[0], ["other"])
-        self.assertEqual(run(text, "Pick", 0, 5)[0], [""])     # case2: nothing wired
+        self.assertEqual(run(text, "Pick", 0, 5)[0], [""])     # case[2]: nothing wired
 
     def test_bindings_between_bars_on_named_nodes(self):
         """A named node's block may bind its outputs by name too, as a shorthand for
@@ -1391,7 +1408,7 @@ func G(e: Enemy, v: Vec2, m: Mode, p: Mode = Other::X) {
   )
   node Mode = Branch()
 
-  !exec k.case0 Mode::Idle -> {}.case1 3 -> {}
+  !exec k.case[0] Mode::Idle -> {}.case[1] 3 -> {}
 }
 """, macros=False)
         diags = [d for d in check(parse(text)) if d.severity == "error"]
@@ -1524,9 +1541,9 @@ func Pick(m: Mode) -> (word: string) {
   )
 
   exec entry
-  exec sw.case0 Mode::Idle -> {
+  exec sw.case[0] Mode::Idle -> {
     exec wait
-  }.case1 Mode::Chase -> {
+  }.case[1] Mode::Chase -> {
     exec chase
   }.default -> {
     exec other
@@ -2549,7 +2566,7 @@ func Main(m: Mode) -> (out: i32, len: f32, word: string) {
 
   exec entry
   exec save
-  exec sw.case0 Mode::Idle -> {
+  exec sw.case[0] Mode::Idle -> {
     exec r_idle
   }.default -> {
     exec r_run
@@ -2589,8 +2606,8 @@ class EditTests(unittest.TestCase):
             {"op": "wire_exec", "graph": "Main", "from": "log", "to": "save"},
             {"op": "set_meta", "graph": "Main", "node": "log", "meta": '@note("Says hi.")'},
             {"op": "set_attr", "graph": "Main", "node": "sw", "attr": "#cases<2>"},
-            {"op": "bind", "graph": "Main", "node": "sw", "pin": "case1", "value": "Mode::Run"},
-            {"op": "wire_exec", "graph": "Main", "from": "sw.case1", "to": "r_run"},
+            {"op": "bind", "graph": "Main", "node": "sw", "pin": "case[1]", "value": "Mode::Run"},
+            {"op": "wire_exec", "graph": "Main", "from": "sw.case[1]", "to": "r_run"},
             {"op": "place", "graph": "Main", "node": "log", "props": {"label": '"Greet"'}},
         ])
         self.assertTrue(r.ok, r.error)
@@ -2600,7 +2617,7 @@ class EditTests(unittest.TestCase):
                       '    .message <- "hello"\n  )\n', r.text)
         self.assertIn("  exec entry\n  exec log\n  exec save\n", r.text)
         self.assertIn("node sw = Switch#<Mode>#cases<2>(", r.text)
-        self.assertIn("exec sw.case0 Mode::Idle -> {\n    exec r_idle\n  }.case1 Mode::Run -> {\n"
+        self.assertIn("exec sw.case[0] Mode::Idle -> {\n    exec r_idle\n  }.case[1] Mode::Run -> {\n"
                       "    exec r_run\n  }", r.text)
         self.assertIn("+  node log = Call host.Log", r.diff)
         self.assertEqual(r.hash, hash_of(r.text))
@@ -2713,11 +2730,11 @@ class RenameTests(unittest.TestCase):
 
     def test_enum_and_member(self):
         text = self.renamed("member", "Idle", "Resting")
-        self.assertIn("exec sw.case0 Mode::Resting -> {", text)
+        self.assertIn("exec sw.case[0] Mode::Resting -> {", text)
         text = self.renamed("enum", "Mode", "State")
         self.assertRegex(text, r'func Main\(@id\("\w+"\) m: State')
         self.assertIn("node sw = Switch#<State>#cases<1>(\n", text)
-        self.assertIn("exec sw.case0 State::Resting -> {", text)
+        self.assertIn("exec sw.case[0] State::Resting -> {", text)
 
     def test_macro_exec_pins(self):
         from wiret.ids import assign_ids, elements
@@ -2732,10 +2749,10 @@ macro Twice(go: exec, skip: exec) -> (out: exec) {
   node seq = Sequence#count<2>()
 
   exec entry.go -> {
-    exec seq.then0 -> {
+    exec seq.then[0] -> {
       exec log
       exec leave
-    }.then1
+    }.then[1]
     goto log
   }.skip -> {
     goto leave
@@ -3182,7 +3199,7 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(res, [3])
         # node ids are execution positions: the loop is "1", the node in its `each` block
         # "1.each.0"; inside the macro, "test" is a named node and the rest are positions
-        seq, each, bump = "1/test.then.0", "1/test.then.0.then0.0", "1/test.then.1"
+        seq, each, bump = "1/test.then.0", "1/test.then.0.then[0].0", "1/test.then.1"
         expected = [
             ("0", ()), ("1!in", ()), ("1/1", ()), ("1/test", ()),
             (seq, ()), (each, (bump,)), ("1.each.0", (bump,)),
@@ -3243,9 +3260,9 @@ macro Twice(in: exec) -> (first: exec, second: exec) {
   node b = Exit second()
 
   exec entry
-  exec seq.then0 -> {
+  exec seq.then[0] -> {
     exec a
-  }.then1
+  }.then[1]
   exec b
 }
 
@@ -3329,11 +3346,11 @@ func F() {
   )
 
   exec entry
-  exec seq.then0 -> {
+  exec seq.then[0] -> {
     exec loop.each -> {
       exec log
     }
-  }.then1
+  }.then[1]
   exec after
 }
 """)
@@ -3563,10 +3580,10 @@ func F() {
 
   exec entry
   exec loop.each -> {
-    exec seq.then0 -> {
+    exec seq.then[0] -> {
       exec once_a
       exec log_a
-    }.then1
+    }.then[1]
     exec once_b
     exec log_b
   }
@@ -3626,9 +3643,9 @@ func Name(v: i32) -> (s: string) {
   )
 
   exec entry
-  exec sw.case0 1 -> {
+  exec sw.case[0] 1 -> {
     exec one
-  }.case1 2 -> {
+  }.case[1] 2 -> {
     exec two
   }.default -> {
     exec other
@@ -4118,11 +4135,11 @@ func Nest() -> (n: i32) {
   exec entry
   exec outer.each -> {
     exec inner.each -> {
-      exec seq.then0 -> {
+      exec seq.then[0] -> {
         exec chk.then -> {
           goto outer.break
         }
-      }.then1
+      }.then[1]
       exec add
     }
   }.done -> {
@@ -4676,7 +4693,7 @@ func Spin() {
   node again = Sequence()
 
   exec entry
-  exec again.then0
+  exec again.then[0]
   goto again
 }
 """, macros=False)
@@ -5011,9 +5028,9 @@ func Inner(x: i32) -> (r: i32) {
   node seq = Sequence()
 
   exec entry
-  exec seq.then0 -> {
+  exec seq.then[0] -> {
     exec ret
-  }.then1
+  }.then[1]
   exec log
 }
 
@@ -5189,7 +5206,7 @@ func Spin() {
 
   exec entry
   exec t.body
-  exec again.then0
+  exec again.then[0]
   goto again
 }
 """, macros=False)
@@ -8704,18 +8721,18 @@ func Main() {
         e = next(e for e in self.menu(text, "Main", kind="node", node="~0") if e["label"] == "Add pin")
         r = self.edit(text, "Main", **e["action"])
         self.assertIn("!exec Switch#<Mode>#cases<1>{pos=", r["text"])
-        self.assertIn(").case0 Mode::Idle -> {}\n", r["text"])
+        self.assertIn(").case[0] Mode::Idle -> {}\n", r["text"])
         r = self.edit(r["text"], "Main", op="add_pin", node="~0")
-        self.assertIn(").case0 Mode::Idle -> {}.case1 Mode::Chase -> {}\n", r["text"])
+        self.assertIn(").case[0] Mode::Idle -> {}.case[1] Mode::Chase -> {}\n", r["text"])
         # every member taken: the new case has no value yet, and says so
         r = self.edit(r["text"], "Main", op="add_pin", node="~0")
-        self.assertIn(".case2 -> {}\n", r["text"])
-        # Remove pin on case0: the later cases move down, keeping their values
-        pins = self.menu(r["text"], "Main", kind="pin", node="~0", dir="out", pin="case0")
-        e = next(e for e in pins if e.get("label") == "Remove pin 'case0'")
+        self.assertIn(".case[2] -> {}\n", r["text"])
+        # Remove pin on case[0]: the later cases move down, keeping their values
+        pins = self.menu(r["text"], "Main", kind="pin", node="~0", dir="out", pin="case[0]")
+        e = next(e for e in pins if e.get("label") == "Remove pin 'case[0]'")
         r = self.edit(r["text"], "Main", **e["action"])
         self.assertIn("!exec Switch#<Mode>#cases<2>{pos=", r["text"])
-        self.assertIn(").case0 Mode::Chase -> {}.case1 -> {}\n", r["text"])
+        self.assertIn(").case[0] Mode::Chase -> {}.case[1] -> {}\n", r["text"])
         self.assertFalse(any(e.get("label", "").startswith("Remove pin") for e in
                              self.menu(r["text"], "Main", kind="pin", node="~0", dir="out",
                                        pin="default")))

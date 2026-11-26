@@ -782,10 +782,52 @@ def _static_sig(node: Node, idx: "Optional[ModuleIndex]" = None) -> Sig:
     return sig
 
 
+# The nodes with a variable number of exec outputs: kind -> (the named generic that counts
+# them, the outputs' name, the count a node has without it, the fewest it may have). Their
+# outputs are indexed, `then[0]`, `case[1]` (section 2.3).
+COUNTED_OUTPUTS = {"Sequence": ("count", "then", 2, 1), "Switch": ("cases", "case", 0, 0)}
+_INDEXED = re.compile(r"([A-Za-z_]\w*)\[(\d+)\]")
+
+
+def indexed_name(base: str, i: int) -> str:
+    """The name of the `i`th of a node's variable outputs, `case[0]`."""
+    return f"{base}[{i}]"
+
+
+def pin_index(name: str):
+    """(base, index) for an indexed pin name, `case[2]` -> ("case", 2), or None."""
+    m = _INDEXED.fullmatch(name or "")
+    return (m.group(1), int(m.group(2))) if m else None
+
+
+def output_count(n) -> Optional[int]:
+    """How many indexed outputs a Sequence or Switch has, or None for another node (or a count
+    written in a form the checker rejects)."""
+    spec = COUNTED_OUTPUTS.get(n.kind)
+    if spec is None:
+        return None
+    a = n.attr(spec[0])
+    if a is None or not a.args:
+        return spec[2]
+    v = a.args[0][1]
+    return v.value if len(a.args) == 1 and v.kind == "int" else None
+
+
+def removable_output(n, pin: str) -> bool:
+    """Whether `pin` is an indexed output of a Sequence or Switch that the editor can remove:
+    one of its outputs, while it has more than the fewest it may have."""
+    count = output_count(n) if n is not None else None
+    if count is None:
+        return False
+    _, base, _, least = COUNTED_OUTPUTS[n.kind]
+    ix = pin_index(pin)
+    return ix is not None and ix[0] == base and ix[1] < count and count > least
+
+
 def output_values(sig) -> list:
     """The exec outputs that take a value, in pin order: those with a data input of the same
-    name, as a Switch's `case0`. The value is written after the output's name in the text,
-    `.case0 Mode::Idle -> { ... }`, and on its own input pin on the canvas (section 2.3)."""
+    name, as a Switch's `case[0]`. The value is written after the output's name in the text,
+    `.case[0] Mode::Idle -> { ... }`, and on its own input pin on the canvas (section 2.3)."""
     out = []
     for p in sig.exec_outs:
         q = sig.input(p.name)
@@ -825,7 +867,7 @@ def signature(node: Node, graph: Graph, idx: ModuleIndex) -> Sig:
     if k == "Sequence":
         n = attr_int(node, "count", 2)
         sig.inputs = [Pin("in", E)]
-        sig.outputs = [Pin(f"then{i}", E) for i in range(n)]
+        sig.outputs = [Pin(indexed_name("then", i), E) for i in range(n)]
         return sig
     if k == "Switch":
         if len(node.targs) != 1:
@@ -837,14 +879,15 @@ def signature(node: Node, graph: Graph, idx: ModuleIndex) -> Sig:
         n = attr_int(node, "cases", 0)
         if a is not None and a.args and not (len(a.args) == 1 and a.args[0][1].kind == "int"):
             sig.error = ("E0502", "#cases takes the number of cases, '#cases<2>'; each case's "
-                                  "value follows its output, '.case0 Mode::Idle -> { ... }'")
+                                  "value follows its output, '.case[0] Mode::Idle -> { ... }'")
             n = len(a.args)
         elif not 0 <= n <= 64:
             sig.error = ("E0502", "#cases takes a number of cases from 0 to 64")
             n = max(0, min(n, 64))
         # each case output takes its value: an input of the same name (section 2.3)
-        sig.inputs = [Pin("in", E), Pin("value", t)] + [Pin(f"case{i}", t) for i in range(n)]
-        sig.outputs = [Pin(f"case{i}", E) for i in range(n)] + [Pin("default", E)]
+        cases = [indexed_name("case", i) for i in range(n)]
+        sig.inputs = [Pin("in", E), Pin("value", t)] + [Pin(c, t) for c in cases]
+        sig.outputs = [Pin(c, E) for c in cases] + [Pin("default", E)]
         return sig
     if k == "Reroute":
         if len(node.targs) != 1:

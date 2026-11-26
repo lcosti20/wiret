@@ -18,7 +18,8 @@ from .explain import type_words
 from .model import Attr, Box, Graph, Lit, PinRef, set_note_text
 from .parser import ParseError, parse_literal
 from .printer import fmt_string
-from .registry import PRIM_TYPES, can_convert, enum_values, lit_fits
+from .registry import (COUNTED_OUTPUTS, PRIM_TYPES, can_convert, enum_values, indexed_name,
+                       lit_fits, output_count, pin_index, removable_output)
 
 # geom(node id) -> (x, y, width) of a node as drawn, or None; used to place an inserted node
 Geom = Callable[[str], Optional[tuple]]
@@ -322,34 +323,9 @@ def set_int_attr(g: Graph, nid: str, name: str, value) -> str:
     return f"Set #{name}<{v}> on {nid}"
 
 
-# the nodes whose numbered exec outputs the canvas adds and removes: kind -> (the attribute
-# that counts them, the outputs' name prefix, the count a node has without the attribute)
-PIN_COUNTS = {"Sequence": ("count", "then", 2), "Switch": ("cases", "case", 0)}
 MAX_PINS = 64
-
-
-def pin_count(n) -> Optional[int]:
-    """How many numbered outputs a Sequence or Switch has, or None for another node."""
-    spec = PIN_COUNTS.get(n.kind)
-    if spec is None:
-        return None
-    a = n.attr(spec[0])
-    if a is None or not a.args:
-        return spec[2]
-    v = a.args[0][1]
-    return v.value if len(a.args) == 1 and v.kind == "int" else None
-
-
-def removable_pin(n, pin: str) -> bool:
-    """Whether `pin` is a numbered output of a Sequence or Switch that the canvas can remove
-    (a Switch case's value input counts as its case)."""
-    count = pin_count(n) if n is not None else None
-    if count is None:
-        return False
-    prefix = PIN_COUNTS[n.kind][1]
-    m = re.fullmatch(re.escape(prefix) + r"(\d+)", pin)
-    return (m is not None and int(m.group(1)) < count
-            and not (n.kind == "Sequence" and count <= 1))
+pin_count = output_count            # the names the editors call them by
+removable_pin = removable_output
 
 
 def _set_count(n, name: str, v: int):
@@ -360,7 +336,7 @@ def _next_case(g: Graph, idx, n) -> Optional[Lit]:
     """The value a new Switch case starts with: the first enum member no case has yet, or the
     integer after the largest; None when there is none to suggest (it is then set by hand)."""
     ty = n.targs[0] if n.targs else None
-    have = [b.value for b in n.bindings if b.pin.startswith("case") and isinstance(b.value, Lit)]
+    have = [b.value for b in n.bindings if pin_index(b.pin) and isinstance(b.value, Lit)]
     if ty in idx.enums:
         used = {v.value for v in have if v.kind == "enum"}
         for member, _ in enum_values(idx.enums[ty]):
@@ -374,17 +350,17 @@ def _next_case(g: Graph, idx, n) -> Optional[Lit]:
 
 
 def add_pin(g: Graph, idx, nid: str) -> str:
-    """The "+ Add pin" button: one more numbered output on a Sequence (`then2`) or Switch
-    (`case2`, given the next value that no case has)."""
+    """The "Add pin" button: one more indexed output on a Sequence (`then[2]`) or Switch
+    (`case[2]`, given the next value that no case has)."""
     n = g.node(nid)
     count = pin_count(n) if n is not None else None
     if count is None:
         raise Refused("Only a Sequence or a Switch has pins to add.")
     if count >= MAX_PINS:
         raise Refused(f"A {n.kind} has at most {MAX_PINS} outputs.")
-    name, prefix, _ = PIN_COUNTS[n.kind]
+    name, base, _, _ = COUNTED_OUTPUTS[n.kind]
     _set_count(n, name, count + 1)
-    pin = f"{prefix}{count}"
+    pin = indexed_name(base, count)
     if n.kind == "Switch":
         lit = _next_case(g, idx, n)
         if lit is not None:
@@ -393,26 +369,26 @@ def add_pin(g: Graph, idx, nid: str) -> str:
 
 
 def remove_pin(g: Graph, nid: str, pin: str) -> str:
-    """Remove one numbered output of a Sequence or Switch, with its wire and (on a Switch) its
-    value. The outputs after it move down one, `case2` becoming `case1`, keeping their wires."""
+    """Remove one indexed output of a Sequence or Switch, with its wire and (on a Switch) its
+    value. The outputs after it move down one, `case[2]` becoming `case[1]`, keeping their
+    wires and values."""
     n = g.node(nid)
     count = pin_count(n) if n is not None else None
     if count is None:
         raise Refused("Only a Sequence or a Switch has pins to remove.")
-    name, prefix, _ = PIN_COUNTS[n.kind]
-    m = re.fullmatch(re.escape(prefix) + r"(\d+)", pin)
-    if m is None or int(m.group(1)) >= count:
-        raise Refused(f"'{pin}' is not one of the {n.kind}'s numbered outputs.")
-    if n.kind == "Sequence" and count <= 1:
-        raise Refused("A Sequence needs at least one output.")
-    k = int(m.group(1))
+    name, base, _, least = COUNTED_OUTPUTS[n.kind]
+    ix = pin_index(pin)
+    if ix is None or ix[0] != base or ix[1] >= count:
+        raise Refused(f"'{pin}' is not one of the {n.kind}'s indexed outputs.")
+    if count <= least:
+        raise Refused(f"A {n.kind} needs at least {least} output{'s' if least != 1 else ''}.")
+    k = ix[1]
 
     def shift(p):
-        mm = re.fullmatch(re.escape(prefix) + r"(\d+)", p or "")
-        if mm is None:
+        i = pin_index(p)
+        if i is None or i[0] != base:
             return p
-        i = int(mm.group(1))
-        return p if i < k else f"{prefix}{i - 1}"
+        return p if i[1] < k else indexed_name(base, i[1] - 1)
 
     n.execs = [e for e in n.execs if e.pin != pin]
     for e in n.execs:
