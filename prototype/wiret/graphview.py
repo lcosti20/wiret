@@ -592,14 +592,18 @@ class GraphView(tk.Canvas):
         """Notes under their node, and the graph's own notes at the top left of the view. Those
         can be folded away with the button below them, and start folded on a narrow canvas."""
         graph_notes = []
+        below = {}      # a node's notes stack one under another, each below the one before
         for on, i, nt in g.all_notes():
             key = note_key(on, i)
             if on and on in self.geoms:
                 gm = self.geoms[on]
                 sx, sy = self.to_screen(gm.x, gm.y + gm.h + 6)
-                self.create_text(sx, sy, anchor="nw", text="✎ " + note_text(nt), fill="#f7dc6f",
-                                 width=max(140, gm.w * self.scale * 1.4), font=self.font(9),
-                                 tags=("note", f"t={key}"))
+                sy = below.get(on, sy)
+                item = self.create_text(sx, sy, anchor="nw", text="✎ " + note_text(nt),
+                                        fill="#f7dc6f", font=self.font(9),
+                                        width=max(140, gm.w * self.scale * 1.4),
+                                        tags=("note", f"t={key}"))
+                below[on] = self.bbox(item)[3] + 2 * self.scale
             else:
                 graph_notes.append((key, nt))
         if not graph_notes:
