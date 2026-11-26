@@ -8072,6 +8072,74 @@ def lesson(name: str) -> str:
         return f.read()
 
 
+# FizzBuzz with every `else` written as a block, nothing flattened. The flatten tests start
+# from this rather than lesson 6, so how the lesson happens to be saved cannot break them.
+NESTED_FIZZBUZZ = """wiret 1
+module tests.fizzbuzz
+
+extern func host.Log(message: string) -> ()
+
+func Main() {
+  exec Entry{pos=(0, 0)}()
+  exec Macro std.flow.ForRange{pos=(200, 0)}(
+    .first <- 1
+    .last <- 15
+  ).each|index| -> {
+    @note("Check 15")
+    exec Branch{pos=(788, 0)}(
+      .cond <- Eq#<i32>{pos=(608, 64)}(
+        .a <- Rem#<i32>{pos=(475, 64)}(
+          .a <- index
+          .b <- 15
+        )
+        .b <- 0
+      )
+    ).then -> {
+      exec Call host.Log{pos=(972, -138)}(
+        .message <- "FizzBuzz"
+      )
+    }.else -> {
+      @note("Check 3")
+      exec Branch{pos=(1043, 20)}(
+        .cond <- Eq#<i32>{pos=(609, 154)}(
+          .a <- Rem#<i32>{pos=(474, 156)}(
+            .a <- index
+            .b <- 3
+          )
+          .b <- 0
+        )
+      ).then -> {
+        exec Call host.Log{pos=(1255, -140)}(
+          .message <- "Fizz"
+        )
+      }.else -> {
+        @note("Check 5")
+        exec Branch{pos=(1282, 40)}(
+          .cond <- Eq#<i32>{pos=(609, 246)}(
+            .a <- Rem#<i32>{pos=(475, 246)}(
+              .a <- index
+              .b <- 5
+            )
+            .b <- 0
+          )
+        ).then -> {
+          exec Call host.Log{pos=(1502, -141)}(
+            .message <- "Buzz"
+          )
+        }.else -> {
+          exec Call host.Log{pos=(1531, 60)}(
+            .message <- Convert#<i32, string>{pos=(474, 346)}(
+              .value <- index
+            )
+          )
+        }
+      }
+    }
+  }
+}
+"""
+
+
 class StdFlowTests(unittest.TestCase):
     def test_library_is_canonical_and_clean(self):
         from wiret.registry import STD_FLOW_PATH
@@ -8830,7 +8898,8 @@ func Main() {
         from wiret.checker import GraphInfo
         from wiret.printer import GraphNames
         from wiret.registry import ModuleIndex
-        src = lesson("06_fizzbuzz.wiret")
+        src = NESTED_FIZZBUZZ
+        self.assertEqual(print_module(parse(src)), src)     # the fixture is canonical
         # the triangle on the first Branch's `else`: its block joins the each block
         r = self.edit(src, "Main", op="toggle_flat", node="1.each.0")
         self.assertEqual(r["message"], "Flattened 1.each.0.else")
