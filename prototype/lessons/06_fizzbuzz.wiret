@@ -13,8 +13,8 @@ func Main() {
   ).each|index| -> {
     @note("Check 15")
     @note("Why check 15 first? 15 is a multiple of 3 too. If check3 came first, 15 would only print Fizz.")
-    exec Branch{pos=(788, 0)}(
-      .cond <- Eq#<i32>{pos=(608, 64)}(
+    exec Branch{pos=(877, 0)}(
+      .cond <- Eq#<i32>{pos=(674, 64)}(
         .a <- Rem#<i32>{pos=(475, 64)}(
           .a <- index
           .b <- 15
@@ -22,45 +22,42 @@ func Main() {
         .b <- 0
       )
     ).then -> {
-      exec Call host.Log{pos=(972, -138)}(
+      exec Call host.Log{pos=(1153, 243)}(
         .message <- "FizzBuzz"
       )
-    }.else -> {
-      @note("Check 3")
-      exec Branch{pos=(1043, 20)}(
-        .cond <- Eq#<i32>{pos=(609, 154)}(
-          .a <- Rem#<i32>{pos=(474, 156)}(
-            .a <- index
-            .b <- 3
-          )
-          .b <- 0
+    }.else
+    @note("Check 3")
+    exec Branch{pos=(1086, 0)}(
+      .cond <- Eq#<i32>{pos=(674, 156)}(
+        .a <- Rem#<i32>{pos=(474, 156)}(
+          .a <- index
+          .b <- 3
         )
-      ).then -> {
-        exec Call host.Log{pos=(1255, -140)}(
-          .message <- "Fizz"
+        .b <- 0
+      )
+    ).then -> {
+      exec Call host.Log{pos=(1405, 245)}(
+        .message <- "Fizz"
+      )
+    }.else
+    @note("Check 5")
+    exec Branch{pos=(1297, 0)}(
+      .cond <- Eq#<i32>{pos=(674, 246)}(
+        .a <- Rem#<i32>{pos=(475, 246)}(
+          .a <- index
+          .b <- 5
         )
-      }.else -> {
-        @note("Check 5")
-        exec Branch{pos=(1282, 40)}(
-          .cond <- Eq#<i32>{pos=(609, 246)}(
-            .a <- Rem#<i32>{pos=(475, 246)}(
-              .a <- index
-              .b <- 5
-            )
-            .b <- 0
-          )
-        ).then -> {
-          exec Call host.Log{pos=(1502, -141)}(
-            .message <- "Buzz"
-          )
-        }.else -> {
-          exec Call host.Log{pos=(1531, 60)}(
-            .message <- Convert#<i32, string>{pos=(474, 346)}(
-              .value <- index
-            )
-          )
-        }
-      }
-    }
+        .b <- 0
+      )
+    ).then -> {
+      exec Call host.Log{pos=(1656, 246)}(
+        .message <- "Buzz"
+      )
+    }.else
+    exec Call host.Log{pos=(1525, 0)}(
+      .message <- Convert#<i32, string>{pos=(474, 346)}(
+        .value <- index
+      )
+    )
   }
 }

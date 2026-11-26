@@ -7,7 +7,7 @@ extern func host.Log(message: string) -> ()
 @note("CheckAge asks one question: is age at least 18? Branch follows 'then' when the answer is true and 'else' when it is false.")
 func CheckAge(age: i32) {
   @note("This node is used in multiple places, so it needs to be named.")
-  node age_text = Convert#<i32, string>{pos=(337, -189)}(
+  node age_text = Convert#<i32, string>{pos=(337, -190)}(
     .value <- age
   )
 
