@@ -1097,6 +1097,17 @@ class EditorApp:
             return
         self.commit(reason)
 
+    def toggle_flat(self, nid):
+        """The triangle beside a node's bottom exec output: flatten or unflatten it."""
+        if not self.can_edit():
+            return
+        try:
+            reason = canvasedit.toggle_flat(self.graph, self.info, nid)
+        except canvasedit.Refused as e:
+            messagebox.showerror("Flatten", str(e))
+            return
+        self.commit(reason)
+
     def add_note(self, on):
         if not self.can_edit():
             return

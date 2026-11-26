@@ -8,8 +8,9 @@ from dataclasses import dataclass, field
 from .checker import GraphInfo
 from .model import Graph, PinRef, note_detached, note_text
 from .ops import note_key
+from .registry import is_flat
 from .viewmodel import (HEADER, ROW, add_pin_label, add_pin_side, can_remove, display_title, has_add_pin,
-                        header_color,
+                        flat_toggle, header_color,
                         input_editor, input_label, output_label, pin_rows, type_color)
 
 REMOVE_W = 18    # the circled − beside a removable pin's label, with its gap
@@ -159,8 +160,10 @@ class GraphView(tk.Canvas):
                 fields[p.name] = (lw, fw, ed)
                 in_w = max(in_w, lw + fw + extra)
             # an indexed output that can be removed has a circled − before its label
+            # and the flattenable one has its triangle there
             out_w = max([f_pin.measure(output_label(sig, p)) / s
-                         + (REMOVE_W if can_remove(n, p.name, "out") else 0)
+                         + (REMOVE_W if can_remove(n, p.name, "out")
+                            or p.name == flat_toggle(n, sig) else 0)
                          for p in outs] or [0])
             add_w = (f_pin.measure(add_pin_label(n)) / s + ADD_PAD) if has_add_pin(n) else 0
             w = max(f_title.measure(title) / s + 28, in_w + out_w + 46, add_w + 22, 96)
@@ -385,6 +388,9 @@ class GraphView(tk.Canvas):
                 if can_remove(n, name, "out"):  # the circled − that removes this output
                     cx = lx - fpin.measure(label) - 10 * s
                     self.draw_circled(cx, sy, "-", ("removepin", f"m={n.id}|out|{name}"))
+                if name == flat_toggle(n, sig):  # the triangle that flattens this output
+                    cx = lx - fpin.measure(label) - 9 * s
+                    self.draw_flat_toggle(cx, sy, is_flat(n, sig), ("flatpin", f"l={n.id}"))
         if gm.rule is not None:          # the line between indexed outputs and the rest
             _, ry = self.to_screen(gm.x, gm.rule)
             self.create_line(x0 + 4 * s, ry, x1 - 4 * s, ry, fill=FIELD_EDGE, tags=tag)
@@ -448,6 +454,17 @@ class GraphView(tk.Canvas):
         self.create_line(cx - a, cy, cx + a, cy, fill=DIM, width=max(1, s), tags=tags)
         if sign == "+":
             self.create_line(cx, cy - a, cx, cy + a, fill=DIM, width=max(1, s), tags=tags)
+
+    def draw_flat_toggle(self, cx, cy, flat, tags):
+        """The small triangle left of a flattenable exec output: pointing up, it brings the
+        output to the top of the node (flatten); pointing down, it puts it back (unflatten)."""
+        s = self.scale
+        a, b = 4 * s, 3 * s
+        pts = ([cx - a, cy + b, cx + a, cy + b, cx, cy - b] if not flat
+               else [cx - a, cy - b, cx + a, cy - b, cx, cy + b])
+        self.create_rectangle(cx - 7 * s, cy - 7 * s, cx + 7 * s, cy + 7 * s, outline="",
+                              fill="", tags=tags)
+        self.create_polygon(*pts, fill=DIM, outline="", tags=tags)
 
     def draw_field(self, nid, pin, x, y, fdata, font, tag):
         s = self.scale
@@ -633,6 +650,8 @@ class GraphView(tk.Canvas):
             return ("field", nid, name)
         if "a" in found:
             return ("addpin", found["a"])
+        if "l" in found:
+            return ("flatpin", found["l"])
         if "m" in found:
             nid, _d, pin = found["m"].split("|", 2)
             return ("removepin", nid, pin)
@@ -670,6 +689,10 @@ class GraphView(tk.Canvas):
         if h and h[0] == "removepin":
             self.drag = None
             self.app.remove_pin(h[1], h[2])
+            return
+        if h and h[0] == "flatpin":
+            self.drag = None
+            self.app.toggle_flat(h[1])
             return
         if h and h[0] == "pin":
             _, nid, d, name = h

@@ -166,7 +166,8 @@ def edit(source: str, graph: str, request: str) -> str:
                        "context": the pin a wire was dragged from, to wire the new node to
     and the context menu's edits (see `menu`, which builds these requests): set_enum,
     make_struct, break_struct, rename, label, color, toggle_attr, int_attr, add_pin ("node":
-    the "+ Add pin" button of a Sequence or Switch), remove_pin ("node", "pin"), add_note,
+    the "+ Add pin" button of a Sequence or Switch), remove_pin ("node", "pin"), toggle_flat
+    ("node": the triangle that flattens or unflattens its bottom exec output), add_note,
     edit_note, delete_note, add_box, resize, retitle and add_local.
     and optionally "geoms": {node: [x, y, width]} as drawn (to place an inserted Convert node)
     and "comments": "convert". The result is {"ok", "text", "message", "select"} (`select`: a
@@ -243,6 +244,8 @@ def edit(source: str, graph: str, request: str) -> str:
             reason = canvasedit.add_pin(g, idx, req["node"])
         elif op == "remove_pin":
             reason = canvasedit.remove_pin(g, req["node"], req["pin"])
+        elif op == "toggle_flat":
+            reason = canvasedit.toggle_flat(g, info, req["node"])
         elif op == "add_note":
             reason = canvasedit.add_note(g, req.get("on"), req["text"])
         elif op == "edit_note":

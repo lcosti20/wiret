@@ -1064,7 +1064,7 @@ class Parser:
                 if not self.at("nl") and not self.at_p("}"):
                     self.error(f"expected '-> {{' after '.{pin}', or the end of the line to "
                                f"continue from it in this block")
-                x.flat = True
+                x.flat, x.flat_pin = True, pin
                 return x.id, pin
             self.next()
             self.expect_p("{")
@@ -1075,7 +1075,7 @@ class Parser:
             self.next()
             outs = True
         if outs:
-            x.flat = False
+            x.flat, x.flat_pin = False, None
             return None
         return x.id, None
 

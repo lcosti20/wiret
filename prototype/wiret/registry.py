@@ -847,6 +847,36 @@ def output_values(sig) -> list:
     return out
 
 
+def flattenable_pin(node, sig) -> Optional[str]:
+    """The exec output that the canvas can flatten (section 2.5): the bottom one, `.else` of
+    a Branch, `.then` of a Try, `.default` of a Switch, `.done` of a loop, when the node has
+    another exec output above it and it gives no values of its own. A macro's value outputs
+    (a loop's `index`) belong to the outputs above, so a loop's `done` qualifies; an output
+    that takes a value (a Switch's `case[0]`) or an indexed one (a Sequence's `then[1]`) does
+    not. None when there is no such output."""
+    if sig is None or node is None or len(sig.exec_outs) < 2 or node.kind == "Entry":
+        return None     # an Entry's outputs are its graph's exec inputs, each its own block
+    last = sig.exec_outs[-1]
+    if pin_index(last.name) or last.name in output_values(sig):
+        return None
+    if node.kind == "Try":
+        return last.name        # `then` runs after the body; `message`, `code` are the fault's
+    if any(not p.is_exec for p in sig.outputs) and node.kind != "Macro":
+        return None
+    return last.name
+
+
+def is_flat(node, sig) -> bool:
+    """Whether a node is written flattened at its flattenable output (`}.else`), as the
+    text was last read: the canvas then shows that output at the top, beside `in`."""
+    pin = flattenable_pin(node, sig)
+    if pin is None:
+        return False
+    if node.flat is None:           # not read from text yet: the canonical default (2.5)
+        return node.kind == "Try"
+    return node.flat and node.flat_pin in (None, pin)
+
+
 def attr_int(node: Node, name: str, default: int) -> int:
     a = node.attr(name)
     if a and a.args and a.args[0][1].kind == "int":

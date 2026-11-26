@@ -136,6 +136,10 @@
   .gv-addpin:hover { border-color: #6aa0ff; }
   .gv-addpin .gv-circle { cursor: inherit; }
   button.gv-circle:hover { color: #ff8a80; }
+  /* the triangle beside a node's bottom exec output that flattens it (graphview.js) */
+  .gv-flat { padding: 0 2px; border: none; background: none; color: var(--g-dim);
+             font-size: 9px; line-height: 20px; cursor: pointer; }
+  .gv-flat:hover { color: var(--g-text); }
   .gv-text { position: absolute; white-space: nowrap; pointer-events: none; }
   .gv-id { color: var(--g-dim); font-size: 11px; }
   .gv-count { color: #2ecc71; font-size: 11px; font-weight: 700; }
@@ -372,6 +376,7 @@ const gv = new GraphView($("graph"), {
   setPin: (node, pin, text) => applyEdit({ op: "literal", node, pin, text, verbatim: true }),
   addPin: (node) => { if (canEdit() === true) applyEdit({ op: "add_pin", node }); else say(canEdit(), true); },
   removePin: (node, pin) => { if (canEdit() === true) applyEdit({ op: "remove_pin", node, pin }); else say(canEdit(), true); },
+  toggleFlat: (node) => { if (canEdit() === true) applyEdit({ op: "toggle_flat", node }); else say(canEdit(), true); },
   palette: (world, at, context) => openPalette(world, at, context),
   menu: (target, at, world) => openMenu(target, at, world),
 });

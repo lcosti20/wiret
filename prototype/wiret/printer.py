@@ -15,8 +15,10 @@ import unicodedata
 from .model import (Attr, Binding, Box, Class, Const, Enum, Interface, ExecOut, Extern, Graph, ITEM_ORDER, Lit,
                     META_ORDER, Module, NODE_GENERICS, Node, PinRef, SEMANTIC_ATTRS, Struct, Use, Var,
                     item_kind, strip_comments)
-from .registry import (PLACE_MUTATORS, ModuleIndex, Sig, field_place, lit_equal, lit_fits,
-                       output_values, signature)
+from typing import Optional
+
+from .registry import (PLACE_MUTATORS, ModuleIndex, Sig, field_place, flattenable_pin,
+                       lit_equal, lit_fits, output_values, signature)
 
 IND = "  "
 
@@ -454,7 +456,7 @@ class GraphNames:
             single = len(edges) == 1 and len(sig.exec_outs) <= 1
             for i, e in enumerate(edges):
                 last = i == len(edges) - 1
-                cd = d if single or (last and self.flattens(nid)) else d + 1
+                cd = d if single or (last and self.flattens(nid, e.pin)) else d + 1
                 seen_edges.append((nid, e, cd))
                 t = e.target
                 if t in self.nodes and t not in self.parent and self.is_exec(t):
@@ -521,6 +523,7 @@ class GraphNames:
         i = 0
         while i < len(stmts):
             st = stmts[i]
+            flattened = False
             if isinstance(st, _Exec) and st.outs:
                 for out in st.outs:
                     if out[1] is not None:
@@ -529,18 +532,40 @@ class GraphNames:
                 # an empty block is an output nothing is wired to: never flattened, or the
                 # statements after it would continue from it
                 if last[1] and (st.nid, last[0]) not in uses \
-                        and self.flattens(st.nid):
+                        and self.flattens(st.nid, last[0]):
                     stmts[i + 1:i + 1] = last[1]
                     last[1] = None
+                    flattened = True
+            if isinstance(st, _Exec) and not flattened and i == len(stmts) - 1:
+                # a flattened bottom output that nothing is wired to ends its block: `}.else`
+                pin = self.flat_unwired(st)
+                if pin is not None:
+                    st.outs.append([pin, None])
             i += 1
 
-    def flattens(self, nid) -> bool:
-        """Whether a node's last exec output continues in its block: as it was written, else
-        for a Try or Sequence, whose last output means "and then" (section 2.5)."""
+    def flattens(self, nid, pin=None) -> bool:
+        """Whether a node's last exec output, `pin`, continues in its block: as it was
+        written, else for a Try or Sequence, whose last output means "and then" (section 2.5).
+        A node flattened at its bottom output (`}.else`, registry.flattenable_pin) flattens
+        that output only, so wiring an earlier one does not flatten it instead."""
         n = self.nodes[nid]
         if n.flat is not None and not self.semantic:
+            if n.flat and pin is not None and n.flat_pin is not None and pin != n.flat_pin \
+                    and n.flat_pin == flattenable_pin(n, self.sigs[nid]):
+                return False
             return n.flat
         return n.kind in ("Try", "Sequence")
+
+    def flat_unwired(self, st) -> Optional[str]:
+        """The bottom exec output of a node flattened on the canvas, when nothing is wired to
+        it (registry.flattenable_pin), or None. It is written `}.else` at the end of the
+        block, so the node stays flattened in the text."""
+        n, sig = self.nodes[st.nid], self.sigs[st.nid]
+        if self.semantic or not n.flat or n.flat_pin is None:
+            return None
+        if n.flat_pin != flattenable_pin(n, sig) or any(o[0] == n.flat_pin for o in st.outs):
+            return None
+        return n.flat_pin
 
     def _sites(self):
         """For each statement node and goto: the blocks around it, outermost first, as

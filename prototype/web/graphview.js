@@ -37,7 +37,7 @@ export class GraphView {
    *  toggleBreakpoint(nodeId), canEdit() -> true or the reason not, message(text),
    *  move(id, x, y), connect(a, b), connectToNode(a, nodeId), disconnect(node, dir, pin),
    *  deleteNode(id), editPin(node, pin, [screenX, screenY]), setPin(node, pin, text),
-   *  addPin(nodeId), removePin(nodeId, pin),
+   *  addPin(nodeId), removePin(nodeId, pin), toggleFlat(nodeId),
    *  palette([worldX, worldY], [screenX, screenY], pin or null),
    *  menu(target, [screenX, screenY], [worldX, worldY])}. A pin is [node, "in"/"out", pin];
    *  screen points are relative to the canvas. A menu target is as webapi.menu takes it. */
@@ -204,6 +204,12 @@ export class GraphView {
         if (o?.removable) {       // an indexed output (case[K], then[K]): − on its left
           out.prepend(button("gv-circle", "−", `Remove ${o.name}; the outputs after it move up`,
                              () => this.on.removePin(n.id, o.name)));
+        }
+        if (o && o.name === n.flatPin) {   // the bottom exec output: ▲ flattens it, ▼ puts it back
+          out.prepend(button("gv-flat", n.flat ? "▼" : "▲",
+                             n.flat ? `Unflatten ${o.name}: gather what it runs back into its own block`
+                                    : `Flatten ${o.name}: bring it to the top, and let what it runs continue in this node's block`,
+                             () => this.on.toggleFlat(n.id)));
         }
         body.append(r, out);
       });

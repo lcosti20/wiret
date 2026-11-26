@@ -8825,6 +8825,59 @@ func Main() {
         self.assertIsNone(web["rule"])
 
 
+    def test_flatten_bottom_exec_output(self):
+        from wiret import viewmodel
+        from wiret.checker import GraphInfo
+        from wiret.printer import GraphNames
+        from wiret.registry import ModuleIndex
+        src = lesson("06_fizzbuzz.wiret")
+        # the triangle on the first Branch's `else`: its block joins the each block
+        r = self.edit(src, "Main", op="toggle_flat", node="1.each.0")
+        self.assertEqual(r["message"], "Flattened 1.each.0.else")
+        self.assertIn('    }.else\n    @note("Check 3")\n    exec Branch{pos=(1043, 20)}(\n',
+                      r["text"])
+        flat = r["text"]
+        # the canvas puts `else` beside `in`, over a line, with the triangle pointing down
+        m = parse(flat)
+        g, idx = m.graph("Main"), ModuleIndex(m)
+        web = viewmodel.graph_json(g, GraphInfo(g, idx), idx)["nodes"]
+        br = next(x for x in web if x["title"] == "Branch" and x["flat"])
+        self.assertEqual([row[:2] for row in br["rows"]],
+                         [["in", "else"], ["cond", "then"]])
+        self.assertEqual(br["flatPin"], "else")
+        self.assertIsNotNone(br["rule"])
+        others = [x for x in web if x["title"] == "Branch" and not x["flat"]]
+        self.assertEqual([row[:2] for row in others[0]["rows"]],
+                         [["in", "then"], ["cond", "else"]])
+        self.assertIsNone(others[0]["rule"])
+        # and back: the statements after it are gathered into `.else -> { }` again
+        name = next(GraphNames(g, idx).name(n.id) for n in g.nodes if n.kind == "Branch" and n.flat)
+        self.assertEqual(self.edit(flat, "Main", op="toggle_flat", node=name)["text"], src)
+        # a loop's `done`: the loop's `index` belongs to `each`, so it can flatten
+        r = self.edit(src, "Main", op="toggle_flat", node="1")
+        self.assertTrue(r["text"].endswith("    }\n  }.done\n}\n"))
+        self.assertEqual(self.edit(r["text"], "Main", op="toggle_flat", node="1")["text"], src)
+
+    def test_flatten_unwired_and_refused(self):
+        text = ("wiret 1\nmodule m\n\nextern func host.Log(message: string)\n\nenum Mode {\n"
+                "  Idle\n}\n\nfunc Main() {\n  exec Entry{pos=(0, 0)}()\n"
+                "  exec Branch{pos=(200, 0)}().then -> {\n"
+                "    exec Call host.Log{pos=(400, 0)}(\n      .message <- \"a\"\n    )\n  }\n\n"
+                "  !exec Switch#<Mode>#cases<1>{pos=(0, 200)}().case[0] Mode::Idle -> {}\n\n"
+                "  !exec Sequence{pos=(0, 400)}()\n}\n")
+        self.assertEqual(print_module(parse(text)), text)
+        # nothing wired to `else`: flattened, it still ends the block as `}.else`
+        r = self.edit(text, "Main", op="toggle_flat", node="1")
+        self.assertIn("  }.else\n\n  !exec Switch", r["text"])
+        self.assertEqual(print_module(parse(r["text"])), r["text"])
+        # wiring something to it continues the block
+        self.assertEqual(self.edit(r["text"], "Main", op="toggle_flat", node="1")["text"], text)
+        # a Switch's `default` can flatten; a Sequence's `then[1]` and an Entry cannot
+        r = self.edit(text, "Main", op="toggle_flat", node="~0")
+        self.assertIn(").case[0] Mode::Idle -> {}.default\n", r["text"])
+        for nid in ("~1", "0"):
+            self.assertFalse(self.edit(text, "Main", op="toggle_flat", node=nid)["ok"])
+
     def test_web_highlighting_matches_desktop(self):
         """web/syntax.js colours every line as the desktop editor does (wiret/syntax.py)."""
         import shutil

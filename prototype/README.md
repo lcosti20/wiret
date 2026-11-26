@@ -203,6 +203,7 @@ available to every module as `Macro std.flow.ForRange` and so on.
 | Name, label, colour, note, `@disabled`, `#count` | Right-click a node |
 | Add or remove a `Sequence`'s or `Switch`'s outputs, or a `MakeArray`'s items | *⊕ Add case*, *⊕ Add then* or *Add item ⊕* at the bottom of the node; the ⊖ beside an output (or right-click it → Remove pin) |
 | Set a `Switch` case's value | Its `caseK` input: type it, pick an enum member, or wire a value in |
+| Flatten a bottom exec output | The small ▲ left of a `Branch`'s `else`, a `Try`'s `then`, a `Switch`'s `default` or a loop's `done` (the bottom exec output, when it gives no values of its own). The output moves up beside `in`, above a line, and the text drops its `-> { }`: `}.else` and what it runs carries on in the node's own block. Click the ▼ to gather those statements back into `.else -> { ... }` |
 | Boxes | Right-click empty canvas → Add box. Drag a box by its title bar. Members are edited explicitly |
 | Pan / zoom | Drag empty canvas / mouse wheel (Shift+wheel pans) |
 | Undo / redo graph edits | Cmd+Z / Cmd+Shift+Z on the canvas (the text pane has its own undo) |

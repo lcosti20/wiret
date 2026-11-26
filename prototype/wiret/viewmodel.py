@@ -12,7 +12,7 @@ from .model import Graph, Lit, PinRef, note_detached, note_text
 from .ops import note_key
 from .printer import fmt_lit
 from .registry import (COUNTED_PINS, FLOAT_TYPES, INT_RANGES, INT_TYPES, counted_side,
-                       output_values,
+                       flattenable_pin, is_flat, output_values,
                        pin_count, pin_index, removable_pin)
 
 HEADER = 24     # node header height, in graph units
@@ -167,7 +167,17 @@ def _layout(n, sig) -> dict:
     return {"rows": [[p.name if p else None, o.name if o else None, y] for p, o, y in r["rows"]],
             "rule": r["rule"], "addPin": r["add"], "addSide": add_pin_side(n),
             "addLabel": add_pin_label(n) if r["add"] is not None else None,
+            "flatPin": flat_toggle(n, sig), "flat": is_flat(n, sig),
             "height": r["height"]}
+
+
+def flat_toggle(n, sig):
+    """The exec output that shows the small flatten triangle beside it, or None: the node's
+    flattenable output (registry.flattenable_pin), while the node is not disabled. It points
+    up to flatten the output, down (when the node is flat) to gather it back into a block."""
+    if n.attr("disabled") is not None:
+        return None
+    return flattenable_pin(n, sig)
 
 
 def pin_rows(n, sig) -> dict:
@@ -179,6 +189,13 @@ def pin_rows(n, sig) -> dict:
     so each case reads across; the other inputs come first, beside the outputs before it."""
     ins = sig.exec_ins + sig.data_ins
     outs = sig.exec_outs + sig.data_outs
+    # a flattened output (`}.else`) sits at the top, beside the exec input, over a line
+    top = None
+    if is_flat(n, sig):
+        fpin = sig.output(flattenable_pin(n, sig))
+        top = (sig.exec_ins[0] if sig.exec_ins else None, fpin)
+        ins = [p for p in ins if p is not top[0]]
+        outs = [p for p in outs if p is not fpin]
     valued = output_values(sig)
     if valued:
         first = next(i for i, p in enumerate(outs) if p.name == valued[0])
@@ -188,11 +205,15 @@ def pin_rows(n, sig) -> dict:
         pairs += [(None, p) for p in outs[first:] if p.name not in valued]
     else:
         pairs = list(zip_longest(ins, outs))
-    if not pairs and not sig.pure:
+    if not pairs and not sig.pure and top is None:
         pairs = [(None, None)]
-    # the line goes above the first exec output that follows indexed ones, `default`
+    # the line goes above the first exec output that follows indexed ones, `default`, or
+    # under the flattened output's row
     rule_at, seen = None, False
-    for i, (_, o) in enumerate(pairs):
+    if top is not None:
+        pairs.insert(0, top)
+        rule_at = 1 if len(pairs) > 1 else None
+    for i, (_, o) in enumerate(pairs if top is None else []):
         if o is not None and o.is_exec:
             if pin_index(o.name):
                 seen = True

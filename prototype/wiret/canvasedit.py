@@ -18,8 +18,8 @@ from .explain import type_words
 from .model import Attr, Box, Graph, Lit, PinRef, set_note_text
 from .parser import ParseError, parse_literal
 from .printer import fmt_string
-from .registry import (COUNTED_PINS, PRIM_TYPES, can_convert, enum_values, indexed_name,
-                       lit_fits, pin_count, pin_index, removable_pin)
+from .registry import (COUNTED_PINS, PRIM_TYPES, can_convert, enum_values, flattenable_pin,
+                       indexed_name, is_flat, lit_fits, pin_count, pin_index, removable_pin)
 
 # geom(node id) -> (x, y, width) of a node as drawn, or None; used to place an inserted node
 Geom = Callable[[str], Optional[tuple]]
@@ -398,6 +398,23 @@ def remove_pin(g: Graph, nid: str, pin: str) -> str:
         b.pin = shift(b.pin)
     _set_count(n, name, count - 1)
     return f"Removed {nid}.{pin}"
+
+
+def toggle_flat(g: Graph, info, nid: str) -> str:
+    """The small triangle beside a node's bottom exec output (registry.flattenable_pin):
+    flatten it, so `}.else` drops its `-> { }` and the statements it runs continue in the
+    node's own block, or unflatten it, so they are gathered back into `.else -> { ... }`."""
+    n = g.node(nid)
+    sig = info.sigs.get(nid) if n is not None else None
+    pin = flattenable_pin(n, sig)
+    if pin is None:
+        raise Refused("Only the bottom exec output of a node, one that gives no values, "
+                      "can be flattened.")
+    if is_flat(n, sig):
+        n.flat, n.flat_pin = False, None
+        return f"Unflattened {nid}.{pin}"
+    n.flat, n.flat_pin = True, pin
+    return f"Flattened {nid}.{pin}"
 
 
 def add_note(g: Graph, on: Optional[str], text: str) -> Optional[str]:

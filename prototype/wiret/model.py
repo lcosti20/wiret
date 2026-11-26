@@ -125,6 +125,10 @@ class Node:
     # whether its last exec output was written flattened (`}.then`, continuing in the same
     # block) or as a block (`}.then -> { ... }`); None: the canonical default (section 2.5)
     flat: Optional[bool] = None
+    # the exec output written flattened, when `flat` is true: `else` for `}.else`. It tells a
+    # flattened bottom output that nothing is wired to (`}.else` ending its block) from an
+    # earlier output that continues the block (`exec Branch(...).then`)
+    flat_pin: Optional[str] = None
 
     def binding(self, pin: str) -> Optional[Binding]:
         for b in self.bindings:
