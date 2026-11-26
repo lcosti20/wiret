@@ -376,7 +376,7 @@ def menu(source: str, graph: str, target: str) -> str:
         if d == "out" and p.type in idx.structs:
             choice(f"Break '{pin}' into fields", "break_struct", node=nid, pin=pin, type=p.type)
         choice("Disconnect", "disconnect", node=nid, dir=d, pin=pin)
-        if canvasedit.removable_pin(g.node(nid), pin):
+        if canvasedit.removable_pin(g.node(nid), pin, d):
             choice(f"Remove pin '{pin}'", "remove_pin", node=nid, pin=pin)
         out.append(sep)
         node_menu(nid)

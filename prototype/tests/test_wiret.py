@@ -1285,7 +1285,25 @@ func G() {
         self.assertIn("'then[0]'", d.message)
         with self.assertRaises(ParseError) as cm:
             parse(text.replace(".then0", ".then[x]"))
-        self.assertIn("'case[0]'", cm.exception.msg)
+        self.assertIn("'then[0]'", cm.exception.msg)
+
+    def test_make_array_items_are_indexed(self):
+        """MakeArray's inputs are indexed too, `.item[0] <- ...`; the old `.item0` says so."""
+        text = module("""
+func G() -> (n: i32) = ArrayLength#<i32>(
+  .array <- MakeArray#<i32>#count<3>(
+    .item[0] <- 1
+    .item[1] <- 2
+    .item[2] <- 3
+  )
+)
+""", macros=False)
+        self.assertEqual(print_module(parse(text)), text)
+        self.assertEqual(codes(text), [])
+        self.assertEqual(run(text, "G")[0], [3])
+        old = text.replace(".item[0]", ".item0")
+        d = next(d for d in check(parse(old)) if d.code == "E0103")
+        self.assertIn("'item[0]'", d.message)
 
     def test_case_rows_line_up_and_default_is_set_apart(self):
         """A case's value sits on its output's row; a line divides the cases from default,
@@ -3732,8 +3750,8 @@ class Box {
 func Guard(i: i32) -> (r: i32) {
   node entry = Entry()
   node arr = MakeArray#<i32>#count<2>(
-    .item0 <- 10
-    .item1 <- 20
+    .item[0] <- 10
+    .item[1] <- 20
   )
   node ok = And(
     .a <- Ge#<i32>(
@@ -4748,9 +4766,9 @@ func Main(at: i32) -> (r: i32) {
   exec Entry()
   exec SetLocal nums(
     .value <- MakeArray#<i32>#count<3>(
-      .item0 <- 10
-      .item1 <- 20
-      .item2 <- 5
+      .item[0] <- 10
+      .item[1] <- 20
+      .item[2] <- 5
     )
   )
   exec ArrayAdd#<i32> nums(
@@ -6090,7 +6108,7 @@ func Safe() -> (code: i32) {
 func Alias() -> (hp: i32) {
   node a = New Player()
   node arr = MakeArray#<Player>#count<1>(
-    .item0 <- a.result
+    .item[0] <- a.result
   )
   node entry = Entry()
   node first = ArrayGet#<Player>(
@@ -8772,6 +8790,37 @@ func Main() {
         # and on a Sequence: one more `then`
         r = self.edit(text, "Main", op="add_pin", node="1")
         self.assertIn("  exec Sequence#count<3>{pos=(250, 0)}()\n", r["text"])
+
+    def test_make_array_items_are_added_and_removed(self):
+        from wiret import viewmodel
+        from wiret.checker import GraphInfo
+        from wiret.registry import ModuleIndex
+        text = ("wiret 1\nmodule m\n\nextern func host.Log(message: string)\n\nfunc Main() {\n"
+                "  exec Entry{pos=(0, 0)}()\n\n"
+                "  !MakeArray#<i32>#count<3>{pos=(0, 100)}(\n"
+                "    .item[0] <- 10\n    .item[1] <- 20\n    .item[2] <- 30\n  )\n}\n")
+        self.assertEqual(print_module(parse(text)), text)
+        # the item's − removes it, and the items after it move up with their values
+        pins = self.menu(text, "Main", kind="pin", node="~0", dir="in", pin="item[0]")
+        e = next(e for e in pins if e.get("label") == "Remove pin 'item[0]'")
+        r = self.edit(text, "Main", **e["action"])
+        self.assertIn("!MakeArray#<i32>#count<2>{pos=(0, 100)}(\n    .item[0] <- 20\n"
+                      "    .item[1] <- 30\n  )", r["text"])
+        r = self.edit(r["text"], "Main", op="add_pin", node="~0")
+        self.assertIn("!MakeArray#<i32>#count<3>{pos=", r["text"])
+        # down to no items, which is an empty array
+        for _ in range(3):
+            r = self.edit(r["text"], "Main", op="remove_pin", node="~0", pin="item[0]")
+        self.assertIn("!MakeArray#<i32>#count<0>{pos=(0, 100)}()", r["text"])
+        # on the canvas: the item's label stays, a − on each item, the button on the left
+        m = parse(text)
+        g, idx = m.graph("Main"), ModuleIndex(m)
+        web = next(x for x in viewmodel.graph_json(g, GraphInfo(g, idx), idx)["nodes"]
+                   if x["title"].startswith("MakeArray"))
+        self.assertEqual([(p["name"], p["removable"]) for p in web["ins"]],
+                         [("item[0]", True), ("item[1]", True), ("item[2]", True)])
+        self.assertEqual(web["addSide"], "left")
+        self.assertIsNone(web["rule"])
 
 
     def test_web_highlighting_matches_desktop(self):

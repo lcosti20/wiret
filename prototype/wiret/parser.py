@@ -200,6 +200,21 @@ class Parser:
     def ident(self, what="identifier") -> str:
         return self.expect("id", None, what).value
 
+    def pin_name(self, what="pin name") -> str:
+        """A pin's name after its `.`: a name, or one of a node's variable pins with its index
+        right after it, `case[0]`, `item[2]` (section 2.3)."""
+        t = self.peek()
+        name = self.ident(what)
+        b = self.peek()
+        if self.at_p("[") and b.line == t.line and b.col == t.col + len(name):
+            self.next()
+            k = self.expect("int", None, f"the pin's index, as in '{name}[0]'")
+            if k.value[1] or k.value[0] < 0:
+                self.error(f"a pin's index is a plain number, as in '{name}[0]'", k)
+            self.expect_p("]")
+            name = f"{name}[{k.value[0]}]"
+        return name
+
     def skip_nl(self) -> bool:
         skipped = False
         while self.at("nl"):
@@ -1021,17 +1036,8 @@ class Parser:
         while self.at_p("."):
             self.next()
             pt = self.peek()
-            pin = self.ident("exec output")
+            pin = self.pin_name("exec output")
             nt = self.peek()
-            if self.at_p("[") and nt.line == pt.line and nt.col == pt.col + len(pin):
-                # one of a node's variable outputs, `.case[0]` (section 2.3)
-                self.next()
-                k = self.expect("int", None, "the output's index, as in 'case[0]'")
-                if k.value[1] or k.value[0] < 0:
-                    self.error("an output's index is a plain number, as in 'case[0]'", k)
-                self.expect_p("]")
-                pin = f"{pin}[{k.value[0]}]"
-                nt = self.peek()
             if self.at_p("(") and nt.line == pt.line and nt.col == pt.col + len(pin):
                 self.error(f"an exec output's block binds names between bars: "
                            f"'.{pin}|name, ...| -> {{ ... }}'")
@@ -1174,7 +1180,7 @@ class Parser:
                 self.error("expected an input, '.pin <- value', or ')'")
             cm = self.lead_comments(t0.line, self.peek().line)
             self.next()
-            pin = self.ident("pin name")
+            pin = self.pin_name("pin name")
             self.expect_p("<-")
             self.skip_nl()
             val, inline = self.input_value(f"{nid}.{pin}", scope)

@@ -782,15 +782,19 @@ def _static_sig(node: Node, idx: "Optional[ModuleIndex]" = None) -> Sig:
     return sig
 
 
-# The nodes with a variable number of exec outputs: kind -> (the named generic that counts
-# them, the outputs' name, the count a node has without it, the fewest it may have). Their
-# outputs are indexed, `then[0]`, `case[1]` (section 2.3).
-COUNTED_OUTPUTS = {"Sequence": ("count", "then", 2, 1), "Switch": ("cases", "case", 0, 0)}
+# The nodes with a variable number of pins: kind -> (the named generic that counts them, the
+# pins' name, which side they are on, the count a node has without it, the fewest it may
+# have). The pins are indexed, `then[0]`, `case[1]`, `item[2]` (section 2.3). A Switch case
+# also has a value input of the same name; the case is its exec output.
+COUNTED_PINS = {"Sequence": ("count", "then", "out", 2, 1),
+                "Switch": ("cases", "case", "out", 0, 0),
+                "MakeArray": ("count", "item", "in", 2, 0)}
+COUNTED_OUTPUTS = {k: v for k, v in COUNTED_PINS.items() if v[2] == "out"}
 _INDEXED = re.compile(r"([A-Za-z_]\w*)\[(\d+)\]")
 
 
 def indexed_name(base: str, i: int) -> str:
-    """The name of the `i`th of a node's variable outputs, `case[0]`."""
+    """The name of the `i`th of a node's variable pins, `case[0]`."""
     return f"{base}[{i}]"
 
 
@@ -800,28 +804,35 @@ def pin_index(name: str):
     return (m.group(1), int(m.group(2))) if m else None
 
 
-def output_count(n) -> Optional[int]:
-    """How many indexed outputs a Sequence or Switch has, or None for another node (or a count
-    written in a form the checker rejects)."""
-    spec = COUNTED_OUTPUTS.get(n.kind)
+def counted_side(n) -> Optional[str]:
+    """Which side a node's variable pins are on, "in" or "out", or None if it has none."""
+    spec = COUNTED_PINS.get(n.kind)
+    return spec[2] if spec else None
+
+
+def pin_count(n) -> Optional[int]:
+    """How many indexed pins a Sequence, Switch or MakeArray has, or None for another node (or
+    a count written in a form the checker rejects)."""
+    spec = COUNTED_PINS.get(n.kind)
     if spec is None:
         return None
     a = n.attr(spec[0])
     if a is None or not a.args:
-        return spec[2]
+        return spec[3]
     v = a.args[0][1]
     return v.value if len(a.args) == 1 and v.kind == "int" else None
 
 
-def removable_output(n, pin: str) -> bool:
-    """Whether `pin` is an indexed output of a Sequence or Switch that the editor can remove:
-    one of its outputs, while it has more than the fewest it may have."""
-    count = output_count(n) if n is not None else None
+def removable_pin(n, pin: str, d: str) -> bool:
+    """Whether pin `pin` on side `d` ("in" or "out") is one of a node's indexed pins that the
+    editor can remove, while it has more than the fewest it may have."""
+    count = pin_count(n) if n is not None else None
     if count is None:
         return False
-    _, base, _, least = COUNTED_OUTPUTS[n.kind]
+    _, base, side, _, least = COUNTED_PINS[n.kind]
     ix = pin_index(pin)
-    return ix is not None and ix[0] == base and ix[1] < count and count > least
+    return (d == side and ix is not None and ix[0] == base and ix[1] < count
+            and count > least)
 
 
 def output_values(sig) -> list:
@@ -1385,7 +1396,7 @@ def _array_sig(node: Node, graph: Graph, idx: ModuleIndex, sig: Sig) -> Sig:
     arr = f"array#<{t}>"
     if k == "MakeArray":
         sig.purity = "pure"
-        sig.inputs = [Pin(f"item{i}", t) for i in range(attr_int(node, "count", 2))]
+        sig.inputs = [Pin(indexed_name("item", i), t) for i in range(attr_int(node, "count", 2))]
         sig.outputs = [Pin("result", arr)]
     elif k == "ArrayGet":
         sig.purity = "pure"

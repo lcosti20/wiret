@@ -11,8 +11,8 @@ from .palette import describe
 from .model import Graph, Lit, PinRef, note_detached, note_text
 from .ops import note_key
 from .printer import fmt_lit
-from .registry import (FLOAT_TYPES, INT_RANGES, INT_TYPES, output_count, output_values,
-                       pin_index, removable_output)
+from .registry import (FLOAT_TYPES, INT_RANGES, INT_TYPES, counted_side, output_values,
+                       pin_count, pin_index, removable_pin)
 
 HEADER = 24     # node header height, in graph units
 ROW = 20        # height of one pin row
@@ -73,8 +73,8 @@ def display_title(g: Graph, n) -> str:
 def input_label(n, pin) -> str:
     if pin.is_exec:
         return "" if pin.name == "in" else pin.name
-    if pin_index(pin.name):     # an output's value, on its output's row: that names it
-        return ""
+    if pin_index(pin.name) and counted_side(n) == "out":
+        return ""               # an output's value, on its output's row: that names it
     b = n.binding(pin.name)
     if b is not None and isinstance(b.value, Lit):
         text = fmt_lit(b.value)
@@ -135,22 +135,31 @@ def input_editor(n, pin, idx=None):
 
 
 def has_add_pin(n) -> bool:
-    """Whether the node shows an "Add pin" button at its bottom: a Sequence or a Switch, the
-    nodes whose indexed exec outputs are counted by `#count` or `#cases`."""
-    return output_count(n) is not None and n.attr("disabled") is None
+    """Whether the node shows an "Add pin" button at its bottom: a Sequence, a Switch or a
+    MakeArray, the nodes whose indexed pins are counted by `#count` or `#cases`."""
+    return pin_count(n) is not None and n.attr("disabled") is None
 
 
-def can_remove(n, pin) -> bool:
-    """Whether an output shows a remove button next to it: an indexed output of a node with
-    an Add pin button."""
-    return has_add_pin(n) and removable_output(n, pin)
+def add_pin_side(n):
+    """Which side a node's Add pin button sits on: "right" for indexed outputs, so it lines up
+    with their remove buttons, "left" for indexed inputs, or None for no button."""
+    if not has_add_pin(n):
+        return None
+    return "left" if counted_side(n) == "in" else "right"
+
+
+def can_remove(n, pin, d: str = "out") -> bool:
+    """Whether a pin shows a remove button next to it: an indexed pin of a node with an Add
+    pin button (the button is beside the pin's label, toward the inside of the node)."""
+    return has_add_pin(n) and removable_pin(n, pin, d)
 
 
 def _layout(n, sig) -> dict:
     """pin_rows for the web canvas, as JSON."""
     r = pin_rows(n, sig)
     return {"rows": [[p.name if p else None, o.name if o else None, y] for p, o, y in r["rows"]],
-            "rule": r["rule"], "addPin": r["add"], "height": r["height"]}
+            "rule": r["rule"], "addPin": r["add"], "addSide": add_pin_side(n),
+            "height": r["height"]}
 
 
 def pin_rows(n, sig) -> dict:
@@ -322,13 +331,14 @@ def graph_json(g: Graph, info, idx, diags=(), remembered=None, module=None) -> d
             "ins": [{"name": p.name, "exec": p.is_exec, "type": type_words(p.type),
                      "color": type_color(p.type, idx),
                      "label": input_label(n, p), "bound": n.binding(p.name) is not None,
+                     "removable": can_remove(n, p.name, "in"),
                      "editor": input_editor(n, p, idx),
                      "filled": p.name in connected or (p.is_exec and (n.id, p.name) in targets)}
                     for p in sig.exec_ins + sig.data_ins],
             "outs": [{"name": p.name, "exec": p.is_exec, "type": type_words(p.type),
                       "color": type_color(p.type, idx),
                       "label": output_label(sig, p), "filled": (n.id, p.name) in used,
-                      "removable": can_remove(n, p.name)}
+                      "removable": can_remove(n, p.name, "out")}
                      for p in sig.exec_outs + sig.data_outs],
             # [[input name | null, output name | null, y]], the y of the line between indexed
             # outputs and the rest, of the Add pin button, and the node's height (pin_rows)

@@ -13,10 +13,10 @@ func Main() {
   exec Entry{pos=(0, 0)}()
   exec Macro std.flow.ForEach#<string>{pos=(217, 0)}(
     .array <- MakeArray#<string>#count<4>{pos=(-83, 74)}(
-      .item0 <- "apple"
-      .item1 <- "pear"
-      .item2 <- "apple"
-      .item3 <- "kiwi"
+      .item[0] <- "apple"
+      .item[1] <- "pear"
+      .item[2] <- "apple"
+      .item[3] <- "kiwi"
     )
   ).each|item| -> {
     @note("A key that is not there yet gives 0, so the first apple counts as 0 + 1.")

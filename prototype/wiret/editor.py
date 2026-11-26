@@ -1244,7 +1244,7 @@ class EditorApp:
                 menu.add_command(label=f"Break '{pin}' into fields",
                                  command=lambda: self.break_struct(nid, pin, p.type))
             menu.add_command(label="Disconnect", command=lambda: self.disconnect(nid, d, pin))
-            if canvasedit.removable_pin(self.graph.node(nid), pin):
+            if canvasedit.removable_pin(self.graph.node(nid), pin, d):
                 menu.add_command(label=f"Remove pin '{pin}'",
                                  command=lambda: self.remove_pin(nid, pin))
             menu.add_separator()

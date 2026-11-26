@@ -13,7 +13,7 @@ from .model import Const, Extern, Var
 # Decorators that are metadata: they explain the program and never change it (section 2.4).
 META_NAMES = {"doc", "category", "keywords", "note"}
 from .registry import (HANDLE_TYPES, assignable, field_place, handle_ok, parent_method, BUILTIN_TYPE_NAMES, PLACE_MUTATORS, INT_RANGES, ModuleIndex, Sig,
-                       COUNTED_OUTPUTS, array_elem, enum_values, instantiate, lit_fits,
+                       COUNTED_OUTPUTS, array_elem, counted_side, enum_values, instantiate, lit_fits,
                        lit_in_range, output_values, signature, substitute, type_ok)
 
 
@@ -468,7 +468,11 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
                     D("E0103", f"exec output '{b.pin}' takes no value; write "
                                f"'.{b.pin} -> {{ ... }}'", G, n.id, b.pin)
                 else:
-                    D("E0103", f"{n.kind} has no input pin '{b.pin}'", G, n.id, b.pin)
+                    m = re.fullmatch(r"([A-Za-z_]+)(\d+)", b.pin)
+                    hint = (f"; its numbered inputs are written with brackets, "
+                            f"'{m.group(1)}[{m.group(2)}]'"
+                            if m and counted_side(n) == "in" else "")
+                    D("E0103", f"{n.kind} has no input pin '{b.pin}'{hint}", G, n.id, b.pin)
                 continue
             if pin.is_exec:
                 D("E0120", f"'{b.pin}' is an exec input; wire it from an exec output", G, n.id, b.pin)

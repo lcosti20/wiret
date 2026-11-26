@@ -18,8 +18,8 @@ from .explain import type_words
 from .model import Attr, Box, Graph, Lit, PinRef, set_note_text
 from .parser import ParseError, parse_literal
 from .printer import fmt_string
-from .registry import (COUNTED_OUTPUTS, PRIM_TYPES, can_convert, enum_values, indexed_name,
-                       lit_fits, output_count, pin_index, removable_output)
+from .registry import (COUNTED_PINS, PRIM_TYPES, can_convert, enum_values, indexed_name,
+                       lit_fits, pin_count, pin_index, removable_pin)
 
 # geom(node id) -> (x, y, width) of a node as drawn, or None; used to place an inserted node
 Geom = Callable[[str], Optional[tuple]]
@@ -324,8 +324,6 @@ def set_int_attr(g: Graph, nid: str, name: str, value) -> str:
 
 
 MAX_PINS = 64
-pin_count = output_count            # the names the editors call them by
-removable_pin = removable_output
 
 
 def _set_count(n, name: str, v: int):
@@ -350,15 +348,16 @@ def _next_case(g: Graph, idx, n) -> Optional[Lit]:
 
 
 def add_pin(g: Graph, idx, nid: str) -> str:
-    """The "Add pin" button: one more indexed output on a Sequence (`then[2]`) or Switch
-    (`case[2]`, given the next value that no case has)."""
+    """The "Add pin" button: one more indexed pin on a Sequence (`then[2]`), a Switch
+    (`case[2]`, given the next value that no case has) or a MakeArray (`item[2]`)."""
     n = g.node(nid)
     count = pin_count(n) if n is not None else None
     if count is None:
-        raise Refused("Only a Sequence or a Switch has pins to add.")
+        raise Refused("Only a Sequence, a Switch or a MakeArray has pins to add.")
+    name, base, side, _, _ = COUNTED_PINS[n.kind]
+    what = "inputs" if side == "in" else "outputs"
     if count >= MAX_PINS:
-        raise Refused(f"A {n.kind} has at most {MAX_PINS} outputs.")
-    name, base, _, _ = COUNTED_OUTPUTS[n.kind]
+        raise Refused(f"A {n.kind} has at most {MAX_PINS} {what}.")
     _set_count(n, name, count + 1)
     pin = indexed_name(base, count)
     if n.kind == "Switch":
@@ -369,19 +368,20 @@ def add_pin(g: Graph, idx, nid: str) -> str:
 
 
 def remove_pin(g: Graph, nid: str, pin: str) -> str:
-    """Remove one indexed output of a Sequence or Switch, with its wire and (on a Switch) its
-    value. The outputs after it move down one, `case[2]` becoming `case[1]`, keeping their
-    wires and values."""
+    """Remove one indexed pin of a Sequence, Switch or MakeArray, with its wire and its value.
+    The pins after it move down one, `case[2]` becoming `case[1]`, keeping their wires and
+    values."""
     n = g.node(nid)
     count = pin_count(n) if n is not None else None
     if count is None:
-        raise Refused("Only a Sequence or a Switch has pins to remove.")
-    name, base, _, least = COUNTED_OUTPUTS[n.kind]
+        raise Refused("Only a Sequence, a Switch or a MakeArray has pins to remove.")
+    name, base, side, _, least = COUNTED_PINS[n.kind]
+    what = "input" if side == "in" else "output"
     ix = pin_index(pin)
     if ix is None or ix[0] != base or ix[1] >= count:
-        raise Refused(f"'{pin}' is not one of the {n.kind}'s indexed outputs.")
+        raise Refused(f"'{pin}' is not one of the {n.kind}'s indexed {what}s.")
     if count <= least:
-        raise Refused(f"A {n.kind} needs at least {least} output{'s' if least != 1 else ''}.")
+        raise Refused(f"A {n.kind} needs at least {least} {what}{'s' if least != 1 else ''}.")
     k = ix[1]
 
     def shift(p):

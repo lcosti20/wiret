@@ -14,9 +14,9 @@ func Main() {
   exec Entry{pos=(0, 0)}()
   exec SetLocal scores{pos=(200, 0)}(
     .value <- MakeArray#<i32>#count<3>{pos=(-51, 75)}(
-      .item0 <- 12
-      .item1 <- 30
-      .item2 <- 7
+      .item[0] <- 12
+      .item[1] <- 30
+      .item[2] <- 7
     )
   )
   @note("ArrayAdd puts one more item on the end of the array. scores now holds 4 items.")

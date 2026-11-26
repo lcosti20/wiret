@@ -154,7 +154,7 @@ Pin names are fixed per kind. Pure binary operators use inputs `a`, `b` and outp
 
 | Kind | Notes |
 | --- | --- |
-| `MakeArray#<T>` | Pure. `#count<n>`, inputs `item0` ... |
+| `MakeArray#<T>` | Pure. `#count<n>`, inputs `item[0]` ... |
 | `ArrayGet#<T>`, `ArrayLength#<T>` | Pure. Out-of-range index is a fault. |
 | `ArraySet#<T>`, `ArrayAdd#<T>`, `ArrayInsert#<T>`, `ArrayRemove#<T>`, `ArrayClear#<T>` | Impure. They change a **place**: the symbol names a local, a module variable, or a field. Examples: `ArrayAdd#<i32> acc` with input `.item <- x`, and `ArrayAdd#<i32> Player.items` with inputs `.obj <- p` and `.item <- x`. Targeting anything else, such as a call result, is `E0130`. Arrays are value types (section 4.9), so no other variable sees the change. |
 | `MapFind#<K,V>` | Pure. In `map`, `key`; out `value`, `found`. A missing key gives the zero value and `found = false`. |
