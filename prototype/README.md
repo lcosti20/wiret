@@ -48,7 +48,7 @@ double-click an input to type its value, and add nodes from the palette (Tab, a 
 on empty canvas, a wire dropped on empty canvas, or the Add node button). Right-click (or press
 and hold on a touch screen) for the same context menus as the desktop editor: set an enum
 input, make or break a struct, rename, label, colour, notes, boxes, locals, #count, and add or
-remove a Sequence's or Switch's pins (also the ⊕ and ⊖ buttons on the node).
+remove a Sequence's, Switch's or MakeArray's pins (also the ⊕ and ⊖ buttons on the node).
 Ctrl+Z and Ctrl+Y undo and redo. You can debug with Step (F11),
 Over (F10), Back (Shift+F11), Run/Continue (F5), Animate and breakpoints (click the circle at a
 node's top-left corner or beside its line number, or press F9). The Tkinter modules, the Git
@@ -201,7 +201,7 @@ available to every module as `Macro std.flow.ForRange` and so on.
 | Delete | Select a node or wire and press Delete/Backspace, or use the right-click menu |
 | Open a called function/macro | Double-click a `Call` or `Macro` node |
 | Name, label, colour, note, `@disabled`, `#count` | Right-click a node |
-| Add or remove a `Sequence`'s or `Switch`'s outputs | *⊕ Add pin* at the bottom of the node; the ⊖ beside an output (or right-click it → Remove pin) |
+| Add or remove a `Sequence`'s or `Switch`'s outputs, or a `MakeArray`'s items | *⊕ Add pin* at the bottom of the node; the ⊖ beside an output (or right-click it → Remove pin) |
 | Set a `Switch` case's value | Its `caseK` input: type it, pick an enum member, or wire a value in |
 | Boxes | Right-click empty canvas → Add box. Drag a box by its title bar. Members are edited explicitly |
 | Pan / zoom | Drag empty canvas / mouse wheel (Shift+wheel pans) |
@@ -354,6 +354,9 @@ In the editor:
   new case starts with the first enum member no case has yet, or the integer after the largest.
   A circled − beside each indexed output removes it (so does *Remove pin* when you right-click
   it), and the outputs after it move up, keeping their wires and values.
+- A `MakeArray`'s items are indexed inputs, `.item[0] <- 12`. Its *Add pin ⊕* button sits at the
+  bottom left, under the items, and a circled − after each item removes it; the items after it
+  move up. An array may have no items.
 - *Add local* accepts struct and enum types. Struct pins are light blue and enum pins lavender.
 - Lesson 8 walks through a struct, an enum, `WithField` and a `Switch` on an enum.
 

@@ -194,21 +194,28 @@ export class GraphView {
         } else if (p && !p.exec) {
           r.dataset.row = p.name; r.title = `${p.name}: ${p.type}\nDouble-click to type a value`;
         }
+        if (p?.removable) {       // an indexed input (MakeArray's item[K]): − on its right
+          r.classList.add("gv-hasfield");
+          r.append(button("gv-circle", "−", `Remove ${p.name}; the inputs after it move up`,
+                          () => this.on.removePin(n.id, p.name)));
+        }
         const o = oname != null ? outOf.get(oname) : null;
         const out = h("div", "gv-pin gv-out", o ? o.label : "");
-        if (o?.removable) {
+        if (o?.removable) {       // an indexed output (case[K], then[K]): − on its left
           out.prepend(button("gv-circle", "−", `Remove ${o.name}; the outputs after it move up`,
                              () => this.on.removePin(n.id, o.name)));
         }
         body.append(r, out);
       });
-      if (n.addPin != null) {     // one more indexed output (Sequence, Switch)
-        body.append(h("div", "gv-pin"));
-        const add = button("gv-addpin", "", "Add an output to this node", () => this.on.addPin(n.id));
-        add.append(h("span", "gv-circle", "+"), "Add pin");
-        const cell = h("div", "gv-pin gv-out");
+      if (n.addPin != null) {     // one more indexed pin, on the side the pins are on
+        const left = n.addSide === "left";
+        const add = button("gv-addpin", "", `Add ${left ? "an input" : "an output"} to this node`,
+                           () => this.on.addPin(n.id));
+        const plus = h("span", "gv-circle", "+");
+        if (left) add.append("Add pin", plus); else add.append(plus, "Add pin");
+        const cell = h("div", left ? "gv-pin" : "gv-pin gv-out");
         cell.append(add);
-        body.append(cell);
+        body.append(...(left ? [cell, h("div", "gv-pin")] : [h("div", "gv-pin"), cell]));
       }
       d.append(head, body);
       d.style.height = `${n.height}px`;
