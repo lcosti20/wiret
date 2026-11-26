@@ -201,7 +201,7 @@ available to every module as `Macro std.flow.ForRange` and so on.
 | Delete | Select a node or wire and press Delete/Backspace, or use the right-click menu |
 | Open a called function/macro | Double-click a `Call` or `Macro` node |
 | Name, label, colour, note, `@disabled`, `#count` | Right-click a node |
-| Add or remove a `Sequence`'s or `Switch`'s outputs, or a `MakeArray`'s items | *⊕ Add pin* at the bottom of the node; the ⊖ beside an output (or right-click it → Remove pin) |
+| Add or remove a `Sequence`'s or `Switch`'s outputs, or a `MakeArray`'s items | *⊕ Add case*, *⊕ Add then* or *Add item ⊕* at the bottom of the node; the ⊖ beside an output (or right-click it → Remove pin) |
 | Set a `Switch` case's value | Its `caseK` input: type it, pick an enum member, or wire a value in |
 | Boxes | Right-click empty canvas → Add box. Drag a box by its title bar. Members are edited explicitly |
 | Pan / zoom | Drag empty canvas / mouse wheel (Shift+wheel pans) |
@@ -350,11 +350,11 @@ In the editor:
   values are inputs too, each drawn on its `case[K]` output's row with the same box or dropdown.
 - A node's indexed outputs (`then[0]`, `case[0]`, ...) are set apart from the outputs after
   them by a line, so a `Switch`'s `default` sits below its cases.
-- A `Sequence` and a `Switch` have an *⊕ Add pin* button at the bottom right. On a `Switch` the
+- A `Sequence` and a `Switch` have an add button at the bottom right, named for the pin it adds: *⊕ Add case*, *⊕ Add then*. On a `Switch` the
   new case starts with the first enum member no case has yet, or the integer after the largest.
   A circled − beside each indexed output removes it (so does *Remove pin* when you right-click
   it), and the outputs after it move up, keeping their wires and values.
-- A `MakeArray`'s items are indexed inputs, `.item[0] <- 12`. Its *Add pin ⊕* button sits at the
+- A `MakeArray`'s items are indexed inputs, `.item[0] <- 12`. Its *Add item ⊕* button sits at the
   bottom left, under the items, and a circled − after each item removes it; the items after it
   move up. An array may have no items.
 - *Add local* accepts struct and enum types. Struct pins are light blue and enum pins lavender.

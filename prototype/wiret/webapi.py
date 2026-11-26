@@ -25,7 +25,7 @@ from .printer import GraphNames, print_module
 from .model import note_text
 from .registry import ModuleIndex, enum_values
 from .runner import format_results, format_value, run_function
-from .viewmodel import graph_json, opens, positions
+from .viewmodel import add_pin_label, graph_json, opens, positions
 from .vm import VM, WiretError
 
 MAX_STEPS = 5000      # pause points kept by debug_run; the run itself carries on past them
@@ -340,7 +340,7 @@ def menu(source: str, graph: str, target: str) -> str:
             choice("Set output count (#count)…", "int_attr", "Number of outputs:",
                    str(canvasedit.int_attr(g, nid, "count")), node=nid, name="count")
         if canvasedit.pin_count(n) is not None:
-            choice("Add pin", "add_pin", node=nid)
+            choice(add_pin_label(n), "add_pin", node=nid)
         if n.kind not in ("Entry",):
             choice(("Enable" if n.attr("disabled") else "Disable") + " (@disabled)", "toggle_attr",
                    node=nid, name="disabled")

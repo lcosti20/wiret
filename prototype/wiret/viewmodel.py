@@ -11,7 +11,8 @@ from .palette import describe
 from .model import Graph, Lit, PinRef, note_detached, note_text
 from .ops import note_key
 from .printer import fmt_lit
-from .registry import (FLOAT_TYPES, INT_RANGES, INT_TYPES, counted_side, output_values,
+from .registry import (COUNTED_PINS, FLOAT_TYPES, INT_RANGES, INT_TYPES, counted_side,
+                       output_values,
                        pin_count, pin_index, removable_pin)
 
 HEADER = 24     # node header height, in graph units
@@ -148,6 +149,12 @@ def add_pin_side(n):
     return "left" if counted_side(n) == "in" else "right"
 
 
+def add_pin_label(n) -> str:
+    """The text of a node's add button: "Add " and the name its indexed pins share, "Add
+    case", "Add item", "Add then", so a node with several kinds of them could tell them apart."""
+    return f"Add {COUNTED_PINS[n.kind][1]}"
+
+
 def can_remove(n, pin, d: str = "out") -> bool:
     """Whether a pin shows a remove button next to it: an indexed pin of a node with an Add
     pin button (the button is beside the pin's label, toward the inside of the node)."""
@@ -159,6 +166,7 @@ def _layout(n, sig) -> dict:
     r = pin_rows(n, sig)
     return {"rows": [[p.name if p else None, o.name if o else None, y] for p, o, y in r["rows"]],
             "rule": r["rule"], "addPin": r["add"], "addSide": add_pin_side(n),
+            "addLabel": add_pin_label(n) if r["add"] is not None else None,
             "height": r["height"]}
 
 

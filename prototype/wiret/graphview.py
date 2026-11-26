@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from .checker import GraphInfo
 from .model import Graph, PinRef, note_detached, note_text
 from .ops import note_key
-from .viewmodel import (HEADER, ROW, add_pin_side, can_remove, display_title, has_add_pin,
+from .viewmodel import (HEADER, ROW, add_pin_label, add_pin_side, can_remove, display_title, has_add_pin,
                         header_color,
                         input_editor, input_label, output_label, pin_rows, type_color)
 
@@ -162,7 +162,7 @@ class GraphView(tk.Canvas):
             out_w = max([f_pin.measure(output_label(sig, p)) / s
                          + (REMOVE_W if can_remove(n, p.name, "out") else 0)
                          for p in outs] or [0])
-            add_w = (f_pin.measure("Add pin") / s + ADD_PAD) if has_add_pin(n) else 0
+            add_w = (f_pin.measure(add_pin_label(n)) / s + ADD_PAD) if has_add_pin(n) else 0
             w = max(f_title.measure(title) / s + 28, in_w + out_w + 46, add_w + 22, 96)
             lay = pin_rows(n, sig)
             gm = Geom(x, y, w, lay["height"])
@@ -391,22 +391,23 @@ class GraphView(tk.Canvas):
         if gm.add_pin is not None:       # the Add pin button, on the side its pins are on
             _, ay = self.to_screen(gm.x, gm.add_pin)
             atag = ("addpin", f"a={n.id}")
-            bw = fpin.measure("Add pin") + (ADD_PAD - 8) * s
-            if add_pin_side(n) == "left":    # "Add pin ⊕", under the inputs
+            text = add_pin_label(n)
+            bw = fpin.measure(text) + (ADD_PAD - 8) * s
+            if add_pin_side(n) == "left":    # "Add item ⊕", under the inputs
                 left = x0 + 11 * s
                 right = left + bw
                 self.create_rectangle(left, ay - 9 * s, right, ay + 9 * s,
                                       fill=FIELD_BG, outline=FIELD_EDGE, tags=atag)
-                self.create_text(left + 5 * s, ay, anchor="w", text="Add pin", fill=DIM,
+                self.create_text(left + 5 * s, ay, anchor="w", text=text, fill=DIM,
                                  font=fpin, tags=atag)
                 self.draw_circled(right - 10 * s, ay, "+", atag)
-            else:                             # "⊕ Add pin", under the outputs
+            else:                             # "⊕ Add case", under the outputs
                 right = x1 - 11 * s
                 left = right - bw
                 self.create_rectangle(left, ay - 9 * s, right, ay + 9 * s,
                                       fill=FIELD_BG, outline=FIELD_EDGE, tags=atag)
                 self.draw_circled(left + 10 * s, ay, "+", atag)
-                self.create_text(right - 5 * s, ay, anchor="e", text="Add pin", fill=DIM,
+                self.create_text(right - 5 * s, ay, anchor="e", text=text, fill=DIM,
                                  font=fpin, tags=atag)
         if (self.app.graph_name, n.id) in self.app.breakpoints:
             self.create_oval(x0 - 7 * s, y0 - 7 * s, x0 + 7 * s, y0 + 7 * s, fill=BREAK,

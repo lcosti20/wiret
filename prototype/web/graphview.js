@@ -212,7 +212,7 @@ export class GraphView {
         const add = button("gv-addpin", "", `Add ${left ? "an input" : "an output"} to this node`,
                            () => this.on.addPin(n.id));
         const plus = h("span", "gv-circle", "+");
-        if (left) add.append("Add pin", plus); else add.append(plus, "Add pin");
+        if (left) add.append(n.addLabel, plus); else add.append(plus, n.addLabel);
         const cell = h("div", left ? "gv-pin" : "gv-pin gv-out");
         cell.append(add);
         body.append(...(left ? [cell, h("div", "gv-pin")] : [h("div", "gv-pin"), cell]));

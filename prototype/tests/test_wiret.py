@@ -8768,8 +8768,10 @@ func Main() {
         self.assertIn("  exec Sequence#count<3>{pos=(250, 0)}()\n", r["text"])
         self.assertEqual(self.edit(text, "Main", **{**e["action"], "text": "99"})["message"],
                          "Enter a whole number from 1 to 64.")
-        # "+ Add pin" on a Switch: a case with the first member no case has yet
-        e = next(e for e in self.menu(text, "Main", kind="node", node="~0") if e["label"] == "Add pin")
+        # "Add case" on a Switch: a case with the first member no case has yet
+        e = next(e for e in self.menu(text, "Main", kind="node", node="~0") if e.get("label") == "Add case")
+        self.assertTrue(any(e.get("label") == "Add then"
+                            for e in self.menu(text, "Main", kind="node", node="1")))
         r = self.edit(text, "Main", **e["action"])
         self.assertIn("!exec Switch#<Mode>#cases<1>{pos=", r["text"])
         self.assertIn(").case[0] Mode::Idle -> {}\n", r["text"])
@@ -8819,7 +8821,7 @@ func Main() {
                    if x["title"].startswith("MakeArray"))
         self.assertEqual([(p["name"], p["removable"]) for p in web["ins"]],
                          [("item[0]", True), ("item[1]", True), ("item[2]", True)])
-        self.assertEqual(web["addSide"], "left")
+        self.assertEqual((web["addSide"], web["addLabel"]), ("left", "Add item"))
         self.assertIsNone(web["rule"])
 
 

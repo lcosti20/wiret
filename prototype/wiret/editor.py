@@ -1303,7 +1303,7 @@ class EditorApp:
             menu.add_command(label="Set output count (#count)…",
                              command=lambda: self.set_int_attr(nid, "count", "Number of outputs:"))
         if canvasedit.pin_count(n) is not None:
-            menu.add_command(label="Add pin", command=lambda: self.add_pin(nid))
+            menu.add_command(label=viewmodel.add_pin_label(n), command=lambda: self.add_pin(nid))
         if n.kind not in ("Entry",):
             menu.add_command(label=("Enable" if n.attr("disabled") else "Disable") + " (@disabled)",
                              command=lambda: self.toggle_attr(nid, "disabled"))
