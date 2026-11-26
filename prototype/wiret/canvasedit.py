@@ -215,8 +215,8 @@ def add_node(g: Graph, idx, item, x: float, y: float, context: Optional[tuple] =
 
 
 def place_unplaced(g: Graph, remembered: dict) -> None:
-    """Give every node without a place line one, where the automatic layout put it: auto-placed
-    nodes get a place line when first saved (section 2.3)."""
+    """Give every node without a `pos` one, where the automatic layout put it: auto-placed
+    nodes get a `pos` when first saved (section 2.3)."""
     for n in g.nodes:
         if g.place(n.id) is None:
             x, y = remembered.get((g.name, n.id), (0, 0))

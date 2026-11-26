@@ -115,6 +115,18 @@ The `.wiret` file is the only copy of the program, and it stays in sync with the
 - **Changes made by other programs** (an LLM, `git checkout`, another editor) are noticed by
   polling the file every second, and the editor reloads.
 
+The two views point at each other:
+
+- After a graph edit, undo or redo, the Source pane flashes what changed: the changed lines in
+  grey and the changed columns in yellow, fading over a second (`wiret/textchanges.py`).
+  Typing, the next edit or switching lessons clears it.
+- Selecting a node marks its whole statement, down to where its input block closes, at the
+  edge of the Source pane.
+- The graph's own notes fold into a *✎ Notes (N)* button (open by default on a wide canvas);
+  folding or unfolding them does not move the graph. A node's notes stack one under another.
+- The canvas shows a node's type arguments in single guillemets, `Add‹i32›`, where the text
+  writes `Add#<i32>`.
+
 **Run** (F5) compiles the file to a `.wbc` next to it, loads those bytes back from disk into
 the VM (decode, verify, link) and calls the function chosen under *Entry*, passing the
 comma-separated *Args*. Every node that ran gets a green outline and an `×N` count. If the
@@ -202,9 +214,9 @@ available to every module as `Macro std.flow.ForRange` and so on.
 | Open a called function/macro | Double-click a `Call` or `Macro` node |
 | Name, label, colour, note, `@disabled`, `#count` | Right-click a node |
 | Add or remove a `Sequence`'s or `Switch`'s outputs, or a `MakeArray`'s items | *⊕ Add case*, *⊕ Add then* or *Add item ⊕* at the bottom of the node; the ⊖ beside an output (or right-click it → Remove pin) |
-| Set a `Switch` case's value | Its `caseK` input: type it, pick an enum member, or wire a value in |
+| Set a `Switch` case's value | Its `case[K]` input, on the output's row: type it, pick an enum member, or wire a value in |
 | Flatten a bottom exec output | The small ▲ left of a `Branch`'s `else`, a `Try`'s `then`, a `Switch`'s `default` or a loop's `done` (the bottom exec output, when it gives no values of its own). The output moves up beside `in`, above a line, and the text drops its `-> { }`: `}.else` and what it runs carries on in the node's own block. Click the ▼ to gather those statements back into `.else -> { ... }` |
-| Boxes | Right-click empty canvas → Add box. Drag a box by its title bar. Members are edited explicitly |
+| Boxes | Right-click empty canvas → Add box. Drag a box by its title bar; the nodes inside it move with it, and go back if the drag is cancelled |
 | Pan / zoom | Drag empty canvas / mouse wheel (Shift+wheel pans) |
 | Undo / redo graph edits | Cmd+Z / Cmd+Shift+Z on the canvas (the text pane has its own undo) |
 | New function / macro, signature, locals, state | **Graph** menu |
@@ -213,8 +225,8 @@ The editor also follows the graph-editor contract in section 7.5:
 
 - Ids are kept exactly as they are; new nodes get a readable slug plus a random suffix such as
   `branch_k3m9`.
-- Nodes with no `place` line are laid out automatically, and get a `place` line the first time
-  the graph is saved.
+- Nodes with no `pos` in their attribute block are laid out automatically, and get one the
+  first time the graph is saved.
 - Unknown attributes and layout properties are kept.
 - Notes are kept even when the node or box they explain is deleted: they move to the graph as `@note("...", detached: "id")` and show as detached (`W0604`).
 - A wire whose source or target no longer exists stays on screen as a red dashed stub.
@@ -884,6 +896,9 @@ prototype/
     ops.py             edit operations (section 7.2)
     runner.py          typed arguments and results
     graphview.py       editor canvas
+    viewmodel.py       what the canvas draws, shared by both editors
+    canvasedit.py      canvas edits (wiring, values), shared by both editors
+    textchanges.py     changed lines and columns, for the source pane's flash
     editor.py          editor application, debugger, lessons menu
     palette.py         searchable node palette and node descriptions
     explain.py         plain-language diagnostics and runtime errors

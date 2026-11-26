@@ -1,5 +1,5 @@
 """What a graph looks like, without drawing it: node titles, pin labels, colors and the
-automatic layout of nodes that have no `place` line. The desktop canvas (graphview.py) draws
+automatic layout of nodes that have no `pos`. The desktop canvas (graphview.py) draws
 from these; `graph_json` hands the same to the web page."""
 from __future__ import annotations
 
@@ -93,7 +93,7 @@ def node_title(n) -> str:
 
 
 def display_title(g: Graph, n) -> str:
-    """The node's `label` from its place line, or its title."""
+    """The node's `label` from its attribute block, or its title."""
     place = g.place(n.id)
     label = place.prop("label") if place else None
     return label.value if label is not None and label.kind == "string" else node_title(n)
@@ -296,7 +296,7 @@ def used_outputs(g: Graph, info) -> set:
 
 
 def positions(g: Graph, info, remembered: dict) -> dict:
-    """node id -> (x, y): from the place lines, and for nodes without one, from `remembered`
+    """node id -> (x, y): from their attribute blocks, and for nodes without one, from `remembered`
     ((graph, node) -> (x, y), updated here) or the automatic layout (section 7.5: lay out
     only what has no layout)."""
     pos = {p.id: (p.x, p.y) for p in g.places}
@@ -306,7 +306,7 @@ def positions(g: Graph, info, remembered: dict) -> dict:
 
 
 def auto_layout(g: Graph, info, pos: dict, remembered: dict):
-    """Place nodes without a `place` line."""
+    """Place nodes without a `pos`."""
     for n in g.nodes:
         if n.id not in pos and (g.name, n.id) in remembered:
             pos[n.id] = remembered[(g.name, n.id)]

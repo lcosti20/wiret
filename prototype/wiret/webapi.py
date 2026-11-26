@@ -30,7 +30,7 @@ from .vm import VM, WiretError
 
 MAX_STEPS = 5000      # pause points kept by debug_run; the run itself carries on past them
 _REMEMBERED: dict = {}  # (graph, node) -> where the automatic layout put a node without a
-                        # place line, so it stays put while the text is edited
+                        # `pos`, so it stays put while the text is edited
 
 
 def _diag(d) -> dict:
@@ -188,7 +188,7 @@ def edit(source: str, graph: str, request: str) -> str:
         return json.dumps({"ok": False, "comments": len(m.comments)})
     idx = ModuleIndex(m)
     info = GraphInfo(g, idx)
-    positions(g, info, _REMEMBERED)            # where nodes without a place line are drawn
+    positions(g, info, _REMEMBERED)            # where nodes without a `pos` are drawn
     geoms = req.get("geoms") or {}
 
     def geom(nid):

@@ -702,7 +702,7 @@ class EditorApp:
             else:
                 m.comments = []
         g = self.graph
-        if g is not None:   # auto-placed nodes get a place line when first saved (section 2.3)
+        if g is not None:   # auto-placed nodes get a `pos` when first saved (section 2.3)
             canvasedit.place_unplaced(g, self.auto_pos)
         if getattr(self, "project", None) is not None:   # editors always write @id (2.4)
             assign_ids(m, retired={r.id for r in self.project.retired})
