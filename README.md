@@ -42,7 +42,7 @@ func Main() {
 }
 ```
 
-[Try out the prototype graph editor in the browser!](https://lcosti20.github.io/wiret/)
+[Try out the prototype graph editor in the browser!](https://lemonator32.github.io/wiret/)
 
 ## Why Wiret?
 
