@@ -51,16 +51,16 @@ func Show(p: Pet) {
 
   exec Entry{pos=(0, 0)}()
   @note("A Switch on an enum has one path per case. Anything not listed, here Sleepy, follows default.")
-  exec Switch#<Mood>#cases<Mood::Happy, Mood::Hungry>{pos=(444, 0)}(
+  exec Switch#<Mood>#cases<2>{pos=(444, 0)}(
     .value <- parts.mood
-  ).case0 -> {
+  ).case0 Mood::Happy -> {
     exec Call host.Log{pos=(774, -115)}(
       .message <- Call std.string.Concat{pos=(460, -200)}(
         .a <- parts.name
         .b <- " is happy."
       )
     )
-  }.case1 -> {
+  }.case1 Mood::Hungry -> {
     exec Call host.Log{pos=(970, 20)}(
       .message <- Call std.string.Concat{pos=(724, 90)}(
         .a <- parts.name

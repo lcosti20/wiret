@@ -25,7 +25,7 @@ Comments are for whoever reads the text. Explanations that the graph editor show
 | Qualified name | `std.math.Sqrt` |
 | Pin reference | `name.pin`, `name` alone for a named node's one output, or a bare name bound by a block or a parameter (section 2.3) |
 | Comment | `// text`, to the end of the line; kept when it stands directly above what it explains (see above) |
-| Generic arguments | `#<i32>`, `#<i32, string>`; a node's named generic arguments `#count<3>`, `#cases<Mode::Idle>` |
+| Generic arguments | `#<i32>`, `#<i32, string>`; a node's named generic arguments `#count<3>`, `#cases<2>` |
 | Arrows | `->` (an exec output's block, results), `<-` (input binding) |
 | Attribute block | `{pos=(0, 0), label="Start"}` after a node's kind, or after `box` |
 | Integer | `42`, `-7`, `0xFF`, `1_000`; optional suffix `i8 u8 i16 u16 i32 u32 i64 u64` |
@@ -117,14 +117,15 @@ box       = "box" attrs NL ;
 named     = "node" IDENT "=" expr NL ;
 stmt      = exec | goto ;
 exec      = "exec" ( expr | IDENT ) { out } NL ;
-out       = "." IDENT [ "|" IDENT { "," IDENT } "|" ] "->" "{" { decos stmt } "}"
-          | "." IDENT ;                      (* only last: continue in this block *)
+out       = "." IDENT [ input ] [ "|" IDENT { "," IDENT } "|" ] "->" "{" { decos stmt } "}"
+          | "." IDENT [ input ] ;            (* only last: continue in this block *)
+                                             (* input: the output's value, `.case0 Mode::Idle` *)
 goto      = "goto" IDENT [ "." IDENT ] NL ;
 disabled  = "!" ( "exec" ( expr | IDENT ) { out } | "{" { decos stmt } "}" | expr ) NL ;
 expr      = KIND [ symbol | STRING ] [ targs ] { named_gen } [ attrs ]
             "(" [ binding { sep binding } ] ")" ;
 targs     = "#" "<" type { "," type } ">" ;
-named_gen = "#" IDENT "<" [ value { "," value } ] ">" ;  (* #count<3>, #cases<Mode::Idle> *)
+named_gen = "#" IDENT "<" [ value { "," value } ] ">" ;  (* #count<3>, #cases<2> *)
 attrs     = "{" [ IDENT "=" value { "," IDENT "=" value } ] "}" ;
 binding   = decos "." IDENT "<-" input ;
 input     = expr [ "." IDENT ] | ref | literal ;  (* expr: a node written inline *)
@@ -165,6 +166,7 @@ exec Branch(
 
 - **Flattening.** The last output may be written `.pin` alone, without a block. Then the statements that follow in the enclosing block are that output's block: they continue from it. `Try`'s `.then`, which runs after the body or the fault, and `Sequence`'s last output read most naturally this way, and so does an `if` without an `else` (`}.else` followed by the rest of the function). Flattening is notation only: the graph is the same either way, and the formatter keeps the form that is written. A node created by an editor flattens its last output when it is a `Try` or a `Sequence`.
 - **Output names.** An output's block may bind names between bars, `.each|index, item| -> { ... }`. A name is one of the node's data outputs, read in the block as a bare name (`.b <- index`), or one of its other exec inputs, run with `goto` (`.each|index, break| -> { ... goto break }`). Names are matched by pin name, not position, so `.each|item|` binds only `item`; the bars, unlike parentheses, do not read as a call's arguments. A name is in scope in its block and in the blocks inside it, and an inner block's name hides an outer one's. A named node may bind names too, as a shorthand for `name.pin`. A flattened output binds no names. The parenthesised form of earlier drafts, `.each(index) -> {`, is a syntax error that shows the bars.
+- **Output values.** Some exec outputs take a value: a `Switch`'s `case0`, `case1`, ... (section 3.3). The value is written after the output's name and before its names or `->`, `.case0 Mode::Idle -> { ... }`, and is the node's data input of the same name: a literal, an enum value, a name, `name.pin` or a node written inline, as on the right of `.pin <- value`. It is read in the enclosing block's scope. An output that takes a value is written even when nothing is wired to it, with an empty block, `.case1 Mode::Chase -> {}`, so its value is kept; an empty block is never flattened. Writing a value on an output that takes none is `E0103`.
 - A node whose output must be read anywhere else (after its blocks, or from a grandparent's block) is named, and its outputs are read as `name.pin` (see *Named nodes*).
 
 #### Named nodes
@@ -302,7 +304,7 @@ Personal view state (zoom, scroll, selection, open panels) is never written to t
 
 1. **Kind** is a PascalCase built-in (`Add`, `Branch`, `SetLocal`, ...; section 3.3). Calling a declared function is always `Call`, so the closed set of built-in kinds never collides with user names.
 2. **Symbol** (optional) names the thing the node acts on: `Call std.math.Sqrt`, `GetField Player.health`, `SetLocal acc`, `GetState done`, `New Player`, `Cast Player`, `Macro ForRange`, `Exit done`, and for `Format` its template, a string: `Format "Total: {total}"` (section 3.3). A struct node names its struct, and a field node the struct and the field: `MakeStruct Vec2`, `GetField Vec2.x`. A member of a class (a field, a dispatcher, or a field that a container node changes) is always written with its class: `GetField Player.health`, `Broadcast Player.OnHit`, `ArrayAdd#<i32> Player.items`. Inside a method the reader also accepts a member of the method's own class by its bare name, `GetField health`, and the formatter writes it qualified with that class.
-3. **Generic arguments** follow the symbol: `Add#<i32>`, `Convert#<i32, string>`, `Call std.array.Get#<f32>`, and come before the symbol of a container node: `ArrayAdd#<i32> scores`. They are always written out, never inferred. Every generic argument list in Wiret, on a node, a declaration (`macro ForEach#<T>`) or a type (`array#<i32>`), is introduced by `#`; a bare `<` would read like a comparison. A node's **named generic arguments**, which change its pins, follow its type arguments: `Sequence#count<3>()`, `MakeArray#<i32>#count<4>(...)`, `Switch#<Mode>#cases<Mode::Idle, Mode::Chase>(...)`. They are written with `#` so they are never confused with decorators.
+3. **Generic arguments** follow the symbol: `Add#<i32>`, `Convert#<i32, string>`, `Call std.array.Get#<f32>`, and come before the symbol of a container node: `ArrayAdd#<i32> scores`. They are always written out, never inferred. Every generic argument list in Wiret, on a node, a declaration (`macro ForEach#<T>`) or a type (`array#<i32>`), is introduced by `#`; a bare `<` would read like a comparison. A node's **named generic arguments**, which change its pins, follow its type arguments: `Sequence#count<3>()`, `MakeArray#<i32>#count<4>(...)`, `Switch#<Mode>#cases<2>(...)`. They are written with `#` so they are never confused with decorators. `#cases` counts a `Switch`'s cases; each case's value follows its output, `.case0 Mode::Idle -> { ... }` (output values, above). Listing the values in `#cases`, as earlier drafts did, is `E0502` with a message that shows the new form.
 4. **Bindings** connect input pins: `.pin <- value`, one per line, or separated by commas on one line: `Call host.Log(.message <- "hi")`. The canonical form puts each binding on its own line, indented one level further than the node, without commas (section 2.5). A node with no bound inputs is written with empty parentheses, `Entry()`, so every node reads the same way. `<-` mirrors the `->` of an output's block: data flows *into* the pin. An enum value is written `Mode::Chase`, which never reads like a pin reference. An input that is not listed takes the pin's default value (the declared default, otherwise the zero value of its type); the compiler warns (`W0201`) about unlisted inputs that have no declared default.
 5. **Exec inputs.** A wire enters a node at its first exec input, `in` for most nodes and a macro's first exec parameter. `goto name.pin` enters another one.
 6. **Data wires** may fan out freely: any number of inputs may read the same output of a named node.
@@ -369,7 +371,7 @@ Decorator lines may stand above the module line, any item, any member of an `enu
 | `@capability("name")` | `extern func` | The import needs this host capability. Listed in the `wr.caps` section; the load fails unless the host granted it (section 6.5). |
 | `@latent` | `func` | The function may suspend. Required when it contains a latent node or calls a latent function or event (`E0201`). Events are implicitly latent. A latent function is never `@pure` or `@reads`. |
 
-The node parameters of earlier drafts, `#count<n>` and `#cases<...>`, are named generic arguments now, `#count<n>` and `#cases<...>` (section 2.3, rule 3); a decorator with either name is a syntax error that shows the new form.
+The node parameters of earlier drafts, `@count(n)` and `@cases(...)`, are named generic arguments now, `#count<n>` and `#cases<n>` (section 2.3, rule 3); a decorator with either name is a syntax error that shows the new form.
 
 **Metadata decorators** never change bytecode. They are stored and diffed, and they are covered by the layout hash but not the semantic hash (section 2.5). Node positions, labels, colours and sizes are not decorators; they live in the node's attribute block (section 2.3).
 

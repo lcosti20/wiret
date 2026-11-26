@@ -1076,17 +1076,6 @@ class EditorApp:
             return
         self.commit(canvasedit.set_int_attr(self.graph, nid, name, v))
 
-    def set_cases(self, nid):
-        prompt, cur = canvasedit.cases_prompt(self.graph, self.idx, nid)
-        text = simpledialog.askstring("@cases", prompt, initialvalue=cur, parent=self.root)
-        if text is None:
-            return
-        try:
-            reason = canvasedit.set_cases(self.graph, self.idx, nid, text)
-        except canvasedit.Refused as e:
-            messagebox.showerror("@cases", str(e))
-            return
-        self.commit(reason)
 
     def add_note(self, on):
         if not self.can_edit():
@@ -1290,8 +1279,6 @@ class EditorApp:
         if n.kind == "Sequence":
             menu.add_command(label="Set output count (#count)…",
                              command=lambda: self.set_int_attr(nid, "count", "Number of outputs:"))
-        if n.kind == "Switch":
-            menu.add_command(label="Set cases (#cases)…", command=lambda: self.set_cases(nid))
         if n.kind not in ("Entry",):
             menu.add_command(label=("Enable" if n.attr("disabled") else "Disable") + " (@disabled)",
                              command=lambda: self.toggle_attr(nid, "disabled"))

@@ -12,8 +12,8 @@ from .model import Const, Extern, Var
 # Decorators that are metadata: they explain the program and never change it (section 2.4).
 META_NAMES = {"doc", "category", "keywords", "note"}
 from .registry import (HANDLE_TYPES, assignable, field_place, handle_ok, parent_method, BUILTIN_TYPE_NAMES, PLACE_MUTATORS, INT_RANGES, ModuleIndex, Sig,
-                       array_elem, enum_values, instantiate, lit_fits, lit_in_range, signature,
-                       substitute, type_ok)
+                       array_elem, enum_values, instantiate, lit_fits, lit_in_range,
+                       output_values, signature, substitute, type_ok)
 
 
 @dataclass
@@ -344,19 +344,26 @@ def check_enum_value(lit: Lit, idx: ModuleIndex, D, graph=None, node=None, pin=N
 
 
 def check_switch_cases(n: Node, sig: Sig, idx: ModuleIndex, G, D):
-    """Each `@cases` value must be a value of the Switch's type (section 3.3)."""
-    a = n.attr("cases")
+    """Each case's value, written after its output (`.case0 Mode::Idle -> { ... }`), must be a
+    value of the Switch's type (section 3.3). A wired value is checked as any wire is."""
     vin = sig.input("value")
-    if a is None or not a.args or vin is None:
+    if vin is None:
         return
     ty = vin.type
-    for i, (_, lit) in enumerate(a.args):
-        pin = f"case{i}"
+    for i, pin in enumerate(output_values(sig)):
+        b = n.binding(pin)
+        if b is None:
+            D("W0201", f"case {i} has no value, so it is never taken; write it after the "
+                       f"output, '.{pin} <value> -> {{ ... }}'", G, n.id, pin, type=ty)
+            continue
+        if not isinstance(b.value, Lit):
+            continue
+        lit = b.value
         if lit.kind == "enum":
             if not check_enum_value(lit, idx, D, G, n.id, pin):
                 continue
         if not (lit_fits(lit, ty) and lit_in_range(lit, ty)):
-            hint = (f"; write it as {ty}.Member" if ty in idx.enums and lit.kind != "enum"
+            hint = (f"; write it as {ty}::Member" if ty in idx.enums and lit.kind != "enum"
                     else "")
             D("E0110", f"case {i} ({fmt_value(lit)}) is not a value of type {ty}{hint}",
               G, n.id, pin, literal=True, dst=ty)
@@ -447,13 +454,19 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
                        "re-reads the node's value (section 4.3)", G, n.id)
         # data bindings
         bound = set()
+        valued = set(output_values(sig))
         for b in n.bindings:
             pin = sig.input(b.pin)
             if b.pin in bound:
                 D("E0111", f"input '{b.pin}' is bound twice", G, n.id, b.pin)
             bound.add(b.pin)
             if pin is None:
-                if not sig.error:
+                if sig.error:
+                    pass
+                elif sig.output(b.pin) is not None and sig.output(b.pin).is_exec:
+                    D("E0103", f"exec output '{b.pin}' takes no value; write "
+                               f"'.{b.pin} -> {{ ... }}'", G, n.id, b.pin)
+                else:
                     D("E0103", f"{n.kind} has no input pin '{b.pin}'", G, n.id, b.pin)
                 continue
             if pin.is_exec:
@@ -479,6 +492,8 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
                     D("E0110", f"wire type mismatch: {spin.type} -> {pin.type}; insert "
                                f"Convert#<{spin.type}, {pin.type}>", G, n.id, b.pin,
                       src=spin.type, dst=pin.type)
+            elif b.pin in valued:
+                pass                # a case value: check_switch_cases says it in its words
             else:
                 if b.value.kind == "enum" and not check_enum_value(b.value, idx, D, G, n.id,
                                                                    b.pin):
@@ -488,7 +503,7 @@ def check_graph(g: Graph, idx: ModuleIndex, D):
                       dst=pin.type, literal=True)
         if not sig.error and n.kind not in ("Exit", "Leave"):
             for p in sig.data_ins:
-                if p.name not in bound and p.default is None:
+                if p.name not in bound and p.default is None and p.name not in valued:
                     D("W0201", f"input '{p.name}' is unbound and has no default", G, n.id, p.name,
                       type=p.type)
         # exec outputs

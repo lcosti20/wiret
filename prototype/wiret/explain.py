@@ -77,7 +77,7 @@ def explain(d: Diag) -> str:
                     f"{zero_words(data['dst'])}.")
         if m.startswith("case "):
             dst = data["dst"]
-            fix = (f" Write each case as {dst}.Member." if "Member" in m else "")
+            fix = (f" Write each case as {dst}::Member." if "Member" in m else "")
             return (f"Case {m.split()[1]} of this Switch isn't {type_words(dst)}, so the value "
                     f"could never match it.{fix}")
         if "default of '" in m:

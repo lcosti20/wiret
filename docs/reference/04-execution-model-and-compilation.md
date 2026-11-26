@@ -160,7 +160,7 @@ Some faults cannot be caught: fuel exhausted, memory limit exceeded, and a fiber
 | `E0101` / `E0102` | A binding, bare name or `goto` names nothing (no named node, block name or parameter) / a duplicate: node name, local, declaration, struct field or enum member; also a struct or enum named like a built-in type (section 2.3). |
 | `E0103` | Unknown pin on a node. |
 | `E0104` | A decorator name without a dot that is neither a semantic nor a metadata decorator, or a decorator where it does not apply (section 2.4). |
-| `E0110` | Wire type mismatch (and no supertype relation); also a literal, field default, enum member value or `#cases` value that does not fit its type, including a vector tuple of the wrong length; and a type argument the kind does not accept, such as `Add#<quat>` (section 3.1.1). |
+| `E0110` | Wire type mismatch (and no supertype relation); also a literal, field default, enum member value or `Switch` case value that does not fit its type, including a vector tuple of the wrong length; and a type argument the kind does not accept, such as `Add#<quat>` (section 3.1.1). |
 | `E0111` | The same input pin is bound twice. |
 | `E0120` | Exec output wired to a data pin, or a data wire to an exec pin. |
 | `E0121` | An exec output has more than one wire: the same output written as two blocks. |

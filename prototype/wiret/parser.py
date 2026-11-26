@@ -982,8 +982,10 @@ class Parser:
 
     def exec_stmt(self, st: _Body, pos: str, cur, scope, meta, attrs, cm, tok):
         """`exec Kind(...)` or `exec name`, then its exec outputs: `.pin|names| -> { ... }`
-        blocks, the last of which may be written `.pin` alone to continue in this block.
-        Returns the exec output the next statement continues from."""
+        blocks, the last of which may be written `.pin` alone to continue in this block. An
+        output that takes a value (a Switch's `case0`) has it after its name, `.case0 Mode::Idle
+        -> { ... }`: it is the node's input of the same name. Returns the exec output the next
+        statement continues from."""
         g = st.g
         named_ref = self.at("id") and not (
             self.at_p("(", 1) or self.at_p("{", 1) or self.at_p("#", 1) or self.at("id", k=1)
@@ -1024,6 +1026,12 @@ class Parser:
             if self.at_p("(") and nt.line == pt.line and nt.col == pt.col + len(pin):
                 self.error(f"an exec output's block binds names between bars: "
                            f"'.{pin}|name, ...| -> {{ ... }}'")
+            if not (self.at_p("|") or self.at_p("->") or self.at_p("<-") or self.at_p("}")
+                    or self.at("nl") or self.at("eof")):
+                # the output's value: the node's input of the same name (section 2.3)
+                val, inline = self.input_value(f"{x.id}.{pin}", scope)
+                x.bindings.append(Binding(pin, val))
+                g.nodes.extend(inline)
             names = []
             if self.at_p("|"):
                 self.next()
@@ -1216,7 +1224,8 @@ def _int_pair(v) -> bool:
 
 
 def resolve_enum_values(mod: Module):
-    """`#cases<Mode::Idle, ...>` arguments written as bare dotted names become enum values."""
+    """Old-style `#cases<Mode::Idle, ...>` arguments written as bare dotted names become enum
+    values, so the checker's message about the old form can show them (registry.signature)."""
     enums = {it.name for it in mod.items if isinstance(it, Enum)}
     if not enums:
         return

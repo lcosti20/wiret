@@ -322,36 +322,6 @@ def set_int_attr(g: Graph, nid: str, name: str, value) -> str:
     return f"Set #{name}<{v}> on {nid}"
 
 
-def cases_prompt(g: Graph, idx, nid: str) -> tuple:
-    """(what to ask, the current cases as text) for a Switch's #cases."""
-    from .printer import fmt_lit
-    n = g.node(nid)
-    a = n.attr("cases")
-    cur = ", ".join(fmt_lit(v) for _, v in a.args) if a and a.args else ""
-    ety = n.targs[0] if n.targs and n.targs[0] in idx.enums else None
-    prompt = "Case values, comma separated:"
-    if ety:
-        members = ", ".join(m for m, _ in enum_values(idx.enums[ety]))
-        prompt = f"{ety} members, comma separated (one of: {members}):"
-    return prompt, cur
-
-
-def set_cases(g: Graph, idx, nid: str, text: str) -> str:
-    """A Switch's #cases from comma-separated values; enum members need no type name."""
-    import csv
-    n = g.node(nid)
-    ty = n.targs[0] if n.targs else None
-    parts = [t.strip() for t in next(csv.reader([text], skipinitialspace=True), []) if t.strip()]
-    if ty in idx.enums:      # bare member names are enough: Idle, Chase
-        parts = [t if "." in t or "::" in t else f"{ty}::{t}" for t in parts]
-    try:
-        vals = [parse_literal(t) for t in parts]
-    except ParseError as e:
-        raise Refused(e.msg)
-    n.attrs = [x for x in n.attrs if x.name != "cases"] + [Attr("cases", [(None, v) for v in vals])]
-    return f"Set cases on {nid}"
-
-
 def add_note(g: Graph, on: Optional[str], text: str) -> Optional[str]:
     """A note on a node or box, or on the whole graph (`on` None)."""
     if not text:

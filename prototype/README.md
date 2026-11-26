@@ -47,7 +47,7 @@ pin (or onto a node) to wire them, click a wire or node and press Delete to remo
 double-click an input to type its value, and add nodes from the palette (Tab, a double click
 on empty canvas, a wire dropped on empty canvas, or the Add node button). Right-click (or press
 and hold on a touch screen) for the same context menus as the desktop editor: set an enum
-input, make or break a struct, rename, label, colour, notes, boxes, locals, #count and #cases.
+input, make or break a struct, rename, label, colour, notes, boxes, locals and #count.
 Ctrl+Z and Ctrl+Y undo and redo. You can debug with Step (F11),
 Over (F10), Back (Shift+F11), Run/Continue (F5), Animate and breakpoints (click the circle at a
 node's top-left corner or beside its line number, or press F9). The Tkinter modules, the Git
@@ -199,7 +199,8 @@ available to every module as `Macro std.flow.ForRange` and so on.
 | Set a literal | Double-click an input pin (bool pins toggle). An empty value unbinds the pin |
 | Delete | Select a node or wire and press Delete/Backspace, or use the right-click menu |
 | Open a called function/macro | Double-click a `Call` or `Macro` node |
-| Name, label, colour, note, `@disabled`, `#count`, `#cases` | Right-click a node |
+| Name, label, colour, note, `@disabled`, `#count` | Right-click a node |
+| Set a `Switch` case's value | Its `caseK` input: type it, pick an enum member, or wire a value in |
 | Boxes | Right-click empty canvas → Add box. Drag a box by its title bar. Members are edited explicitly |
 | Pan / zoom | Drag empty canvas / mouse wheel (Shift+wheel pans) |
 | Undo / redo graph edits | Cmd+Z / Cmd+Shift+Z on the canvas (the text pane has its own undo) |
@@ -242,7 +243,7 @@ The editor also follows the graph-editor contract in section 7.5:
 
 | Area | Status |
 | --- | --- |
-| Text syntax (2.1–2.4) | Full lexer and parser for `use`, `extern`, `const`, `var`, `enum`, `struct`, `class` (with methods, dispatchers, a base class and `impl`), `interface`, `func`, `event`, `macro`, `local`, `state`, `exec` statements in the order a function runs, output blocks (`.then -> { ... }`) with bound names (`.each(index, break)`) and a flattened last output (`}.else`), named nodes (`node name = ...`), `exec name` and `goto`, disabled statements (`!exec`, `!{ }`, `!Kind()`), nodes with their inputs in parentheses, one per line or separated by commas, nodes written inline in the one input they feed (naming the output they feed in only when they have several), parameters read by bare name, attribute blocks (`{pos=(x, y), label="..."}`), `box {...}` statements, `@` decorators above what they describe (or before a parameter or field on its line), `#<...>` generics and named generics (`#count<3>`, `#cases<...>`), `self` and static methods, parameter defaults, `-> ()`, functions written `= value`, `Format "..."` templates and `//` comments attached to what they stand above. The `flow` and `layout` blocks, `#[...]` metadata and `::<` generics of Draft 0.13 are rejected with a hint, and an unknown undotted decorator is `E0104`. See *Structs and enums*, *Classes*, *Interfaces* and *Delegates and dispatchers* below. |
+| Text syntax (2.1–2.4) | Full lexer and parser for `use`, `extern`, `const`, `var`, `enum`, `struct`, `class` (with methods, dispatchers, a base class and `impl`), `interface`, `func`, `event`, `macro`, `local`, `state`, `exec` statements in the order a function runs, output blocks (`.then -> { ... }`) with bound names (`.each(index, break)`) and a flattened last output (`}.else`), named nodes (`node name = ...`), `exec name` and `goto`, disabled statements (`!exec`, `!{ }`, `!Kind()`), nodes with their inputs in parentheses, one per line or separated by commas, nodes written inline in the one input they feed (naming the output they feed in only when they have several), parameters read by bare name, attribute blocks (`{pos=(x, y), label="..."}`), `box {...}` statements, `@` decorators above what they describe (or before a parameter or field on its line), `#<...>` generics and named generics (`#count<3>`, `#cases<2>`), output values (`.case0 Mode::Idle -> {`), names bound between bars (`.each|index| -> {`), `self` and static methods, parameter defaults, `-> ()`, functions written `= value`, `Format "..."` templates and `//` comments attached to what they stand above. The `flow` and `layout` blocks, `#[...]` metadata and `::<` generics of Draft 0.13 are rejected with a hint, and an unknown undotted decorator is `E0104`. See *Structs and enums*, *Classes*, *Interfaces* and *Delegates and dispatchers* below. |
 | Canonical form and hashes (2.5) | Sorted items (struct fields and enum members keep the order written); in a body: locals, boxes, named nodes in the order they were named, the exec walk from `Entry` (a node entered from several places named and written at its least nested entry, the others `goto`), then disabled statements. Anonymous nodes get their execution position as id (`1.body.0`, `1.fault.0.message`), and the printer names a node that must be named after its symbol (`concat`, `concat_2`). Decorators above their statement (`doc`, `category`, `keywords`, notes as written, other metadata, then semantic ones); registry pin order; default-valued bindings and the implicit `self` omitted. Semantic hash (ignores attribute blocks, boxes, metadata decorators, `//` comments and `Reroute`) and layout hash. The §2.6 example round-trips byte for byte (see tests). |
 | Node kinds (3.3) | `Entry`, `Return`, `Branch`, `Sequence`, `Switch`, `Select`, `Macro`, `Exit`, `Reroute`, `Get/SetLocal`, `Get/SetVar` (and `const`s), `Get/SetState`, `Call`, `Convert`, all arithmetic, comparison, logic and bit kinds, `Scale`, and the array kinds `MakeArray`, `ArrayGet`, `ArrayLength`, `ArraySet`, `ArrayAdd`, `ArrayInsert`, `ArrayRemove`, `ArrayClear`, the struct kinds, the map and set kinds (see *Maps and sets* below), `Try` and `Throw` (see *Faults* below), the latent kinds `Delay`, `Yield` and `Await` (see *Fibers* below), the class kinds `New`, `GetField`/`SetField` on objects, `Cast` and `IsValid` (see *Classes* below), and `CreateDelegate`, `Invoke`, `Bind`, `Unbind` and `Broadcast` (see *Delegates and dispatchers* below). Types: `bool`, all integer widths, `f32`, `f64`, `string`, `array#<T>`, `map#<K, V>`, `set#<T>`, structs, enums, classes, interfaces, `delegate#<(A) -> (R)>` and `std.Signal`. |
 | Execution model (4.2–4.3) | Continuation stack, `Sequence` push/pop, macro inlining with path-style ids (`loop/test`, `loop!in`), `Exit` as a jump, joins, evaluation points with per-point sharing, impure output slots, `@pure` and `@reads` calls as pure nodes, per-expansion `state`. The §4.2 `SumTo(2)` trace is reproduced exactly (see tests). |
@@ -290,7 +291,7 @@ Declarations are checked, and their names can be used as types in signatures, `l
   it in an array is fine.
 
 An enum value is written `Mode::Chase`: on a pin (`.b <- Mode::Flee`), as a default
-(`mode: Mode = Mode::Idle`) and in `#cases<Mode::Idle, Mode::Chase>`. It never reads like a wire,
+(`mode: Mode = Mode::Idle`) and as a case value (`.case0 Mode::Idle -> { ... }`). It never reads like a wire,
 so a node may be called `Mode` too. The dotted `Mode.Chase` of earlier drafts is still read where
 the graph has no node called `Mode`, and `wiretc fmt` rewrites it. A missing enum or member is
 `E0501`, and a value of the wrong enum is `E0110`.
@@ -310,8 +311,12 @@ with a pointer to `WithField`.
 
 `Eq`/`Ne` take enums and structs, `Lt`/`Le`/`Gt`/`Ge` take enums, `Select` takes either, and
 `Switch` takes enums. `Convert` turns an enum into its own underlying type and back, and nothing
-else. Each `#cases` value must be a value of the `Switch`'s type (`E0110`); this now applies to
-every `Switch`.
+else. `Switch#<T>#cases<n>` has `n` cases, and each case's value follows its output,
+`.case0 Mode::Idle -> { ... }`, or `.case1 Mode::Chase -> {}` when nothing is wired to it. The
+value is the node's input of the same name: a literal must be a value of the `Switch`'s type
+(`E0110`), and a wire is read when the `Switch` runs, the first equal case being taken. A case
+with no value is never taken (`W0201`). Listing the values in `#cases`, as earlier drafts did,
+is `E0502` with a message showing the new form.
 
 They compile and run:
 
@@ -338,8 +343,9 @@ In the editor:
 - Dragging a struct wire onto empty canvas offers the nodes that take it, *Break* first among
   them. Right-clicking a struct output pin offers *Break into fields*, and a struct input pin
   offers *Make a Vec2*, each adding the node already wired.
-- Right-clicking an enum input pin lists its members. Typing a literal into one accepts the bare
-  member name, and `#cases` on an enum `Switch` does too.
+- Right-clicking an enum input pin lists its members, and an unwired one shows a dropdown of
+  them on the canvas. Typing a literal into one accepts the bare member name. A `Switch`'s case
+  values are inputs too (`case0`, `case1`, ...), with the same box or dropdown.
 - *Add local* accepts struct and enum types. Struct pins are light blue and enum pins lavender.
 - Lesson 8 walks through a struct, an enum, `WithField` and a `Switch` on an enum.
 
@@ -793,8 +799,8 @@ A node is named by its id: a named node's name, else its execution position (`"1
 `"plus.result"`, `"1.message.result"`, `"5"`, `"\"hi\""`, `"Mode::Chase"`.
 A target is `graph` and `node` (a node or box), `graph` alone, or `decl` (any declaration).
 `set_meta` with a note adds one; with any other name it replaces it. Renaming by `@id` rewrites
-every reference: calls and macro uses, type names, struct and field symbols, enum values and
-`#cases`, `Entry` pins and call-site bindings for parameters, `Return` bindings and call-site
+every reference: calls and macro uses, type names, struct and field symbols, enum values (a
+`Switch`'s case values among them), `Entry` pins and call-site bindings for parameters, `Return` bindings and call-site
 pins for results, and exec wires for a macro's exec parameters and results.
 
 ### Merging

@@ -165,7 +165,7 @@ def edit(source: str, graph: str, request: str) -> str:
       add              "kind", "symbol", "targs" (a palette item), "x", "y", and optionally
                        "context": the pin a wire was dragged from, to wire the new node to
     and the context menu's edits (see `menu`, which builds these requests): set_enum,
-    make_struct, break_struct, rename, label, color, toggle_attr, int_attr, cases, add_note,
+    make_struct, break_struct, rename, label, color, toggle_attr, int_attr, add_note,
     edit_note, delete_note, add_box, resize, retitle and add_local.
     and optionally "geoms": {node: [x, y, width]} as drawn (to place an inserted Convert node)
     and "comments": "convert". The result is {"ok", "text", "message", "select"} (`select`: a
@@ -238,8 +238,6 @@ def edit(source: str, graph: str, request: str) -> str:
             reason = canvasedit.toggle_attr(g, req["node"], req["name"])
         elif op == "int_attr":
             reason = canvasedit.set_int_attr(g, req["node"], req["name"], req["text"])
-        elif op == "cases":
-            reason = canvasedit.set_cases(g, idx, req["node"], req["text"])
         elif op == "add_note":
             reason = canvasedit.add_note(g, req.get("on"), req["text"])
         elif op == "edit_note":
@@ -336,9 +334,6 @@ def menu(source: str, graph: str, target: str) -> str:
         if n.kind == "Sequence":
             choice("Set output count (#count)…", "int_attr", "Number of outputs:",
                    str(canvasedit.int_attr(g, nid, "count")), node=nid, name="count")
-        if n.kind == "Switch":
-            prompt, cur = canvasedit.cases_prompt(g, idx, nid)
-            choice("Set cases (#cases)…", "cases", prompt, cur, node=nid)
         if n.kind not in ("Entry",):
             choice(("Enable" if n.attr("disabled") else "Disable") + " (@disabled)", "toggle_attr",
                    node=nid, name="disabled")

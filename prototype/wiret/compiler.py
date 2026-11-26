@@ -709,7 +709,10 @@ class FuncLowerer:
                 ir.extra["assign"] = [ctx.results[p] for p, _, _ in ir.inputs]
                 ir.execs = [("then", ctx.exits.get(n.symbol))]
             else:
-                ir.inputs = [(p.name, p.type, self.src(ctx, n, p)) for p in sig.data_ins]
+                ins = sig.data_ins
+                if n.kind == "Switch":       # a case with no value is never taken (W0201)
+                    ins = [p for p in ins if p.name == "value" or n.binding(p.name) is not None]
+                ir.inputs = [(p.name, p.type, self.src(ctx, n, p)) for p in ins]
                 ir.execs = [(p.name, self.out_target(ctx, n, p.name)) for p in sig.exec_outs]
             if n.kind in ("GetLocal", "SetLocal"):
                 ir.extra["local"] = ctx.locals[n.symbol]
@@ -1132,17 +1135,21 @@ class FuncLowerer:
                 self.E("cont.push", self.L(t))
             self.transfer(outs[0] if outs else None, nxt)
         elif k == "Switch":
+            # the value into a temp, then each case's value in pin order (a literal or a
+            # wire: section 3.3); the first case equal to the value is taken
             ty = n.targs[0]
-            self.emit_inputs(n)
+            ep = self.new_ep(n)
+            (_, _, value), cases = n.inputs[0], n.inputs[1:]
+            self.eval(value, ep, keep=False)
             tmp = self.temp(ty)
             self.E("local.set", tmp)
-            cases = n.attrs and next((a for a in n.attrs if a.name == "cases"), None)
+            self.ready(n)
             targets = dict(n.execs)
-            for i, (_, lit) in enumerate(cases.args if cases and cases.args else []):
+            for pin, _, s in cases:
                 self.E("local.get", tmp)
-                self.emit_const(lit, ty)
+                self.eval(s, ep, keep=False)
                 self.emit_eq(ty)
-                self.E("br_if", self.L(targets.get(f"case{i}")))
+                self.E("br_if", self.L(targets.get(pin)))
             self.transfer(targets.get("default"), nxt)
         elif k in PLACE_MUTATORS:
             # read the place, apply the mutator (which yields the changed container), store it

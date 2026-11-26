@@ -782,6 +782,18 @@ def _static_sig(node: Node, idx: "Optional[ModuleIndex]" = None) -> Sig:
     return sig
 
 
+def output_values(sig) -> list:
+    """The exec outputs that take a value, in pin order: those with a data input of the same
+    name, as a Switch's `case0`. The value is written after the output's name in the text,
+    `.case0 Mode::Idle -> { ... }`, and on its own input pin on the canvas (section 2.3)."""
+    out = []
+    for p in sig.exec_outs:
+        q = sig.input(p.name)
+        if q is not None and not q.is_exec:
+            out.append(p.name)
+    return out
+
+
 def attr_int(node: Node, name: str, default: int) -> int:
     a = node.attr(name)
     if a and a.args and a.args[0][1].kind == "int":
@@ -822,8 +834,16 @@ def signature(node: Node, graph: Graph, idx: ModuleIndex) -> Sig:
         if not allows("switch", t, idx):
             sig.error = ("E0110", f"Switch does not accept type {t}")
         a = node.attr("cases")
-        n = len(a.args) if a and a.args else 0
-        sig.inputs = [Pin("in", E), Pin("value", t)]
+        n = attr_int(node, "cases", 0)
+        if a is not None and a.args and not (len(a.args) == 1 and a.args[0][1].kind == "int"):
+            sig.error = ("E0502", "#cases takes the number of cases, '#cases<2>'; each case's "
+                                  "value follows its output, '.case0 Mode::Idle -> { ... }'")
+            n = len(a.args)
+        elif not 0 <= n <= 64:
+            sig.error = ("E0502", "#cases takes a number of cases from 0 to 64")
+            n = max(0, min(n, 64))
+        # each case output takes its value: an input of the same name (section 2.3)
+        sig.inputs = [Pin("in", E), Pin("value", t)] + [Pin(f"case{i}", t) for i in range(n)]
         sig.outputs = [Pin(f"case{i}", E) for i in range(n)] + [Pin("default", E)]
         return sig
     if k == "Reroute":

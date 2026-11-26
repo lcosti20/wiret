@@ -16,7 +16,7 @@ from .model import (Attr, Binding, Box, Class, Const, Enum, Interface, ExecOut, 
                     META_ORDER, Module, NODE_GENERICS, Node, PinRef, SEMANTIC_ATTRS, Struct, Use, Var,
                     item_kind, strip_comments)
 from .registry import (PLACE_MUTATORS, ModuleIndex, Sig, field_place, lit_equal, lit_fits,
-                       signature)
+                       output_values, signature)
 
 IND = "  "
 
@@ -381,7 +381,9 @@ class GraphNames:
                 continue
             stmts = []
             self._walk(nid, stmts)
-            alone = len(stmts) == 1 and not stmts[0].outs
+            # alone: one node with nothing wired after it (its outputs, if any, are the empty
+            # blocks of outputs that take a value, `.case0 Mode::Idle -> {}`)
+            alone = len(stmts) == 1 and not any(blk for _, blk in stmts[0].outs)
             self.regions.append(("exec" if alone else "block", stmts))
         pure = [n.id for n in self.g.nodes if n.id not in self.parent and n.id not in self.placed
                 and not self.is_exec(n.id) and not n.named and not self.refs.get(n.id)]
@@ -468,7 +470,8 @@ class GraphNames:
             stmts.append(st)
             n, sig = self.nodes[nid], self.sigs[nid]
             edges = _ordered_execs(n, sig)
-            if not edges:
+            valued = output_values(sig)
+            if not edges and not valued:
                 return
             outs = sig.exec_outs
             single = len(edges) == 1 and len(outs) <= 1 and (
@@ -480,6 +483,12 @@ class GraphNames:
                     nxt = self._follow(e, blk)
                     if nxt is not None:
                         self._walk(nxt, blk)
+                # an output that takes a value is written even when nothing is wired to it,
+                # with an empty block: `.case1 Mode::Chase -> {}`
+                wired = {o[0] for o in st.outs}
+                st.outs.extend([p, []] for p in valued if p not in wired)
+                order = {p.name: i for i, p in enumerate(outs)}
+                st.outs.sort(key=lambda o: order.get(o[0], len(order)))
                 return
             nxt = self._follow(edges[0], stmts)
             if nxt is None:
@@ -517,7 +526,9 @@ class GraphNames:
                     if out[1] is not None:
                         self._flatten(out[1], uses)
                 last = st.outs[-1]
-                if last[1] is not None and (st.nid, last[0]) not in uses \
+                # an empty block is an output nothing is wired to: never flattened, or the
+                # statements after it would continue from it
+                if last[1] and (st.nid, last[0]) not in uses \
                         and self.flattens(st.nid):
                     stmts[i + 1:i + 1] = last[1]
                     last[1] = None
@@ -811,6 +822,8 @@ def fmt_expr(node: Node, sig: Sig, indent: str, names: GraphNames = None, semant
     lines and the decorators of the node written in it) and `)`, or `Kind{attrs}()` when no
     input is bound."""
     bindings = _ordered_bindings(node, sig)
+    valued = set(output_values(sig))       # written after their exec output (fmt_exec)
+    bindings = [b for b in bindings if b.pin not in valued]
     if names is not None:
         bindings = [b for b in bindings if not _implicit_self(node, b, names)]
     head = fmt_head(node, names)
@@ -904,18 +917,35 @@ def fmt_exec(st: _Exec, names: GraphNames, indent: str, scope: dict, semantic: b
                                     comment=n.comment), indent, semantic)
         lines = deco + (f"{indent}{bang}exec " + fmt_expr(n, sig, indent, names, semantic,
                                                          scope)).split("\n")
+    valued = set(output_values(sig))
     for pin, blk in st.outs:
         # the first output follows the node's `)`; each later one follows the `}` that
-        # closes the block before it
+        # closes the block before it. An output that takes a value has it after its name,
+        # in the enclosing block's scope: `.case0 Mode::Idle -> {`
+        head = f".{pin}"
+        b = n.binding(pin) if pin in valued else None
+        if b is not None:
+            names.current = st.nid
+            head += " " + fmt_input(b, indent, names, scope)
         if blk is None:             # the flattened last output: `}.pin`
-            lines[-1] += f".{pin}"
+            _append(lines, head)
+            continue
+        if not blk:                 # nothing wired to it
+            _append(lines, head + " -> {}")
             continue
         inner = dict(scope)
         inner.update(names.bound.get((st.nid, pin), {}))
-        lines[-1] += f".{pin}{_bound_list(names, st.nid, pin)} -> {{"
+        _append(lines, f"{head}{_bound_list(names, st.nid, pin)} -> {{")
         lines.extend(fmt_stmts(blk, names, indent + IND, inner, semantic))
         lines.append(f"{indent}}}")
     return lines
+
+
+def _append(lines: list, text: str):
+    """Continue the last line with `text`, which may run over several lines."""
+    first, *rest = text.split("\n")
+    lines[-1] += first
+    lines.extend(rest)
 
 def fmt_graph(g: Graph, idx: ModuleIndex, indent: str = "", semantic=False) -> list:
     """A graph: its decorators and head, then its locals and states, its boxes, its named
