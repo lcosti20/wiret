@@ -8,8 +8,11 @@ from dataclasses import dataclass, field
 from .checker import GraphInfo
 from .model import Graph, PinRef, note_detached, note_text
 from .ops import note_key
-from .viewmodel import (HEADER, ROW, display_title, has_add_pin, header_color, input_editor,
-                        input_label, output_label, type_color)
+from .viewmodel import (HEADER, ROW, can_remove, display_title, has_add_pin, header_color,
+                        input_editor, input_label, output_label, pin_rows, type_color)
+
+REMOVE_W = 18    # the circled − before a removable output's label, with its gap
+ADD_PAD = 30     # the Add pin button around its text: the circled +, gaps and edges
 
 FIELD_BG = "#1d1f23"
 FIELD_EDGE = "#3a3e46"
@@ -37,7 +40,8 @@ class Geom:
     h: float
     pins: dict = field(default_factory=dict)   # (dir, name) -> (x, y, type)
     fields: dict = field(default_factory=dict)  # input name -> (x, y, width, input_editor)
-    add_pin: float = None       # the y of its "+ Add pin" row (Sequence, Switch), or None
+    add_pin: float = None       # the y of its Add pin button (Sequence, Switch), or None
+    rule: float = None          # the y of the line above the outputs after indexed ones
 
 
 class GraphView(tk.Canvas):
@@ -143,28 +147,31 @@ class GraphView(tk.Canvas):
             in_w, fields = 0, {}
             for p in ins:
                 ed = editors[p.name]
+                label = input_label(n, p)
                 if ed is None:
-                    in_w = max(in_w, f_pin.measure(input_label(n, p)) / s)
+                    in_w = max(in_w, f_pin.measure(label) / s)
                     continue
-                lw = f_pin.measure(p.name) / s
+                lw = (f_pin.measure(p.name) / s + 6) if label else 0
                 fw = self.field_width(ed, f_pin) / s
-                fields[p.name] = (lw + 6, fw, ed)
-                in_w = max(in_w, lw + 6 + fw)
-            out_w = max([f_pin.measure("" if p.is_exec and len(sig.exec_outs) == 1 else p.name)
-                         for p in outs] or [0]) / s
-            w = max(f_title.measure(title) / s + 28, in_w + out_w + 46, 96)
-            rows = max(len(ins), len(outs), 1 if not sig.pure else 0)
-            adds = has_add_pin(n)       # a "+ Add pin" row at the bottom
-            h = HEADER + ROW * (rows + adds) + 6
-            gm = Geom(x, y, w, h)
-            gm.add_pin = (y + HEADER + ROW * (rows + 0.5) + 3) if adds else None
-            for i, p in enumerate(ins):
-                gm.pins[("in", p.name)] = (x, y + HEADER + ROW * (i + 0.5) + 3, p.type)
-                if p.name in fields:
-                    fx, fw, ed = fields[p.name]
-                    gm.fields[p.name] = (x + 16 + fx, y + HEADER + ROW * (i + 0.5) + 3, fw, ed)
-            for i, p in enumerate(outs):
-                gm.pins[("out", p.name)] = (x + w, y + HEADER + ROW * (i + 0.5) + 3, p.type)
+                fields[p.name] = (lw, fw, ed)
+                in_w = max(in_w, lw + fw)
+            # an indexed output that can be removed has a circled − before its label
+            out_w = max([f_pin.measure(output_label(sig, p)) / s
+                         + (REMOVE_W if can_remove(n, p.name) else 0) for p in outs] or [0])
+            add_w = (f_pin.measure("Add pin") / s + ADD_PAD) if has_add_pin(n) else 0
+            w = max(f_title.measure(title) / s + 28, in_w + out_w + 46, add_w + 22, 96)
+            lay = pin_rows(n, sig)
+            gm = Geom(x, y, w, lay["height"])
+            gm.add_pin = (y + lay["add"]) if lay["add"] is not None else None
+            gm.rule = (y + lay["rule"]) if lay["rule"] is not None else None
+            for p, o, ry in lay["rows"]:
+                if p is not None:
+                    gm.pins[("in", p.name)] = (x, y + ry, p.type)
+                    if p.name in fields:
+                        fx, fw, ed = fields[p.name]
+                        gm.fields[p.name] = (x + 16 + fx, y + ry, fw, ed)
+                if o is not None:
+                    gm.pins[("out", o.name)] = (x + w, y + ry, o.type)
             gm.title = title
             self.geoms[n.id] = gm
 
@@ -348,11 +355,14 @@ class GraphView(tk.Canvas):
                 pin = sig.input(name)
                 b = n.binding(name)
                 fill = TEXT if b is not None else DIM
+                labelled = bool(input_label(n, pin)) if pin else True
                 if name in gm.fields:
                     lx = sx + 2.2 * r
-                    self.create_text(lx, sy, anchor="w", text=name, fill=fill, font=fpin, tags=tag)
-                    self.draw_field(n.id, name, lx + fpin.measure(name) + 6 * s, sy,
-                                    gm.fields[name], fpin, tag)
+                    if labelled:
+                        self.create_text(lx, sy, anchor="w", text=name, fill=fill, font=fpin,
+                                         tags=tag)
+                        lx += fpin.measure(name) + 6 * s
+                    self.draw_field(n.id, name, lx, sy, gm.fields[name], fpin, tag)
                     continue
                 label = input_label(n, pin) if pin else name
                 self.create_text(sx + 2.2 * r, sy, anchor="w", text=label, fill=fill, font=fpin,
@@ -360,14 +370,24 @@ class GraphView(tk.Canvas):
             else:
                 pin = sig.output(name)
                 label = output_label(sig, pin) if pin else name
-                self.create_text(sx - 2.2 * r, sy, anchor="e", text=label, fill=TEXT, font=fpin,
-                                 tags=tag)
-        if gm.add_pin is not None:       # the "+ Add pin" button
+                lx = sx - 2.2 * r
+                self.create_text(lx, sy, anchor="e", text=label, fill=TEXT, font=fpin, tags=tag)
+                if can_remove(n, name):     # the circled − that removes this output
+                    cx = lx - fpin.measure(label) - 10 * s
+                    self.draw_circled(cx, sy, "-", ("removepin", f"m={n.id}|{name}"))
+        if gm.rule is not None:          # the line between indexed outputs and the rest
+            _, ry = self.to_screen(gm.x, gm.rule)
+            self.create_line(x0 + 4 * s, ry, x1 - 4 * s, ry, fill=FIELD_EDGE, tags=tag)
+        if gm.add_pin is not None:       # the Add pin button, at the right like the outputs
             _, ay = self.to_screen(gm.x, gm.add_pin)
             atag = ("addpin", f"a={n.id}")
-            self.create_rectangle(x0 + 8 * s, ay - 8 * s, x1 - 8 * s, ay + 8 * s,
+            tw = fpin.measure("Add pin")
+            right = x1 - 11 * s
+            left = right - tw - ADD_PAD * s + 8 * s
+            self.create_rectangle(left, ay - 9 * s, right, ay + 9 * s,
                                   fill=FIELD_BG, outline=FIELD_EDGE, tags=atag)
-            self.create_text((x0 + x1) / 2, ay, text="+ Add pin", fill=DIM, font=fpin,
+            self.draw_circled(left + 10 * s, ay, "+", atag)
+            self.create_text(right - 5 * s, ay, anchor="e", text="Add pin", fill=DIM, font=fpin,
                              tags=atag)
         if (self.app.graph_name, n.id) in self.app.breakpoints:
             self.create_oval(x0 - 7 * s, y0 - 7 * s, x0 + 7 * s, y0 + 7 * s, fill=BREAK,
@@ -398,6 +418,16 @@ class GraphView(tk.Canvas):
         elif ed["kind"] in ("int", "float"):
             text = max(text, "00000", key=len) + " ±"
         return min(font.measure(text[:24] or "    "), font.measure("0" * 24)) + 10
+
+    def draw_circled(self, cx, cy, sign, tags):
+        """A small circle with + or − in it, the Add and Remove pin buttons."""
+        s = self.scale
+        r, a = 6 * s, 3.2 * s
+        self.create_oval(cx - r, cy - r, cx + r, cy + r, outline=DIM, fill=NODE_BG, width=1,
+                         tags=tags)
+        self.create_line(cx - a, cy, cx + a, cy, fill=DIM, width=max(1, s), tags=tags)
+        if sign == "+":
+            self.create_line(cx, cy - a, cx, cy + a, fill=DIM, width=max(1, s), tags=tags)
 
     def draw_field(self, nid, pin, x, y, fdata, font, tag):
         s = self.scale
@@ -583,6 +613,9 @@ class GraphView(tk.Canvas):
             return ("field", nid, name)
         if "a" in found:
             return ("addpin", found["a"])
+        if "m" in found:
+            nid, pin = found["m"].split("|", 1)
+            return ("removepin", nid, pin)
         if "p" in found:
             nid, d, name = found["p"].split("|")
             return ("pin", nid, d, name)
@@ -613,6 +646,10 @@ class GraphView(tk.Canvas):
         if h and h[0] == "addpin":
             self.drag = None
             self.app.add_pin(h[1])
+            return
+        if h and h[0] == "removepin":
+            self.drag = None
+            self.app.remove_pin(h[1], h[2])
             return
         if h and h[0] == "pin":
             _, nid, d, name = h

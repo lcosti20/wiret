@@ -37,7 +37,7 @@ export class GraphView {
    *  toggleBreakpoint(nodeId), canEdit() -> true or the reason not, message(text),
    *  move(id, x, y), connect(a, b), connectToNode(a, nodeId), disconnect(node, dir, pin),
    *  deleteNode(id), editPin(node, pin, [screenX, screenY]), setPin(node, pin, text),
-   *  addPin(nodeId),
+   *  addPin(nodeId), removePin(nodeId, pin),
    *  palette([worldX, worldY], [screenX, screenY], pin or null),
    *  menu(target, [screenX, screenY], [worldX, worldY])}. A pin is [node, "in"/"out", pin];
    *  screen points are relative to the canvas. A menu target is as webapi.menu takes it. */
@@ -169,35 +169,49 @@ export class GraphView {
       d.style.left = `${n.x}px`; d.style.top = `${n.y}px`;
       const head = h("div", "gv-head", n.title);
       head.style.background = n.header;
+      // the rows of pins (viewmodel.pin_rows): an input on the left, an output on the right,
+      // a Switch case's value beside its output, a line above the outputs after indexed ones
       const body = h("div", "gv-body");
-      const ins = h("div", "gv-col"), outs = h("div", "gv-col gv-outs");
-      for (const p of n.ins) {
-        const r = h("div", "gv-pin", p.editor ? p.name : p.label);
-        if (!p.bound && !p.exec) r.classList.add("gv-unbound");
-        if (p.editor) {
+      const inOf = new Map(n.ins.map((p) => [p.name, p]));
+      const outOf = new Map(n.outs.map((p) => [p.name, p]));
+      const button = (cls, text, title, act) => {
+        const b = h("button", cls, text);
+        b.type = "button"; b.title = title;
+        b.addEventListener("pointerdown", (e) => e.stopPropagation());
+        b.addEventListener("dblclick", (e) => e.stopPropagation());
+        b.addEventListener("click", (e) => { e.stopPropagation(); act(); });
+        return b;
+      };
+      n.rows.forEach(([iname, oname, y], i) => {
+        if (n.rule != null && y > n.rule && (i === 0 || n.rows[i - 1][2] < n.rule)) body.append(h("div", "gv-rule"));
+        const p = iname != null ? inOf.get(iname) : null;
+        const r = h("div", "gv-pin", p ? (p.editor ? (p.label ? p.name : "") : p.label) : "");
+        if (p && !p.bound && !p.exec) r.classList.add("gv-unbound");
+        if (p?.editor) {
           r.classList.add("gv-hasfield");
           r.title = `${p.name}: ${p.type}` + (p.editor.placeholder != null ? `\nEmpty: the default, ${p.editor.placeholder}` : "");
           r.append(this.#field(n.id, p));
-        } else if (!p.exec) {
+        } else if (p && !p.exec) {
           r.dataset.row = p.name; r.title = `${p.name}: ${p.type}\nDouble-click to type a value`;
         }
-        ins.append(r);
+        const o = oname != null ? outOf.get(oname) : null;
+        const out = h("div", "gv-pin gv-out", o ? o.label : "");
+        if (o?.removable) {
+          out.prepend(button("gv-circle", "−", `Remove ${o.name}; the outputs after it move up`,
+                             () => this.on.removePin(n.id, o.name)));
+        }
+        body.append(r, out);
+      });
+      if (n.addPin != null) {     // one more indexed output (Sequence, Switch)
+        body.append(h("div", "gv-pin"));
+        const add = button("gv-addpin", "", "Add an output to this node", () => this.on.addPin(n.id));
+        add.append(h("span", "gv-circle", "+"), "Add pin");
+        const cell = h("div", "gv-pin gv-out");
+        cell.append(add);
+        body.append(cell);
       }
-      for (const p of n.outs) outs.append(h("div", "gv-pin", p.label));
-      body.append(ins, outs);
       d.append(head, body);
-      const rows = Math.max(n.ins.length, n.outs.length, n.pure ? 0 : 1);
-      if (n.addPin) {             // one more numbered output (Sequence, Switch)
-        const add = h("button", "gv-addpin", "+ Add pin");
-        add.type = "button";
-        add.title = "Add an output to this node";
-        add.style.top = `${HEADER + ROW * rows + 1}px`;
-        add.addEventListener("pointerdown", (e) => e.stopPropagation());
-        add.addEventListener("dblclick", (e) => e.stopPropagation());
-        add.addEventListener("click", (e) => { e.stopPropagation(); this.on.addPin(n.id); });
-        d.append(add);
-      }
-      d.style.height = `${HEADER + ROW * (rows + (n.addPin ? 1 : 0)) + 6}px`;
+      d.style.height = `${n.height}px`;
       d.title = this.#nodeTip(n);
       nodes.append(d);
       els.push([n, d]);
@@ -206,8 +220,10 @@ export class GraphView {
       const w = Math.max(d.offsetWidth, 96);
       d.style.width = `${w}px`;
       const geom = { x: n.x, y: n.y, w, h: d.offsetHeight, pins: new Map() };
-      n.ins.forEach((p, i) => geom.pins.set(`in|${p.name}`, [n.x, n.y + HEADER + ROW * (i + 0.5) + 3]));
-      n.outs.forEach((p, i) => geom.pins.set(`out|${p.name}`, [n.x + w, n.y + HEADER + ROW * (i + 0.5) + 3]));
+      for (const [iname, oname, y] of n.rows) {
+        if (iname != null) geom.pins.set(`in|${iname}`, [n.x, n.y + y]);
+        if (oname != null) geom.pins.set(`out|${oname}`, [n.x + w, n.y + y]);
+      }
       this.geoms.set(n.id, geom);
     }
     const pinAt = (id, dir, name) => this.geoms.get(id)?.pins.get(`${dir}|${name}`);

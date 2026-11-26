@@ -4,16 +4,19 @@ from these; `graph_json` hands the same to the web page."""
 from __future__ import annotations
 
 from collections import Counter
+from itertools import zip_longest
 
 from .explain import type_words
 from .palette import describe
 from .model import Graph, Lit, PinRef, note_detached, note_text
 from .ops import note_key
 from .printer import fmt_lit
-from .registry import FLOAT_TYPES, INT_RANGES, INT_TYPES
+from .registry import (FLOAT_TYPES, INT_RANGES, INT_TYPES, output_count, output_values,
+                       pin_index, removable_output)
 
 HEADER = 24     # node header height, in graph units
 ROW = 20        # height of one pin row
+RULE = 10       # height of the line between a node's indexed outputs and the ones after
 
 HEADER_COLORS = {"Arrays": "#b9770e", "Flow": "#566573", "Call": "#2471a3", "Math": "#1e8449", "Compare": "#138d75",
                  "Logic": "#9a7d0a", "Bits": "#873600", "Variables": "#6c3483", "Macro": "#7d3c98",
@@ -70,6 +73,8 @@ def display_title(g: Graph, n) -> str:
 def input_label(n, pin) -> str:
     if pin.is_exec:
         return "" if pin.name == "in" else pin.name
+    if pin_index(pin.name):     # an output's value, on its output's row: that names it
+        return ""
     b = n.binding(pin.name)
     if b is not None and isinstance(b.value, Lit):
         text = fmt_lit(b.value)
@@ -130,9 +135,66 @@ def input_editor(n, pin, idx=None):
 
 
 def has_add_pin(n) -> bool:
-    """Whether the node shows a "+ Add pin" button at its bottom: a Sequence or a Switch, the
-    nodes whose numbered exec outputs are counted by `#count` or `#cases`."""
-    return n.kind in ("Sequence", "Switch") and n.attr("disabled") is None
+    """Whether the node shows an "Add pin" button at its bottom: a Sequence or a Switch, the
+    nodes whose indexed exec outputs are counted by `#count` or `#cases`."""
+    return output_count(n) is not None and n.attr("disabled") is None
+
+
+def can_remove(n, pin) -> bool:
+    """Whether an output shows a remove button next to it: an indexed output of a node with
+    an Add pin button."""
+    return has_add_pin(n) and removable_output(n, pin)
+
+
+def _layout(n, sig) -> dict:
+    """pin_rows for the web canvas, as JSON."""
+    r = pin_rows(n, sig)
+    return {"rows": [[p.name if p else None, o.name if o else None, y] for p, o, y in r["rows"]],
+            "rule": r["rule"], "addPin": r["add"], "height": r["height"]}
+
+
+def pin_rows(n, sig) -> dict:
+    """Where a node's pins sit, top to bottom, in graph units from the node's top:
+    {"rows": [(input Pin | None, output Pin | None, y of the row's centre)], "rule": the y of
+    the line between indexed outputs and the outputs after them, or None, "add": the y of the
+    Add pin button, or None, "height": the node's height}.
+    An output that takes a value (a Switch's `case[0]`) sits on the row of its value's input,
+    so each case reads across; the other inputs come first, beside the outputs before it."""
+    ins = sig.exec_ins + sig.data_ins
+    outs = sig.exec_outs + sig.data_outs
+    valued = output_values(sig)
+    if valued:
+        first = next(i for i, p in enumerate(outs) if p.name == valued[0])
+        lead = [p for p in ins if p.name not in valued]
+        pairs = list(zip_longest(lead, outs[:first]))
+        pairs += [(sig.input(v), sig.output(v)) for v in valued]
+        pairs += [(None, p) for p in outs[first:] if p.name not in valued]
+    else:
+        pairs = list(zip_longest(ins, outs))
+    if not pairs and not sig.pure:
+        pairs = [(None, None)]
+    # the line goes above the first exec output that follows indexed ones, `default`
+    rule_at, seen = None, False
+    for i, (_, o) in enumerate(pairs):
+        if o is not None and o.is_exec:
+            if pin_index(o.name):
+                seen = True
+            elif seen:
+                rule_at = i
+                break
+    y = HEADER + 3
+    rows, rule = [], None
+    for i, (p, o) in enumerate(pairs):
+        if i == rule_at:
+            rule = y + RULE / 2
+            y += RULE
+        rows.append((p, o, y + ROW / 2))
+        y += ROW
+    add = None
+    if has_add_pin(n):
+        add = y + ROW / 2
+        y += ROW
+    return {"rows": rows, "rule": rule, "add": add, "height": y + 3}
 
 
 def output_label(sig, pin) -> str:
@@ -257,7 +319,6 @@ def graph_json(g: Graph, info, idx, diags=(), remembered=None, module=None) -> d
             "header": header_color(g, n, sig), "pure": sig.pure,
             "disabled": n.attr("disabled") is not None, "diag": marks.get(n.id),
             "opens": opens(module, n), "description": describe(n.kind, n.symbol, idx, n.targs),
-            "addPin": has_add_pin(n),
             "ins": [{"name": p.name, "exec": p.is_exec, "type": type_words(p.type),
                      "color": type_color(p.type, idx),
                      "label": input_label(n, p), "bound": n.binding(p.name) is not None,
@@ -266,8 +327,12 @@ def graph_json(g: Graph, info, idx, diags=(), remembered=None, module=None) -> d
                     for p in sig.exec_ins + sig.data_ins],
             "outs": [{"name": p.name, "exec": p.is_exec, "type": type_words(p.type),
                       "color": type_color(p.type, idx),
-                      "label": output_label(sig, p), "filled": (n.id, p.name) in used}
+                      "label": output_label(sig, p), "filled": (n.id, p.name) in used,
+                      "removable": can_remove(n, p.name)}
                      for p in sig.exec_outs + sig.data_outs],
+            # [[input name | null, output name | null, y]], the y of the line between indexed
+            # outputs and the rest, of the Add pin button, and the node's height (pin_rows)
+            **_layout(n, sig),
         })
         for b in n.bindings:
             if isinstance(b.value, PinRef):

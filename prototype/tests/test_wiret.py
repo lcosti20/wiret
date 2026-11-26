@@ -1287,6 +1287,39 @@ func G() {
             parse(text.replace(".then0", ".then[x]"))
         self.assertIn("'case[0]'", cm.exception.msg)
 
+    def test_case_rows_line_up_and_default_is_set_apart(self):
+        """A case's value sits on its output's row; a line divides the cases from default,
+        and the Add pin button comes last (viewmodel.pin_rows, both canvases)."""
+        from wiret.registry import ModuleIndex, signature
+        from wiret.viewmodel import pin_rows
+        m = parse(lesson("08_structs.wiret"))
+        g = m.graph("Show")
+        n = next(n for n in g.nodes if n.kind == "Switch")
+        r = pin_rows(n, signature(n, g, ModuleIndex(m)))
+        rows = [(p and p.name, o and o.name) for p, o, _ in r["rows"]]
+        self.assertEqual(rows, [("in", None), ("value", None), ("case[0]", "case[0]"),
+                                ("case[1]", "case[1]"), (None, "default")])
+        ys = [y for _, _, y in r["rows"]]
+        self.assertLess(ys[3], r["rule"])
+        self.assertLess(r["rule"], ys[4])
+        self.assertLess(ys[4], r["add"])
+        self.assertLess(r["add"], r["height"])
+        # a node with no indexed outputs has neither
+        b = next(x for x in g.nodes if x.kind == "BreakStruct")
+        plain = pin_rows(b, signature(b, g, ModuleIndex(m)))
+        self.assertIsNone(plain["rule"])
+        self.assertIsNone(plain["add"])
+        # what the web canvas gets: the rows, the line, and a remove button on each case
+        from wiret.checker import GraphInfo
+        from wiret.viewmodel import graph_json
+        idx = ModuleIndex(m)
+        web = next(x for x in graph_json(g, GraphInfo(g, idx), idx)["nodes"] if x["id"] == n.id)
+        self.assertEqual([r[:2] for r in web["rows"]], [list(r) for r in rows])
+        self.assertEqual((web["rule"], web["addPin"]), (r["rule"], r["add"]))
+        self.assertEqual({o["name"]: o["removable"] for o in web["outs"]},
+                         {"case[0]": True, "case[1]": True, "default": False})
+        self.assertEqual([p["label"] for p in web["ins"]][2:], ["", ""])
+
     def test_switch_case_values_may_be_wired(self):
         """A case's value is an input: a literal, or a wire from a node or a parameter, read
         when the Switch runs (section 3.3)."""
