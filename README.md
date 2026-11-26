@@ -6,57 +6,39 @@ Instead of treating a visual editor as the source of truth, Wiret stores graphs 
 
 Example:
 
-![Tkinter UI/graph editor](https://github.com/user-attachments/assets/14bebc8d-d113-47aa-847a-6ae164ac1443)
+![Screenshot 2026-11-26 001343](https://github.com/user-attachments/assets/cea2be92-b4a2-49a2-aef7-19c7949aa34f)
 
 ```wiret
 wiret 1
 module lessons.variables
 
-extern func host.Log(message: string)
+extern func host.Log(message: string) -> ()
 
-#[note("Lesson 2: Variables. A local variable (here: score) is a named box that holds one value. SetLocal puts a value in the box. GetLocal reads what is in the box right now.")]
-#[note("Try it: (1) Step through (F11) and watch the Variables panel in the Debugger tab: score changes from 0 to 10 to 15. (2) Change the bonus: double-click pin b on the Add node and type 100.")]
+@note("Lesson 2: Variables. A local variable (here: score) is a named box that holds one value. SetLocal puts a value in the box. GetLocal reads what is in the box right now.")
+@note("Try it: (1) Step through (F11) and watch the Variables panel in the Debugger tab: score changes from 0 to 10 to 15. (2) Change the bonus: type 100 in the b box on the Add node.")
 func Main() {
   local score: i32
 
-  flow {
-    bonus -> show
-    entry -> start
-    start -> bonus
-  }
-
-  node bonus = SetLocal score(
-    .value <- Add::<i32>(
-      .a <- GetLocal score(),
-      .b <- 5,
-    ),
+  exec Entry{pos=(0, 0)}()
+  exec SetLocal score{pos=(200, 0)}(
+    .value <- 10
   )
-  node entry = Entry()
-  node show = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- "Your score is ",
-      .b <- Convert::<i32, string>(
-        .value <- GetLocal score(),
-      ),
-    ),
+  exec SetLocal score{pos=(560, 0)}(
+    @note("Add reads the score (10) and adds 5.")
+    .value <- Add#<i32>{pos=(360, 160)}(
+      .a <- GetLocal score{pos=(180, 260)}()
+      .b <- 5
+    )
   )
-  node start = SetLocal score(
-    .value <- 10,
+  exec Call host.Log{pos=(980, 0)}(
+    .message <- Call std.string.Concat{pos=(780, 180)}(
+      .a <- "Your score is "
+      @note("Log needs text, so Convert turns the number into text.")
+      .b <- Convert#<i32, string>{pos=(600, 320)}(
+        .value <- GetLocal score{pos=(440, 420)}()
+      )
+    )
   )
-
-  layout {
-    bonus at (560, 0)
-    #[note("Add reads the score (10) and adds 5.")]
-    bonus.value at (360, 160)
-    bonus.value.a at (180, 260)
-    entry at (0, 0)
-    show at (980, 0)
-    show.message at (780, 180)
-    #[note("Log needs text, so Convert turns the number into text.")]
-    show.message.b at (600, 320)
-    show.message.b.value at (440, 420)
-    start at (200, 0)
-  }
 }
 ```
 
@@ -80,7 +62,7 @@ Wiret was designed to address exactly that gap. It keeps the graph model, but ma
 - Text is the source of truth
 - Graph semantics are explicit
 - Types, pins, conversion rules, and execution wiring are all visible
-- Layout and editor metadata are separated from runtime meaning
+- A function reads in the order it runs, and layout and notes never change runtime meaning
 - Serialization is canonical, stable, and diff-friendly
 - The language is meant to compile, verify, and run, not just draw boxes
 

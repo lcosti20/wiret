@@ -21,7 +21,7 @@ from .model import (Binding, Box, Const, Enum, EnumMember, ExecOut, Extern, Fiel
                     Local, Module, Node, Param, PinRef, Place, Struct, Use, Var, Class,
                     IfaceMethod, Interface, Dispatcher)
 from .parser import ParseError, parse
-from .printer import fmt_args, fmt_attr, fmt_lit, fmt_params, print_module
+from .printer import fmt_attr, fmt_lit, fmt_params, print_module
 from .registry import ModuleIndex, signature
 
 
@@ -54,7 +54,13 @@ def val_text(v) -> str:
 
 
 def meta_text(a) -> str:
-    return f"#[{a.name}{fmt_args(a)}]"
+    return fmt_attr(a)
+
+
+def node_key(n: Node) -> tuple:
+    """A named node is matched by its name; an anonymous one by what it is and where it is
+    written, its execution position (section 7.1)."""
+    return ("name", n.id) if n.named else ("at", n.kind, n.symbol or "", n.id)
 
 
 def attr_fields(attrs: list, prefix="attr") -> dict:
@@ -73,7 +79,8 @@ def comment_field(out: dict, key: str, lines: list) -> None:
 
 
 def node_fields(n: Node, single_out: Optional[str], comments=False) -> dict:
-    out = {"kind": (n.kind, n.kind), "symbol": (n.symbol or "", n.symbol)}
+    out = {"kind": (n.kind, n.kind), "symbol": (n.symbol or "", n.symbol),
+           "named": (str(n.named), n.named)}
     for i, t in enumerate(n.targs):
         out[f"targ:{i}"] = (t, t)
     out.update(attr_fields(n.attrs))
@@ -96,6 +103,7 @@ def build_node(proto: Node, fields: dict) -> Node:
     n = copy.deepcopy(proto)
     n.kind = fields["kind"][1]
     n.symbol = fields["symbol"][1] if "symbol" in fields else None
+    n.named = fields["named"][1] if "named" in fields else n.named
     targs = sorted((int(k.split(":")[1]), v[1]) for k, v in fields.items()
                    if k.startswith("targ:"))
     n.targs = [t for _, t in targs]
@@ -529,6 +537,9 @@ class Merger:
                     gg = graph_in(m)
                     if gg is not None:
                         gg.nodes.append(copy.deepcopy(n))
+                        p = t.place(n.id)           # it comes back where theirs has it
+                        if p is not None and gg.place(n.id) is None:
+                            gg.places.append(copy.deepcopy(p))
             else:
                 def apply(m, nid=nid):
                     gg = graph_in(m)
@@ -537,7 +548,7 @@ class Merger:
             self.conflicts.append(Conflict(f"{name}.{nid}",
                                            f"node deleted in {deleter}, changed in the other",
                                            apply))
-        g.nodes = self.merge_keyed(b.nodes if b else [], o.nodes, t.nodes, lambda n: n.id,
+        g.nodes = self.merge_keyed(b.nodes if b else [], o.nodes, t.nodes, node_key,
                                    name, merge_one, changed, conflict)
         g.meta = self.merge_meta(b.meta if b else [], o.meta, t.meta, name, graph_in)
         self.merge_layout(b, o, t, g)
@@ -551,8 +562,7 @@ class Merger:
         def pfields(p) -> dict:
             out = {"at": (f"{p.x},{p.y}", (p.x, p.y))}
             for k, v in p.props:
-                if k != "members":
-                    out[f"prop:{k}"] = (fmt_lit(v), v)
+                out[f"prop:{k}"] = (fmt_lit(v), v)
             if isinstance(p, Box):
                 out["title"] = (p.title, p.title)
                 out["size"] = (f"{p.w},{p.h}", (p.w, p.h))
@@ -575,15 +585,13 @@ class Merger:
                     out[k] = pick
             return out
 
-        def build(proto, f, members=None):
+        def build(proto, f):
             p = copy.deepcopy(proto)
             p.x, p.y = f["at"][1]
             p.props = [(k.split(":", 1)[1], v[1]) for k, v in f.items() if k.startswith("prop:")]
             if isinstance(p, Box):
                 p.title = f["title"][1]
                 p.w, p.h = f["size"][1]
-                if members is not None:
-                    p.props.append(("members", Lit("list", [Lit("ident", x) for x in members])))
             return p
 
         bp = {p.id: p for p in (b.places if b else [])}
@@ -599,27 +607,19 @@ class Merger:
                        pfields(pt) if pt else {}, f"{name}.{nid}")
             if "at" in f:
                 places.append(build(proto, f))
-        # stale layout lines (W0605) are kept from both sides; theirs wins on a clash
-        stale = {p.id: p for side in (o, t) for p in side.places if p.id not in ids}
-        places.extend(stale[k] for k in sorted(stale))
-        g.orphan_meta = {k: v for side in (o, t) for k, v in side.orphan_meta.items()
-                         if k not in ids}
         g.places = places
         bb = {x.id: x for x in (b.boxes if b else [])}
         ob = {x.id: x for x in o.boxes}
         tb = {x.id: x for x in t.boxes}
         boxes = []
-        for bid in sorted(set(ob) | set(tb)):
+        # a box has no name: it is matched by its place among the graph's boxes
+        for bid in list(ob) + [x for x in tb if x not in ob]:
             xb, xo, xt = bb.get(bid), ob.get(bid), tb.get(bid)
             if xb is not None and (xo is None or xt is None):
                 continue          # deleted on one side: layout never blocks, the delete wins
             f = merge3(pfields(xb) if xb else {}, pfields(xo) if xo else {},
                        pfields(xt) if xt else {}, f"{name}.box {bid}")
-            mb = set(xb.members()) if xb else set()
-            mo = set(xo.members()) if xo else set()
-            mt = set(xt.members()) if xt else set()
-            members = sorted(((mo | mt) - (mb - mo) - (mb - mt)))
-            box = build(xo or xt, f, members)
+            box = build(xo or xt, f)
             box.meta = self.merge_meta(xb.meta if xb else [], xo.meta if xo else [],
                                        xt.meta if xt else [], f"{name}.box {bid}", lambda m: None)
             boxes.append(box)

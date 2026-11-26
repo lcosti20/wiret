@@ -1,218 +1,139 @@
 wiret 1
 module lessons.interfaces
 
-extern func host.Log(message: string)
+extern func host.Log(message: string) -> ()
 
-#[doc("Anything with an area and a name.")]
+@doc("Anything with an area and a name.")
 interface Shape {
-  func Area() -> (area: i32)
-  func Name() -> (name: string)
+  func Area(self) -> (area: i32)
+  func Name(self) -> (name: string)
 }
 
-#[doc("A rectangle, width by height.")]
+@doc("A rectangle, width by height.")
 class Rectangle impl Shape {
   width: i32 = 3
   height: i32 = 4
 
-  #[note("A rectangle's area is width times height.")]
-  func Area() -> (area: i32) {
-    flow {
-      entry -> ret
-    }
-
-    node entry = Entry()
-    node ret = Return(
-      .area <- Mul::<i32>(
-        .a <- GetField Rectangle.width(
-          .obj <- entry.self,
-        ),
-        .b <- GetField Rectangle.height(
-          .obj <- entry.self,
-        ),
-      ),
+  @note("A rectangle's area is width times height.")
+  func Area(self) -> (area: i32) {
+    exec Entry{pos=(0, 0)}()
+    exec Return{pos=(757, 0)}(
+      .area <- Mul#<i32>{pos=(559, 68)}(
+        .a <- GetField Rectangle.width{pos=(282, 68)}(
+          .obj <- self
+        )
+        .b <- GetField Rectangle.height{pos=(283, 125)}(
+          .obj <- self
+        )
+      )
     )
-
-    layout {
-      entry at (0, 0)
-      ret at (757, 0)
-      ret.area at (559, 68)
-      ret.area.a at (282, 68)
-      ret.area.b at (283, 125)
-    }
   }
 
-  #[note("Square inherits this, but gives its own Name.")]
-  func Name() -> (name: string) {
-    flow {
-      entry -> ret
-    }
-
-    node entry = Entry()
-    node ret = Return(
-      .name <- "Rectangle",
+  @note("Square inherits this, but gives its own Name.")
+  func Name(self) -> (name: string) {
+    exec Entry{pos=(0, 0)}()
+    exec Return{pos=(250, 0)}(
+      .name <- "Rectangle"
     )
-
-    layout {
-      entry at (0, 0)
-      ret at (250, 0)
-    }
   }
 }
 
-#[doc("A square: a rectangle with equal sides.")]
+@doc("A square: a rectangle with equal sides.")
 class Square : Rectangle {
-  #[note("Square gets Area from Rectangle and only renames itself, so it is a Shape too.")]
-  func Name() -> (name: string) {
-    flow {
-      entry -> ret
-    }
-
-    node entry = Entry()
-    node ret = Return(
-      .name <- "Square",
+  @note("Square gets Area from Rectangle and only renames itself, so it is a Shape too.")
+  func Name(self) -> (name: string) {
+    exec Entry{pos=(0, 0)}()
+    exec Return{pos=(250, 0)}(
+      .name <- "Square"
     )
-
-    layout {
-      entry at (0, 0)
-      ret at (250, 0)
-    }
   }
 }
 
-#[doc("A triangle with a base and a height.")]
+@doc("A triangle with a base and a height.")
 class Triangle impl Shape {
   base: i32 = 4
   height: i32 = 3
 
-  #[note("Half of base times height.")]
-  func Area() -> (area: i32) {
-    flow {
-      entry -> ret
-    }
-
-    node entry = Entry()
-    node ret = Return(
-      .area <- Div::<i32>(
-        .a <- Mul::<i32>(
-          .a <- GetField Triangle.base(
-            .obj <- entry.self,
-          ),
-          .b <- GetField Triangle.height(
-            .obj <- entry.self,
-          ),
-        ),
-        .b <- 2,
-      ),
+  @note("Half of base times height.")
+  func Area(self) -> (area: i32) {
+    exec Entry{pos=(0, 0)}()
+    exec Return{pos=(1010, -2)}(
+      .area <- Div#<i32>{pos=(787, 71)}(
+        .a <- Mul#<i32>{pos=(632, 71)}(
+          .a <- GetField Triangle.base{pos=(338, 71)}(
+            .obj <- self
+          )
+          .b <- GetField Triangle.height{pos=(338, 142)}(
+            .obj <- self
+          )
+        )
+        .b <- 2
+      )
     )
-
-    layout {
-      entry at (0, 0)
-      ret at (1010, -2)
-      ret.area at (787, 71)
-      ret.area.a at (632, 71)
-      ret.area.a.a at (338, 71)
-      ret.area.a.b at (338, 142)
-    }
   }
 
-  #[note("Its name.")]
-  func Name() -> (name: string) {
-    flow {
-      entry -> ret
-    }
-
-    node entry = Entry()
-    node ret = Return(
-      .name <- "Triangle",
+  @note("Its name.")
+  func Name(self) -> (name: string) {
+    exec Entry{pos=(0, 0)}()
+    exec Return{pos=(250, 0)}(
+      .name <- "Triangle"
     )
-
-    layout {
-      entry at (0, 0)
-      ret at (250, 0)
-    }
   }
 }
 
-#[note("Lesson 13: Interfaces. An interface is a promise: any class that says 'impl Shape' has an Area and a Name. Rectangle and Triangle are not related, but both keep the promise, so one array can hold both and ask each for its area.")]
-#[note("Try it: (1) Add a Circle class that implements Shape (the Source pane is easiest). (2) Remove Name from Triangle: Wiret says which method the promise is missing. (3) Make the square's sides 6.")]
+@note("Lesson 13: Interfaces. An interface is a promise: any class that says 'impl Shape' has an Area and a Name. Rectangle and Triangle are not related, but both keep the promise, so one array can hold both and ask each for its area.")
+@note("Try it: (1) Add a Circle class that implements Shape (the Source pane is easiest). (2) Remove Name from Triangle: Wiret says which method the promise is missing. (3) Make the square's sides 6.")
 func Main() {
-  local shapes: array::<Shape>
+  local shapes: array#<Shape>
 
-  flow {
-    add_r -> square
-    add_s -> tri
-    add_t -> loop
-    area -> name
-    entry -> rect
-    loop.each -> area
-    name -> say
-    rect -> add_r
-    side_h -> add_s
-    side_w -> side_h
-    square -> side_w
-    tri -> add_t
-  }
+  node rect = New Rectangle{pos=(250, 0)}()
+  node square = New Square{pos=(803, 0)}()
+  node tri = New Triangle{pos=(1750, 0)}()
+  node loop = Macro std.flow.ForEach#<Shape>{pos=(2250, 0)}(
+    .array <- GetLocal shapes{pos=(2023, 98)}()
+  )
+  @note("Calling through the interface: each shape's own class decides what runs.")
+  node area = Call Shape.Area{pos=(2656, -3)}(
+    .self <- loop.item
+  )
+  node name = Call Shape.Name{pos=(2921, 20)}(
+    .self <- loop.item
+  )
 
-  node add_r = ArrayAdd::<Shape> shapes(
-    .item <- rect,
+  exec Entry{pos=(0, 0)}()
+  exec rect
+  exec ArrayAdd#<Shape> shapes{pos=(500, 0)}(
+    .item <- rect
   )
-  node add_s = ArrayAdd::<Shape> shapes(
-    .item <- square,
+  exec square
+  exec SetField Rectangle.width{pos=(1000, 0)}(
+    .obj <- square
+    .value <- 5
   )
-  node add_t = ArrayAdd::<Shape> shapes(
-    .item <- tri,
+  exec SetField Rectangle.height{pos=(1250, 0)}(
+    .obj <- square
+    .value <- 5
   )
-  node area = Call Shape.Area(
-    .self <- loop.item,
+  exec ArrayAdd#<Shape> shapes{pos=(1500, 0)}(
+    .item <- square
   )
-  node entry = Entry()
-  node loop = Macro std.flow.ForEach::<Shape>(
-    .array <- GetLocal shapes(),
+  exec tri
+  exec ArrayAdd#<Shape> shapes{pos=(1949, 0)}(
+    .item <- tri
   )
-  node name = Call Shape.Name(
-    .self <- loop.item,
-  )
-  node rect = New Rectangle()
-  node say = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- Call std.string.Concat(
-        .a <- name,
-        .b <- ": area ",
-      ),
-      .b <- Convert::<i32, string>(
-        .value <- area,
-      ),
-    ),
-  )
-  node side_h = SetField Rectangle.height(
-    .obj <- square,
-    .value <- 5,
-  )
-  node side_w = SetField Rectangle.width(
-    .obj <- square,
-    .value <- 5,
-  )
-  node square = New Square()
-  node tri = New Triangle()
-
-  layout {
-    add_r at (500, 0)
-    add_s at (1500, 0)
-    add_t at (1949, 0)
-    #[note("Calling through the interface: each shape's own class decides what runs.")]
-    area at (2656, -3)
-    entry at (0, 0)
-    loop at (2250, 0)
-    loop.array at (2023, 98)
-    name at (2921, 20)
-    rect at (250, 0)
-    say at (3649, 20)
-    say.message at (3445, 76)
-    say.message.a at (3185, 76)
-    say.message.b at (3054, 177)
-    side_h at (1250, 0)
-    side_w at (1000, 0)
-    square at (803, 0)
-    tri at (1750, 0)
+  exec loop.each -> {
+    exec area
+    exec name
+    exec Call host.Log{pos=(3649, 20)}(
+      .message <- Call std.string.Concat{pos=(3445, 76)}(
+        .a <- Call std.string.Concat{pos=(3185, 76)}(
+          .a <- name
+          .b <- ": area "
+        )
+        .b <- Convert#<i32, string>{pos=(3054, 177)}(
+          .value <- area
+        )
+      )
+    )
   }
 }

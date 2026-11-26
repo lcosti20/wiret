@@ -8,8 +8,18 @@ from dataclasses import dataclass, field
 from .checker import GraphInfo
 from .model import Graph, PinRef, note_detached, note_text
 from .ops import note_key
-from .viewmodel import (HEADER, ROW, display_title, header_color, input_label, output_label,
-                        type_color)
+from .registry import is_flat
+from .viewmodel import (HEADER, ROW, add_pin_label, add_pin_side, can_remove, display_title, has_add_pin,
+                        flat_toggle, header_color,
+                        input_editor, input_label, output_label, pin_rows, type_color)
+
+REMOVE_W = 18    # the circled − beside a removable pin's label, with its gap
+ADD_PAD = 30     # the Add pin button around its text: the circled +, gaps and edges
+
+FIELD_BG = "#1d1f23"
+FIELD_EDGE = "#3a3e46"
+FIELD_H = 15     # height of a value field, in graph units
+ACCENT = "#6aa0ff"
 
 BG = "#1d1f23"
 GRID = "#25282e"
@@ -31,6 +41,9 @@ class Geom:
     w: float
     h: float
     pins: dict = field(default_factory=dict)   # (dir, name) -> (x, y, type)
+    fields: dict = field(default_factory=dict)  # input name -> (x, y, width, input_editor)
+    add_pin: float = None       # the y of its Add pin button (Sequence, Switch), or None
+    rule: float = None          # the y of the line above the outputs after indexed ones
 
 
 class GraphView(tk.Canvas):
@@ -46,6 +59,8 @@ class GraphView(tk.Canvas):
         self.fault_node = None
         self.current_node = None     # the node the debugger is paused before
         self.pin_values: dict = {}   # (node, output pin) -> value at the pause
+        self.notes_open = None       # the graph's notes unfolded; None: only on a wide canvas
+        self._notes_shown = False
         self._fonts = {}
         self.bind("<ButtonPress-1>", self.on_press)
         self.bind("<B1-Motion>", self.on_motion)
@@ -130,17 +145,40 @@ class GraphView(tk.Canvas):
             ins = sig.exec_ins + sig.data_ins
             outs = sig.exec_outs + sig.data_outs
             title = display_title(g, n)
-            in_w = max([f_pin.measure(input_label(n, p)) for p in ins] or [0]) / s
-            out_w = max([f_pin.measure("" if p.is_exec and len(sig.exec_outs) == 1 else p.name)
-                         for p in outs] or [0]) / s
-            w = max(f_title.measure(title) / s + 28, in_w + out_w + 46, 96)
-            rows = max(len(ins), len(outs), 1 if not sig.pure else 0)
-            h = HEADER + ROW * rows + 6
-            gm = Geom(x, y, w, h)
-            for i, p in enumerate(ins):
-                gm.pins[("in", p.name)] = (x, y + HEADER + ROW * (i + 0.5) + 3, p.type)
-            for i, p in enumerate(outs):
-                gm.pins[("out", p.name)] = (x + w, y + HEADER + ROW * (i + 0.5) + 3, p.type)
+            editors = {p.name: input_editor(n, p, self.app.idx) for p in ins}
+            in_w, fields = 0, {}
+            for p in ins:
+                ed = editors[p.name]
+                label = input_label(n, p)
+                # an indexed input that can be removed has a circled − after it
+                extra = REMOVE_W if can_remove(n, p.name, "in") else 0
+                if ed is None:
+                    in_w = max(in_w, f_pin.measure(label) / s + extra)
+                    continue
+                lw = (f_pin.measure(p.name) / s + 6) if label else 0
+                fw = self.field_width(ed, f_pin) / s
+                fields[p.name] = (lw, fw, ed)
+                in_w = max(in_w, lw + fw + extra)
+            # an indexed output that can be removed has a circled − before its label
+            # and the flattenable one has its triangle there
+            out_w = max([f_pin.measure(output_label(sig, p)) / s
+                         + (REMOVE_W if can_remove(n, p.name, "out")
+                            or p.name == flat_toggle(n, sig) else 0)
+                         for p in outs] or [0])
+            add_w = (f_pin.measure(add_pin_label(n)) / s + ADD_PAD) if has_add_pin(n) else 0
+            w = max(f_title.measure(title) / s + 28, in_w + out_w + 46, add_w + 22, 96)
+            lay = pin_rows(n, sig)
+            gm = Geom(x, y, w, lay["height"])
+            gm.add_pin = (y + lay["add"]) if lay["add"] is not None else None
+            gm.rule = (y + lay["rule"]) if lay["rule"] is not None else None
+            for p, o, ry in lay["rows"]:
+                if p is not None:
+                    gm.pins[("in", p.name)] = (x, y + ry, p.type)
+                    if p.name in fields:
+                        fx, fw, ed = fields[p.name]
+                        gm.fields[p.name] = (x + 16 + fx, y + ry, fw, ed)
+                if o is not None:
+                    gm.pins[("out", o.name)] = (x + w, y + ry, o.type)
             gm.title = title
             self.geoms[n.id] = gm
 
@@ -168,6 +206,9 @@ class GraphView(tk.Canvas):
         if self.drag and self.drag[0] == "wire":
             _, nid, d, pin, sx, sy, cx, cy = self.drag
             self.draw_curve(sx, sy, cx, cy, SELECT, 2, d == "in", tags=("temp",))
+        mark = getattr(self.app, "mark_selected_source", None)
+        if mark:
+            mark()
 
     def draw_grid(self):
         w, h = self.winfo_width(), self.winfo_height()
@@ -319,16 +360,61 @@ class GraphView(tk.Canvas):
                                   fill="", tags=ptag)
             if d == "in":
                 pin = sig.input(name)
-                label = input_label(n, pin) if pin else name
                 b = n.binding(name)
                 fill = TEXT if b is not None else DIM
-                self.create_text(sx + 2.2 * r, sy, anchor="w", text=label, fill=fill, font=fpin,
-                                 tags=tag)
+                labelled = bool(input_label(n, pin)) if pin else True
+                lx = sx + 2.2 * r
+                if name in gm.fields:
+                    if labelled:
+                        self.create_text(lx, sy, anchor="w", text=name, fill=fill, font=fpin,
+                                         tags=tag)
+                        lx += fpin.measure(name) + 6 * s
+                    fdata = gm.fields[name]
+                    self.draw_field(n.id, name, lx, sy, fdata, fpin, tag)
+                    end = lx + (FIELD_H if fdata[3]["kind"] == "bool" else fdata[2]) * s
+                else:
+                    label = input_label(n, pin) if pin else name
+                    self.create_text(lx, sy, anchor="w", text=label, fill=fill, font=fpin,
+                                     tags=tag)
+                    end = lx + fpin.measure(label)
+                if can_remove(n, name, "in"):   # the circled − that removes this input
+                    self.draw_circled(end + 10 * s, sy, "-",
+                                      ("removepin", f"m={n.id}|in|{name}"))
             else:
                 pin = sig.output(name)
                 label = output_label(sig, pin) if pin else name
-                self.create_text(sx - 2.2 * r, sy, anchor="e", text=label, fill=TEXT, font=fpin,
-                                 tags=tag)
+                lx = sx - 2.2 * r
+                self.create_text(lx, sy, anchor="e", text=label, fill=TEXT, font=fpin, tags=tag)
+                if can_remove(n, name, "out"):  # the circled − that removes this output
+                    cx = lx - fpin.measure(label) - 10 * s
+                    self.draw_circled(cx, sy, "-", ("removepin", f"m={n.id}|out|{name}"))
+                if name == flat_toggle(n, sig):  # the triangle that flattens this output
+                    cx = lx - fpin.measure(label) - 9 * s
+                    self.draw_flat_toggle(cx, sy, is_flat(n, sig), ("flatpin", f"l={n.id}"))
+        if gm.rule is not None:          # the line between indexed outputs and the rest
+            _, ry = self.to_screen(gm.x, gm.rule)
+            self.create_line(x0 + 4 * s, ry, x1 - 4 * s, ry, fill=FIELD_EDGE, tags=tag)
+        if gm.add_pin is not None:       # the Add pin button, on the side its pins are on
+            _, ay = self.to_screen(gm.x, gm.add_pin)
+            atag = ("addpin", f"a={n.id}")
+            text = add_pin_label(n)
+            bw = fpin.measure(text) + (ADD_PAD - 8) * s
+            if add_pin_side(n) == "left":    # "Add item ⊕", under the inputs
+                left = x0 + 11 * s
+                right = left + bw
+                self.create_rectangle(left, ay - 9 * s, right, ay + 9 * s,
+                                      fill=FIELD_BG, outline=FIELD_EDGE, tags=atag)
+                self.create_text(left + 5 * s, ay, anchor="w", text=text, fill=DIM,
+                                 font=fpin, tags=atag)
+                self.draw_circled(right - 10 * s, ay, "+", atag)
+            else:                             # "⊕ Add case", under the outputs
+                right = x1 - 11 * s
+                left = right - bw
+                self.create_rectangle(left, ay - 9 * s, right, ay + 9 * s,
+                                      fill=FIELD_BG, outline=FIELD_EDGE, tags=atag)
+                self.draw_circled(left + 10 * s, ay, "+", atag)
+                self.create_text(right - 5 * s, ay, anchor="e", text=text, fill=DIM,
+                                 font=fpin, tags=atag)
         if (self.app.graph_name, n.id) in self.app.breakpoints:
             self.create_oval(x0 - 7 * s, y0 - 7 * s, x0 + 7 * s, y0 + 7 * s, fill=BREAK,
                              outline="white", width=1, tags=tag)
@@ -337,6 +423,137 @@ class GraphView(tk.Canvas):
                              fill=ERROR if diag == "error" else WARN, outline="", tags=tag)
             self.create_text(x1 - 1 * s, y0 + 1 * s, text="!", fill="white",
                              font=self.font(10, True), tags=tag)
+
+    # -- value fields on unwired inputs (viewmodel.input_editor) -----------------------
+    @staticmethod
+    def field_text(ed) -> tuple:
+        """(text, is the placeholder) shown in a field."""
+        if ed["kind"] == "bool":
+            return "", ed["value"] is None
+        if ed["value"] is not None:
+            return str(ed["value"]), False
+        return (str(ed["placeholder"]) if ed["placeholder"] is not None else ""), True
+
+    def field_width(self, ed, font) -> float:
+        """The width of a field, in screen units at the font's size."""
+        if ed["kind"] == "bool":
+            return font.metrics("linespace") * 0.9
+        text, _ = self.field_text(ed)
+        if ed["kind"] == "enum":
+            text = max([text] + ed["options"], key=len) + " ▾"
+        elif ed["kind"] in ("int", "float"):
+            text = max(text, "00000", key=len) + " ±"
+        return min(font.measure(text[:24] or "    "), font.measure("0" * 24)) + 10
+
+    def draw_circled(self, cx, cy, sign, tags):
+        """A small circle with + or − in it, the Add and Remove pin buttons."""
+        s = self.scale
+        r, a = 6 * s, 3.2 * s
+        self.create_oval(cx - r, cy - r, cx + r, cy + r, outline=DIM, fill=NODE_BG, width=1,
+                         tags=tags)
+        self.create_line(cx - a, cy, cx + a, cy, fill=DIM, width=max(1, s), tags=tags)
+        if sign == "+":
+            self.create_line(cx, cy - a, cx, cy + a, fill=DIM, width=max(1, s), tags=tags)
+
+    def draw_flat_toggle(self, cx, cy, flat, tags):
+        """The small triangle left of a flattenable exec output: pointing up, it brings the
+        output to the top of the node (flatten); pointing down, it puts it back (unflatten)."""
+        s = self.scale
+        a, b = 4 * s, 3 * s
+        pts = ([cx - a, cy + b, cx + a, cy + b, cx, cy - b] if not flat
+               else [cx - a, cy - b, cx + a, cy - b, cx, cy + b])
+        self.create_rectangle(cx - 7 * s, cy - 7 * s, cx + 7 * s, cy + 7 * s, outline="",
+                              fill="", tags=tags)
+        self.create_polygon(*pts, fill=DIM, outline="", tags=tags)
+
+    def draw_field(self, nid, pin, x, y, fdata, font, tag):
+        s = self.scale
+        _, _, fw, ed = fdata
+        w, h = fw * s, FIELD_H * s
+        ftag = tag + (f"f={nid}|{pin}",)
+        if ed["kind"] == "bool":
+            on = ed["value"] if ed["value"] is not None else bool(ed["placeholder"])
+            self.create_rectangle(x, y - h / 2, x + h, y + h / 2, fill=FIELD_BG,
+                                  outline=ACCENT if on else FIELD_EDGE, width=1, tags=ftag)
+            if on:
+                self.create_line(x + h * 0.2, y, x + h * 0.42, y + h * 0.25, x + h * 0.8,
+                                 y - h * 0.28, fill=ACCENT if ed["value"] is not None else DIM,
+                                 width=max(1.5, 2 * s), tags=ftag)
+            return
+        self.create_rectangle(x, y - h / 2, x + w, y + h / 2, fill=FIELD_BG, outline=FIELD_EDGE,
+                              tags=ftag)
+        text, ph = self.field_text(ed)
+        if len(text) > 24:
+            text = text[:23] + "…"
+        self.create_text(x + 4 * s, y, anchor="w", text=text, fill=DIM if ph else TEXT,
+                         font=font, tags=ftag)
+        if ed["kind"] == "enum":
+            self.create_text(x + w - 4 * s, y, anchor="e", text="▾", fill=DIM, font=font, tags=ftag)
+        elif ed["kind"] in ("int", "float"):
+            self.create_text(x + w - 4 * s, y, anchor="e", text="±", fill=DIM, font=font, tags=ftag)
+
+    def field_rect(self, nid, pin):
+        items = self.find_withtag(f"f={nid}|{pin}")
+        return self.bbox(*items) if items else None
+
+    def edit_field(self, nid, pin, e):
+        """Clicked a value field: toggle a checkbox, list an enum's members, or type in place."""
+        gm = self.geoms.get(nid)
+        if not gm or pin not in gm.fields or not self.app.can_edit():
+            return
+        ed = gm.fields[pin][3]
+        if ed["kind"] == "bool":
+            cur = ed["value"] if ed["value"] is not None else bool(ed["placeholder"])
+            new = not cur
+            # the default needs no line in the source
+            self.app.set_pin_text(nid, pin, "" if ed["placeholder"] is not None
+                                  and new == ed["placeholder"] else str(new).lower())
+            return
+        if ed["kind"] == "enum":
+            m = tk.Menu(self, tearoff=0)
+            if ed["placeholder"] is not None:
+                m.add_command(label=f"{ed['placeholder']} (default)",
+                              command=lambda: self.app.set_pin_text(nid, pin, ""))
+                m.add_separator()
+            for name in ed["options"]:
+                m.add_command(label=name, command=lambda v=name: self.app.set_pin_text(nid, pin, v))
+            m.tk_popup(e.x_root, e.y_root)
+            return
+        rect = self.field_rect(nid, pin)
+        if rect is None:
+            return
+        x0, y0, x1, y1 = rect
+        var = tk.StringVar(value="" if ed["value"] is None else str(ed["value"]))
+        if ed["kind"] == "text":
+            box = tk.Entry(self, textvariable=var)
+        else:
+            lo, hi = (ed.get("min", -1e308), ed.get("max", 1e308))
+            box = tk.Spinbox(self, textvariable=var, from_=lo, to=hi,
+                             increment=1 if ed["kind"] == "int" else 0.1,
+                             format="" if ed["kind"] == "int" else "%.6g")
+            var.set("" if ed["value"] is None else str(ed["value"]))
+        box.configure(font=self.font(10), bg=FIELD_BG, fg=TEXT, insertbackground=TEXT,
+                      relief="flat", highlightthickness=1, highlightcolor=ACCENT)
+        win = self.create_window(x0, (y0 + y1) / 2, anchor="w", window=box,
+                                 width=max(x1 - x0, 90), height=y1 - y0 + 4)
+        done = [False]
+
+        def finish(save):
+            if done[0]:
+                return
+            done[0] = True
+            text = var.get()
+            self.delete(win)
+            box.destroy()
+            if save and text != ("" if ed["value"] is None else str(ed["value"])):
+                self.app.set_pin_text(nid, pin, text, verbatim=ed["kind"] == "text")
+            self.focus_set()
+
+        box.bind("<Return>", lambda _e: finish(True))
+        box.bind("<Escape>", lambda _e: finish(False))
+        box.bind("<FocusOut>", lambda _e: finish(True))
+        box.focus_set()
+        box.select_range(0, "end")
 
     def draw_values(self, g, info):
         """Label each data wire with the value it carried at the debugger's pause."""
@@ -372,24 +589,55 @@ class GraphView(tk.Canvas):
                     self.tag_raise(t, r)
 
     def draw_notes(self, g):
-        y = 10
+        """Notes under their node, and the graph's own notes at the top left of the view. Those
+        can be folded away with the button below them, and start folded on a narrow canvas."""
+        graph_notes = []
+        below = {}      # a node's notes stack one under another, each below the one before
         for on, i, nt in g.all_notes():
             key = note_key(on, i)
             if on and on in self.geoms:
                 gm = self.geoms[on]
                 sx, sy = self.to_screen(gm.x, gm.y + gm.h + 6)
-                self.create_text(sx, sy, anchor="nw", text="✎ " + note_text(nt), fill="#f7dc6f",
-                                 width=max(140, gm.w * self.scale * 1.4), font=self.font(9),
-                                 tags=("note", f"t={key}"))
+                sy = below.get(on, sy)
+                item = self.create_text(sx, sy, anchor="nw", text="✎ " + note_text(nt),
+                                        fill="#f7dc6f", font=self.font(9),
+                                        width=max(140, gm.w * self.scale * 1.4),
+                                        tags=("note", f"t={key}"))
+                below[on] = self.bbox(item)[3] + 2 * self.scale
             else:
-                gone = note_detached(nt)
-                detached = gone is not None
-                text = ("✎ (detached from %s) " % gone if detached else "✎ ") + note_text(nt)
-                item = self.create_text(10, y, anchor="nw", text=text, width=460,
-                                        fill=DIM if detached else "#f7dc6f",
-                                        font=("Helvetica", 12),
-                                        tags=("note", "graphnote", f"t={key}"))
-                y = self.bbox(item)[3] + 8
+                graph_notes.append((key, nt))
+        if not graph_notes:
+            return
+        is_open = self.notes_open if self.notes_open is not None else self.winfo_width() >= 600
+        y = 10
+        for key, nt in graph_notes if is_open else []:
+            gone = note_detached(nt)
+            detached = gone is not None
+            text = ("✎ (detached from %s) " % gone if detached else "✎ ") + note_text(nt)
+            item = self.create_text(10, y, anchor="nw", text=text, width=460,
+                                    fill=DIM if detached else "#f7dc6f",
+                                    font=("Helvetica", 12),
+                                    tags=("note", "graphnote", f"t={key}"))
+            y = self.bbox(item)[3] + 8
+        label = "Hide notes" if is_open else f"✎ Notes ({len(graph_notes)})"
+        t = self.create_text(18, y + 4, anchor="nw", text=label, fill=DIM,
+                             font=("Helvetica", 11), tags=("graphnote", "notestoggle"))
+        bx = self.bbox(t)
+        r = self.create_rectangle(10, y, bx[2] + 8, bx[3] + 4, fill="#2b2e35", outline="#3a3e47",
+                                  tags=("graphnote", "notestoggle"))
+        self.tag_raise(t, r)
+        self._notes_shown = is_open
+
+    def on_notes_toggle(self, x, y) -> bool:
+        """Fold or unfold the graph's notes if (x, y) is on their button. The view stays where
+        it is, so the graph does not jump each time."""
+        items = self.find_overlapping(x, y, x, y)
+        if not any("notestoggle" in self.gettags(it) for it in items):
+            return False
+        self.notes_open = not self._notes_shown
+        self.drag = None
+        self.redraw()
+        return True
 
     # -- hit testing --------------------------------------------------------------
     def hit(self, x, y):
@@ -401,6 +649,16 @@ class GraphView(tk.Canvas):
                 if "=" in t:
                     k, v = t.split("=", 1)
                     found.setdefault(k, v)
+        if "f" in found:
+            nid, name = found["f"].split("|")
+            return ("field", nid, name)
+        if "a" in found:
+            return ("addpin", found["a"])
+        if "l" in found:
+            return ("flatpin", found["l"])
+        if "m" in found:
+            nid, _d, pin = found["m"].split("|", 2)
+            return ("removepin", nid, pin)
         if "p" in found:
             nid, d, name = found["p"].split("|")
             return ("pin", nid, d, name)
@@ -421,7 +679,25 @@ class GraphView(tk.Canvas):
     # -- events -------------------------------------------------------------------
     def on_press(self, e):
         self.focus_set()
+        if self.on_notes_toggle(e.x, e.y):
+            return
         h = self.hit(e.x, e.y)
+        if h and h[0] == "field":
+            self.drag = None
+            self.edit_field(h[1], h[2], e)
+            return
+        if h and h[0] == "addpin":
+            self.drag = None
+            self.app.add_pin(h[1])
+            return
+        if h and h[0] == "removepin":
+            self.drag = None
+            self.app.remove_pin(h[1], h[2])
+            return
+        if h and h[0] == "flatpin":
+            self.drag = None
+            self.app.toggle_flat(h[1])
+            return
         if h and h[0] == "pin":
             _, nid, d, name = h
             sx, sy = self.pin_screen(nid, d, name)

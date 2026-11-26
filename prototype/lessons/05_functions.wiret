@@ -1,67 +1,43 @@
 wiret 1
 module lessons.functions
 
-extern func host.Log(message: string)
+extern func host.Log(message: string) -> ()
 
-#[note("Lesson 5: Functions. Square is a function: a small graph with a name, an input (x) and a result. Main uses it like any other node. Double-click it to look inside.")]
-#[note("Try it: (1) Step (F11) into Square and look at the call stack in the Debugger tab. (2) Make a Cube function: Graph → New function…, type  Cube(x: i32) -> (result: i32) @pure  and build x × x × x. (3) Print cubes as well as squares.")]
+@note("Lesson 5: Functions. Square is a function: a small graph with a name, an input (x) and a result. Main uses it like any other node. Double-click it to look inside.")
+@note("Try it: (1) Step (F11) into Square and look at the call stack in the Debugger tab. (2) Make a Cube function: Graph → New function…, type  @pure Cube(x: i32) -> (result: i32)  and build x × x × x. (3) Print cubes as well as squares.")
 func Main() {
-  flow {
-    entry -> loop
-    loop.each -> say
-  }
-
-  node entry = Entry()
-  node loop = Macro std.flow.ForRange(
-    .first <- 1,
-    .last <- 5,
-  )
-  node say = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- Call std.string.Concat(
-        .a <- Convert::<i32, string>(
-          .value <- loop.index,
-        ),
-        .b <- " squared is ",
-      ),
-      .b <- Convert::<i32, string>(
-        .value <- Call Square(
-          .x <- loop.index,
-        ),
-      ),
-    ),
-  )
-
-  layout {
-    entry at (0, 0)
-    loop at (200, 0)
-    say at (1247, 0)
-    say.message at (1056, 99)
-    say.message.a at (753, 99)
-    say.message.a.a at (498, 99)
-    say.message.b at (733, 260)
-    say.message.b.value at (380, 260)
+  exec Entry{pos=(0, 0)}()
+  exec Macro std.flow.ForRange{pos=(200, 0)}(
+    .first <- 1
+    .last <- 5
+  ).each|index| -> {
+    exec Call host.Log{pos=(1247, 0)}(
+      .message <- Call std.string.Concat{pos=(1056, 99)}(
+        .a <- Call std.string.Concat{pos=(753, 99)}(
+          .a <- Convert#<i32, string>{pos=(498, 99)}(
+            .value <- index
+          )
+          .b <- " squared is "
+        )
+        .b <- Convert#<i32, string>{pos=(733, 260)}(
+          .value <- Call Square{pos=(380, 260)}(
+            .x <- index
+          )
+        )
+      )
+    )
   }
 }
 
-#[doc("Multiplies a number by itself.")]
-#[note("@pure means Square only calculates: the same x always gives the same result, and it changes nothing else. That is why it has no white arrows on the outside.")]
-func Square(x: i32) -> (result: i32) @pure {
-  flow {
-    entry -> ret
-  }
-
-  node entry = Entry()
-  node ret = Return(
-    .result <- Mul::<i32>(
-      .a <- entry.x,
-      .b <- entry.x,
-    ),
+@doc("Multiplies a number by itself.")
+@note("@pure means Square only calculates: the same x always gives the same result, and it changes nothing else. That is why it has no white arrows on the outside.")
+@pure
+func Square(x: i32) -> (result: i32) {
+  exec Entry{pos=(0, 0)}()
+  exec Return{pos=(440, 0)}(
+    .result <- Mul#<i32>{pos=(220, 140)}(
+      .a <- x
+      .b <- x
+    )
   )
-
-  layout {
-    entry at (0, 0)
-    ret at (440, 0)
-    ret.result at (220, 140)
-  }
 }

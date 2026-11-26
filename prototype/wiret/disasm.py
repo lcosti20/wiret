@@ -111,7 +111,7 @@ def disassemble(data: bytes) -> str:
                 t = ins.imms[0]
                 text += f" {t}"
                 if t < len(m.types) and isinstance(m.types[t], ArrayType):
-                    comment = f"array::<{vt_name(m.types[t].elem, m.types)}>"
+                    comment = f"array#<{vt_name(m.types[t].elem, m.types)}>"
             elif ins.op > 0xFF and ins.imms:     # a lane get or with: name the field
                 text += f" {ins.imms[0]}"
                 ty = lanes.BLOCKS[ins.name.partition(".")[0]][1]

@@ -26,7 +26,8 @@ def _retype(ty: str, old: str, new: str) -> str:
 
 
 def _lits(m: Module):
-    """Every literal that may hold an enum value: bindings, defaults, consts, @cases."""
+    """Every literal that may hold an enum value: bindings (a Switch's case values among
+    them), defaults and consts."""
     for it in m.items:
         for attr in ("default", "value"):
             v = getattr(it, attr, None)
@@ -46,14 +47,6 @@ def _lits(m: Module):
                 for b in n.bindings:
                     if isinstance(b.value, Lit):
                         yield b, "value"
-
-
-def _cases(m: Module):
-    for g in m.graphs():
-        for n in g.nodes:
-            a = n.attr("cases")
-            if n.kind == "Switch" and a and a.args:
-                yield a
 
 
 def _typed(m: Module):
@@ -268,12 +261,4 @@ def _rename_enum_values(m: Module, match, change) -> list:
         if new is not None:
             setattr(obj, attr, new)
             out.append(f"value {new.value}")
-    for a in _cases(m):
-        args = []
-        for k, v in a.args:
-            new = fix(v) if v.kind == "enum" else None
-            args.append((k, new or v))
-            if new is not None:
-                out.append(f"case {new.value}")
-        a.args = args
     return out

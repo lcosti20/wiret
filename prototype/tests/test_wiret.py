@@ -50,44 +50,50 @@ FOR_RANGE = """
 macro ForRange(in: exec, first: i32, last: i32) -> (each: exec, done: exec, index: i32) {
   local i: i32
 
-  flow {
-    bump -> test
-    entry -> init
-    init -> test
-    seq.then0 -> each_out
-    seq.then1 -> bump
-    test.then -> seq
-    test.else -> finish
-  }
-
   node bump = SetLocal i(
-    .value <- Add::<i32>(
-      .a <- cur,
-      .b <- 1,
-    ),
+    .value <- Add#<i32>(
+      .a <- cur
+      .b <- 1
+    )
   )
   node cur = GetLocal i()
   node each_out = Exit each(
-    .index <- cur,
+    .index <- cur
   )
   node entry = Entry()
   node finish = Exit done()
   node init = SetLocal i(
-    .value <- entry.first,
+    .value <- entry.first
   )
-  node seq = Sequence() @count(2)
+  node seq = Sequence#count<2>()
   node test = Branch(
-    .cond <- Le::<i32>(
-      .a <- cur,
-      .b <- entry.last,
-    ),
+    .cond <- Le#<i32>(
+      .a <- cur
+      .b <- entry.last
+    )
   )
+
+  exec entry
+  exec init
+  exec test.then -> {
+    exec seq.then[0] -> {
+      exec each_out
+    }.then[1]
+    exec bump
+    goto test
+  }.else -> {
+    exec finish
+  }
 }
 """
 
 
 def module(body: str, macros=True) -> str:
-    return ("wiret 1\nmodule t\n\nextern func host.Log(message: string)\n"
+    return ("""wiret 1
+module t
+
+extern func host.Log(message: string)
+"""
             + (FOR_RANGE if macros else "") + body)
 
 
@@ -129,322 +135,198 @@ class FormatTests(unittest.TestCase):
     def test_non_canonical_input_is_normalised(self):
         text = module("""
 func F(x: i32) -> (y: i32) {
-  node ret   = Return(  .y   <-   s.result
-  )
-  node entry = Entry(
-  )
-  node s     = Add::<i32>(
-
-    .b <- 0x10,
-  .a <- entry.x )
-
-  flow {
-    entry.then -> ret
-  }
+  exec   Entry( )
+  exec Return(.y <- Add#<i32>(.a <- x, .b <- 16,),)
 }
 """, macros=False)
         out = print_module(parse(text))
-        self.assertIn("func F(x: i32) -> (y: i32) = Add::<i32>(\n  .a <- x,\n  .b <- 16,\n)\n",
-                      out)
+        self.assertIn("func F(x: i32) -> (y: i32) = Add#<i32>(\n  .a <- x\n  .b <- 16\n)\n", out)
         self.assertEqual(print_module(parse(out)), out)
 
     def test_single_use_nodes_are_written_inline(self):
         text = module("""
 func Main() {
   local score: i32
-  node as_text = Convert::<i32, string>(
-    .value <- now.value,
-  )
-  node entry = Entry()
-  node line = Call std.string.Concat(
-    .a <- "Your score is ",
-    .b <- as_text.result,
-  )
-  node now = GetLocal score()
-  node show = Call host.Log(
-    .message <- line.result,
-  )
 
-  flow {
-    entry -> show
-  }
-
-  layout {
-    #[note("Log needs text, so Convert turns the number into text.")]
-    as_text at (600, 320)
-    line at (780, 180)
-    now at (440, 420)
-    show at (980, 0)
-  }
+  exec Entry()
+  exec Call host.Log{pos=(980, 0)}(
+    .message <- Call std.string.Concat{pos=(780, 180)}(
+      .a <- "Your score is "
+      @note("Log needs text, so Convert turns the number into text.")
+      .b <- Convert#<i32, string>{pos=(600, 320)}(
+        .value <- GetLocal score{pos=(440, 420)}()
+      )
+    )
+  )
 }
 """, macros=False)
-        want = module("""
-func Main() {
-  local score: i32
-
-  flow {
-    entry -> show
-  }
-
-  node entry = Entry()
-  node show = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- "Your score is ",
-      .b <- Convert::<i32, string>(
-        .value <- GetLocal score(),
-      ),
-    ),
-  )
-
-  layout {
-    show at (980, 0)
-    show.message at (780, 180)
-    #[note("Log needs text, so Convert turns the number into text.")]
-    show.message.b at (600, 320)
-    show.message.b.value at (440, 420)
-  }
-}
-""", macros=False)
-        self.assertEqual(print_module(parse(text)), want)
-        m = parse(want)
-        self.assertEqual(print_module(m), want)
+        m = parse(text)
+        self.assertEqual(print_module(m), text)
         g = m.graph("Main")
         self.assertEqual(sorted(n.id for n in g.nodes),
-                         ["entry", "show", "show.message", "show.message.b",
-                          "show.message.b.value"])
-        self.assertEqual(g.node("show.message.b").binding("value").value.node,
-                         "show.message.b.value")
-        self.assertEqual(run(want, "Main"), ([], ["Your score is 0"]))
-        # a node read twice is declared, under a name made from its old dotted id
-        from wiret.model import PinRef
-        g.node("show.message").binding("a").value = PinRef("show.message.b", "result")
+                         ["0", "1", "1.message", "1.message.b", "1.message.b.value"])
+        self.assertEqual(g.node("1.message.b").binding("value").value.node, "1.message.b.value")
+        self.assertEqual(note_text(g.node("1.message.b").meta[0]),
+                         "Log needs text, so Convert turns the number into text.")
+        self.assertEqual(run(text, "Main"), ([], ["Your score is 0"]))
+        # a node read twice is named after what it does, and keeps its position and notes
+        g.node("1.message").binding("a").value = PinRef("1.message.b", "result")
         out = print_module(m)
-        self.assertIn("  node show_message_b = Convert::<i32, string>(\n"
-                      "    .value <- GetLocal score(),\n  )\n", out)
-        self.assertIn("      .a <- show_message_b,\n      .b <- show_message_b,\n", out)
-        self.assertIn("    show_message_b at (600, 320)\n    show_message_b.value at (440, 420)\n",
-                      out)
+        self.assertIn('  @note("Log needs text, so Convert turns the number into text.")\n'
+                      "  node convert = Convert#<i32, string>{pos=(600, 320)}(\n"
+                      "    .value <- GetLocal score{pos=(440, 420)}()\n  )\n", out)
+        self.assertIn("      .a <- convert\n      .b <- convert\n", out)
         self.assertEqual(print_module(parse(out)), out)
 
-    def test_nodes_with_exec_pins_or_attributes_are_declared(self):
+    def test_named_nodes_keep_their_names_and_order(self):
         text = module("""
 func F() -> (n: i32) {
-  flow {
-    entry -> get
-    get -> r
-  }
-
-  node entry = Entry()
   node get = Call G()
-  node r = Return(
-    .n <- get,
+  node seq = Sequence#count<2>()
+
+  exec Entry()
+  exec get
+  exec Return(
+    .n <- get
   )
-  node seq = Sequence() @count(2)
+
+  !exec seq
 }
 
-func G() -> (n: i32) {
-  flow {
-    entry -> r
-  }
-
-  node entry = Entry()
-  node r = Return(
-    .n <- 1,
-  )
-}
+func G() -> (n: i32) = 1
 """, macros=False)
         self.assertEqual(print_module(parse(text)), text)
+        # a node that must be named is added after the names already there
+        swapped = text.replace("  node get = Call G()\n  node seq = Sequence#count<2>()\n",
+                               "  node seq = Sequence#count<2>()\n  node get = Call G()\n")
+        self.assertEqual(print_module(parse(swapped)), swapped)
 
-    def test_unknown_metadata_and_layout_props_survive(self):
+    def test_unknown_metadata_and_attributes_survive(self):
         text = module("""
-#[x.acme.review("ok", level: 2)]
+@x.acme.review("ok", level: 2)
 func F() {
-  node entry = Entry()
-  layout {
-    #[Hash(1)]
-    entry at (1, 2) [label = "Start", x.acme.pin = [a, b]]
-  }
+  @Hash(1)
+  exec Entry{pos=(1, 2), label="Start", x.acme.pin=[a, b]}()
 }
 """, macros=False)
-        out = print_module(parse(text))
-        self.assertIn('#[x.acme.review("ok", level: 2)]\nfunc F() {', out)
-        self.assertIn("    #[Hash(1)]\n    entry at (1, 2)", out)
-        self.assertIn('x.acme.pin = [a, b]', out)
+        m = parse(text)
+        self.assertEqual(print_module(m), text)
+        self.assertEqual([d for d in check(m) if d.code == "E0104"], [])
 
-    def test_metadata_lines_stand_above_their_statement(self):
+    def test_decorators_stand_above_their_statement(self):
         text = module("""
-#[note("second")]
-#[keywords("a", "b")]
-#[note("first")]
-#[doc("Does F.")]
-func F() @pure {
-  #[note("why")]
+@note("second")
+@note("first")
+@keywords("a", "b")
+@pure
+@doc("Does F.")
+func F() {
+  @note("why")
   local x: i32
-  node entry = Entry()
-  layout {
-    #[doc("the start")]
-    entry
-    #[note("a group")]
-    box g "G" at (0, 0) size (10, 10) [members = [entry]]
-  }
+
+  @note("a group")
+  box {title="G", pos=(0, 0), size=(10, 10)}
+
+  @doc("the start")
+  exec Entry()
 }
 """, macros=False)
         m = parse(text)
         out = print_module(m)
-        self.assertIn('#[doc("Does F.")]\n#[keywords("a", "b")]\n#[note("second")]\n'
-                      '#[note("first")]\nfunc F() @pure {', out)
-        self.assertIn('  #[note("why")]\n  local x: i32\n', out)
-        self.assertIn('  node entry = Entry()\n', out)
-        self.assertIn('    #[doc("the start")]\n    entry\n', out)
-        self.assertEqual(m.graph("F").node("entry").meta[0].name, "doc")
-        self.assertIn('    #[note("a group")]\n    box g "G"', out)
+        self.assertIn('@doc("Does F.")\n@keywords("a", "b")\n@note("second")\n'
+                      '@note("first")\n@pure\nfunc F() {', out)
+        self.assertIn('  @note("why")\n  local x: i32\n', out)
+        self.assertIn('  @note("a group")\n  box {title="G", pos=(0, 0), size=(10, 10)}\n', out)
+        self.assertIn('  @doc("the start")\n  exec Entry()\n', out)
+        self.assertEqual(m.graph("F").node("0").meta[0].name, "doc")
         self.assertEqual(print_module(parse(out)), out)
         self.assertEqual(m.graph("F").meta[0].name, "note")   # the model keeps written order
 
-    def test_metadata_must_touch_its_statement(self):
-        for body, hint in (('#[note("x")]\n\n  local x: i32', "no blank line"),
-                           ('node entry = Entry()\n  #[note("x")]', "directly above"),
-                           ('node entry = Entry()\n  flow {\n    #[note("x")]\n    entry -> entry\n  }',
-                            "flow wires"),
-                           ('#[note("x")]\n  node entry = Entry()', "layout block"),
-                           ('node entry = Entry()\n  layout {\n    entry\n  }', "at (x, y)"),
-                           ('#[note("x")] local x: i32', "next line")):
+    def test_decorators_must_touch_their_statement(self):
+        for body, hint in (('@note("x")\n\n  local x: i32', "no blank line"),
+                           ('exec Entry()\n  @note("x")', "directly above"),
+                           ('#[note("x")]\n  exec Entry()', "not #["),
+                           ("exec Entry() @pure", "line above"),
+                           ("flow {\n  }", "'exec' statements"),
+                           ("layout {\n  }", "pos=(x, y)")):
             with self.subTest(body):
                 with self.assertRaises(ParseError) as cm:
                     parse(module(f"\nfunc F() {{\n  {body}\n}}\n", macros=False))
                 self.assertIn(hint, cm.exception.msg)
 
-    def test_stale_layout_line_is_kept_with_W0605(self):
-        # an inline node's name is its position, so an edit that moves it leaves its layout
-        # line and notes naming nothing; that is a warning and the text is kept, not an error
+    def test_promoted_inline_node_skips_taken_and_retired_names(self):
+        # an inline node that comes to feed a second input is named after what it does,
+        # then _2, _3, ... past live names and names retired in wiret.ids
+        from wiret.model import Binding
         text = module("""
 func F() {
-  flow {
-    entry -> log
-  }
-
-  node entry = Entry()
-  node log = Call host.Log(
-    .message <- "hi",
+  node concat = Call host.Log(
+    .message <- "taken"
   )
 
-  layout {
-    entry at (0, 0)
-    log at (200, 0)
-    #[note("Says hi.")]
-    log.message at (100, 120)
-    #[note("Only a note, no position.")]
-    log.message.value
-  }
-}
-""", macros=False)
-        m = parse(text)
-        diags = [d for d in check(m) if d.code == "W0605"]
-        self.assertEqual(sorted(d.node for d in diags), ["log.message", "log.message.value"])
-        self.assertEqual(print_module(m), text)          # nothing is dropped or moved
-        self.assertTrue(compile_module(m, text).ok)
-        # a merge keeps the stale lines too
-        from wiret.merge import merge_texts
-        merged = merge_texts(text, text, text)
-        self.assertIn('#[note("Says hi.")]\n    log.message at (100, 120)', merged.text)
-
-    def test_promoted_inline_node_skips_taken_and_retired_ids(self):
-        # an inline node that comes to feed a second input is declared under its dotted
-        # name with underscores, then _2, _3, ... past live ids and ids retired in wiret.ids
-        from wiret.model import Binding, PinRef
-        text = module("""
-func F() {
-  node entry = Entry()
-  node log = Call host.Log(
+  exec Entry()
+  exec Call host.Log(
     .message <- Call std.string.Concat(
-      .a <- "a",
-      .b <- "b",
-    ).result,
+      .a <- "a"
+      .b <- "b"
+    )
   )
-  node log_message = Call host.Log(
-    .message <- "taken",
-  )
-  node again = Call host.Log()
-
-  flow {
-    entry -> log
-    log -> log_message
-    log_message -> again
-  }
+  exec concat
+  exec Call host.Log()
 }
 """, macros=False)
 
-        def promoted(retired):
+        def promoted(retired, graph="F"):
             m = parse(text)
-            g = m.graph("F")
-            g.node("again").bindings.append(Binding("message", PinRef("log.message", "result")))
-            m.retired_nodes = {("F", r) for r in retired}
+            m.graph("F").node("3").bindings.append(Binding("message",
+                                                           PinRef("1.message", "result")))
+            m.retired_nodes = {(graph, r) for r in retired}
             out = print_module(m)
-            return re.findall(r"node (log_message\w*) = Call std.string.Concat", out), out
+            return re.findall(r"node (concat\w*) = Call std.string.Concat", out), out
 
-        self.assertEqual(promoted(())[0], ["log_message_2"])     # log_message is live
-        names, out = promoted(("log_message_2", "log_message_3"))
-        self.assertEqual(names, ["log_message_4"])
-        self.assertIn(".message <- log_message_4,", out)
-        # a retired id in another graph does not count
-        self.assertEqual(promoted(())[0], ["log_message_2"])
-        m = parse(text)
-        m.retired_nodes = {("G", "log_message_2")}
-        m.graph("F").node("again").bindings.append(
-            Binding("message", PinRef("log.message", "result")))
-        self.assertIn("node log_message_2 = Call std.string.Concat", print_module(m))
-
-    def test_markup_block_is_rejected_with_a_hint(self):
-        with self.assertRaises(ParseError) as cm:
-            parse(module("\nfunc F() {\n  node entry = Entry()\n  markup {\n"
-                         '    attribute a = Note(message: "x")\n  }\n}\n', macros=False))
-        self.assertIn('#[note(', cm.exception.msg)
-
-    def test_at_doc_is_e0104_with_a_hint(self):
-        text = module('\nfunc F() @doc("x") {\n  node entry = Entry() @x.acme.review\n}\n',
-                      macros=False)
-        diags = [d for d in check(parse(text)) if d.code == "E0104"]
-        self.assertEqual(len(diags), 2)
-        self.assertIn("#[doc(", diags[0].message)
-        self.assertEqual(diags[1].node, "entry")
+        self.assertEqual(promoted(())[0], ["concat_2"])     # concat is taken
+        names, out = promoted(("concat_2", "concat_3"))
+        self.assertEqual(names, ["concat_4"])
+        self.assertIn("    .message <- concat_4\n", out)
+        self.assertEqual(promoted(("concat_2",), graph="G")[0], ["concat_2"])
 
     def test_inputs_go_in_parentheses_one_per_line(self):
         text = module("""
 func F() {
-  flow {
-    entry -> log
-  }
-
-  node entry = Entry()
-  node log = Call host.Log(
-    .message <- "hi",
+  exec Entry()
+  exec Call host.Log(
+    .message <- "hi"
   )
 }
 """, macros=False)
-        out = print_module(parse(text))
-        self.assertIn('  node log = Call host.Log(\n    .message <- "hi",\n  )\n', out)
-        self.assertEqual(out, text)
-        # one line, no trailing comma: read the same
-        one = text.replace('Call host.Log(\n    .message <- "hi",\n  )',
-                           'Call host.Log(.message <- "hi")')
-        self.assertEqual(print_module(parse(one)), text)
+        self.assertEqual(print_module(parse(text)), text)
+        # one line, or a comma after each input: read the same
+        for form in ('Call host.Log(.message <- "hi")', 'Call host.Log(\n    .message <- "hi",\n  )'):
+            one = text.replace('Call host.Log(\n    .message <- "hi"\n  )', form)
+            self.assertEqual(print_module(parse(one)), text)
 
     def test_old_syntax_is_rejected_with_a_hint(self):
-        for body, hint in (('node log = Call host.Log(message: "hi")', ".pin <- value"),
-                           ("node a = Add<i32>()", "Add::<i32>"),
-                           ("local xs: array<i32>", "array::<i32>"),
-                           ('node log = Call host.Log\n    .message <- "hi"', "in parentheses"),
-                           ("node entry = Entry", "'Entry()'"),
-                           ('node log = Call host.Log(.message <- "hi" .x <- 1)', "',' or ')'"),
-                           ("node a = Add::<i32>(.a <- Call host.Log())", "no output"),
-                           ('node log = Call host.Log() .message <- "hi"', "end of line")):
+        for body, hint in (('exec Call host.Log(message: "hi")', ".pin <- value"),
+                           ("exec Add<i32>()", "Add#<i32>"),
+                           ("exec Add::<i32>()", "#<"),
+                           ("local xs: array::<i32>", "array#<i32>"),
+                           ('exec Call host.Log\n    .message <- "hi"', "in parentheses"),
+                           ("exec Entry", "'Entry()'"),
+                           ('exec Call std.string.Concat(.a <- "hi" .b <- "x")', "expected ','"),
+                           ("exec Add#<i32>(.a <- Call host.Log())", "no output"),
+                           ('exec Call host.Log() .message <- "hi"', "-> {"),
+                           ("exec Sequence() @count(2)", "#count<2>"),
+                           ("exec Sequence().then[0](a) -> {\n  }", "'.then[0]|name, ...| -> {"),
+                           ("exec Sequence().then[0]|a| ", "write '.then[0]|a| -> {"),
+                           ("node entry = Entry()\n  entry -> entry", "expected 'exec'")):
             with self.subTest(body):
                 with self.assertRaises(ParseError) as cm:
-                    parse(module(f"\nfunc F() {{\n  {body}\n}}\n", macros=False))
+                    parse(module(f"\nfunc F() {{\n  exec Entry()\n  {body}\n}}\n", macros=False))
                 self.assertIn(hint, cm.exception.msg)
-        with self.assertRaises(ParseError) as cm:
-            parse(module("\nmacro M<T>(in: exec) {\n}\n", macros=False))
-        self.assertIn("::<", cm.exception.msg)
+        for head in ("macro M<T>(in: exec) {\n}", "macro M::<T>(in: exec) {\n}"):
+            with self.assertRaises(ParseError) as cm:
+                parse(module(f"\n{head}\n", macros=False))
+            self.assertIn("#<", cm.exception.msg)
 
     def test_comments_directly_above_a_statement_are_kept(self):
         text = module("""
@@ -460,46 +342,35 @@ func F() {
   // the start
   //
   //   indented, as written
-  node entry = Entry()
-  node log = Call host.Log(
+  exec Entry{pos=(0, 0)}()
+  // first
+  exec Call host.Log(
     // what it says
     .message <- Format "{n} items"(
-      .n <- 3,
-    ),
+      .n <- 3
+    )
   )
-
-  layout {
-    entry at (0, 0)
-  }
 }
 """, macros=False)
         out = print_module(parse(text))
         self.assertEqual(out, text)
         self.assertNotIn("W0603", {d.code for d in check(parse(text))})
-        # the flow block moves above the nodes, and its wire keeps its comment
-        wired = text.replace("  node entry = Entry()\n", "  node entry = Entry()\n\n  flow {\n"
-                             "    // first\n    entry -> log\n  }\n\n")
-        out = print_module(parse(wired))
-        self.assertIn("func F() {\n  flow {\n    // first\n    entry -> log\n  }\n\n"
-                      "  // the start\n  //\n  //   indented, as written\n  node entry", out)
-        self.assertIn("    // what it says\n    .message <- Format", out)
-        self.assertEqual(print_module(parse(out)), out)
         # not part of the semantic text, so a comment edit does not change the semantic hash
         self.assertEqual(semantic_hash(parse(out)),
                          semantic_hash(parse(out.replace("what it says", "its message"))))
         self.assertNotEqual(layout_hash(parse(out)),
                             layout_hash(parse(out.replace("what it says", "its message"))))
-        # a commented node is declared, never written inline, so its comment has a place
+        # a commented node is named, never written inline, so its comment has a place
         m = parse(out)
-        m.graph("F").node("log.message").comment = ["the text"]
-        self.assertIn("  // the text\n  node log_message = Format", print_module(m))
+        m.graph("F").node("1.message").comment = ["the text"]
+        self.assertIn("  // the text\n  node format = Format", print_module(m))
 
     def test_comments_are_reported_and_convertible(self):
         text = module("""
 func F() {
-  // explain the entry
+  exec Entry()   // explain the entry
 
-  node entry = Entry()  // and a trailing one
+  // dangling
 }
 """, macros=False)
         m = parse(text)
@@ -507,7 +378,7 @@ func F() {
         self.assertEqual(len(m.comments), 2)
         convert_comments(m)
         out = print_module(m)
-        self.assertIn('    #[note("explain the entry")]\n', out)
+        self.assertIn('  @note("explain the entry")\n  exec Entry()\n', out)
 
     def test_parse_errors_have_positions(self):
         with self.assertRaises(ParseError) as cm:
@@ -515,36 +386,304 @@ func F() {
         self.assertEqual(cm.exception.line, 3)
 
 
+class ExecSyntaxTests(unittest.TestCase):
+    """`exec`, output blocks, flattening, `goto`, `!`, static methods, the implicit `self` and
+    parameter defaults (section 2.3)."""
+
+    def test_goto_loops_back_to_a_named_node(self):
+        text = module("""
+func SayHiThreeTimes() {
+  local count: i32 = 0
+
+  node say_hi = Call host.Log(
+    .message <- "Hi!"
+  )
+
+  exec Entry()
+  exec say_hi
+  exec SetLocal count(
+    .value <- Add#<i32>(
+      .a <- GetLocal count()
+      .b <- 1
+    )
+  )
+  exec Branch(
+    .cond <- Ge#<i32>(
+      .a <- GetLocal count()
+      .b <- 3
+    )
+  ).then -> {
+    exec Return()
+  }.else
+  goto say_hi
+}
+""", macros=False)
+        self.assertEqual(print_module(parse(text)), text)
+        self.assertEqual(codes(text), [])
+        self.assertEqual(run(text, "SayHiThreeTimes")[1], ["Hi!"] * 3)
+        g = parse(text).graph("SayHiThreeTimes")
+        self.assertEqual([n.id for n in g.nodes if n.kind != "Add" and n.kind != "Ge"
+                          and n.kind != "GetLocal"], ["say_hi", "0", "2", "3", "3.then.0"])
+        # a goto target must be a named node; an unknown one is kept and reported
+        bad = text.replace("goto say_hi", "goto nowhere")
+        self.assertEqual(print_module(parse(bad)), bad)
+        self.assertIn("E0101", codes(bad))
+
+    def test_each_node_has_one_exec_point(self):
+        with self.assertRaises(ParseError) as cm:
+            parse(module("""
+func F() {
+  node log = Call host.Log()
+
+  exec Entry()
+  exec log
+  exec log
+}
+""", macros=False))
+        self.assertIn("goto log", cm.exception.msg)
+
+    def test_a_node_entered_twice_is_named_by_the_printer(self):
+        from wiret.model import ExecOut
+        text = module("""
+func F(c: bool) {
+  exec Entry()
+  exec Branch(
+    .cond <- c
+  ).then -> {
+    exec Call host.Log(
+      .message <- "yes"
+    )
+  }.else
+  exec Call host.Log(
+    .message <- "after"
+  )
+}
+""", macros=False)
+        m = parse(text)
+        g = m.graph("F")
+        g.node("1.then.0").execs.append(ExecOut(None, "2"))     # yes -> after
+        out = print_module(m)
+        self.assertIn("  node log = Call host.Log(\n    .message <- \"after\"\n  )\n", out)
+        # it is written where the branch's flattened else enters it, the then block goes to it
+        self.assertIn("      .message <- \"yes\"\n    )\n    goto log\n  }.else\n  exec log\n}\n", out)
+        self.assertEqual(print_module(parse(out)), out)
+        self.assertEqual(run(out, "F", 1)[1], ["yes", "after"])
+
+    def test_unreached_nodes_are_written_after_a_bang(self):
+        text = module("""
+func F() {
+  exec Entry()
+
+  @note("Declared, but its exec input is not wired.")
+  !exec Call host.Log(
+    .message <- "alone"
+  )
+
+  !{
+    @note("Wired to each other, but not to Entry.")
+    exec Call host.Log(
+      .message <- "a"
+    )
+    exec Call host.Log(
+      .message <- "b"
+    )
+  }
+
+  !Add#<i32>(
+    .a <- 1
+  )
+}
+""", macros=False)
+        m = parse(text)
+        self.assertEqual(print_module(m), text)
+        g = m.graph("F")
+        self.assertEqual(sorted(n.id for n in g.nodes), ["0", "~0", "~1.0", "~1.1", "~2"])
+        self.assertEqual(g.node("~1.0").execs[0].target, "~1.1")
+        self.assertEqual(run(text, "F")[1], [])
+        self.assertIn("W0301", codes(text))
+        # @disabled is different: the node is on the path and is skipped
+        skipped = module("""
+func F() {
+  exec Entry()
+  @disabled
+  exec Call host.Log(
+    .message <- "skipped"
+  )
+  exec Call host.Log(
+    .message <- "runs"
+  )
+}
+""", macros=False)
+        self.assertEqual(print_module(parse(skipped)), skipped)
+        self.assertEqual(run(skipped, "F")[1], ["runs"])
+
+    def test_output_blocks_bind_names_and_the_last_output_can_continue(self):
+        text = module("""
+func F() -> (n: i32) {
+  local total: i32
+
+  exec Entry()
+  exec Macro std.flow.ForRange(
+    .first <- 1
+    .last <- 100
+  ).each|index, break| -> {
+    exec SetLocal total(
+      .value <- Add#<i32>(
+        .a <- GetLocal total()
+        .b <- index
+      )
+    )
+    exec Branch(
+      .cond <- Ge#<i32>(
+        .a <- index
+        .b <- 4
+      )
+    ).then -> {
+      goto break
+    }
+  }.done
+  exec Return(
+    .n <- GetLocal total()
+  )
+}
+""", macros=False)
+        self.assertEqual(print_module(parse(text)), text)
+        self.assertEqual(codes(text), [])
+        self.assertEqual(run(text, "F")[0], [10])
+        # `.done` written as a block reads the same, and is kept as written
+        block = text.replace("  }.done\n  exec Return(\n    .n <- GetLocal total()\n  )\n",
+                             "  }.done -> {\n    exec Return(\n      .n <- GetLocal total()\n"
+                             "    )\n  }\n")
+        self.assertEqual(print_module(parse(block)), block)
+        self.assertEqual(semantic_hash(parse(block)), semantic_hash(parse(text)))
+        # a name an output block binds is only in that block: outside, it names nothing
+        outside = text.replace("    .n <- GetLocal total()\n", "    .n <- index\n")
+        self.assertIn("E0101", codes(outside))
+
+    def test_static_methods_implicit_self_and_defaults(self):
+        text = module("""
+class Counter {
+  n: i32
+
+  func Bump(self, by: i32 = 1) {
+    exec Entry()
+    exec SetField Counter.n(
+      .obj <- self
+      .value <- Add#<i32>(
+        .a <- GetField Counter.n(
+          .obj <- self
+        )
+        .b <- by
+      )
+    )
+  }
+
+  func Make(start: i32 = 5) -> (c: Counter) {
+    node c = New Counter()
+
+    exec Entry()
+    exec c
+    exec SetField Counter.n(
+      .obj <- c
+      .value <- start
+    )
+    exec Return(
+      .c <- c
+    )
+  }
+
+  func Twice(self) {
+    exec Entry()
+    exec Call Counter.Bump()
+    exec Call Counter.Bump(
+      .by <- 10
+    )
+  }
+}
+
+func Main() -> (n: i32) {
+  node c = Call Counter.Make()
+
+  exec Entry()
+  exec c
+  exec Call Counter.Twice(
+    .self <- c
+  )
+  exec Return(
+    .n <- GetField Counter.n(
+      .obj <- c
+    )
+  )
+}
+""", macros=False)
+        m = parse(text)
+        self.assertEqual(print_module(m), text)
+        self.assertEqual(codes(text), [])
+        self.assertEqual(run(text, "Main")[0], [16])          # 5 + 1 + 10
+        self.assertTrue(m.graph("Counter.Make").static)
+        self.assertFalse(m.graph("Counter.Bump").static)
+        # inside an instance method, a call to a method of its class takes its self
+        calls = [n for n in m.graph("Counter.Twice").nodes if n.kind == "Call"]
+        self.assertTrue(all(n.binding("self").value == PinRef("0", "self") for n in calls))
+        # a static method has no self
+        with self.assertRaises(ParseError) as cm:
+            parse(module("\nfunc F(self) {\n  exec Entry()\n}\n", macros=False))
+        self.assertIn("only a method", cm.exception.msg)
+
+    def test_extern_results_may_be_written_empty(self):
+        text = "wiret 1\nmodule t\n\nextern func host.Beep() -> ()\nextern func host.Log(message: string)\n"
+        self.assertEqual(print_module(parse(text)), text)
+        self.assertEqual(parse(text).items[0].results, [])
+        self.assertIsNone(parse(module("", macros=False)).items[0].results)
+
+    def test_commas_are_optional_after_a_new_line(self):
+        a = module("""
+func F() -> (x: i32, y: i32) {
+  exec Entry()
+  exec Return(
+    .x <- 1
+    .y <- 2
+  )
+}
+""", macros=False)
+        b = a.replace(".x <- 1\n", ".x <- 1,\n").replace(".y <- 2\n", ".y <- 2,\n")
+        c = a.replace("(\n    .x <- 1\n    .y <- 2\n  )", "(.x <- 1, .y <- 2)")
+        for text in (b, c):
+            self.assertEqual(print_module(parse(text)), a)
+        with self.assertRaises(ParseError):
+            parse(a.replace("(\n    .x <- 1\n    .y <- 2\n  )", "(.x <- 1 .y <- 2)"))
+
+
 TYPE_DECLS = """
 const MAX: i32 = 3
 
-#[doc("What an enemy is doing.")]
-enum Mode: u8 @id("en_k3f9") {
+@doc("What an enemy is doing.")
+@id("en_k3f9")
+enum Mode: u8 {
   Idle = 0
-  #[note("Moving towards the player.")]
-  Chase @id("m_c")
+  @note("Moving towards the player.")
+  @id("m_c") Chase
   Flee = 7
 }
 
 struct Empty {}
 
-#[doc("A point on the map.")]
+@doc("A point on the map.")
 struct Vec2 {
   y: f32 = 1.5
-  #[doc("Across.")]
-  x: f32 @id("f_x")
+  @doc("Across.")
+  @id("f_x") x: f32
   name: string = "origin"
 }
 
 func Main() {
-  flow {
-    entry -> log
-  }
-
   node entry = Entry()
   node log = Call host.Log(
-    .message <- "hi",
+    .message <- "hi"
   )
+
+  exec entry
+  exec log
 }
 """
 
@@ -577,18 +716,23 @@ class TypeDeclTests(unittest.TestCase):
 
     def test_items_sorted_by_kind_then_name_members_kept_in_order(self):
         text = module("""
-func Main() {
-  node entry = Entry()
+const K: i32 = 1
+
+enum E {
+  Second = 2
+  First = 1
 }
+
+struct A {}
+
 struct B {
   z: i32
   a: i32
 }
-struct A {}
-enum E { Second=2
-  First = 1
+
+func Main() {
+  exec Entry()
 }
-const K: i32 = 1
 """, macros=False)
         out = print_module(parse(text))
         body = out.split("extern func host.Log(message: string)\n", 1)[1]
@@ -608,7 +752,7 @@ struct B {
 }
 
 func Main() {
-  node entry = Entry()
+  exec Entry()
 }
 """)
 
@@ -629,16 +773,16 @@ func Main() {
     def test_unknown_attributes_on_members_are_e0104(self):
         text = module("""
 enum Mode {
-  Idle @doc("x")
+  @dok("x") Idle
 }
 
 struct P {
-  hp: i32 = 100 @bogus
+  @bogus hp: i32 = 100
 }
 """, macros=False)
         diags = [d for d in check(parse(text)) if d.code == "E0104"]
         self.assertEqual(len(diags), 2)
-        self.assertIn("#[doc(", diags[0].message)
+        self.assertIn("@doc", diags[0].message)
         self.assertIn("'P.hp'", diags[1].message)
 
     def test_parse_errors(self):
@@ -649,12 +793,13 @@ struct P {
                           ("enum E {\n  A B\n}\n", "end of line"),
                           ("struct S {\n  x\n}\n", "expected :"),
                           ("struct S {\n  x: i32 y: i32\n}\n", "end of line"),
-                          ("struct S::<T> {\n}\n", "no type parameters"),
-                          ("struct S {\n  #[doc(\"x\")]\n}\n", "directly above"),
-                          ("class C::<T> {\n}\n", "no type parameters"),
+                          ("struct S#<T> {\n}\n", "no type parameters"),
+                          ("struct S {\n  @doc(\"x\")\n}\n", "directly above"),
+                          ("class C#<T> {\n}\n", "no type parameters"),
                           ("class C {\n  macro M() {\n  }\n}\n", "module level"),
                           ("interface I {\n  x: i32\n}\n", "lists methods"),
-                          ("interface I {\n  func F() {\n  }\n}\n", "no body")):
+                          ("interface I {\n  func F(self) {\n  }\n}\n", "no body"),
+                          ("interface I {\n  func F()\n}\n", "(self")):
             with self.subTest(src):
                 with self.assertRaises(ParseError) as cm:
                     parse(module("\n" + src, macros=False))
@@ -683,11 +828,11 @@ struct Vec2 {
 }
 
 struct Path {
-  points: array::<Vec2>
+  points: array#<Vec2>
   mode: Mode
 }
 
-func Move(p: Vec2, ps: array::<Vec2>) -> (m: Mode) {
+func Move(p: Vec2, ps: array#<Vec2>) -> (m: Mode) {
   local last: Vec2
   node entry = Entry()
 }
@@ -700,7 +845,7 @@ func Move(p: Vec2, ps: array::<Vec2>) -> (m: Mode) {
         diags = self.diags("""
 struct S {
   a: Vector
-  b: array::<Nope>
+  b: array#<Nope>
   c: t.S
   d: exec
 }
@@ -742,7 +887,7 @@ struct Vec2 {}
 struct S {
   ok_int: i32 = 3
   ok_float: f64 = 1
-  ok_list: array::<i32> = null
+  ok_list: array#<i32> = null
   bad_text: i32 = "x"
   bad_range: u8 = 256
   bad_neg: u16 = -1
@@ -802,7 +947,7 @@ struct C {
 
 struct Tree {
   label: string
-  children: array::<Tree>
+  children: array#<Tree>
 }
 
 struct UsesA {
@@ -858,75 +1003,77 @@ struct Vec2 {
   y: f32 = 1.5
 }
 
-func Spawn() -> (e: Enemy) @pure {
-  flow {
-    entry -> r
-  }
-
+@pure
+func Spawn() -> (e: Enemy) {
   node entry = Entry()
   node r = Return(
     .e <- MakeStruct Enemy(
-      .pos <- MakeStruct Vec2(),
-      .mode <- Mode::Chase,
-    ),
+      .pos <- MakeStruct Vec2()
+      .mode <- Mode::Chase
+    )
   )
+
+  exec entry
+  exec r
 }
 
 func Step(e: Enemy) -> (out: Enemy, fleeing: bool) {
-  flow {
-    entry -> sw
-    sw.case0 -> r1
-    sw.case1 -> r1
-    sw.default -> r2
-  }
-
   node chased = WithField Enemy.pos(
-    .obj <- entry.e,
+    .obj <- entry.e
     .value <- MakeStruct Vec2(
-      .x <- Add::<f32>(
-        .a <- parts.x,
-        .b <- 1,
-      ),
-      .y <- parts.y,
-    ),
+      .x <- Add#<f32>(
+        .a <- parts.x
+        .b <- 1
+      )
+      .y <- parts.y
+    )
   )
   node entry = Entry()
   node mode = GetField Enemy.mode(
-    .obj <- entry.e,
+    .obj <- entry.e
   )
   node parts = BreakStruct Vec2(
     .obj <- GetField Enemy.pos(
-      .obj <- entry.e,
-    ),
+      .obj <- entry.e
+    )
   )
   node r1 = Return(
-    .out <- chased,
-    .fleeing <- Eq::<Mode>(
-      .a <- mode,
-      .b <- Mode::Flee,
-    ),
+    .out <- chased
+    .fleeing <- Eq#<Mode>(
+      .a <- mode
+      .b <- Mode::Flee
+    )
   )
   node r2 = Return(
-    .out <- entry.e,
-    .fleeing <- Lt::<Mode>(
-      .a <- mode,
-      .b <- Mode::Flee,
-    ),
+    .out <- entry.e
+    .fleeing <- Lt#<Mode>(
+      .a <- mode
+      .b <- Mode::Flee
+    )
   )
-  node sw = Switch::<Mode>(
-    .value <- Select::<Mode>(
-      .cond <- Eq::<Enemy>(
-        .a <- entry.e,
-        .b <- chased,
-      ),
-      .a <- Mode::Idle,
-      .b <- Convert::<u8, Mode>(
-        .value <- Convert::<Mode, u8>(
-          .value <- mode,
-        ),
-      ),
-    ),
-  ) @cases(Mode::Idle, Mode::Chase)
+  node sw = Switch#<Mode>#cases<2>(
+    .value <- Select#<Mode>(
+      .cond <- Eq#<Enemy>(
+        .a <- entry.e
+        .b <- chased
+      )
+      .a <- Mode::Idle
+      .b <- Convert#<u8, Mode>(
+        .value <- Convert#<Mode, u8>(
+          .value <- mode
+        )
+      )
+    )
+  )
+
+  exec entry
+  exec sw.case[0] Mode::Idle -> {
+    exec r1
+  }.case[1] Mode::Chase -> {
+    goto r1
+  }.default -> {
+    exec r2
+  }
 }
 """
 
@@ -951,13 +1098,13 @@ class StructNodeTests(unittest.TestCase):
         self.assertEqual(codes(text), [])
         g = m.graph("Step")
         self.assertEqual(g.node("r1.fleeing").binding("b").value.kind, "enum")
-        self.assertEqual(g.node("sw").attr("cases").args[1][1].kind, "enum")
+        self.assertEqual(g.node("sw").binding("case[1]").value, Lit("enum", "Mode.Chase"))
         enemy = next(it for it in m.items if it.name == "Enemy")
         self.assertEqual(enemy.field("mode").default.kind, "enum")
         # MakeStruct inputs default to the field's declared default, else to the zero value
-        spawn = parse(text.replace("    .mode <- Mode::Chase\n",
-                                   "    .mode <- Mode::Idle\n    .hp <- 10\n"))
-        self.assertEqual(print_module(spawn), text.replace("    .mode <- Mode::Chase\n", ""))
+        spawn = parse(text.replace("      .mode <- Mode::Chase\n",
+                                   "      .mode <- Mode::Idle\n      .hp <- 10\n"))
+        self.assertEqual(print_module(spawn), text.replace("      .mode <- Mode::Chase\n", ""))
 
     def test_pins(self):
         from wiret.registry import ModuleIndex, signature
@@ -982,7 +1129,7 @@ class StructNodeTests(unittest.TestCase):
   node b = GetField Nope.x()
   node c = GetField Mode.Idle()
   node d = GetField Enemy.zz()
-  node f = MakeStruct Vec2::<i32>()
+  node f = MakeStruct Vec2#<i32>()
   node g = MakeStruct Enemy.pos()
   node h = BreakStruct()
   node i = SetField Enemy.hp()
@@ -993,19 +1140,19 @@ class StructNodeTests(unittest.TestCase):
 
     def test_enum_values(self):
         self.assertEqual(self.graph_errors("""
-  node a = Eq::<Mode>(
+  node a = Eq#<Mode>(
     .a <- entry.m,
     .b <- Mode::Run,
   )
-  node b = Eq::<i32>(
+  node b = Eq#<i32>(
     .a <- 1,
     .b <- Mode::Idle,
   )
-  node c = Eq::<Mode>(
+  node c = Eq#<Mode>(
     .a <- entry.m,
     .b <- 1,
   )
-  node d = Eq::<Mode>(
+  node d = Eq#<Mode>(
     .a <- entry.m,
     .b <- Mood::Idle,
   )
@@ -1035,60 +1182,223 @@ func F(p: A = B::Y) {
 
     def test_enum_aware_kinds(self):
         self.assertEqual(self.graph_errors("""
-  node lt = Lt::<Mode>(
+  node lt = Lt#<Mode>(
     .a <- entry.m,
     .b <- Mode::Idle,
   )
-  node sel = Select::<Vec2>(
+  node sel = Select#<Vec2>(
     .a <- entry.v,
     .b <- entry.v,
   )
-  node eq = Eq::<Vec2>(
+  node eq = Eq#<Vec2>(
     .a <- entry.v,
     .b <- entry.v,
   )
-  node to_int = Convert::<Mode, u8>(
+  node to_int = Convert#<Mode, u8>(
     .value <- entry.m,
   )
-  node bad_lt = Lt::<Vec2>(
+  node bad_lt = Lt#<Vec2>(
     .a <- entry.v,
     .b <- entry.v,
   )
-  node bad_add = Add::<Mode>(
+  node bad_add = Add#<Mode>(
     .a <- entry.m,
     .b <- entry.m,
   )
-  node bad_conv = Convert::<Mode, i32>(
+  node bad_conv = Convert#<Mode, i32>(
     .value <- entry.m,
   )
-  node bad_text = Convert::<Mode, string>(
+  node bad_text = Convert#<Mode, string>(
     .value <- entry.m,
   )
-  node bad_struct = Convert::<Vec2, i32>(
+  node bad_struct = Convert#<Vec2, i32>(
     .value <- entry.v,
   )
 """), [("E0110", x, "") for x in ("bad_add", "bad_conv", "bad_lt", "bad_struct", "bad_text")])
 
     def test_switch_cases(self):
         self.assertEqual(self.graph_errors("""
-  node a = Switch::<Mode>(
+  node a = Switch#<Mode>#cases<3>(
     .value <- entry.m,
-  ) @cases(Mode::Idle, 3, Mode::Nope)
-  node b = Switch::<i32>(
+  )
+  node b = Switch#<i32>#cases<2>(
     .value <- 0,
-  ) @cases(1, "two")
-  node c = Switch::<u8>(
+  )
+  node c = Switch#<u8>#cases<1>(
     .value <- 0,
-  ) @cases(300)
+  )
   node Mode = Branch()
-"""), [("E0110", "a", "case1"), ("E0110", "b", "case1"),       # a node may be called Mode
-       ("E0110", "c", "case0"), ("E0501", "a", "case2")])
+
+  exec entry
+  exec a.case[0] Mode::Idle -> {}.case[1] 3 -> {}.case[2] Mode::Nope -> {}
+  !exec b.case[0] 1 -> {}.case[1] "two" -> {}
+  !exec c.case[0] 300 -> {}
+"""), [("E0110", "a", "case[1]"), ("E0110", "b", "case[1]"),       # a node may be called Mode
+       ("E0110", "c", "case[0]"), ("E0501", "a", "case[2]")])
+
+    def test_switch_case_values_follow_their_outputs(self):
+        # the old form, case values in #cases, says where they go now
+        diags = check(parse(module("""
+enum Mode {
+  Idle
+}
+
+func G(m: Mode) {
+  exec Entry()
+  exec Switch#<Mode>#cases<Mode::Idle>(
+    .value <- m
+  )
+}
+""", macros=False)))
+        d = next(d for d in diags if d.code == "E0502")
+        self.assertIn("'.case[0] Mode::Idle -> { ... }'", d.message)
+        # a value on an output that takes none, and a case with no value
+        text = module("""
+func G(v: i32) {
+  exec Entry()
+  exec Branch(
+    .cond <- true
+  ).true 3 -> {}
+  !exec Switch#<i32>#cases<1>(
+    .value <- v
+  ).case[0] -> {}
+}
+""", macros=False)
+        diags = check(parse(text))
+        self.assertIn(("E0103", "true"), [(d.code, d.pin) for d in diags])
+        w = next(d for d in diags if d.code == "W0201")
+        self.assertEqual(w.pin, "case[0]")
+        self.assertIn("never taken", w.message)
+
+    def test_indexed_outputs_are_written_with_brackets(self):
+        text = module("""
+func G() {
+  exec Entry()
+  exec Sequence#count<2>().then0 -> {
+    exec Call host.Log(
+      .message <- "hi"
+    )
+  }
+}
+""", macros=False)
+        d = next(d for d in check(parse(text)) if d.code == "E0103")
+        self.assertIn("'then[0]'", d.message)
+        with self.assertRaises(ParseError) as cm:
+            parse(text.replace(".then0", ".then[x]"))
+        self.assertIn("'then[0]'", cm.exception.msg)
+
+    def test_make_array_items_are_indexed(self):
+        """MakeArray's inputs are indexed too, `.item[0] <- ...`; the old `.item0` says so."""
+        text = module("""
+func G() -> (n: i32) = ArrayLength#<i32>(
+  .array <- MakeArray#<i32>#count<3>(
+    .item[0] <- 1
+    .item[1] <- 2
+    .item[2] <- 3
+  )
+)
+""", macros=False)
+        self.assertEqual(print_module(parse(text)), text)
+        self.assertEqual(codes(text), [])
+        self.assertEqual(run(text, "G")[0], [3])
+        old = text.replace(".item[0]", ".item0")
+        d = next(d for d in check(parse(old)) if d.code == "E0103")
+        self.assertIn("'item[0]'", d.message)
+
+    def test_case_rows_line_up_and_default_is_set_apart(self):
+        """A case's value sits on its output's row; a line divides the cases from default,
+        and the Add pin button comes last (viewmodel.pin_rows, both canvases)."""
+        from wiret.registry import ModuleIndex, signature
+        from wiret.viewmodel import pin_rows
+        m = parse(lesson("08_structs.wiret"))
+        g = m.graph("Show")
+        n = next(n for n in g.nodes if n.kind == "Switch")
+        r = pin_rows(n, signature(n, g, ModuleIndex(m)))
+        rows = [(p and p.name, o and o.name) for p, o, _ in r["rows"]]
+        self.assertEqual(rows, [("in", None), ("value", None), ("case[0]", "case[0]"),
+                                ("case[1]", "case[1]"), (None, "default")])
+        ys = [y for _, _, y in r["rows"]]
+        self.assertLess(ys[3], r["rule"])
+        self.assertLess(r["rule"], ys[4])
+        self.assertLess(ys[4], r["add"])
+        self.assertLess(r["add"], r["height"])
+        # a node with no indexed outputs has neither
+        b = next(x for x in g.nodes if x.kind == "BreakStruct")
+        plain = pin_rows(b, signature(b, g, ModuleIndex(m)))
+        self.assertIsNone(plain["rule"])
+        self.assertIsNone(plain["add"])
+        # what the web canvas gets: the rows, the line, and a remove button on each case
+        from wiret.checker import GraphInfo
+        from wiret.viewmodel import graph_json
+        idx = ModuleIndex(m)
+        web = next(x for x in graph_json(g, GraphInfo(g, idx), idx)["nodes"] if x["id"] == n.id)
+        self.assertEqual([r[:2] for r in web["rows"]], [list(r) for r in rows])
+        self.assertEqual((web["rule"], web["addPin"]), (r["rule"], r["add"]))
+        self.assertEqual({o["name"]: o["removable"] for o in web["outs"]},
+                         {"case[0]": True, "case[1]": True, "default": False})
+        self.assertEqual([p["label"] for p in web["ins"]][2:], ["", ""])
+
+    def test_switch_case_values_may_be_wired(self):
+        """A case's value is an input: a literal, or a wire from a node or a parameter, read
+        when the Switch runs (section 3.3)."""
+        text = module("""
+func Pick(v: i32, lim: i32) -> (r: string) {
+  exec Entry()
+  exec Switch#<i32>#cases<3>(
+    .value <- v
+  ).case[0] lim -> {
+    exec Return(
+      .r <- "lim"
+    )
+  }.case[1] Add#<i32>(
+    .a <- lim
+    .b <- 1
+  ) -> {
+    exec Return(
+      .r <- "lim+1"
+    )
+  }.case[2] 0 -> {}.default -> {
+    exec Return(
+      .r <- "other"
+    )
+  }
+}
+""", macros=False)
+        self.assertEqual(print_module(parse(text)), text)
+        self.assertEqual(codes(text), [])
+        self.assertEqual(run(text, "Pick", 5, 5)[0], ["lim"])
+        self.assertEqual(run(text, "Pick", 6, 5)[0], ["lim+1"])
+        self.assertEqual(run(text, "Pick", 7, 5)[0], ["other"])
+        self.assertEqual(run(text, "Pick", 0, 5)[0], [""])     # case[2]: nothing wired
+
+    def test_bindings_between_bars_on_named_nodes(self):
+        """A named node's block may bind its outputs by name too, as a shorthand for
+        `loop.index` (section 2.3)."""
+        text = module("""
+func Main() {
+  node loop = Macro ForRange(
+    .first <- 0
+    .last <- 2
+  )
+
+  exec Entry()
+  exec loop.each|index| -> {
+    exec Call host.Log(
+      .message <- Convert#<i32,string>(
+        .value <- index
+      )
+    )
+  }
+}
+""")
+        self.assertEqual(codes(text), [])
+        self.assertEqual(run(text, "Main")[1], ["0", "1", "2"])
 
     def test_enum_value_literals(self):
         from wiret.parser import parse_literal
         lit = parse_literal("Mode::Chase")
         self.assertEqual((lit.kind, lit.value), ("enum", "Mode.Chase"))
-        self.assertEqual(parse_literal("Mode.Chase"), lit)              # Draft 0.11 spelling
+
         with self.assertRaises(ParseError) as cm:
             parse_literal("a.b.c")
         self.assertIn("Enum::Member", cm.exception.msg)
@@ -1102,21 +1412,20 @@ struct Vec2 {
 func Main() {
   node entry = Entry()
   node v = MakeStruct Vec2(
-    .x <- 2,
+    .x <- 2
   )
   node x = GetField Vec2.x(
-    .obj <- v.result,
+    .obj <- v
   )
-  node text = Convert::<f32, string>(
-    .value <- x.value,
+  node text = Convert#<f32, string>(
+    .value <- x
   )
   node log = Call host.Log(
-    .message <- text.result,
+    .message <- text
   )
 
-  flow {
-    entry -> log
-  }
+  exec entry
+  exec log
 }
 """, macros=False)
         self.assertEqual(codes(text), [])
@@ -1132,23 +1441,25 @@ func Main() {
         text = module(types + """
 var bad: Mode = Mode::Zip
 
-func G(e: Enemy, v: Vec2, m: Mode, p: Mode = Other.X) {
+func G(e: Enemy, v: Vec2, m: Mode, p: Mode = Other::X) {
   node entry = Entry()
   node a = GetField Enemy()
   node b = GetField Nope.x()
   node c = GetField Mode.Idle()
   node d = GetField Enemy.zz()
-  node f = MakeStruct Vec2::<i32>()
+  node f = MakeStruct Vec2#<i32>()
   node g = MakeStruct Enemy.pos()
   node i = SetField Enemy.hp()
-  node j = Eq::<i32>(
+  node j = Eq#<i32>(
     .a <- 1,
     .b <- Mode::Idle,
   )
-  node k = Switch::<Mode>(
+  node k = Switch#<Mode>#cases<2>(
     .value <- entry.m,
-  ) @cases(Mode::Idle, 3)
+  )
   node Mode = Branch()
+
+  !exec k.case[0] Mode::Idle -> {}.case[1] 3 -> {}
 }
 """, macros=False)
         diags = [d for d in check(parse(text)) if d.severity == "error"]
@@ -1165,7 +1476,6 @@ STRUCT_DATA = """
 const START: Mode = Mode::Chase
 
 var best: Enemy
-
 var mode: Mode = Mode::Flee
 
 enum Mode: u8 {
@@ -1186,12 +1496,12 @@ struct Enemy {
 }
 
 struct Path {
-  points: array::<Vec2>
+  points: array#<Vec2>
 }
 
 struct Tree {
   label: string
-  children: array::<Tree>
+  children: array#<Tree>
 }
 
 struct Vec2 {
@@ -1201,141 +1511,142 @@ struct Vec2 {
 
 func Defaults() -> (local_e: Enemy, global_e: Enemy, m: Mode, s: Mode, made: Enemy) {
   local e: Enemy
+
   node entry = Entry()
   node ge = GetVar best()
   node gm = GetVar mode()
   node le = GetLocal e()
   node mk = MakeStruct Enemy()
   node r = Return(
-    .local_e <- le.value,
-    .global_e <- ge.value,
-    .m <- gm.value,
-    .s <- st.value,
-    .made <- mk.result,
+    .local_e <- le
+    .global_e <- ge
+    .m <- gm
+    .s <- st
+    .made <- mk
   )
   node st = GetVar START()
 
-  flow {
-    entry -> r
-  }
+  exec entry
+  exec r
 }
 
 func Equal(a: Enemy, b: Enemy) -> (eq: bool, ne: bool) {
   node entry = Entry()
-  node eq = Eq::<Enemy>(
-    .a <- entry.a,
-    .b <- entry.b,
+  node eq = Eq#<Enemy>(
+    .a <- entry.a
+    .b <- entry.b
   )
-  node ne = Ne::<Enemy>(
-    .a <- entry.a,
-    .b <- entry.b,
+  node ne = Ne#<Enemy>(
+    .a <- entry.a
+    .b <- entry.b
   )
   node r = Return(
-    .eq <- eq.result,
-    .ne <- ne.result,
+    .eq <- eq
+    .ne <- ne
   )
 
-  flow {
-    entry -> r
-  }
+  exec entry
+  exec r
 }
 
 func Far() -> (w: Wide, back: i64) {
   node entry = Entry()
-  node to_int = Convert::<Wide, i64>(
-    .value <- Wide::Far,
+  node to_int = Convert#<Wide, i64>(
+    .value <- Wide::Far
   )
   node r = Return(
-    .w <- Wide::Far,
-    .back <- to_int.result,
+    .w <- Wide::Far
+    .back <- to_int
   )
 
-  flow {
-    entry -> r
-  }
+  exec entry
+  exec r
 }
 
 func Leaf(name: string) -> (t: Tree) {
   node entry = Entry()
   node r = Return(
-    .t <- tree.result,
+    .t <- tree
   )
   node tree = MakeStruct Tree(
-    .label <- entry.name,
+    .label <- entry.name
   )
 
-  flow {
-    entry -> r
-  }
-}
-
-func Points(n: i32) -> (path: Path, last_x: f32, count: i32) {
-  local pts: array::<Vec2>
-  node add = ArrayAdd::<Vec2> pts(
-    .item <- point.result,
-  )
-  node entry = Entry()
-  node get = ArrayGet::<Vec2>(
-    .array <- now.value,
-    .index <- last.result,
-  )
-  node last = Sub::<i32>(
-    .a <- len.length,
-    .b <- 1,
-  )
-  node len = ArrayLength::<Vec2>(
-    .array <- now.value,
-  )
-  node loop = Macro std.flow.ForRange(
-    .first <- 0,
-    .last <- entry.n,
-  )
-  node now = GetLocal pts()
-  node path = MakeStruct Path(
-    .points <- now.value,
-  )
-  node point = MakeStruct Vec2(
-    .x <- x.result,
-  )
-  node r = Return(
-    .path <- path.result,
-    .last_x <- x_of.value,
-    .count <- len.length,
-  )
-  node x = Convert::<i32, f32>(
-    .value <- loop.index,
-  )
-  node x_of = GetField Vec2.x(
-    .obj <- get.item,
-  )
-
-  flow {
-    entry -> loop
-    loop.each -> add
-    loop.done -> r
-  }
+  exec entry
+  exec r
 }
 
 func Pick(m: Mode) -> (word: string) {
   node chase = Return(
-    .word <- "chase",
+    .word <- "chase"
   )
   node entry = Entry()
   node other = Return(
-    .word <- "other",
+    .word <- "other"
   )
-  node sw = Switch::<Mode>(
-    .value <- entry.m,
-  ) @cases(Mode::Idle, Mode::Chase)
+  node sw = Switch#<Mode>#cases<2>(
+    .value <- entry.m
+  )
   node wait = Return(
-    .word <- "wait",
+    .word <- "wait"
   )
 
-  flow {
-    entry -> sw
-    sw.case0 -> wait
-    sw.case1 -> chase
-    sw.default -> other
+  exec entry
+  exec sw.case[0] Mode::Idle -> {
+    exec wait
+  }.case[1] Mode::Chase -> {
+    exec chase
+  }.default -> {
+    exec other
+  }
+}
+
+func Points(n: i32) -> (path: Path, last_x: f32, count: i32) {
+  local pts: array#<Vec2>
+
+  node add = ArrayAdd#<Vec2> pts(
+    .item <- point
+  )
+  node entry = Entry()
+  node get = ArrayGet#<Vec2>(
+    .array <- now
+    .index <- last
+  )
+  node last = Sub#<i32>(
+    .a <- len
+    .b <- 1
+  )
+  node len = ArrayLength#<Vec2>(
+    .array <- now
+  )
+  node loop = Macro std.flow.ForRange(
+    .first <- 0
+    .last <- entry.n
+  )
+  node now = GetLocal pts()
+  node path = MakeStruct Path(
+    .points <- now
+  )
+  node point = MakeStruct Vec2(
+    .x <- x
+  )
+  node r = Return(
+    .path <- path
+    .last_x <- x_of
+    .count <- len
+  )
+  node x = Convert#<i32, f32>(
+    .value <- loop.index
+  )
+  node x_of = GetField Vec2.x(
+    .obj <- get
+  )
+
+  exec entry
+  exec loop.each -> {
+    exec add
+  }.done -> {
+    exec r
   }
 }
 """
@@ -1371,7 +1682,7 @@ class StructRunTests(unittest.TestCase):
             with self.subTest(b=b):
                 self.assertEqual(self.call("Equal", a, b), [0, 1])
         nan = ((math.nan, 2.0), 1, 10, "a")
-        self.assertEqual(self.call("Equal", nan, nan), [0, 1])   # as Eq::<f32> on NaN
+        self.assertEqual(self.call("Equal", nan, nan), [0, 1])   # as Eq#<f32> on NaN
 
     def test_arrays_of_structs_and_recursive_types(self):
         path, last_x, count = self.call("Points", 3)
@@ -1497,12 +1808,12 @@ class StructEditorTests(unittest.TestCase):
     def test_palette_offers_struct_and_enum_nodes(self):
         labels = self.labels()
         for label in ("Make Vec2", "Break Enemy", "Get Enemy.mode", "With Vec2.y (changed copy)",
-                      "Switch::<Mode>", "Eq::<Enemy>", "Lt::<Mode>", "Select::<Tree>",
-                      "MakeArray::<Vec2>", "Convert::<Mode, u8> (to whole number)",
-                      "Convert::<u8, Mode> (to a Mode)", "Eq::<Path>", "Ne::<array::<Vec2>>"):
+                      "Switch#<Mode>", "Eq#<Enemy>", "Lt#<Mode>", "Select#<Tree>",
+                      "MakeArray#<Vec2>", "Convert#<Mode, u8> (to whole number)",
+                      "Convert#<u8, Mode> (to a Mode)", "Eq#<Path>", "Ne#<array#<Vec2>>"):
             with self.subTest(label):
                 self.assertIn(label, labels)
-        for label in ("Lt::<Vec2>", "Add::<Mode>", "Convert::<Mode, i32> (to whole number)"):
+        for label in ("Lt#<Vec2>", "Add#<Mode>", "Convert#<Mode, i32> (to whole number)"):
             with self.subTest(label):
                 self.assertNotIn(label, labels)
         self.assertEqual(labels["Make Vec2"].category, "Structs")
@@ -1511,8 +1822,8 @@ class StructEditorTests(unittest.TestCase):
 
     def test_struct_docs_reach_the_palette(self):
         from wiret import palette
-        src = (STRUCT_NODES.replace("struct Vec2 {", '#[doc("A point.")]\nstruct Vec2 {')
-               .replace("  x: f32\n", '  #[doc("Across.")]\n  x: f32\n'))
+        src = (STRUCT_NODES.replace("struct Vec2 {", '@doc("A point.")\nstruct Vec2 {')
+               .replace("  x: f32\n", '  @doc("Across.")\n  x: f32\n'))
         m = parse(module(src, macros=False))
         from wiret.registry import ModuleIndex
         idx = ModuleIndex(m)
@@ -1523,7 +1834,7 @@ class StructEditorTests(unittest.TestCase):
         from wiret import palette
         fits = {it.label for it in palette.items(self.g, self.idx)
                 if palette.compatible(it, self.g, self.idx, "out", "Vec2") is not None}
-        for label in ("Break Vec2", "Get Vec2.x", "With Vec2.x (changed copy)", "Eq::<Vec2>"):
+        for label in ("Break Vec2", "Get Vec2.x", "With Vec2.x (changed copy)", "Eq#<Vec2>"):
             self.assertIn(label, fits)
         self.assertNotIn("Break Enemy", fits)
         into = {it.label for it in palette.items(self.g, self.idx)
@@ -1532,13 +1843,13 @@ class StructEditorTests(unittest.TestCase):
 
     def test_pin_colours(self):
         from wiret.viewmodel import type_color
-        self.assertEqual(type_color("array::<i32>"), "#f0a830")
+        self.assertEqual(type_color("array#<i32>"), "#f0a830")
         self.assertNotEqual(type_color("Vec2", self.idx), type_color("Vec2"))
         self.assertNotEqual(type_color("Mode", self.idx), type_color("Vec2", self.idx))
 
 
 CONTAINERS = """
-var seen: set::<i32>
+var seen: set#<i32>
 
 struct Cell {
   x: i32
@@ -1546,236 +1857,238 @@ struct Cell {
 }
 
 struct Grid {
-  cells: map::<Cell, string>
+  cells: map#<Cell, string>
 }
 
-func Count(words: array::<string>) -> (counts: map::<string, i32>, n: i32, first: string, firstn: i32) {
-  local m: map::<string, i32>
-  node add = MapSet::<string, i32> m(
-    .key <- w.item,
-    .value <- plus.result,
+func Count(words: array#<string>) -> (counts: map#<string, i32>, n: i32, first: string, firstn: i32) {
+  local m: map#<string, i32>
+
+  node add = MapSet#<string, i32> m(
+    .key <- w.item
+    .value <- plus
   )
   node cur = GetLocal m()
   node entry = Entry()
-  node find = MapFind::<string, i32>(
-    .map <- cur.value,
-    .key <- w.item,
+  node find = MapFind#<string, i32>(
+    .map <- cur
+    .key <- w.item
   )
-  node k0 = MapKeyAt::<string, i32>(
-    .map <- cur.value,
-    .index <- 0,
+  node k0 = MapKeyAt#<string, i32>(
+    .map <- cur
+    .index <- 0
   )
-  node len = MapLength::<string, i32>(
-    .map <- cur.value,
+  node len = MapLength#<string, i32>(
+    .map <- cur
   )
-  node plus = Add::<i32>(
-    .a <- find.value,
-    .b <- 1,
+  node plus = Add#<i32>(
+    .a <- find.value
+    .b <- 1
   )
   node r = Return(
-    .counts <- cur.value,
-    .n <- len.length,
-    .first <- k0.key,
-    .firstn <- v0.value,
+    .counts <- cur
+    .n <- len
+    .first <- k0
+    .firstn <- v0
   )
-  node v0 = MapValueAt::<string, i32>(
-    .map <- cur.value,
-    .index <- 0,
+  node v0 = MapValueAt#<string, i32>(
+    .map <- cur
+    .index <- 0
   )
-  node w = Macro std.flow.ForEach::<string>(
-    .array <- entry.words,
+  node w = Macro std.flow.ForEach#<string>(
+    .array <- entry.words
   )
 
-  flow {
-    entry -> w
-    w.each -> add
-    w.done -> r
+  exec entry
+  exec w.each -> {
+    exec add
+  }.done -> {
+    exec r
   }
 }
 
-func Describe(m: map::<string, i32>) -> (text: string) {
+func Describe(m: map#<string, i32>) -> (text: string) {
   local acc: string
+
   node add = SetLocal acc(
-    .value <- line.result,
+    .value <- line
   )
   node entry = Entry()
   node eq = Call std.string.Concat(
-    .a <- loop.key,
-    .b <- "=",
+    .a <- loop.key
+    .b <- "="
   )
   node kv = Call std.string.Concat(
-    .a <- eq.result,
-    .b <- num.result,
+    .a <- eq
+    .b <- num
   )
   node line = Call std.string.Concat(
-    .a <- old.value,
-    .b <- kv.result,
+    .a <- old
+    .b <- kv
   )
-  node loop = Macro std.flow.ForEachMap::<string, i32>(
-    .map <- entry.m,
+  node loop = Macro std.flow.ForEachMap#<string, i32>(
+    .map <- entry.m
   )
-  node num = Convert::<i32, string>(
-    .value <- loop.value,
+  node num = Convert#<i32, string>(
+    .value <- loop.value
   )
   node old = GetLocal acc()
   node r = Return(
-    .text <- old.value,
+    .text <- old
   )
 
-  flow {
-    entry -> loop
-    loop.done -> r
-    loop.each -> add
+  exec entry
+  exec loop.each -> {
+    exec add
+  }.done -> {
+    exec r
   }
 }
 
-func Remember(x: i32) -> (added: bool, size: i32, has: bool, removed: bool) {
-  node add = SetAdd::<i32> seen(
-    .item <- entry.x,
-  )
-  node entry = Entry()
-  node has = SetHas::<i32>(
-    .set <- now.value,
-    .item <- entry.x,
-  )
-  node now = GetVar seen()
-  node r = Return(
-    .added <- add.added,
-    .size <- size.length,
-    .has <- has.result,
-    .removed <- rm.removed,
-  )
-  node rm = SetRemove::<i32> seen(
-    .item <- 999,
-  )
-  node size = SetLength::<i32>(
-    .set <- now.value,
-  )
+func Missing(m: map#<string, i32>, key: string) -> (value: i32, found: bool, removed: bool, left: i32) {
+  local copy: map#<string, i32>
 
-  flow {
-    add -> rm
-    entry -> add
-    rm -> r
-  }
-}
-
-func Missing(m: map::<string, i32>, key: string) -> (value: i32, found: bool, removed: bool, left: i32) {
-  local copy: map::<string, i32>
   node entry = Entry()
-  node find = MapFind::<string, i32>(
-    .map <- entry.m,
-    .key <- entry.key,
+  node find = MapFind#<string, i32>(
+    .map <- entry.m
+    .key <- entry.key
   )
   node keep = SetLocal copy(
-    .value <- entry.m,
+    .value <- entry.m
   )
-  node left = MapLength::<string, i32>(
-    .map <- now.value,
+  node left = MapLength#<string, i32>(
+    .map <- now
   )
   node now = GetLocal copy()
   node r = Return(
-    .value <- find.value,
-    .found <- find.found,
-    .removed <- rm.removed,
-    .left <- left.length,
+    .value <- find.value
+    .found <- find.found
+    .removed <- rm
+    .left <- left
   )
-  node rm = MapRemove::<string, i32> copy(
-    .key <- entry.key,
-  )
-
-  flow {
-    entry -> keep
-    keep -> rm
-    rm -> r
-  }
-}
-
-func Place(g: Grid, x: i32, y: i32) -> (g2: Grid, what: string, found: bool) {
-  local cells: map::<Cell, string>
-  node at = MakeStruct Cell(
-    .x <- entry.x,
-    .y <- entry.y,
-  )
-  node entry = Entry()
-  node find = MapFind::<Cell, string>(
-    .map <- now.value,
-    .key <- at.result,
-  )
-  node get = GetField Grid.cells(
-    .obj <- entry.g,
-  )
-  node load = SetLocal cells(
-    .value <- get.value,
-  )
-  node now = GetLocal cells()
-  node put = MapSet::<Cell, string> cells(
-    .key <- at.result,
-    .value <- "tree",
-  )
-  node r = Return(
-    .g2 <- out.result,
-    .what <- find.value,
-    .found <- find.found,
-  )
-  node out = WithField Grid.cells(
-    .obj <- entry.g,
-    .value <- now.value,
+  node rm = MapRemove#<string, i32> copy(
+    .key <- entry.key
   )
 
-  flow {
-    entry -> load
-    load -> put
-    put -> r
-  }
+  exec entry
+  exec keep
+  exec rm
+  exec r
 }
 
 func Nans() -> (size: i32) {
-  local s: set::<f64>
-  node a = SetAdd::<f64> s(
-    .item <- nan.result,
+  local s: set#<f64>
+
+  node a = SetAdd#<f64> s(
+    .item <- nan
   )
-  node b = SetAdd::<f64> s(
-    .item <- nan.result,
+  node b = SetAdd#<f64> s(
+    .item <- nan
   )
   node entry = Entry()
-  node nan = Div::<f64>(
-    .a <- 0.0,
-    .b <- 0.0,
+  node nan = Div#<f64>(
+    .a <- 0.0
+    .b <- 0.0
   )
   node now = GetLocal s()
   node r = Return(
-    .size <- size.length,
+    .size <- size
   )
-  node size = SetLength::<f64>(
-    .set <- now.value,
+  node size = SetLength#<f64>(
+    .set <- now
   )
 
-  flow {
-    a -> b
-    b -> r
-    entry -> a
-  }
+  exec entry
+  exec a
+  exec b
+  exec r
 }
 
-func OutOfRange(m: map::<string, i32>) -> (k: string) {
-  node at = MapKeyAt::<string, i32>(
-    .map <- entry.m,
-    .index <- 5,
+func OutOfRange(m: map#<string, i32>) -> (k: string) {
+  node at = MapKeyAt#<string, i32>(
+    .map <- entry.m
+    .index <- 5
   )
   node entry = Entry()
   node r = Return(
-    .k <- at.key,
+    .k <- at
   )
 
-  flow {
-    entry -> r
-  }
+  exec entry
+  exec r
+}
+
+func Place(g: Grid, x: i32, y: i32) -> (g2: Grid, what: string, found: bool) {
+  local cells: map#<Cell, string>
+
+  node at = MakeStruct Cell(
+    .x <- entry.x
+    .y <- entry.y
+  )
+  node entry = Entry()
+  node find = MapFind#<Cell, string>(
+    .map <- now
+    .key <- at
+  )
+  node get = GetField Grid.cells(
+    .obj <- entry.g
+  )
+  node load = SetLocal cells(
+    .value <- get
+  )
+  node now = GetLocal cells()
+  node put = MapSet#<Cell, string> cells(
+    .key <- at
+    .value <- "tree"
+  )
+  node r = Return(
+    .g2 <- out
+    .what <- find.value
+    .found <- find.found
+  )
+  node out = WithField Grid.cells(
+    .obj <- entry.g
+    .value <- now
+  )
+
+  exec entry
+  exec load
+  exec put
+  exec r
+}
+
+func Remember(x: i32) -> (added: bool, size: i32, has: bool, removed: bool) {
+  node add = SetAdd#<i32> seen(
+    .item <- entry.x
+  )
+  node entry = Entry()
+  node has = SetHas#<i32>(
+    .set <- now
+    .item <- entry.x
+  )
+  node now = GetVar seen()
+  node r = Return(
+    .added <- add
+    .size <- size
+    .has <- has
+    .removed <- rm
+  )
+  node rm = SetRemove#<i32> seen(
+    .item <- 999
+  )
+  node size = SetLength#<i32>(
+    .set <- now
+  )
+
+  exec entry
+  exec add
+  exec rm
+  exec r
 }
 """
 
 
 class ContainerTests(unittest.TestCase):
-    """set::<T> and map::<K, V>: insertion-ordered value types (sections 3.1, 3.3, 5.6)."""
+    """set#<T> and map#<K, V>: insertion-ordered value types (sections 3.1, 3.3, 5.6)."""
 
     @classmethod
     def setUpClass(cls):
@@ -1792,7 +2105,7 @@ class ContainerTests(unittest.TestCase):
     def test_canonical_and_clean(self):
         self.assertEqual(print_module(parse(self.text)), self.text)
         self.assertEqual(codes(self.text), [])
-        self.assertIn("  node add = MapSet::<string, i32> m(\n", self.text)
+        self.assertIn("MapSet#<string, i32> m", self.text)
 
     def test_maps_keep_insertion_order(self):
         counts, n, first, firstn = self.call("Count", ("b", "a", "b", "c", "b"))
@@ -1829,30 +2142,44 @@ class ContainerTests(unittest.TestCase):
 
     def test_errors(self):
         bad = module("""
+var s: set#<i32>
+
 struct Tree {
   label: string
-  kids: array::<Tree>
+  kids: array#<Tree>
 }
 
-var s: set::<i32>
+@pure
+func F(a: map#<array#<i32>, i32>, b: set#<Tree>, c: map#<string, Tree>) -> (y: i32) {
+  local m: map#<string, i32>
 
-func F(a: map::<array::<i32>, i32>, b: set::<Tree>, c: map::<string, Tree>) -> (y: i32) @pure {
-  local m: map::<string, i32>
   node entry = Entry()
-  node f1 = MapFind::<i32>(
-    .key <- 1,
+  node f1 = MapFind#<i32>(
+    .key <- 1
   )
-  node m1 = MapSet::<string, i32>(
-    .key <- "a",
-    .value <- 1,
+  node m1 = MapSet#<string, i32>(
+    .key <- "a"
+    .value <- 1
   )
-  node m2 = MapSet::<string, f32> m(
-    .key <- "a",
+  node m2 = MapSet#<string, f32> m(
+    .key <- "a"
   )
-  node s1 = SetAdd::<i32> s(
-    .item <- 1,
+  node s1 = SetAdd#<i32> s(
+    .item <- 1
   )
-  node s2 = SetHas::<Tree>()
+  node s2 = SetHas#<Tree>()
+
+  exec entry
+
+  !exec f1
+
+  !exec m1
+
+  !exec m2
+
+  !exec s1
+
+  !exec s2
 }
 """, macros=False)
         found = sorted((d.code, d.graph, d.node or "") for d in check(parse(bad))
@@ -1922,12 +2249,12 @@ func F(a: map::<array::<i32>, i32>, b: set::<Tree>, c: map::<string, Tree>) -> (
         m = parse(self.text)
         idx = ModuleIndex(m)
         labels = {it.label for it in palette.items(m.graph("Count"), idx)}
-        for label in ("MapFind::<string, i32>", "MapSet m", "MapRemove m", "SetAdd seen",
-                      "SetHas::<i32>", "MapFind::<Cell, string>",
-                      "Macro std.flow.ForEachMap::<string, i32>"):
+        for label in ("MapFind#<string, i32>", "MapSet m", "MapRemove m", "SetAdd seen",
+                      "SetHas#<i32>", "MapFind#<Cell, string>",
+                      "Macro std.flow.ForEachMap#<string, i32>"):
             with self.subTest(label):
                 self.assertIn(label, labels)
-        self.assertFalse(any("ForEachMap::<i32, i32>" in x for x in labels))
+        self.assertFalse(any("ForEachMap#<i32, i32>" in x for x in labels))
 
 
 IDS_SRC = """wiret 1
@@ -1940,19 +2267,18 @@ struct Vec2 {
 func Add1(v: i32) -> (r: i32, s: i32) {
   local tmp: i32
 
-  flow {
-    entry -> ret
-  }
-
   node entry = Entry()
-  node plus = Add::<i32>(
-    .a <- entry.v,
-    .b <- 1,
+  node plus = Add#<i32>(
+    .a <- entry.v
+    .b <- 1
   )
   node ret = Return(
-    .r <- plus,
-    .s <- plus,
+    .r <- plus
+    .s <- plus
   )
+
+  exec entry
+  exec ret
 }
 """
 
@@ -1974,16 +2300,33 @@ def make_project(root, text=IDS_SRC, ids=""):
 
 
 EQUALITY = """
+struct Path {
+  name: string
+  points: array#<Vec2>
+}
+
 struct Vec2 {
   x: f64
   y: f64
 }
-
-struct Path {
-  name: string
-  points: array::<Vec2>
-}
-""" + "".join(['\nfunc Arrays(a: array::<f64>, b: array::<f64>) -> (eq: bool, ne: bool) {\n  node entry = Entry()\n  node eq = Eq::<array::<f64>>(\n    .a <- entry.a,\n    .b <- entry.b,\n  )\n  node ne = Ne::<array::<f64>>(\n    .a <- entry.a,\n    .b <- entry.b,\n  )\n  node r = Return(\n    .eq <- eq.result,\n    .ne <- ne.result,\n  )\n\n  flow {\n    entry -> r\n  }\n}\n', '\nfunc Nested(a: array::<array::<i32>>, b: array::<array::<i32>>) -> (eq: bool, ne: bool) {\n  node entry = Entry()\n  node eq = Eq::<array::<array::<i32>>>(\n    .a <- entry.a,\n    .b <- entry.b,\n  )\n  node ne = Ne::<array::<array::<i32>>>(\n    .a <- entry.a,\n    .b <- entry.b,\n  )\n  node r = Return(\n    .eq <- eq.result,\n    .ne <- ne.result,\n  )\n\n  flow {\n    entry -> r\n  }\n}\n', '\nfunc Maps(a: map::<string, i32>, b: map::<string, i32>) -> (eq: bool, ne: bool) {\n  node entry = Entry()\n  node eq = Eq::<map::<string, i32>>(\n    .a <- entry.a,\n    .b <- entry.b,\n  )\n  node ne = Ne::<map::<string, i32>>(\n    .a <- entry.a,\n    .b <- entry.b,\n  )\n  node r = Return(\n    .eq <- eq.result,\n    .ne <- ne.result,\n  )\n\n  flow {\n    entry -> r\n  }\n}\n', '\nfunc Sets(a: set::<i32>, b: set::<i32>) -> (eq: bool, ne: bool) {\n  node entry = Entry()\n  node eq = Eq::<set::<i32>>(\n    .a <- entry.a,\n    .b <- entry.b,\n  )\n  node ne = Ne::<set::<i32>>(\n    .a <- entry.a,\n    .b <- entry.b,\n  )\n  node r = Return(\n    .eq <- eq.result,\n    .ne <- ne.result,\n  )\n\n  flow {\n    entry -> r\n  }\n}\n', '\nfunc FloatSets(a: set::<f64>, b: set::<f64>) -> (eq: bool, ne: bool) {\n  node entry = Entry()\n  node eq = Eq::<set::<f64>>(\n    .a <- entry.a,\n    .b <- entry.b,\n  )\n  node ne = Ne::<set::<f64>>(\n    .a <- entry.a,\n    .b <- entry.b,\n  )\n  node r = Return(\n    .eq <- eq.result,\n    .ne <- ne.result,\n  )\n\n  flow {\n    entry -> r\n  }\n}\n', '\nfunc FloatMaps(a: map::<f64, f64>, b: map::<f64, f64>) -> (eq: bool, ne: bool) {\n  node entry = Entry()\n  node eq = Eq::<map::<f64, f64>>(\n    .a <- entry.a,\n    .b <- entry.b,\n  )\n  node ne = Ne::<map::<f64, f64>>(\n    .a <- entry.a,\n    .b <- entry.b,\n  )\n  node r = Return(\n    .eq <- eq.result,\n    .ne <- ne.result,\n  )\n\n  flow {\n    entry -> r\n  }\n}\n', '\nfunc Paths(a: Path, b: Path) -> (eq: bool, ne: bool) {\n  node entry = Entry()\n  node eq = Eq::<Path>(\n    .a <- entry.a,\n    .b <- entry.b,\n  )\n  node ne = Ne::<Path>(\n    .a <- entry.a,\n    .b <- entry.b,\n  )\n  node r = Return(\n    .eq <- eq.result,\n    .ne <- ne.result,\n  )\n\n  flow {\n    entry -> r\n  }\n}\n', '\nfunc PathMaps(a: map::<string, Path>, b: map::<string, Path>) -> (eq: bool, ne: bool) {\n  node entry = Entry()\n  node eq = Eq::<map::<string, Path>>(\n    .a <- entry.a,\n    .b <- entry.b,\n  )\n  node ne = Ne::<map::<string, Path>>(\n    .a <- entry.a,\n    .b <- entry.b,\n  )\n  node r = Return(\n    .eq <- eq.result,\n    .ne <- ne.result,\n  )\n\n  flow {\n    entry -> r\n  }\n}\n'])
+""" + "".join(f"""
+func {name}(a: {ty}, b: {ty}) -> (eq: bool, ne: bool) {{
+  exec Entry()
+  exec Return(
+    .eq <- Eq#<{ty}>(
+      .a <- a
+      .b <- b
+    )
+    .ne <- Ne#<{ty}>(
+      .a <- a
+      .b <- b
+    )
+  )
+}}
+""" for name, ty in (("Arrays", "array#<f64>"), ("Nested", "array#<array#<i32>>"),
+                     ("Maps", "map#<string, i32>"), ("Sets", "set#<i32>"),
+                     ("FloatSets", "set#<f64>"), ("FloatMaps", "map#<f64, f64>"),
+                     ("Paths", "Path"), ("PathMaps", "map#<string, Path>")))
 
 
 class ContainerEqualityTests(unittest.TestCase):
@@ -2094,14 +2437,13 @@ class IdTests(unittest.TestCase):
         self.assertEqual(assign_ids(m), [])                  # idempotent
         text = print_module(m)
         self.assertEqual(print_module(parse(text)), text)
-        self.assertIn('module game.ids @id("mod_', text)
-        self.assertIn("v: i32 @id(\"p_", text)
+        self.assertRegex(text, r'@id\("mod_\w+"\)\nmodule game.ids\n')
+        self.assertRegex(text, r'\(@id\("p_\w+"\) v: i32\)')
 
     def test_retired_between(self):
         from wiret.ids import Retired, retired_between
         old = parse(IDS_SRC)
-        new = parse(IDS_SRC.replace("  local tmp: i32\n", "")
-                    .replace("node plus", "node sum").replace("plus.result", "sum.result"))
+        new = parse(IDS_SRC.replace("  local tmp: i32\n", "").replace("plus", "sum"))
         self.assertEqual(retired_between(old, new),
                          [Retired("game.ids", "Add1", "node", "plus")])
         self.assertEqual(retired_between(None, new), [])
@@ -2224,59 +2566,61 @@ struct Vec2 {
   y: f32
 }
 
-func Double(v: i32) -> (r: i32) @pure {
+@pure
+func Double(v: i32) -> (r: i32) {
   node entry = Entry()
   node ret = Return(
-    .r <- twice.result,
+    .r <- twice
   )
-  node twice = Add::<i32>(
-    .a <- entry.v,
-    .b <- entry.v,
+  node twice = Add#<i32>(
+    .a <- entry.v
+    .b <- entry.v
   )
 
-  flow {
-    entry -> ret
-  }
+  exec entry
+  exec ret
 }
 
 func Main(m: Mode) -> (out: i32, len: f32, word: string) {
   local acc: i32
+
   node call = Call Double(
-    .v <- 21,
+    .v <- 21
   )
   node entry = Entry()
   node get = GetLocal acc()
   node len = GetField Vec2.x(
-    .obj <- make.result,
+    .obj <- make
   )
   node make = MakeStruct Vec2(
-    .x <- 3.5,
+    .x <- 3.5
   )
   node parts = BreakStruct Vec2(
-    .obj <- make.result,
+    .obj <- make
   )
   node r_idle = Return(
-    .out <- get.value,
-    .len <- parts.x,
-    .word <- "idle",
+    .out <- get
+    .len <- parts.x
+    .word <- "idle"
   )
   node r_run = Return(
-    .out <- get.value,
-    .len <- len.value,
-    .word <- "run",
+    .out <- get
+    .len <- len
+    .word <- "run"
   )
   node save = SetLocal acc(
-    .value <- call.r,
+    .value <- call
   )
-  node sw = Switch::<Mode>(
-    .value <- entry.m,
-  ) @cases(Mode::Idle)
+  node sw = Switch#<Mode>#cases<1>(
+    .value <- entry.m
+  )
 
-  flow {
-    entry -> save
-    save -> sw
-    sw.case0 -> r_idle
-    sw.default -> r_run
+  exec entry
+  exec save
+  exec sw.case[0] Mode::Idle -> {
+    exec r_idle
+  }.default -> {
+    exec r_run
   }
 }
 """
@@ -2311,17 +2655,21 @@ class EditTests(unittest.TestCase):
             {"op": "unwire_exec", "graph": "Main", "from": "entry"},
             {"op": "wire_exec", "graph": "Main", "from": "entry", "to": "log"},
             {"op": "wire_exec", "graph": "Main", "from": "log", "to": "save"},
-            {"op": "set_meta", "graph": "Main", "node": "log", "meta": '#[note("Says hi.")]'},
-            {"op": "set_attr", "graph": "Main", "node": "sw", "attr": "@cases(Mode::Idle, Mode::Run)"},
-            {"op": "wire_exec", "graph": "Main", "from": "sw.case1", "to": "r_run"},
+            {"op": "set_meta", "graph": "Main", "node": "log", "meta": '@note("Says hi.")'},
+            {"op": "set_attr", "graph": "Main", "node": "sw", "attr": "#cases<2>"},
+            {"op": "bind", "graph": "Main", "node": "sw", "pin": "case[1]", "value": "Mode::Run"},
+            {"op": "wire_exec", "graph": "Main", "from": "sw.case[1]", "to": "r_run"},
             {"op": "place", "graph": "Main", "node": "log", "props": {"label": '"Greet"'}},
         ])
         self.assertTrue(r.ok, r.error)
         self.assertEqual([d.code for d in r.diagnostics], [])
         self.assertEqual(print_module(parse(r.text)), r.text)
-        self.assertIn('  node log = Call host.Log(\n    .message <- "hello",\n  )\n', r.text)
-        self.assertIn("    entry -> log\n    log -> save\n", r.text)
-        self.assertIn('    #[note("Says hi.")]\n    log at (100, 50) [label = "Greet"]\n', r.text)
+        self.assertIn('  @note("Says hi.")\n  node log = Call host.Log{pos=(100, 50), label="Greet"}(\n'
+                      '    .message <- "hello"\n  )\n', r.text)
+        self.assertIn("  exec entry\n  exec log\n  exec save\n", r.text)
+        self.assertIn("node sw = Switch#<Mode>#cases<2>(", r.text)
+        self.assertIn("exec sw.case[0] Mode::Idle -> {\n    exec r_idle\n  }.case[1] Mode::Run -> {\n"
+                      "    exec r_run\n  }", r.text)
         self.assertIn("+  node log = Call host.Log", r.diff)
         self.assertEqual(r.hash, hash_of(r.text))
         self.assertEqual(run(r.text, "Main", 0)[1], ["hello"])
@@ -2335,6 +2683,9 @@ class EditTests(unittest.TestCase):
         self.assertEqual(r.text, self.text)
         for bad in ({"op": "frobnicate"}, {"op": "bind", "graph": "Main"},
                     {"op": "set_attr", "graph": "Main", "node": "sw", "attr": "cases(1)"},
+                    {"op": "set_attr", "graph": "Main", "node": "sw", "attr": "@cases(1)"},
+                    {"op": "set_meta", "graph": "Main", "node": "sw", "meta": "@pure"},
+                    {"op": "rename", "graph": "Main", "node": "sw", "to": "1.x"},
                     {"op": "bind", "graph": "Main", "node": "save", "pin": "value", "value": "a b"},
                     {"op": "wire_exec", "graph": "Main", "from": "sw", "to": "save"}):
             with self.subTest(bad):
@@ -2344,12 +2695,11 @@ class EditTests(unittest.TestCase):
         r = self.edit([{"op": "delete_node", "graph": "Main", "node": "make"}])
         self.assertFalse(r.ok)
         self.assertIn("cascade", r.error["message"])
-        r = self.edit([{"op": "set_meta", "graph": "Main", "node": "make", "meta": '#[note("n")]'},
+        r = self.edit([{"op": "set_meta", "graph": "Main", "node": "make", "meta": '@note("n")'},
                        {"op": "delete_node", "graph": "Main", "node": "make", "cascade": True}])
-        self.assertTrue(r.ok)
-        self.assertEqual(sorted(r.removed), ["make.result -> r_idle.len.obj",
-                                             "make.result -> r_run.len.obj"])
-        self.assertIn('#[note("n", detached: "make")]', r.text)
+        self.assertTrue(r.ok, r.error)
+        self.assertEqual(sorted(r.removed), ["make.result -> len.obj", "make.result -> parts.obj"])
+        self.assertIn('@note("n", detached: "make")', r.text)
         self.assertEqual(sorted({d.code for d in r.diagnostics}), ["W0201", "W0604"])
 
     def test_edits_retire_ids_in_a_project(self):
@@ -2372,7 +2722,7 @@ class EditTests(unittest.TestCase):
                 f.write(self.text)
             with open(req, "w", encoding="utf-8") as f:
                 json.dump({"if_hash": hash_of(self.text), "ops": [
-                    {"op": "bind", "graph": "Double", "node": "ret.r", "pin": "b", "value": "1"}]}, f)
+                    {"op": "bind", "graph": "Double", "node": "twice", "pin": "b", "value": "1"}]}, f)
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 self.assertEqual(wiretc.main(["edit", path, req, "--dry-run"]), 0)
@@ -2409,33 +2759,33 @@ class RenameTests(unittest.TestCase):
 
     def test_function_param_result_and_local(self):
         text = self.renamed("func", "Double", "Twice")
-        self.assertIn("    .value <- Call Twice(\n", text)
+        self.assertIn("  node call = Call Twice(\n", text)
         text = self.renamed("param", "v", "n")
-        self.assertIn("@pure = Add::<i32>(\n  .a <- n,\n  .b <- n,\n)\n", text)
-        self.assertIn("      .n <- 21,\n", text)
+        self.assertIn("    .a <- entry.n\n    .b <- entry.n\n", text)
+        self.assertIn("    .n <- 21\n", text)
         text = self.renamed("result", "r", "doubled")
-        self.assertIn("-> (doubled: i32", text)
+        self.assertRegex(text, r'-> \(@id\("\w+"\) doubled: i32')
         text = self.renamed("local", "acc", "total")
         self.assertIn("node get = GetLocal total()\n", text)
         self.assertIn("node save = SetLocal total(\n", text)
 
     def test_struct_and_field(self):
         text = self.renamed("field", "x", "across")
-        self.assertIn("    .len <- GetField Vec2.across(\n", text)
-        self.assertIn("    .across <- 3.5,\n", text)
-        self.assertIn("    ).across,\n", text)
+        self.assertIn("  node len = GetField Vec2.across(\n", text)
+        self.assertIn("    .across <- 3.5\n", text)
+        self.assertIn("    .len <- parts.across\n", text)
         text = self.renamed("struct", "Vec2", "Point")
         self.assertIn("node make = MakeStruct Point(\n", text)
-        self.assertIn("    .len <- GetField Point.across(\n", text)
+        self.assertIn("  node len = GetField Point.across(\n", text)
         self.assertIn("struct Point", text)
 
     def test_enum_and_member(self):
         text = self.renamed("member", "Idle", "Resting")
-        self.assertIn("@cases(Mode::Resting)", text)
+        self.assertIn("exec sw.case[0] Mode::Resting -> {", text)
         text = self.renamed("enum", "Mode", "State")
-        self.assertIn("func Main(m: State", text)
-        self.assertIn("node sw = Switch::<State>(\n", text)
-        self.assertIn("  ) @cases(State::Resting)\n", text)
+        self.assertRegex(text, r'func Main\(@id\("\w+"\) m: State')
+        self.assertIn("node sw = Switch#<State>#cases<1>(\n", text)
+        self.assertIn("exec sw.case[0] State::Resting -> {", text)
 
     def test_macro_exec_pins(self):
         from wiret.ids import assign_ids, elements
@@ -2445,30 +2795,31 @@ macro Twice(go: exec, skip: exec) -> (out: exec) {
   node entry = Entry()
   node leave = Exit out()
   node log = Call host.Log(
-    .message <- "tick",
+    .message <- "tick"
   )
-  node seq = Sequence() @count(2)
+  node seq = Sequence#count<2>()
 
-  flow {
-    entry.go -> seq
-    entry.skip -> leave
-    log -> leave
-    seq.then0 -> log
-    seq.then1 -> log
+  exec entry.go -> {
+    exec seq.then[0] -> {
+      exec log
+      exec leave
+    }.then[1]
+    goto log
+  }.skip -> {
+    goto leave
   }
 }
 
 func Main() {
   node after = Call host.Log(
-    .message <- "done",
+    .message <- "done"
   )
   node entry = Entry()
   node t = Macro Twice()
 
-  flow {
-    entry -> t.go
-    t.out -> after
-  }
+  exec entry
+  exec t
+  exec after
 }
 """, macros=False)
         m = parse(src)
@@ -2480,10 +2831,11 @@ func Main() {
         text = print_module(m)
         self.assertEqual(codes(text), [])
         self.assertEqual(run(text, "Main")[1], before)
-        # two exec parameters make Entry's pins named; one exec result keeps `t -> after`
-        for line in ("entry.start -> seq", "entry -> t.start", "t -> after",
-                     "node leave = Exit finished()", "-> (finished: exec"):
+        # Entry's exec outputs are blocks; `exec t` enters t at its first exec input
+        for line in ("exec entry.start -> {", "  exec t\n  exec after\n",
+                     "node leave = Exit finished()"):
             self.assertIn(line, text)
+        self.assertRegex(text, r'-> \(@id\("\w+"\) finished: exec')
 
     def test_refusals(self):
         from wiret.rename import RenameError, rename
@@ -2501,7 +2853,7 @@ func Main() {
         r = apply_request(text, {"if_hash": hash_of(text), "ops": [
             {"op": "rename", "id": self.id_of("member", "Run"), "to": "Go"}]})
         self.assertTrue(r.ok, r.error)
-        self.assertIn("  Go @id(", r.text)
+        self.assertRegex(r.text, r'  @id\("\w+"\) Go\n')
 
 
 MERGE_BASE = """wiret 1
@@ -2510,49 +2862,48 @@ module t
 extern func host.Log(message: string)
 
 func Double(v: i32) -> (r: i32, s: i32) {
-  flow {
-    entry -> ret
-  }
-
-  node entry = Entry()
-  node ret = Return(
-    .r <- twice,
-    .s <- twice,
+  node twice = Add#<i32>(
+    .a <- v
+    .b <- v
   )
-  node twice = Add::<i32>(
-    .a <- entry.v,
-    .b <- entry.v,
+
+  exec Entry()
+  exec Return(
+    .r <- twice
+    .s <- twice
   )
 }
 
 func Main() {
-  flow {
-    a -> b
-    entry -> a
-  }
+  box {title="Group", pos=(0, 0), size=(300, 100)}
 
-  node a = Call host.Log(
-    .message <- "a",
+  @note("Says hello.")
+  node a = Call host.Log{pos=(100, 0)}(
+    .message <- "a"
   )
-  node b = Call host.Log(
-    .message <- "b",
+  node b = Call host.Log{pos=(200, 0)}(
+    .message <- "b"
   )
-  node entry = Entry()
 
-  layout {
-    #[note("Says hello.")]
-    a at (100, 0)
-    b at (200, 0)
-    entry at (0, 0)
-    box grp "Group" at (0, 0) size (300, 100) [members = [a]]
-  }
+  exec Entry{pos=(0, 0)}()
+  exec a
+  exec b
 }
 """
+
+CALL_D = ("  node d = Call Double(\n    .v <- 2\n  )\n", "  exec b\n  exec d\n")
 
 
 def sub(text, old, new):
     assert old in text, old
     return text.replace(old, new)
+
+
+def with_call_d(text):
+    """`text` with a node d that calls Double, run after b."""
+    text = sub(text, "\n\n  exec Entry{pos=(0, 0)}()", "\n" + CALL_D[0].rstrip("\n")
+               + "\n\n  exec Entry{pos=(0, 0)}()")
+    return sub(text, "  exec b\n", CALL_D[1])
 
 
 class MergeTests(unittest.TestCase):
@@ -2579,28 +2930,34 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(r.text, ours)
 
     def test_per_field_merge_inside_one_node(self):
-        ours = sub(MERGE_BASE, "    .b <- entry.v,\n", "    .b <- 3,\n")
-        theirs = sub(MERGE_BASE, "node twice = Add::<i32>(", "node twice = Mul::<i32>(")
+        ours = sub(MERGE_BASE, "    .b <- v\n", "    .b <- 3\n")
+        theirs = sub(MERGE_BASE, "node twice = Add#<i32>(", "node twice = Mul#<i32>(")
         r = self.merge(ours, theirs)
         self.assertTrue(r.clean)
-        self.assertIn("  node twice = Mul::<i32>(\n    .a <- entry.v,\n    .b <- 3,\n  )\n", r.text)
+        self.assertIn("  node twice = Mul#<i32>(\n    .a <- v\n    .b <- 3\n  )\n", r.text)
+
+    def test_anonymous_nodes_merge_by_position(self):
+        r = self.merge(sub(MERGE_BASE, "    .r <- twice\n", "    .r <- 1\n"),
+                       sub(MERGE_BASE, "    .s <- twice\n", "    .s <- 2\n"))
+        self.assertTrue(r.clean)
+        self.assertIn("  exec Return(\n    .r <- 1\n    .s <- 2\n  )\n", r.text)
 
     def test_conflicting_binding_is_one_line_each(self):
         r = self.merge(sub(MERGE_BASE, '.message <- "a"', '.message <- "ours"'),
                        sub(MERGE_BASE, '.message <- "a"', '.message <- "theirs"'))
         self.assertFalse(r.clean)
         self.assertEqual([c.where for c in r.conflicts], ["Main.a.message"])
-        self.assertIn('<<<<<<< ours (Main.a.message)\n    .message <- "ours",\n=======\n'
-                      '    .message <- "theirs",\n>>>>>>> theirs\n', r.text)
+        self.assertIn('<<<<<<< ours (Main.a.message)\n    .message <- "ours"\n=======\n'
+                      '    .message <- "theirs"\n>>>>>>> theirs\n', r.text)
 
     def test_delete_against_change_is_a_conflict(self):
-        ours = (MERGE_BASE.replace('  node b = Call host.Log(\n    .message <- "b",\n  )\n', "")
-                .replace("    a -> b\n", "").replace("    b at (200, 0)\n", ""))
+        ours = (MERGE_BASE.replace('  node b = Call host.Log{pos=(200, 0)}(\n    .message <- "b"\n'
+                                   '  )\n', "").replace("  exec b\n", ""))
         r = self.merge(ours, sub(MERGE_BASE, '.message <- "b"', '.message <- "B"'))
         self.assertEqual([c.what for c in r.conflicts],
                          ["node deleted in ours, changed in the other"])
-        self.assertIn('<<<<<<< ours (Main.b)\n=======\n  node b = Call host.Log(\n'
-                      '    .message <- "B",\n  )\n>>>>>>> theirs\n', r.text)
+        self.assertIn("<<<<<<< ours (Main.b)\n", r.text)
+        self.assertIn('  node b = Call host.Log{pos=(200, 0)}(\n    .message <- "B"\n  )\n', r.text)
         # deleted on one side and unchanged on the other: deleted
         r = self.merge(ours, MERGE_BASE)
         self.assertTrue(r.clean)
@@ -2612,17 +2969,13 @@ class MergeTests(unittest.TestCase):
         assign_ids(m, random.Random(1))
         base = print_module(m)
         ours = base.replace("func Double(", "func Twice(")
-        theirs = sub(base, "  node b = Call host.Log(",
-                     "  node d = Call Double(\n    .v <- 2,\n  )\n  node b = Call host.Log(")
-        r = self.merge(ours, theirs, base)
+        r = self.merge(ours, with_call_d(base), base)
         self.assertTrue(r.clean, [c.what for c in r.conflicts])
         self.assertIn("func Twice(", r.text)
         self.assertIn("node d = Call Twice(\n", r.text)
         self.assertEqual([d.code for d in check(parse(r.text)) if d.severity == "error"], [])
         # without @ids the rename is a deletion plus an addition, and theirs' call breaks
-        r = self.merge(MERGE_BASE.replace("func Double(", "func Twice("),
-                       sub(MERGE_BASE, "  node b = Call host.Log(",
-                           "  node d = Call Double(\n    .v <- 2,\n  )\n  node b = Call host.Log("))
+        r = self.merge(MERGE_BASE.replace("func Double(", "func Twice("), with_call_d(MERGE_BASE))
         self.assertTrue(r.semantic or r.conflicts)
 
     def test_renamed_parameter_reaches_new_call_sites(self):
@@ -2630,12 +2983,11 @@ class MergeTests(unittest.TestCase):
         m = parse(MERGE_BASE)
         assign_ids(m, random.Random(2))
         base = print_module(m)
-        ours = sub(base, "func Double(v: i32", "func Double(n: i32").replace("entry.v", "entry.n")
-        theirs = sub(base, "  node b = Call host.Log(",
-                     "  node d = Call Double(\n    .v <- 2,\n  )\n  node b = Call host.Log(")
-        r = self.merge(ours, theirs, base)
+        ours = re.sub(r'\) v: i32\)', ") n: i32)", base)
+        ours = sub(sub(ours, "    .a <- v\n", "    .a <- n\n"), "    .b <- v\n", "    .b <- n\n")
+        r = self.merge(ours, with_call_d(base), base)
         self.assertTrue(r.clean)
-        self.assertIn("  node d = Call Double(\n    .n <- 2,\n  )\n", r.text)
+        self.assertIn("  node d = Call Double(\n    .n <- 2\n  )\n", r.text)
 
     def test_ids_assigned_on_one_side_are_not_a_rename(self):
         from wiret.ids import assign_ids
@@ -2647,50 +2999,45 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(r.text.count("@id("), print_module(m).count("@id("))
 
     def test_layout_never_blocks(self):
-        r = self.merge(sub(MERGE_BASE, "a at (100, 0)", "a at (111, 0)"),
-                       sub(MERGE_BASE, "a at (100, 0)", "a at (122, 0)"))
+        r = self.merge(sub(MERGE_BASE, "{pos=(100, 0)}", "{pos=(111, 0)}"),
+                       sub(MERGE_BASE, "{pos=(100, 0)}", "{pos=(122, 0)}"))
         self.assertTrue(r.clean)
-        self.assertIn("a at (122, 0)", r.text)
+        self.assertIn("{pos=(122, 0)}", r.text)
         self.assertEqual(len(r.notices), 1)
-        r = self.merge(sub(MERGE_BASE, "a at (100, 0)", "a at (111, 0)"),
+        r = self.merge(sub(MERGE_BASE, "{pos=(100, 0)}", "{pos=(111, 0)}"),
                        sub(MERGE_BASE, '.message <- "a"', '.message <- "A"'))
         self.assertTrue(r.clean)
-        self.assertIn("a at (111, 0)", r.text)
+        self.assertIn("{pos=(111, 0)}", r.text)
         self.assertIn('"A"', r.text)
 
-    def test_box_members_merge_as_a_set(self):
-        r = self.merge(sub(MERGE_BASE, "members = [a]", "members = [a, b]"),
-                       sub(MERGE_BASE, "members = [a]", "members = [a, entry]"))
+    def test_box_properties_merge_separately(self):
+        r = self.merge(sub(MERGE_BASE, 'title="Group"', 'title="Ours"'),
+                       sub(MERGE_BASE, "size=(300, 100)", "size=(320, 100)"))
         self.assertTrue(r.clean)
-        self.assertIn("members = [a, b, entry]", r.text)
-        r = self.merge(sub(MERGE_BASE, "members = [a]", "members = []"),
-                       sub(MERGE_BASE, "members = [a]", "members = [a, b]"))
-        self.assertIn("members = [b]", r.text)
+        self.assertIn('  box {title="Ours", pos=(0, 0), size=(320, 100)}\n', r.text)
 
     def test_notes(self):
-        r = self.merge(sub(MERGE_BASE, "    b at (", '    #[note("ours")]\n    b at ('),
-                       sub(MERGE_BASE, "    b at (", '    #[note("theirs")]\n    b at ('))
+        r = self.merge(sub(MERGE_BASE, "  node b = ", '  @note("ours")\n  node b = '),
+                       sub(MERGE_BASE, "  node b = ", '  @note("theirs")\n  node b = '))
         self.assertTrue(r.clean)
-        self.assertIn('#[note("ours")]\n    #[note("theirs")]\n    b at (', r.text)
+        self.assertIn('  @note("ours")\n  @note("theirs")\n  node b = ', r.text)
         r = self.merge(sub(MERGE_BASE, "Says hello.", "Ours."),
                        sub(MERGE_BASE, "Says hello.", "Theirs."))
         self.assertEqual([c.what for c in r.conflicts],
                          ["a note was replaced differently on both sides"])
-        self.assertIn('<<<<<<< ours (Main.a note)\n    #[note("Ours.")]\n=======\n'
-                      '    #[note("Theirs.")]\n>>>>>>> theirs\n', r.text)
-        r = self.merge(sub(MERGE_BASE, '    #[note("Says hello.")]\n', ""),
+        self.assertIn('<<<<<<< ours (Main.a note)\n  @note("Ours.")\n=======\n'
+                      '  @note("Theirs.")\n>>>>>>> theirs\n', r.text)
+        r = self.merge(sub(MERGE_BASE, '  @note("Says hello.")\n', ""),
                        sub(MERGE_BASE, '.message <- "b"', '.message <- "B"'))
         self.assertTrue(r.clean)
         self.assertNotIn("Says hello.", r.text)
 
     def test_semantic_conflicts_are_reported(self):
-        ours = (MERGE_BASE.replace("  node twice = Add::<i32>(\n    .a <- entry.v,\n"
-                                   "    .b <- entry.v,\n  )\n", "")
-                .replace("    .r <- twice.result,\n    .s <- twice.result,\n",
-                         "    .r <- 0,\n    .s <- 0,\n"))
-        theirs = sub(MERGE_BASE, "  node ret = Return",
-                     "  node half = Div::<i32>(\n    .a <- twice.result,\n    .b <- 2,\n  )\n"
-                     "  node ret = Return")
+        ours = (MERGE_BASE.replace("  node twice = Add#<i32>(\n    .a <- v\n    .b <- v\n  )\n\n", "")
+                .replace("    .r <- twice\n    .s <- twice\n", "    .r <- 0\n    .s <- 0\n"))
+        theirs = sub(MERGE_BASE, "  node twice = Add",
+                     "  node half = Div#<i32>(\n    .a <- twice\n    .b <- 2\n  )\n"
+                     "  node twice = Add")
         r = self.merge(ours, theirs)
         self.assertFalse(r.conflicts)
         self.assertEqual([(d.code, d.node) for d in r.semantic], [("E0101", "half")])
@@ -2741,20 +3088,20 @@ class MergeTests(unittest.TestCase):
             sh("commit", "-q", "-m", "base")
             sh("checkout", "-q", "-b", "other")
             with open(path, "w", encoding="utf-8", newline="\n") as f:
-                f.write(sub(MERGE_BASE, "    .b <- entry.v,\n", "    .b <- 3,\n"))
+                f.write(sub(MERGE_BASE, "    .b <- v\n", "    .b <- 3\n"))
             sh("commit", "-q", "-am", "theirs")
             sh("checkout", "-q", "main")
             with open(path, "w", encoding="utf-8", newline="\n") as f:
-                f.write(sub(MERGE_BASE, "node twice = Add::<i32>(", "node twice = Mul::<i32>("))
+                f.write(sub(MERGE_BASE, "node twice = Add#<i32>(", "node twice = Mul#<i32>("))
             sh("commit", "-q", "-am", "ours")
             sh("merge", "-q", "--no-edit", "other")
             merged = read(path)
-            self.assertIn("  node twice = Mul::<i32>(\n    .a <- entry.v,\n    .b <- 3,\n  )\n", merged)
-            # the textconv changes what git diff shows (flow order), not what is stored
+            self.assertIn("  node twice = Mul#<i32>(\n    .a <- v\n    .b <- 3\n  )\n", merged)
+            # the textconv changes what git diff shows, not what is stored
             shown = sh("diff", "HEAD~1", "HEAD", "--", "g.wiret").stdout
             raw = sh("diff", "--no-textconv", "HEAD~1", "HEAD", "--", "g.wiret").stdout
             self.assertIn(".b <- 3", shown)
-            self.assertNotEqual(shown, raw)
+            self.assertIn(".b <- 3", raw)
 
 
 class DiffTests(unittest.TestCase):
@@ -2769,20 +3116,16 @@ class DiffTests(unittest.TestCase):
 
     def test_nodes_in_flow_order(self):
         b = sub(MERGE_BASE, '.message <- "b"', '.message <- "B"')
-        b = sub(b, '    .message <- "B",\n  )\n  node entry = Entry()\n',
-                '    .message <- "B",\n  )\n  node c = Call host.Log(\n    .message <- "c",\n  )\n'
-                '  node entry = Entry()\n')
-        b = sub(b, "    a -> b\n", "    a -> b\n    b -> c\n")
-        b = sub(b, "    .r <- twice,\n    .s <- twice,\n",
-                "    .r <- 1,\n    .s <- 1,\n")
-        b = sub(b, "  node twice = Add::<i32>(\n    .a <- entry.v,\n    .b <- entry.v,\n  )\n", "")
+        b = sub(b, "  exec b\n", '  exec b\n  exec Call host.Log(\n    .message <- "c"\n  )\n')
+        b = sub(b, "    .r <- twice\n    .s <- twice\n", "    .r <- 1\n    .s <- 1\n")
+        b = sub(b, "  node twice = Add#<i32>(\n    .a <- v\n    .b <- v\n  )\n\n", "")
         self.assertEqual(self.diff(MERGE_BASE, b), """func Double
-  ~ node ret: .r: twice.result -> 1; .s: twice.result -> 1
+  ~ node 1: .r: twice.result -> 1; .s: twice.result -> 1
   - node twice = Add
 func Main
-  ~ node b: .message: "b" -> "B"; exec then: (none) -> c
-  + node c = Call host.Log(
-        .message <- "c",
+  ~ node b: .message: "b" -> "B"; exec then: (none) -> 3
+  + node 3 = Call host.Log(
+        .message <- "c"
       )
 """)
 
@@ -2791,24 +3134,24 @@ func Main
         m = parse(MERGE_BASE)
         assign_ids(m, random.Random(9))
         a = print_module(m)
-        b = a.replace("func Double(v: i32", "func Twice(n: i32").replace("entry.v", "entry.n")
-        b = b.replace("extern func host.Log", "var count: i32\n\nextern func host.Log")
+        b = re.sub(r"func Double\((@id\(\"\w+\"\)) v: i32", r"func Twice(\1 n: i32", a)
+        b = b.replace("    .a <- v\n    .b <- v\n", "    .a <- n\n    .b <- n\n")
+        b = re.sub(r"(@id\(\"ext_\w+\"\)\nextern)", r"var count: i32\n\n\1", b)
         out = self.diff(a, b)
         self.assertIn("func Double -> Twice (renamed)\n  ~ param v -> n\n", out)
         self.assertIn("+ var count\n", out)
-        self.assertIn("~ node twice: .a: entry.v -> entry.n; .b: entry.v -> entry.n", out)
 
     def test_metadata_and_layout_are_separate(self):
         b = sub(MERGE_BASE, "Says hello.", "Says hi.")
-        b = sub(b, "a at (100, 0)", "a at (150, 0)")
-        b = sub(b, "size (300, 100)", "size (320, 100)")
+        b = sub(b, "{pos=(100, 0)}", "{pos=(150, 0)}")
+        b = sub(b, "size=(300, 100)", "size=(320, 100)")
         self.assertEqual(self.diff(MERGE_BASE, b), """metadata (does not change behaviour):
-  Main.a: - #[note("Says hello.")]
-  Main.a: + #[note("Says hi.")]
+  Main.a: - @note("Says hello.")
+  Main.a: + @note("Says hi.")
 
 layout only:
   Main.a: (100, 0) -> (150, 0)
-  Main: box grp changed
+  Main: box 'Group' changed
 """)
 
     def test_cli(self):
@@ -2826,7 +3169,7 @@ layout only:
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 self.assertEqual(wiretc.main(["diff", "--raw", pa, pb]), 1)
-            self.assertIn('-    .message <- "a",\n+    .message <- "A",\n', out.getvalue())
+            self.assertIn('-    .message <- "a"\n+    .message <- "A"\n', out.getvalue())
 
 
 class HashTests(unittest.TestCase):
@@ -2848,34 +3191,41 @@ class HashTests(unittest.TestCase):
     def test_layout_only_edit_keeps_semantic_hash(self):
         m = parse(demo())
         before = semantic_hash(m)
-        m.graph("Main").place("hello").x += 40
+        m.graph("Main").place("2").x += 40            # the Log after SetVar, by position
         self.assertEqual(semantic_hash(m), before)
 
     def test_rewire_changes_semantic_hash(self):
         m = parse(demo())
         before = semantic_hash(m)
-        m.graph("Main").node("hello").bindings[0].value.value = "changed"
+        m.graph("Main").node("2").bindings[0].value.value = "changed"
         self.assertNotEqual(semantic_hash(m), before)
 
     def test_reroute_is_erased(self):
         plain = module("""
-func F(x: i32) -> (y: i32) = x
+func F(x: i32) -> (y: i32) {
+  node entry = Entry()
+  node ret = Return(
+    .y <- entry.x
+  )
+
+  exec entry
+  exec ret
+}
 """, macros=False)
         rerouted = module("""
 func F(x: i32) -> (y: i32) {
-  node bend = Reroute::<i32>(
-    .in <- entry.x,
+  node bend = Reroute#<i32>(
+    .in <- entry.x
   )
   node entry = Entry()
-  node hop = Reroute::<exec>()
+  node hop = Reroute#<exec>()
   node ret = Return(
-    .y <- bend.out,
+    .y <- bend
   )
 
-  flow {
-    entry -> hop
-    hop -> ret
-  }
+  exec entry
+  exec hop
+  exec ret
 }
 """, macros=False)
         self.assertEqual(semantic_hash(parse(plain)), semantic_hash(parse(rerouted)))
@@ -2898,45 +3248,51 @@ class ExecutionTests(unittest.TestCase):
         trace = []
         res, _ = run(demo(), "SumTo", 2, trace=trace)
         self.assertEqual(res, [3])
+        # node ids are execution positions: the loop is "1", the node in its `each` block
+        # "1.each.0"; inside the macro, "test" is a named node and the rest are positions
+        seq, each, bump = "1/test.then.0", "1/test.then.0.then[0].0", "1/test.then.1"
         expected = [
-            ("entry", ()), ("loop!in", ()), ("loop/init", ()), ("loop/test", ()),
-            ("loop/seq", ()), ("loop/each_out", ("loop/bump",)), ("add", ("loop/bump",)),
-            ("loop/bump", ()), ("loop/test", ()), ("loop/seq", ()),
-            ("loop/each_out", ("loop/bump",)), ("add", ("loop/bump",)), ("loop/bump", ()),
-            ("loop/test", ()), ("loop/finish", ()), ("ret", ())]
+            ("0", ()), ("1!in", ()), ("1/1", ()), ("1/test", ()),
+            (seq, ()), (each, (bump,)), ("1.each.0", (bump,)),
+            (bump, ()), ("1/test", ()), (seq, ()),
+            (each, (bump,)), ("1.each.0", (bump,)), (bump, ()),
+            ("1/test", ()), ("1/test.else.0", ()), ("1.done.0", ())]
         self.assertEqual(trace, expected)
 
     def test_nested_loops(self):
         text = module("""
 func Grid(n: i32) -> (count: i32) {
   local c: i32
+
   node entry = Entry()
   node outer = Macro ForRange(
-    .first <- 1,
-    .last <- entry.n,
+    .first <- 1
+    .last <- entry.n
   )
   node inner = Macro ForRange(
-    .first <- 1,
-    .last <- outer.index,
+    .first <- 1
+    .last <- outer.index
   )
   node cur = GetLocal c()
-  node inc = Add::<i32>(
-    .a <- cur.value,
-    .b <- 1,
+  node inc = Add#<i32>(
+    .a <- cur
+    .b <- 1
   )
   node bump = SetLocal c(
-    .value <- inc.result,
+    .value <- inc
   )
   node total = GetLocal c()
   node ret = Return(
-    .count <- total.value,
+    .count <- total
   )
 
-  flow {
-    entry -> outer
-    outer.each -> inner
-    outer.done -> ret
-    inner.each -> bump
+  exec entry
+  exec outer.each -> {
+    exec inner.each -> {
+      exec bump
+    }
+  }.done -> {
+    exec ret
   }
 }
 """)
@@ -2954,31 +3310,32 @@ macro Twice(in: exec) -> (first: exec, second: exec) {
   node a = Exit first()
   node b = Exit second()
 
-  flow {
-    entry -> seq
-    seq.then0 -> a
-    seq.then1 -> b
-  }
+  exec entry
+  exec seq.then[0] -> {
+    exec a
+  }.then[1]
+  exec b
 }
 
 func F() {
   node entry = Entry()
   node tw = Macro Twice()
   node log1 = Call host.Log(
-    .message <- "one",
+    .message <- "one"
   )
   node log1b = Call host.Log(
-    .message <- "one-b",
+    .message <- "one-b"
   )
   node log2 = Call host.Log(
-    .message <- "two",
+    .message <- "two"
   )
 
-  flow {
-    entry -> tw
-    tw.first -> log1
-    tw.second -> log2
-    log1 -> log1b
+  exec entry
+  exec tw.first -> {
+    exec log1
+    exec log1b
+  }.second -> {
+    exec log2
   }
 }
 """)
@@ -2989,32 +3346,34 @@ func F() {
 func FirstOver(limit: i32) -> (found: i32) {
   node entry = Entry()
   node loop = Macro ForRange(
-    .first <- 1,
-    .last <- 100,
+    .first <- 1
+    .last <- 100
   )
-  node sq = Mul::<i32>(
-    .a <- loop.index,
-    .b <- loop.index,
+  node sq = Mul#<i32>(
+    .a <- loop.index
+    .b <- loop.index
   )
-  node over = Gt::<i32>(
-    .a <- sq.result,
-    .b <- entry.limit,
+  node over = Gt#<i32>(
+    .a <- sq
+    .b <- entry.limit
   )
   node chk = Branch(
-    .cond <- over.result,
+    .cond <- over
   )
   node hit = Return(
-    .found <- loop.index,
+    .found <- loop.index
   )
   node none = Return(
-    .found <- -1,
+    .found <- -1
   )
 
-  flow {
-    entry -> loop
-    loop.each -> chk
-    loop.done -> none
-    chk.then -> hit
+  exec entry
+  exec loop.each -> {
+    exec chk.then -> {
+      exec hit
+    }
+  }.done -> {
+    exec none
   }
 }
 """)
@@ -3027,22 +3386,23 @@ func F() {
   node entry = Entry()
   node seq = Sequence()
   node loop = Macro ForRange(
-    .first <- 1,
-    .last <- 2,
+    .first <- 1
+    .last <- 2
   )
   node log = Call host.Log(
-    .message <- "body",
+    .message <- "body"
   )
   node after = Call host.Log(
-    .message <- "after",
+    .message <- "after"
   )
 
-  flow {
-    entry -> seq
-    seq.then0 -> loop
-    seq.then1 -> after
-    loop.each -> log
-  }
+  exec entry
+  exec seq.then[0] -> {
+    exec loop.each -> {
+      exec log
+    }
+  }.then[1]
+  exec after
 }
 """)
         self.assertEqual(run(text, "F")[1], ["body", "body", "after"])
@@ -3052,30 +3412,30 @@ func F() {
 func F(c: bool) -> (r: string) {
   node entry = Entry()
   node br = Branch(
-    .cond <- entry.c,
+    .cond <- entry.c
   )
   node make = Call Make()
   node join = Return(
-    .r <- make.s,
+    .r <- make
   )
 
-  flow {
-    entry -> br
-    br.then -> make
-    br.else -> join
-    make -> join
+  exec entry
+  exec br.then -> {
+    exec make
+    exec join
+  }.else -> {
+    goto join
   }
 }
 
 func Make() -> (s: string) {
   node entry = Entry()
   node ret = Return(
-    .s <- "made",
+    .s <- "made"
   )
 
-  flow {
-    entry -> ret
-  }
+  exec entry
+  exec ret
 }
 """, macros=False)
         # reading make.s at the join, where make may not have run, is rejected
@@ -3085,40 +3445,41 @@ func Make() -> (s: string) {
         fixed = module("""
 func F(c: bool) -> (r: string) {
   local s: string
+
   node entry = Entry()
   node br = Branch(
-    .cond <- entry.c,
+    .cond <- entry.c
   )
   node make = Call Make()
   node keep = SetLocal s(
-    .value <- make.s,
+    .value <- make
   )
   node none = SetLocal s(
-    .value <- "",
+    .value <- ""
   )
   node join = Return(
-    .r <- GetLocal s().value,
+    .r <- GetLocal s()
   )
 
-  flow {
-    entry -> br
-    br.then -> make
-    br.else -> none
-    make -> keep
-    keep -> join
-    none -> join
+  exec entry
+  exec br.then -> {
+    exec make
+    exec keep
+    exec join
+  }.else -> {
+    exec none
+    goto join
   }
 }
 
 func Make() -> (s: string) {
   node entry = Entry()
   node ret = Return(
-    .s <- "made",
+    .s <- "made"
   )
 
-  flow {
-    entry -> ret
-  }
+  exec entry
+  exec ret
 }
 """, macros=False)
         self.assertNotIn("E0310", codes(fixed))
@@ -3131,41 +3492,40 @@ var hp: i32 = 10
 
 func F() -> (a: i32, b: i32) {
   local first: i32
+
   node entry = Entry()
   node cur = GetVar hp()
   node save = SetLocal first(
-    .value <- cur.value,
+    .value <- cur
   )
-  node dmg = Sub::<i32>(
-    .a <- cur.value,
-    .b <- 3,
+  node dmg = Sub#<i32>(
+    .a <- cur
+    .b <- 3
   )
   node hit = SetVar hp(
-    .value <- dmg.result,
+    .value <- dmg
   )
   node got = GetLocal first()
   node ret = Return(
-    .a <- got.value,
-    .b <- cur.value,
+    .a <- got
+    .b <- cur
   )
 
-  flow {
-    entry -> save
-    save -> hit
-    hit -> ret
-  }
+  exec entry
+  exec save
+  exec hit
+  exec ret
 }
 """, macros=False)
         # read at save, then at ret after hit wrote it: an error unless that is meant
         self.assertIn("E0320", codes(text))
-        live = text.replace("  node cur = GetVar hp()\n", "  node cur = GetVar hp() @live\n")
+        live = sub(text, "  node cur = GetVar hp()\n", "  @live\n  node cur = GetVar hp()\n")
         self.assertNotIn("E0320", codes(live))
         self.assertEqual(run(live, "F")[0], [10, 7])
         # @live on a node that reads it also excuses it, but not on an impure node
-        dmg = text.replace("    .b <- 3,\n  )\n", "    .b <- 3,\n  ) @live\n")
+        dmg = sub(text, "  node dmg = ", "  @live\n  node dmg = ")
         self.assertIn("E0320", codes(dmg))       # cur still reaches save and ret directly
-        bad = text.replace("  node hit = SetVar hp(\n    .value <- dmg.result,\n  )\n",
-                           "  node hit = SetVar hp(\n    .value <- dmg.result,\n  ) @live\n")
+        bad = sub(text, "  node hit = ", "  @live\n  node hit = ")
         self.assertIn("E0104", codes(bad))
 
     def test_reads_on_exclusive_paths_are_not_e0320(self):
@@ -3173,26 +3533,27 @@ func F() -> (a: i32, b: i32) {
 var hp: i32 = 10
 
 func F(c: bool) -> (a: i32) {
-  flow {
-    entry -> chk
-    chk.then -> r1
-    chk.else -> r2
-  }
-
   node chk = Branch(
-    .cond <- entry.c,
+    .cond <- entry.c
   )
   node cur = GetVar hp()
   node entry = Entry()
   node r1 = Return(
-    .a <- cur.value,
+    .a <- cur
   )
   node r2 = Return(
-    .a <- Add::<i32>(
-      .a <- cur.value,
-      .b <- 1,
-    ),
+    .a <- Add#<i32>(
+      .a <- cur
+      .b <- 1
+    )
   )
+
+  exec entry
+  exec chk.then -> {
+    exec r1
+  }.else -> {
+    exec r2
+  }
 }
 """, macros=False)
         self.assertNotIn("E0320", codes(text))
@@ -3201,24 +3562,25 @@ func F(c: bool) -> (a: i32) {
 var hp: i32 = 10
 
 func F() -> (a: i32) {
-  flow {
-    entry -> loop
-    loop.each -> bump
-    loop.done -> ret
-  }
-
   node bump = SetVar hp(
-    .value <- cur,
+    .value <- cur
   )
   node cur = GetVar hp()
   node entry = Entry()
   node loop = Macro ForRange(
-    .first <- 1,
-    .last <- 3,
+    .first <- 1
+    .last <- 3
   )
   node ret = Return(
-    .a <- cur,
+    .a <- cur
   )
+
+  exec entry
+  exec loop.each -> {
+    exec bump
+  }.done -> {
+    exec ret
+  }
 }
 """)
         self.assertIn("E0320", codes(loop))
@@ -3227,50 +3589,54 @@ func F() -> (a: i32) {
         text = module("""
 macro DoOnce(in: exec, reset: exec) -> (out: exec) {
   state fired: bool
+
   node entry = Entry()
   node flag = GetState fired()
   node check = Branch(
-    .cond <- flag.value,
+    .cond <- flag
   )
   node mark = SetState fired(
-    .value <- true,
+    .value <- true
   )
   node fire = Exit out()
   node clear = SetState fired(
-    .value <- false,
+    .value <- false
   )
 
-  flow {
-    entry.in -> check
-    entry.reset -> clear
-    check.else -> mark
-    mark -> fire
+  exec entry.in -> {
+    exec check.else -> {
+      exec mark
+      exec fire
+    }
+  }.reset -> {
+    exec clear
   }
 }
 
 func F() {
   node entry = Entry()
   node loop = Macro ForRange(
-    .first <- 1,
-    .last <- 3,
+    .first <- 1
+    .last <- 3
   )
   node seq = Sequence()
   node once_a = Macro DoOnce()
   node once_b = Macro DoOnce()
   node log_a = Call host.Log(
-    .message <- "a",
+    .message <- "a"
   )
   node log_b = Call host.Log(
-    .message <- "b",
+    .message <- "b"
   )
 
-  flow {
-    entry -> loop
-    loop.each -> seq
-    seq.then0 -> once_a
-    seq.then1 -> once_b
-    once_a.out -> log_a
-    once_b.out -> log_b
+  exec entry
+  exec loop.each -> {
+    exec seq.then[0] -> {
+      exec once_a
+      exec log_a
+    }.then[1]
+    exec once_b
+    exec log_b
   }
 }
 """)
@@ -3278,61 +3644,62 @@ func F() {
 
     def test_switch_select_and_conversions(self):
         text = module("""
-func Name(v: i32) -> (s: string) {
-  node entry = Entry()
-  node sw = Switch::<i32>(
-    .value <- entry.v,
-  ) @cases(1, 2)
-  node one = Return(
-    .s <- "one",
-  )
-  node two = Return(
-    .s <- "two",
-  )
-  node neg = Lt::<i32>(
-    .a <- entry.v,
-    .b <- 0,
-  )
-  node pick = Select::<string>(
-    .cond <- neg.result,
-    .a <- "negative",
-    .b <- "many",
-  )
-  node other = Return(
-    .s <- pick.result,
-  )
-
-  flow {
-    entry -> sw
-    sw.case0 -> one
-    sw.case1 -> two
-    sw.default -> other
-  }
-}
-
 func Conv(x: f64) -> (i: i32, b: u8, s: string, back: f32) {
   node entry = Entry()
-  node i = Convert::<f64, i32>(
-    .value <- entry.x,
+  node i = Convert#<f64, i32>(
+    .value <- entry.x
   )
-  node b = Convert::<i32, u8>(
-    .value <- i.result,
+  node b = Convert#<i32, u8>(
+    .value <- i
   )
-  node s = Convert::<f64, string>(
-    .value <- entry.x,
+  node s = Convert#<f64, string>(
+    .value <- entry.x
   )
-  node f = Convert::<f64, f32>(
-    .value <- entry.x,
+  node f = Convert#<f64, f32>(
+    .value <- entry.x
   )
   node ret = Return(
-    .i <- i.result,
-    .b <- b.result,
-    .s <- s.result,
-    .back <- f.result,
+    .i <- i
+    .b <- b
+    .s <- s
+    .back <- f
   )
 
-  flow {
-    entry -> ret
+  exec entry
+  exec ret
+}
+
+func Name(v: i32) -> (s: string) {
+  node entry = Entry()
+  node sw = Switch#<i32>#cases<2>(
+    .value <- entry.v
+  )
+  node one = Return(
+    .s <- "one"
+  )
+  node two = Return(
+    .s <- "two"
+  )
+  node neg = Lt#<i32>(
+    .a <- entry.v
+    .b <- 0
+  )
+  node pick = Select#<string>(
+    .cond <- neg
+    .a <- "negative"
+    .b <- "many"
+  )
+  node other = Return(
+    .s <- pick
+  )
+
+  exec entry
+  exec sw.case[0] 1 -> {
+    exec one
+  }.case[1] 2 -> {
+    exec two
+  }.default -> {
+    exec other
   }
 }
 """, macros=False)
@@ -3347,111 +3714,109 @@ func Conv(x: f64) -> (i: i32, b: u8, s: string, back: f32) {
 
 LAZY = """
 class Box {
-  items: array::<i32>
+  items: array#<i32>
 
-  func Pick(i: i32) {
+  func Pick(self, i: i32) {
     state last: i32
+
     node entry = Entry()
     node save = SetState last(
-      .value <- Select::<i32>(
-        .cond <- Lt::<i32>(
-          .a <- entry.i,
-          .b <- 0,
-        ).result,
-        .a <- -1,
-        .b <- ArrayGet::<i32>(
-          .array <- GetField items(
-            .obj <- entry.self,
-          ).value,
-          .index <- entry.i,
-        ).item,
-      ).result,
+      .value <- Select#<i32>(
+        .cond <- Lt#<i32>(
+          .a <- entry.i
+          .b <- 0
+        )
+        .a <- -1
+        .b <- ArrayGet#<i32>(
+          .array <- GetField Box.items(
+            .obj <- entry.self
+          )
+          .index <- entry.i
+        )
+      )
     )
     node log = Call host.Log(
-      .message <- Convert::<i32, string>(
-        .value <- GetState last().value,
-      ).result,
+      .message <- Convert#<i32, string>(
+        .value <- GetState last()
+      )
     )
 
-    flow {
-      entry -> save
-      save -> log
-    }
+    exec entry
+    exec save
+    exec log
   }
 }
 
 func Guard(i: i32) -> (r: i32) {
   node entry = Entry()
-  node arr = MakeArray::<i32>(
-    .item0 <- 10,
-    .item1 <- 20,
-  ) @count(2)
+  node arr = MakeArray#<i32>#count<2>(
+    .item[0] <- 10
+    .item[1] <- 20
+  )
   node ok = And(
-    .a <- Ge::<i32>(
-      .a <- entry.i,
-      .b <- 0,
-    ).result,
-    .b <- Lt::<i32>(
-      .a <- entry.i,
-      .b <- ArrayLength::<i32>(
-        .array <- arr.result,
-      ).length,
-    ).result,
+    .a <- Ge#<i32>(
+      .a <- entry.i
+      .b <- 0
+    )
+    .b <- Lt#<i32>(
+      .a <- entry.i
+      .b <- ArrayLength#<i32>(
+        .array <- arr
+      )
+    )
   )
   node ret = Return(
-    .r <- Add::<i32>(
-      .a <- 1000,
-      .b <- Select::<i32>(
-        .cond <- ok.result,
-        .a <- ArrayGet::<i32>(
-          .array <- arr.result,
-          .index <- entry.i,
-        ).item,
-        .b <- Select::<i32>(
+    .r <- Add#<i32>(
+      .a <- 1000
+      .b <- Select#<i32>(
+        .cond <- ok
+        .a <- ArrayGet#<i32>(
+          .array <- arr
+          .index <- entry.i
+        )
+        .b <- Select#<i32>(
           .cond <- Or(
-            .a <- ok.result,
-            .b <- Eq::<i32>(
-              .a <- Div::<i32>(
-                .a <- 1,
-                .b <- entry.i,
-              ).result,
-              .b <- 0,
-            ).result,
-          ).result,
-          .a <- 1,
-          .b <- -1,
-        ).result,
-      ).result,
-    ).result,
+            .a <- ok
+            .b <- Eq#<i32>(
+              .a <- Div#<i32>(
+                .a <- 1
+                .b <- entry.i
+              )
+              .b <- 0
+            )
+          )
+          .a <- 1
+          .b <- -1
+        )
+      )
+    )
   )
 
-  flow {
-    entry -> ret
-  }
+  exec entry
+  exec ret
 }
 
 func Main() {
   node entry = Entry()
   node b = New Box()
-  node add = ArrayAdd::<i32> Box.items(
-    .obj <- b.result,
-    .item <- 42,
+  node add = ArrayAdd#<i32> Box.items(
+    .obj <- b
+    .item <- 42
   )
   node low = Call Box.Pick(
-    .self <- b.result,
-    .i <- -5,
+    .self <- b
+    .i <- -5
   )
   node high = Call Box.Pick(
-    .self <- b.result,
-    .i <- 0,
+    .self <- b
+    .i <- 0
   )
 
-  flow {
-    add -> low
-    b -> add
-    entry -> b
-    low -> high
-  }
+  exec entry
+  exec b
+  exec add
+  exec low
+  exec high
 }
 """
 
@@ -3469,14 +3834,22 @@ class LazyTests(unittest.TestCase):
 
     def test_the_taken_side_still_faults(self):
         text = module("""
-func F(c: bool) -> (r: i32) = Select::<i32>(
-  .cond <- c,
-  .a <- Div::<i32>(
-    .a <- 1,
-    .b <- 0,
-  ),
-  .b <- 7,
-)
+func F(c: bool) -> (r: i32) {
+  node entry = Entry()
+  node ret = Return(
+    .r <- Select#<i32>(
+      .cond <- entry.c
+      .a <- Div#<i32>(
+        .a <- 1
+        .b <- 0
+      )
+      .b <- 7
+    )
+  )
+
+  exec entry
+  exec ret
+}
 """, macros=False)
         self.assertEqual(run(text, "F", 0)[0], [7])
         with self.assertRaises(WiretError):
@@ -3507,76 +3880,69 @@ struct Vec2 {
   y: f32
 }
 
-func Both(v: i32) -> (lo: i32, hi: i32) @pure {
-  flow {
-    entry -> ret
-  }
-
-  node entry = Entry()
-  node ret = Return(
-    .lo <- entry.v,
-    .hi <- Mul::<i32>(
-      .a <- entry.v,
-      .b <- 2,
-    ),
+@pure
+func Both(v: i32) -> (lo: i32, hi: i32) {
+  exec Entry()
+  exec Return(
+    .lo <- v
+    .hi <- Mul#<i32>(
+      .a <- v
+      .b <- 2
+    )
   )
 }
 
-func Clamp01(v: f32) -> (result: f32) @pure = Min::<f32>(
-  .a <- Max::<f32>(
-    .a <- v,
-    .b <- 0.0,
-  ),
-  .b <- 1.0,
+@pure
+func Clamp01(v: f32) -> (result: f32) = Min#<f32>(
+  .a <- Max#<f32>(
+    .a <- v
+    .b <- 0.0
+  )
+  .b <- 1.0
 )
 
 func Main() {
-  local items: array::<i32>
+  local items: array#<i32>
 
-  flow {
-    entry -> say
-    say -> pair
-  }
-
-  node entry = Entry()
-  node pair = Call host.Log(
+  exec Entry()
+  exec Call host.Log(
+    .message <- Format "{n} items, {f} clamped, {ok}, {big}, {name}"(
+      .n <- ArrayLength#<i32>(
+        .array <- GetLocal items()
+      )
+      .f <- Call Clamp01(
+        .v <- 2.5
+      )
+      .ok <- Lt#<i32>(
+        .a <- 1
+        .b <- 2
+      )
+      .big <- 3000000000u32
+      .name <- "done"
+    )
+  )
+  exec Call host.Log(
     .message <- Format "lo {lo}, hi {hi}, x {x}, {{literal}} {lo}"(
       .lo <- Call Both(
-        .v <- 3,
-      ).lo,
+        .v <- 3
+      ).lo
       .hi <- Call Both(
-        .v <- 4,
-      ).hi,
+        .v <- 4
+      ).hi
       .x <- BreakStruct Vec2(
         .obj <- MakeStruct Vec2(
-          .x <- 0.5,
-        ),
-      ).x,
-    ),
-  )
-  node say = Call host.Log(
-    .message <- Format "{n} items, {f} clamped, {ok}, {big}, {name}"(
-      .n <- ArrayLength::<i32>(
-        .array <- GetLocal items(),
-      ),
-      .f <- Call Clamp01(
-        .v <- 2.5,
-      ),
-      .ok <- Lt::<i32>(
-        .a <- 1,
-        .b <- 2,
-      ),
-      .big <- 3000000000u32,
-      .name <- "done",
-    ),
+          .x <- 0.5
+        )
+      ).x
+    )
   )
 }
 """
 
 
 class ReadabilityTests(unittest.TestCase):
-    """Draft 0.11: an inline node's one output is implied, Format builds text, a function
-    can be written `= value`, the flow block comes first, and `//` comments are kept."""
+    """An inline node's one output is implied, Format builds text, a function can be written
+    `= value`, and `//` comments are kept."""
 
     def text(self):
         return module(READABLE, macros=False)
@@ -3592,22 +3958,22 @@ class ReadabilityTests(unittest.TestCase):
 
     def test_one_output_is_implied_and_several_must_be_named(self):
         m = parse(self.text())
-        say = m.graph("Main").node("say.message.f")
-        self.assertEqual(m.graph("Main").node("say.message").binding("f").value,
-                         PinRef("say.message.f", "result"))
-        self.assertEqual(say.kind, "Call")
+        f = m.graph("Main").node("1.message.f")
+        self.assertEqual(m.graph("Main").node("1.message").binding("f").value,
+                         PinRef("1.message.f", "result"))
+        self.assertEqual(f.kind, "Call")
         # `.lo` can be left out of the text only when the node has one data output
-        bad = self.text().replace("      ).lo,\n", "      ),\n")
+        bad = self.text().replace("      ).lo\n", "      )\n")
         with self.assertRaises(ParseError) as cm:
             parse(bad)
         self.assertIn("several outputs (lo, hi)", cm.exception.msg)
         self.assertIn("'Call(...).lo'", cm.exception.msg)
         # written out, `.result` reads the same and is printed the short way
-        long = self.text().replace("        .v <- 2.5,\n      ),", "        .v <- 2.5,\n      ).result,")
+        long = self.text().replace("        .v <- 2.5\n      )", "        .v <- 2.5\n      ).result")
         self.assertNotEqual(long, self.text())
         self.assertEqual(print_module(parse(long)), self.text())
 
-    def test_a_declared_node_s_one_output_is_implied_too(self):
+    def test_a_named_node_s_one_output_is_implied_too(self):
         text = module("""
 struct Vec2 {
   x: f32
@@ -3617,59 +3983,52 @@ struct Vec2 {
 func F(n: i32) -> (r: i32, x: f32, y: f32) {
   local acc: i32
 
-  flow {
-    entry -> loop
-    loop.each -> add
-    loop.done -> ret
-  }
-
-  node add = SetLocal acc(
-    .value <- Add::<i32>(
-      .a <- cur,
-      .b <- loop.index,
-    ),
-  )
   node cur = GetLocal acc()
-  node entry = Entry()
-  node loop = Macro std.flow.ForRange(
-    .first <- 1,
-    .last <- entry.n,
-  )
   node parts = BreakStruct Vec2(
     .obj <- MakeStruct Vec2(
-      .x <- 1.5,
-    ),
+      .x <- 1.5
+    )
   )
-  node ret = Return(
-    .r <- cur,
-    .x <- parts.x,
-    .y <- parts.y,
-  )
+
+  exec Entry()
+  exec Macro std.flow.ForRange(
+    .first <- 1
+    .last <- n
+  ).each|index| -> {
+    exec SetLocal acc(
+      .value <- Add#<i32>(
+        .a <- cur
+        .b <- index
+      )
+    )
+  }.done -> {
+    exec Return(
+      .r <- cur
+      .x <- parts.x
+      .y <- parts.y
+    )
+  }
 }
 """, macros=False)
         self.assertEqual(print_module(parse(text)), text)
         self.assertEqual(run(text, "F", 4)[0], [10, 1.5, 0.0])
         g = parse(text).graph("F")
-        self.assertEqual(g.node("ret").binding("r").value, PinRef("cur", "value"))
+        self.assertEqual(g.node("1.done.0").binding("r").value, PinRef("cur", "value"))
         # written out, the one output reads the same and is printed the short way
-        self.assertEqual(print_module(parse(text.replace("    .r <- cur,", "    .r <- cur.value,"))),
-                         text)
-        # Entry and a macro name their outputs, which are parameters and results: the bare
-        # form is read, but written with the name
-        bare = text.replace("    .last <- entry.n,", "    .last <- entry,")
-        self.assertEqual(print_module(parse(bare)), text)
+        self.assertEqual(print_module(parse(text.replace("      .r <- cur\n",
+                                                         "      .r <- cur.value\n"))), text)
         # several outputs: the one read must be named
         with self.assertRaises(ParseError) as cm:
-            parse(text.replace("    .x <- parts.x,", "    .x <- parts,"))
+            parse(text.replace("      .x <- parts.x\n", "      .x <- parts\n"))
         self.assertIn("'parts' has several outputs (x, y)", cm.exception.msg)
         self.assertIn("'parts.x'", cm.exception.msg)
-        # a node that does not exist is kept as written and reported, never unreadable
-        gone = print_module(parse(text.replace("    .r <- cur,", "    .r <- old,")))
-        self.assertIn("    .r <- old,\n", gone)
+        # a name that is no node or parameter is kept as written and reported
+        gone = print_module(parse(text.replace("      .r <- cur\n", "      .r <- old\n")))
+        self.assertIn("      .r <- old\n", gone)
         self.assertEqual(print_module(parse(gone)), gone)
         found = [d for d in check(parse(gone)) if d.code == "E0101"]
-        self.assertEqual([(d.node, d.pin) for d in found], [("ret", "r")])
-        self.assertIn("'old()'", found[0].message)
+        self.assertEqual([(d.node, d.pin) for d in found], [("1.done.0", "r")])
+
 
     def test_format_templates_and_types(self):
         def errors(body):
@@ -3684,30 +4043,46 @@ func F() -> (s: string) = Format "TEMPLATE"(
 """.replace("TEMPLATE", bad))
                 self.assertIn("E0501", [c for c, _ in found])
         found = errors("""
-func F(xs: array::<i32>) -> (s: string) = Format "{xs}"(
+func F(xs: array#<i32>) -> (s: string) = Format "{xs}"(
   .xs <- xs,
 )
 """)
-        self.assertTrue(any(c == "E0110" and "'xs' is array::<i32>" in m for c, m in found), found)
+        self.assertTrue(any(c == "E0110" and "'xs' is array#<i32>" in m for c, m in found), found)
         # an unbound placeholder is empty text; doubled braces are braces
         text = module("""
-func F() -> (s: string) = Format "[{gap}] {{x}}"()
+func F() -> (s: string) {
+  node entry = Entry()
+  node ret = Return(
+    .s <- Format "[{gap}] {{x}}"()
+  )
+
+  exec entry
+  exec ret
+}
 """, macros=False)
         self.assertEqual(run(text, "F")[0], ["[] {x}"])
 
     def test_format_with_a_lazy_input_verifies(self):
         # the Select branches, so the template's text must not be on the operand stack yet
         text = module("""
-func F(c: bool) -> (s: string) = Format "got {v}!"(
-  .v <- Select::<i32>(
-    .cond <- c,
-    .a <- Div::<i32>(
-      .a <- 1,
-      .b <- 0,
-    ),
-    .b <- -1,
-  ),
-)
+func F(c: bool) -> (s: string) {
+  node entry = Entry()
+  node ret = Return(
+    .s <- Format "got {v}!"(
+      .v <- Select#<i32>(
+        .cond <- entry.c
+        .a <- Div#<i32>(
+          .a <- 1
+          .b <- 0
+        )
+        .b <- -1
+      )
+    )
+  )
+
+  exec entry
+  exec ret
+}
 """, macros=False)
         self.assertEqual(run(text, "F", 0)[0], ["got -1!"])
         r = compile_module(parse(text), text, debug=True)
@@ -3717,15 +4092,14 @@ func F(c: bool) -> (s: string) = Format "got {v}!"(
         text = self.text()
         m = parse(text)
         g = m.graph("Clamp01")
-        self.assertEqual(sorted(n.id for n in g.nodes),
-                         ["entry", "ret", "ret.result", "ret.result.a"])
-        self.assertEqual(g.node("ret.result.a").binding("a").value, PinRef("entry", "v"))
-        # once it has a layout (the editor placed it), it is written as a graph
-        g.places.append(Place("ret", 300, 0))
+        self.assertEqual(sorted(n.id for n in g.nodes), ["0", "1", "1.result", "1.result.a"])
+        self.assertEqual(g.node("1.result.a").binding("a").value, PinRef("0", "v"))
+        # once it has a position (the editor placed it), it is written as a graph
+        g.places.append(Place("1", 300, 0))
         out = print_module(m)
-        self.assertIn("func Clamp01(v: f32) -> (result: f32) @pure {\n  flow {\n"
-                      "    entry -> ret\n  }\n\n  node entry = Entry()\n", out)
-        self.assertIn("      .a <- entry.v,\n", out)
+        self.assertIn("@pure\nfunc Clamp01(v: f32) -> (result: f32) {\n  exec Entry()\n"
+                      "  exec Return{pos=(300, 0)}(\n", out)
+        self.assertIn("      .a <- v\n", out)
         g.places.clear()
         self.assertEqual(print_module(m), text)
         for head in ("macro M() -> (r: i32) = 1", "func F() -> (a: i32, b: i32) = 1",
@@ -3743,15 +4117,14 @@ func F(c: bool) -> (s: string) = Format "got {v}!"(
 func Main() {
   local n: i32 = 7
 
-  flow {
-    entry -> say
-  }
-
   node entry = Entry()
   node get = GetLocal n()
   node say = Call host.Log(
-    .message <- Format "n is {n}"(),
+    .message <- Format "n is {n}"()
   )
+
+  exec entry
+  exec say
 }
 """, macros=False)
         m = parse(text)
@@ -3763,13 +4136,13 @@ func Main() {
 
     def test_comment_edits_merge_with_other_edits(self):
         from wiret.merge import merge_texts
-        base = self.text().replace("  node entry = Entry()\n", "  // starts here\n  node entry = Entry()\n")
+        base = self.text().replace("  exec Entry()\n", "  // starts here\n  exec Entry()\n")
         ours = base.replace("// starts here", "// begins here")
         theirs = base.replace('.name <- "done"', '.name <- "finished"').replace(
             "    .message <- Format \"{n}", "    // the summary\n    .message <- Format \"{n}")
         r = merge_texts(base, ours, theirs)
         self.assertTrue(r.clean, [c.what for c in r.conflicts])
-        self.assertIn("  // begins here\n  node entry = Entry()\n", r.text)
+        self.assertIn("  // begins here\n  exec Entry()\n", r.text)
         self.assertIn("    // the summary\n    .message <- Format \"{n}", r.text)
         self.assertIn('.name <- "finished"', r.text)
 
@@ -3778,96 +4151,107 @@ LEAVE = """
 func Nest() -> (n: i32) {
   local count: i32
 
-  flow {
-    chk.then -> outer.break
-    entry -> outer
-    inner.each -> seq
-    outer.each -> inner
-    outer.done -> ret
-    seq.then0 -> chk
-    seq.then1 -> add
-  }
-
   node add = SetLocal count(
-    .value <- Add::<i32>(
-      .a <- GetLocal count(),
-      .b <- 1,
-    ),
+    .value <- Add#<i32>(
+      .a <- GetLocal count()
+      .b <- 1
+    )
   )
   node chk = Branch(
     .cond <- And(
-      .a <- Eq::<i32>(
-        .a <- outer.index,
-        .b <- 2,
-      ),
-      .b <- Eq::<i32>(
-        .a <- inner.index,
-        .b <- 2,
-      ),
-    ),
+      .a <- Eq#<i32>(
+        .a <- outer.index
+        .b <- 2
+      )
+      .b <- Eq#<i32>(
+        .a <- inner.index
+        .b <- 2
+      )
+    )
   )
   node entry = Entry()
   node inner = Macro std.flow.ForRange(
-    .first <- 1,
-    .last <- 3,
+    .first <- 1
+    .last <- 3
   )
   node outer = Macro std.flow.ForRange(
-    .first <- 1,
-    .last <- 3,
+    .first <- 1
+    .last <- 3
   )
   node ret = Return(
-    .n <- GetLocal count(),
+    .n <- GetLocal count()
   )
-  node seq = Sequence() @count(2)
+  node seq = Sequence#count<2>()
+
+  exec entry
+  exec outer.each -> {
+    exec inner.each -> {
+      exec seq.then[0] -> {
+        exec chk.then -> {
+          goto outer.break
+        }
+      }.then[1]
+      exec add
+    }
+  }.done -> {
+    exec ret
+  }
 }
 
 func Never() -> (n: i32) {
-  flow {
-    entry -> loop.break
-    loop.done -> ret
-  }
-
   node entry = Entry()
   node loop = Macro std.flow.ForRange(
-    .first <- 1,
-    .last <- 3,
+    .first <- 1
+    .last <- 3
   )
   node ret = Return(
-    .n <- 7,
+    .n <- 7
   )
+
+  exec entry
+  goto loop.break
+
+  !{
+    exec loop.done -> {
+      exec ret
+    }
+  }
 }
 
 func SumUntil(stop: i32) -> (total: i32) {
   local acc: i32
 
-  flow {
-    chk.then -> loop.break
-    chk.else -> add
-    entry -> loop
-    loop.each -> chk
-    loop.done -> ret
-  }
-
   node add = SetLocal acc(
-    .value <- Add::<i32>(
-      .a <- GetLocal acc(),
-      .b <- loop.index,
-    ),
+    .value <- Add#<i32>(
+      .a <- GetLocal acc()
+      .b <- loop.index
+    )
   )
   node chk = Branch(
-    .cond <- Eq::<i32>(
-      .a <- loop.index,
-      .b <- entry.stop,
-    ),
+    .cond <- Eq#<i32>(
+      .a <- loop.index
+      .b <- entry.stop
+    )
   )
   node entry = Entry()
   node loop = Macro std.flow.ForRange(
-    .first <- 1,
-    .last <- 10,
+    .first <- 1
+    .last <- 10
   )
   node ret = Return(
-    .total <- GetLocal acc(),
+    .total <- GetLocal acc()
   )
+
+  exec entry
+  exec loop.each -> {
+    exec chk.then -> {
+      goto loop.break
+    }.else -> {
+      exec add
+    }
+  }.done -> {
+    exec ret
+  }
 }
 """
 
@@ -3907,12 +4291,11 @@ class LeaveTests(unittest.TestCase):
     def test_leave_belongs_in_a_macro(self):
         text = module("""
 func F() {
-  flow {
-    entry -> out
-  }
-
   node entry = Entry()
   node out = Leave done()
+
+  exec entry
+  exec out
 }
 """, macros=False)
         diags = [d for d in check(parse(text)) if d.code == "E0501"]
@@ -3936,17 +4319,16 @@ class Box {
   dispatcher: i32 = 3
   state: i32 = 4
 
-  func Total() -> (size: i32) {
-    flow {
-      entry -> ret
-    }
-
+  func Total(self) -> (size: i32) {
     node entry = Entry()
     node ret = Return(
       .size <- GetField Box.state(
-        .obj <- entry.self,
-      ),
+        .obj <- entry.self
+      )
     )
+
+    exec entry
+    exec ret
   }
 }
 
@@ -3954,47 +4336,41 @@ func Main(node: i32) -> (size: i32) {
   local flow: i32
   local state: Mode
 
-  flow {
-    Mode.then -> local
-    at -> box
-    box -> Mode
-    entry -> at
-    local -> size
-  }
+  box {title="Group", pos=(0, 0), size=(400, 100)}
 
   node Mode = Branch(
-    .cond <- Eq::<Mode>(
-      .a <- GetLocal state(),
-      .b <- Mode::Idle,
-    ),
+    .cond <- Eq#<Mode>(
+      .a <- GetLocal state()
+      .b <- Mode::Idle
+    )
   )
-  node at = SetLocal flow(
-    .value <- entry.node,
+  node at = SetLocal flow{pos=(100, 0)}(
+    .value <- entry.node
   )
-  node box = SetLocal state(
-    .value <- Mode::Idle,
+  node box = SetLocal state{pos=(200, 0)}(
+    .value <- Mode::Idle
   )
-  node entry = Entry()
+  node entry = Entry{pos=(0, 0)}()
   node local = Call host.Log(
     .message <- Format "{size} {flow}"(
       .size <- GetField layout.size(
         .obj <- MakeStruct layout(
-          .size <- 5,
-        ),
-      ),
-      .flow <- GetLocal flow(),
-    ),
+          .size <- 5
+        )
+      )
+      .flow <- GetLocal flow()
+    )
   )
-  node size = Return(
-    .size <- GetLocal flow(),
+  node size = Return{pos=(300, 0)}(
+    .size <- GetLocal flow()
   )
 
-  layout {
-    at at (100, 0)
-    box at (200, 0)
-    entry at (0, 0)
-    size at (300, 0)
-    box group "Group" at (0, 0) size (400, 100) [members = [at, box]]
+  exec entry
+  exec at
+  exec box
+  exec Mode.then -> {
+    exec local
+    exec size
   }
 }
 """
@@ -4017,7 +4393,7 @@ class ContextualNameTests(unittest.TestCase):
         box = next(it for it in m.items if getattr(it, "name", "") == "Box")
         self.assertEqual([f.name for f in box.fields], ["func", "event", "dispatcher", "state"])
         g = m.graph("Main")
-        self.assertEqual([b.id for b in g.boxes], ["group"])
+        self.assertEqual([b.title for b in g.boxes], ["Group"])
         self.assertEqual(sorted(p.id for p in g.places), ["at", "box", "entry", "size"])
         # node Mode and enum Mode side by side: a wire is `Mode.then`, a value `Mode::Idle`
         self.assertEqual(g.node("box").binding("value").value, Lit("enum", "Mode.Idle"))
@@ -4037,8 +4413,12 @@ class ContextualNameTests(unittest.TestCase):
         self.assertEqual(kw("  local flow: i32"), ["local"])
         self.assertEqual(kw("  state: i32 = 4"), [])
         self.assertEqual(kw("    .size <- GetField layout.size("), [])
-        self.assertEqual(kw("  node at = SetLocal flow("), ["node", "at"])
-        self.assertEqual(kw("    box.message at (1, 2)"), ["at"])
+        self.assertEqual(kw("  node at = SetLocal flow("), ["node"])
+        self.assertEqual(kw("  exec box"), ["exec"])
+        self.assertEqual(kw("  goto node"), ["goto"])
+        self.assertEqual(kw("  !exec Entry()"), ["exec"])
+        self.assertEqual(kw('  box {title="x"}'), ["box"])
+        self.assertEqual(kw("    .box <- exec"), [])
 
 
 class SaturationTests(unittest.TestCase):
@@ -4047,19 +4427,17 @@ class SaturationTests(unittest.TestCase):
     def test_narrow_types_saturate(self):
         types = ["i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64"]
         results = ", ".join(f"{t}_: {t}" for t in types)
-        nodes = "".join(f"  node {t}_ = Convert::<f64, {t}>(\n    .value <- entry.x,\n  )\n" for t in types)
-        binds = "".join(f"    .{t}_ <- {t}_.result,\n" for t in types)
+        binds = "".join(f"    .{t}_ <- Convert#<f64, {t}>(\n      .value <- x\n    )\n"
+                        for t in types)
         text = module(f"""
-func Sat(x: f64) -> ({results}) @pure {{
-  node entry = Entry()
-{nodes}  node r = Return(
+@pure
+func Sat(x: f64) -> ({results}) {{
+  exec Entry()
+  exec Return(
 {binds}  )
-
-  flow {{
-    entry -> r
-  }}
 }}
 """, macros=False)
+        self.assertEqual(print_module(parse(text)), text)
         from wiret.runner import format_value
         cases = {
             300.7: [127, 255, 300, 300, 300, 300, 300, 300],
@@ -4077,68 +4455,81 @@ func Sat(x: f64) -> ({results}) @pure {{
 
 
 EXPORTS = module("""
-var counter: i32 = 0 @export
+@export
+var counter: i32 = 0
+
 var hidden: i32 = 0
 
-enum Color: u8 @export {
+@export
+enum Color: u8 {
   Red
   Green
-}
-
-struct Point @export {
-  x: i32
-  y: i32
 }
 
 struct Inner {
   v: i32
 }
 
-interface Named @export {
-  func Name() -> (name: string)
+@export
+struct Point {
+  x: i32
+  y: i32
 }
 
-class Box @export {
+@export
+interface Named {
+  func Name(self) -> (name: string)
+}
+
+@export
+class Box {
   size: i32 = 1
 
-  func Grow(by: i32) -> (size: i32) @export {
-    flow {
-      entry -> ret
-    }
-
+  @export
+  func Grow(self, by: i32) -> (size: i32) {
     node entry = Entry()
     node ret = Return(
-      .size <- entry.by,
+      .size <- entry.by
     )
+
+    exec entry
+    exec ret
   }
 
-  func Shrink(by: i32) -> (size: i32) {
-    flow {
-      entry -> ret
-    }
-
+  func Shrink(self, by: i32) -> (size: i32) {
     node entry = Entry()
     node ret = Return(
-      .size <- entry.by,
+      .size <- entry.by
     )
+
+    exec entry
+    exec ret
   }
 }
 
-func Priv(x: i32) -> (y: i32) = x
+func Priv(x: i32) -> (y: i32) {
+  node entry = Entry()
+  node ret = Return(
+    .y <- entry.x
+  )
 
-func Pub(x: i32) -> (y: i32) @export {
-  flow {
-    call -> ret
-    entry -> call
-  }
+  exec entry
+  exec ret
+}
 
+@export
+func Pub(x: i32) -> (y: i32) {
   node call = Call Priv(
-    .x <- entry.x,
+    .x <- entry.x
   )
   node entry = Entry()
   node ret = Return(
-    .y <- call,
+    .y <- call
   )
+
+  exec entry
+  exec call
+  exec ret
 }
 """, macros=False)
 
@@ -4199,7 +4590,7 @@ class ExportModeTests(unittest.TestCase):
         w = [d for d in r.diags if d.code == "W0203"]
         self.assertEqual([(d.graph, d.node) for d in w], [("Color", None)])
         self.assertIn("Enum 'Color' is marked @export", explain(w[0]))
-        unmarked = EXPORTS.replace("enum Color: u8 @export {", "enum Color: u8 {")
+        unmarked = EXPORTS.replace("@export\nenum Color: u8 {", "enum Color: u8 {")
         self.assertNotIn("W0203", codes(unmarked))
 
     def test_verifier_checks_type_export_index(self):
@@ -4236,8 +4627,8 @@ class ExportModeTests(unittest.TestCase):
 
 class SpecExampleRoundTrip(unittest.TestCase):
     """Tier 0 exit criterion (section 1.6): the section 2.6 example round-trips byte for byte.
-    The spec shows it in flow order with no alignment (section 2.5), so the canonical writer's
-    output, put back in flow order by `wiretc view --flow`, must be the example exactly."""
+    The text is written in the order it runs, so the example is canonical as it stands, and
+    `wiretc view --flow` prints it unchanged."""
 
     def example(self):
         spec = os.path.join(os.path.dirname(os.path.dirname(HERE)), "docs", "reference",
@@ -4249,10 +4640,9 @@ class SpecExampleRoundTrip(unittest.TestCase):
     def test_section_2_6_round_trips_byte_for_byte(self):
         from wiret.flow import view_flow
         text = self.example()
-        canonical = print_module(parse(text))
-        self.assertEqual(print_module(parse(canonical)), canonical)     # fmt(fmt(x)) == fmt(x)
-        self.assertEqual(view_flow(parse(canonical)), text)
+        self.assertEqual(print_module(parse(text)), text)              # fmt(x) == x
         self.assertEqual(view_flow(parse(text)), text)
+        self.assertEqual([d.code for d in check(parse(text))], [])
 
     def test_section_2_6_has_no_alignment_padding(self):
         for line in self.example().splitlines():
@@ -4262,78 +4652,74 @@ class SpecExampleRoundTrip(unittest.TestCase):
 
 class ArithmeticEdgeCases(unittest.TestCase):
     TEXT = module("""
-func Div(a: i32, b: i32) -> (q: i32, r: i32) {
-  node entry = Entry()
-  node q = Div::<i32>(
-    .a <- entry.a,
-    .b <- entry.b,
-  )
-  node r = Rem::<i32>(
-    .a <- entry.a,
-    .b <- entry.b,
-  )
-  node ret = Return(
-    .q <- q.result,
-    .r <- r.result,
-  )
-
-  flow {
-    entry -> ret
-  }
-}
-
-func Shift(a: i32, n: i32) -> (r: i32) {
-  node entry = Entry()
-  node s = Shl::<i32>(
-    .a <- entry.a,
-    .b <- entry.n,
-  )
-  node ret = Return(
-    .r <- s.result,
-  )
-
-  flow {
-    entry -> ret
-  }
-}
-
 func AddU8(a: u8, b: u8) -> (r: u8) {
   node entry = Entry()
-  node s = Add::<u8>(
-    .a <- entry.a,
-    .b <- entry.b,
+  node s = Add#<u8>(
+    .a <- entry.a
+    .b <- entry.b
   )
   node ret = Return(
-    .r <- s.result,
+    .r <- s
   )
 
-  flow {
-    entry -> ret
-  }
+  exec entry
+  exec ret
+}
+
+func Div(a: i32, b: i32) -> (q: i32, r: i32) {
+  node entry = Entry()
+  node q = Div#<i32>(
+    .a <- entry.a
+    .b <- entry.b
+  )
+  node r = Rem#<i32>(
+    .a <- entry.a
+    .b <- entry.b
+  )
+  node ret = Return(
+    .q <- q
+    .r <- r
+  )
+
+  exec entry
+  exec ret
 }
 
 func MinMax(a: i32, b: i32) -> (lo: i32, hi: i32, abs: i32) {
   node entry = Entry()
-  node lo = Min::<i32>(
-    .a <- entry.a,
-    .b <- entry.b,
+  node lo = Min#<i32>(
+    .a <- entry.a
+    .b <- entry.b
   )
-  node hi = Max::<i32>(
-    .a <- entry.a,
-    .b <- entry.b,
+  node hi = Max#<i32>(
+    .a <- entry.a
+    .b <- entry.b
   )
-  node ab = Abs::<i32>(
-    .value <- entry.a,
+  node ab = Abs#<i32>(
+    .value <- entry.a
   )
   node ret = Return(
-    .lo <- lo.result,
-    .hi <- hi.result,
-    .abs <- ab.result,
+    .lo <- lo
+    .hi <- hi
+    .abs <- ab
   )
 
-  flow {
-    entry -> ret
-  }
+  exec entry
+  exec ret
+}
+
+func Shift(a: i32, n: i32) -> (r: i32) {
+  node entry = Entry()
+  node s = Shl#<i32>(
+    .a <- entry.a
+    .b <- entry.n
+  )
+  node ret = Return(
+    .r <- s
+  )
+
+  exec entry
+  exec ret
 }
 """, macros=False)
 
@@ -4357,10 +4743,9 @@ func Spin() {
   node entry = Entry()
   node again = Sequence()
 
-  flow {
-    entry -> again
-    again.then0 -> again
-  }
+  exec entry
+  exec again.then[0]
+  goto again
 }
 """, macros=False)
         _, r = build(text)
@@ -4372,59 +4757,48 @@ func Spin() {
 
 class ArrayTests(unittest.TestCase):
     BODY = """
-var names: array::<string>
+var names: array#<string>
 
 func Main(at: i32) -> (r: i32) {
-  local nums: array::<i32>
+  local nums: array#<i32>
   local total: i32
 
-  flow {
-    add -> set
-    entry -> init
-    init -> add
-    loop.each -> keep
-    loop.done -> name
-    name -> say
-    say -> r
-    set -> loop
-  }
-
-  node add = ArrayAdd::<i32> nums(
-    .item <- 30,
+  exec Entry()
+  exec SetLocal nums(
+    .value <- MakeArray#<i32>#count<3>(
+      .item[0] <- 10
+      .item[1] <- 20
+      .item[2] <- 5
+    )
   )
-  node entry = Entry()
-  node init = SetLocal nums(
-    .value <- mk,
+  exec ArrayAdd#<i32> nums(
+    .item <- 30
   )
-  node keep = SetLocal total(
-    .value <- Add::<i32>(
-      .a <- GetLocal total(),
-      .b <- loop.item,
-    ),
+  exec ArraySet#<i32> nums(
+    .index <- at
+    .item <- 7
   )
-  node loop = Macro std.flow.ForEach::<i32>(
-    .array <- GetLocal nums(),
+  exec Macro std.flow.ForEach#<i32>(
+    .array <- GetLocal nums()
+  ).each|item| -> {
+    exec SetLocal total(
+      .value <- Add#<i32>(
+        .a <- GetLocal total()
+        .b <- item
+      )
+    )
+  }.done
+  exec ArrayAdd#<string> names(
+    .item <- "Ada"
   )
-  node mk = MakeArray::<i32>(
-    .item0 <- 10,
-    .item1 <- 20,
-    .item2 <- 5,
-  ) @count(3)
-  node name = ArrayAdd::<string> names(
-    .item <- "Ada",
+  exec Call host.Log(
+    .message <- ArrayGet#<string>(
+      .array <- GetVar names()
+      .index <- 0
+    )
   )
-  node r = Return(
-    .r <- GetLocal total(),
-  )
-  node say = Call host.Log(
-    .message <- ArrayGet::<string>(
-      .array <- GetVar names(),
-      .index <- 0,
-    ),
-  )
-  node set = ArraySet::<i32> nums(
-    .index <- entry.at,
-    .item <- 7,
+  exec Return(
+    .r <- GetLocal total()
   )
 }
 """
@@ -4440,7 +4814,7 @@ func Main(at: i32) -> (r: i32) {
             run(module(self.BODY, macros=False), "Main", 9)
         self.assertIn("out of range", str(cm.exception))
         self.assertIn("isn't in the array", explain_runtime("WR_ERR_FAULT", str(cm.exception)))
-        self.assertEqual(cm.exception.traceback[-1], ("t.Main", "set"))
+        self.assertEqual(cm.exception.traceback[-1], ("t.Main", "3"))      # the ArraySet
 
     def test_fault_in_pure_node_names_that_node(self):
         text = module(self.BODY.replace(".index <- 0", ".index <- 5"), macros=False)
@@ -4449,10 +4823,10 @@ func Main(at: i32) -> (r: i32) {
                 vm = VM(output=lambda s: None)
                 with self.assertRaises(WiretError) as cm:
                     vm.call(vm.load(compile_module(parse(text), text, debug=debug).wbc), "Main", [0])
-                self.assertEqual(cm.exception.traceback[-1], ("t.Main", "say.message"))   # not `say`
+                self.assertEqual(cm.exception.traceback[-1], ("t.Main", "6.message"))  # not `6`
 
     def test_mutator_type_must_match_place(self):
-        text = module(self.BODY.replace("ArrayAdd::<i32> nums", "ArrayAdd::<f64> nums"),
+        text = module(self.BODY.replace("ArrayAdd#<i32> nums", "ArrayAdd#<f64> nums"),
                       macros=False)
         self.assertIn("E0110", codes(text))
 
@@ -4461,33 +4835,24 @@ class DiagnosticTests(unittest.TestCase):
     """One failing graph per implemented diagnostic code (section 7.4)."""
 
     CASES = {
-        "E0101": "node entry = Entry()\n  flow {\n    entry -> nowhere\n  }",
-        "E0102": "node entry = Entry()\n  node entry = Return()",
-        "E0103": "node entry = Entry()\n  node r = Return(\n    .bogus <- 1,\n  )\n"
-                 "  flow {\n    entry -> r\n  }",
-        "E0110": "node entry = Entry()\n  node r = Return(\n    .y <- \"text\",\n  )\n"
-                 "  flow {\n    entry -> r\n  }",
-        "E0111": "node entry = Entry()\n  node r = Return(\n    .y <- 1,\n    .y <- 2,\n  )\n"
-                 "  flow {\n    entry -> r\n  }",
-        "E0120": "node entry = Entry()\n  node r = Return(\n    .in <- 1,\n    .y <- 2,\n  )\n"
-                 "  flow {\n    entry -> r\n  }",
-        "E0121": "node entry = Entry()\n  node r = Return(\n    .y <- 1,\n  )\n"
-                 "  flow {\n    entry.then -> r\n    entry.then -> r\n  }",
-        "E0130": "node entry = Entry()\n  node c = ArrayClear::<i32>()\n  node r = Return(\n    .y <- 1,\n  )\n"
-                 "  flow {\n    entry -> c\n    c -> r\n  }",
-        "E0301": "node entry = Entry()\n  node a = Add::<i32>(\n    .a <- b.result,\n    .b <- 1,\n  )\n"
-                 "  node b = Add::<i32>(\n    .a <- a.result,\n    .b <- 1,\n  )\n"
-                 "  node r = Return(\n    .y <- a.result,\n  )\n"
-                 "  flow {\n    entry -> r\n  }",
-        "E0501": "node entry = Entry()\n  node w = Frobnicate()\n  node r = Return(\n    .y <- 1,\n  )\n"
-                 "  flow {\n    entry -> r\n  }",
-        "E0502": "node entry = Entry()\n  node a = Add(\n    .a <- 1,\n    .b <- 2,\n  )\n"
-                 "  node r = Return(\n    .y <- 1,\n  )\n"
-                 "  flow {\n    entry -> r\n  }",
-        "W0201": "node entry = Entry()\n  node r = Return()\n  flow {\n    entry -> r\n  }",
-        "W0301": "node entry = Entry()\n  node r = Return(\n    .y <- 1,\n  )\n  node lost = Return(\n"
-                 "    .y <- 2,\n  )\n  flow {\n    entry -> r\n  }",
-        "W0302": "node entry = Entry()",
+        "E0101": "exec Entry()\n  goto nowhere",
+        "E0102": "local x: i32\n  local x: i32\n\n  exec Entry()\n  exec Return(\n    .y <- 1\n  )",
+        "E0103": "exec Entry()\n  exec Return(\n    .bogus <- 1\n  )",
+        "E0110": "exec Entry()\n  exec Return(\n    .y <- \"text\"\n  )",
+        "E0111": "exec Entry()\n  exec Return(\n    .y <- 1\n    .y <- 2\n  )",
+        "E0120": "exec Entry()\n  exec Return(\n    .in <- 1\n    .y <- 2\n  )",
+        "E0121": "node r = Return(\n    .y <- 1\n  )\n\n  exec Entry().then -> {\n    exec r\n"
+                 "  }.then -> {\n    goto r\n  }",
+        "E0130": "exec Entry()\n  exec ArrayClear#<i32>()\n  exec Return(\n    .y <- 1\n  )",
+        "E0301": "node a = Add#<i32>(\n    .a <- b\n    .b <- 1\n  )\n"
+                 "  node b = Add#<i32>(\n    .a <- a\n    .b <- 1\n  )\n\n"
+                 "  exec Entry()\n  exec Return(\n    .y <- a\n  )",
+        "E0501": "exec Entry()\n  exec Frobnicate()\n  exec Return(\n    .y <- 1\n  )",
+        "E0502": "exec Entry()\n  exec Return(\n    .y <- Add(\n      .a <- 1\n      .b <- 2\n"
+                 "    )\n  )",
+        "W0201": "exec Entry()\n  exec Return()",
+        "W0301": "exec Entry()\n  exec Return(\n    .y <- 1\n  )\n\n  !exec Return(\n    .y <- 2\n  )",
+        "W0302": "exec Entry()",
     }
 
     def test_each_code(self):
@@ -4505,38 +4870,26 @@ class DiagnosticTests(unittest.TestCase):
     def test_purity_codes(self):
         base = module("""
 var g: i32 = 0
-
-func Impure() {
-  node entry = Entry()
-}
 """, macros=False)
         e0302 = base + """
-func P() -> (y: i32) @pure {
-  node entry = Entry()
-  node w = SetVar g(
-    .value <- 1,
+@pure
+func P() -> (y: i32) {
+  exec Entry()
+  exec SetVar g(
+    .value <- 1
   )
-  node r = Return(
-    .y <- 1,
+  exec Return(
+    .y <- 1
   )
-
-  flow {
-    entry -> w
-    w -> r
-  }
 }
 """
         e0304 = base + """
-func P() -> (y: i32) @pure {
-  node entry = Entry()
-  node v = GetVar g()
-  node r = Return(
-    .y <- v.value,
+@pure
+func P() -> (y: i32) {
+  exec Entry()
+  exec Return(
+    .y <- GetVar g()
   )
-
-  flow {
-    entry -> r
-  }
 }
 """
         self.assertIn("E0302", codes(e0302))
@@ -4545,59 +4898,49 @@ func P() -> (y: i32) @pure {
     def test_macro_recursion(self):
         text = module("""
 macro Loop(in: exec) -> (out: exec) {
-  node entry = Entry()
-  node again = Macro Loop()
-  node done = Exit out()
-
-  flow {
-    entry -> again
-    again.out -> done
-  }
+  exec Entry()
+  exec Macro Loop()
+  exec Exit out()
 }
 """, macros=False)
         self.assertIn("E0401", codes(text))
 
-    def test_layout_and_note_warnings(self):
+    def test_detached_note_warning(self):
         text = module("""
-#[note("orphan", detached: "gone")]
+@note("orphan", detached: "gone")
 func F() {
-  node entry = Entry()
-  layout {
-    box a "A" at (0, 0) size (10, 10) [members = [entry, ghost]]
-    box b "B" at (0, 0) size (10, 10) [members = [entry]]
-  }
+  exec Entry()
 }
 """, macros=False)
-        found = codes(text)
-        for c in ("W0601", "W0602", "W0604"):
-            self.assertIn(c, found)
+        self.assertIn("W0604", codes(text))
 
     def test_delete_keeps_notes(self):
         m = parse(demo())
         g = m.graph("Main")
-        removed = delete_node(g, "log_fib.message.b")
+        target = "3.each.0.then.0.message.b"         # the Convert with a note in the demo
+        self.assertTrue(notes(g.node(target).meta))
+        removed = delete_node(g, target)
         self.assertTrue(removed)
-        self.assertTrue(any(note_detached(a) == "log_fib.message.b" for a in notes(g.meta)))
+        self.assertTrue(any(note_detached(a) == target for a in notes(g.meta)))
         self.assertIn("W0604", {d.code for d in check(m)})
         out = print_module(m)
-        self.assertIn('detached: "log_fib.message.b")]', out)
+        self.assertIn(f'detached: "{target}")', out)
         self.assertEqual(print_module(parse(out)), out)
 
     def test_delete_box_keeps_notes(self):
         text = module("""
 func F() {
-  node entry = Entry()
-  layout {
-    #[note("the group")]
-    box g "G" at (0, 0) size (10, 10) [members = [entry]]
-  }
+  @note("the group")
+  box {title="G", pos=(0, 0), size=(10, 10)}
+
+  exec Entry()
 }
 """, macros=False)
         m = parse(text)
         g = m.graph("F")
-        delete_box(g, "g")
+        delete_box(g, g.boxes[0].id)
         self.assertEqual([(note_text(a), note_detached(a)) for a in notes(g.meta)],
-                         [("the group", "g")])
+                         [("the group", "box.0")])
 
     def test_notes_do_not_change_the_semantic_hash(self):
         m1 = parse(demo())
@@ -4608,39 +4951,30 @@ func F() {
         self.assertEqual(semantic_hash(m1), semantic_hash(m2))
         self.assertNotEqual(layout_hash(m1), layout_hash(m2))
 
-    def test_flow_view_keeps_notes_above_their_nodes(self):
-        out = view_flow(parse(demo()))
-        self.assertEqual(out.count("#[note("), demo().count("#[note("))
-        for line_no, line in enumerate(out.split("\n")):
-            if line.strip().startswith("#[note("):
-                nxt = out.split("\n")[line_no + 1].strip()
-                self.assertTrue(nxt.startswith(("#[", "func ", "event ", "macro "))
-                                or re.match(r"[\w.]+( at \(|$)", nxt), nxt)
-
 
 SAFE_DIV = """
 func SafeDiv(a: i32, b: i32) -> (q: i32) {
-  flow {
-    bad -> fail
-    entry -> t
-    t.body -> ok
-    t.fault -> bad
-  }
-
   node bad = Call host.Log(
-    .message <- t.message,
+    .message <- t.message
   )
   node entry = Entry()
   node fail = Return(
-    .q <- t.code,
+    .q <- t.code
   )
   node ok = Return(
-    .q <- Div::<i32>(
-      .a <- entry.a,
-      .b <- entry.b,
-    ),
+    .q <- Div#<i32>(
+      .a <- entry.a
+      .b <- entry.b
+    )
   )
   node t = Try()
+
+  exec entry
+  exec t.body -> {
+    exec ok
+  }.fault
+  exec bad
+  exec fail
 }
 """
 
@@ -4662,35 +4996,37 @@ class FaultTests(unittest.TestCase):
 func Check(x: i32) -> (r: i32) {
   node entry = Entry()
   node after = Call host.Log(
-    .message <- "after",
+    .message <- "after"
   )
-  node big = Gt::<i32>(
-    .a <- entry.x,
-    .b <- 10,
+  node big = Gt#<i32>(
+    .a <- entry.x
+    .b <- 10
   )
   node boom = Throw(
-    .message <- "too big",
-    .code <- 42,
+    .message <- "too big"
+    .code <- 42
   )
   node chk = Branch(
-    .cond <- big.result,
+    .cond <- big
   )
   node logit = Call host.Log(
-    .message <- t.message,
+    .message <- t.message
   )
   node ret = Return(
-    .r <- t.code,
+    .r <- t.code
   )
   node t = Try()
 
-  flow {
-    after -> ret
-    chk.then -> boom
-    entry -> t
-    t.body -> chk
-    t.fault -> logit
-    t.then -> after
-  }
+  exec entry
+  exec t.body -> {
+    exec chk.then -> {
+      exec boom
+    }
+  }.fault -> {
+    exec logit
+  }.then
+  exec after
+  exec ret
 }
 """
 
@@ -4712,13 +5048,12 @@ func Check(x: i32) -> (r: i32) {
 func Fail() {
   node entry = Entry()
   node boom = Throw(
-    .message <- "no",
-    .code <- 7,
+    .message <- "no"
+    .code <- 7
   )
 
-  flow {
-    entry -> boom
-  }
+  exec entry
+  exec boom
 }
 """, macros=False)
         with self.assertRaises(WiretError) as cm:
@@ -4731,44 +5066,44 @@ func Fail() {
         text = module("""
 func Inner(x: i32) -> (r: i32) {
   node entry = Entry()
-  node div = Div::<i32>(
-    .a <- 1,
-    .b <- entry.x,
+  node div = Div#<i32>(
+    .a <- 1
+    .b <- entry.x
   )
   node log = Call host.Log(
-    .message <- "inner done",
+    .message <- "inner done"
   )
   node ret = Return(
-    .r <- div.result,
+    .r <- div
   )
   node seq = Sequence()
 
-  flow {
-    entry -> seq
-    seq.then0 -> ret
-    seq.then1 -> log
-  }
+  exec entry
+  exec seq.then[0] -> {
+    exec ret
+  }.then[1]
+  exec log
 }
 
 func Outer(x: i32) -> (r: i32) {
   node entry = Entry()
   node call = Call Inner(
-    .x <- entry.x,
+    .x <- entry.x
   )
   node caught = Return(
-    .r <- t.code,
+    .r <- t.code
   )
   node ok = Return(
-    .r <- call.r,
+    .r <- call
   )
   node t = Try()
 
-  flow {
-    call -> ok
-    entry -> t
-    t.body -> call
-    t.fault -> caught
-  }
+  exec entry
+  exec t.body -> {
+    exec call
+    exec ok
+  }.fault
+  exec caught
 }
 """, macros=False)
         self.assertEqual(run(text, "Outer", 1), ([1], []))
@@ -4779,42 +5114,46 @@ func Outer(x: i32) -> (r: i32) {
         text = module("""
 func F() -> (n: i32) {
   local c: i32
+
   node entry = Entry()
   node boom = Throw(
-    .message <- "stop",
+    .message <- "stop"
   )
   node bump = SetLocal c(
-    .value <- inc.result,
+    .value <- inc
   )
   node chk = Branch(
-    .cond <- two.result,
+    .cond <- two
   )
   node cur = GetLocal c()
-  node inc = Add::<i32>(
-    .a <- cur.value,
-    .b <- 1,
+  node inc = Add#<i32>(
+    .a <- cur
+    .b <- 1
   )
   node loop = Macro ForRange(
-    .first <- 1,
-    .last <- 5,
+    .first <- 1
+    .last <- 5
   )
   node ret = Return(
-    .n <- cur.value,
+    .n <- cur
   )
   node t = Try()
-  node two = Eq::<i32>(
-    .a <- loop.index,
-    .b <- 2,
+  node two = Eq#<i32>(
+    .a <- loop.index
+    .b <- 2
   )
 
-  flow {
-    chk.then -> boom
-    chk.else -> bump
-    entry -> t
-    loop.each -> chk
-    t.body -> loop
-    t.fault -> ret
-  }
+  exec entry
+  exec t.body -> {
+    exec loop.each -> {
+      exec chk.then -> {
+        exec boom
+      }.else -> {
+        exec bump
+      }
+    }
+  }.fault
+  exec ret
 }
 """)
         trace = []
@@ -4828,45 +5167,49 @@ func F() -> (n: i32) {
         text = module("""
 func F() -> (n: i32) {
   local c: i32
+
   node entry = Entry()
   node boom = Throw(
-    .message <- "odd",
+    .message <- "odd"
   )
   node bump = SetLocal c(
-    .value <- inc.result,
+    .value <- inc
   )
   node chk = Branch(
-    .cond <- odd.result,
+    .cond <- odd
   )
   node cur = GetLocal c()
   node done = Return(
-    .n <- cur.value,
+    .n <- cur
   )
-  node inc = Add::<i32>(
-    .a <- cur.value,
-    .b <- 1,
+  node inc = Add#<i32>(
+    .a <- cur
+    .b <- 1
   )
   node loop = Macro ForRange(
-    .first <- 1,
-    .last <- 5,
+    .first <- 1
+    .last <- 5
   )
-  node odd = Eq::<i32>(
-    .a <- rem.result,
-    .b <- 1,
+  node odd = Eq#<i32>(
+    .a <- rem
+    .b <- 1
   )
-  node rem = Rem::<i32>(
-    .a <- loop.index,
-    .b <- 2,
+  node rem = Rem#<i32>(
+    .a <- loop.index
+    .b <- 2
   )
   node t = Try()
 
-  flow {
-    chk.then -> boom
-    entry -> loop
-    loop.done -> done
-    loop.each -> t
-    t.body -> chk
-    t.fault -> bump
+  exec entry
+  exec loop.done -> {
+    exec done
+  }.each -> {
+    exec t.body -> {
+      exec chk.then -> {
+        exec boom
+      }
+    }.fault
+    exec bump
   }
 }
 """)
@@ -4880,26 +5223,27 @@ func F() -> (n: i32) {
 func F() -> (msg: string) {
   node entry = Entry()
   node again = Throw(
-    .message <- inner.message,
-    .code <- 2,
+    .message <- inner.message
+    .code <- 2
   )
   node boom = Throw(
-    .message <- "first",
-    .code <- 1,
+    .message <- "first"
+    .code <- 1
   )
   node inner = Try()
   node outer = Try()
   node ret = Return(
-    .msg <- outer.message,
+    .msg <- outer.message
   )
 
-  flow {
-    entry -> outer
-    inner.body -> boom
-    inner.fault -> again
-    outer.body -> inner
-    outer.fault -> ret
-  }
+  exec entry
+  exec outer.body -> {
+    exec inner.body -> {
+      exec boom
+    }.fault
+    exec again
+  }.fault
+  exec ret
 }
 """, macros=False)
         self.assertEqual(run(text, "F")[0], ["first"])
@@ -4911,11 +5255,10 @@ func Spin() {
   node again = Sequence()
   node t = Try()
 
-  flow {
-    again.then0 -> again
-    entry -> t
-    t.body -> again
-  }
+  exec entry
+  exec t.body
+  exec again.then[0]
+  goto again
 }
 """, macros=False)
         _, r = build(text)
@@ -4929,23 +5272,24 @@ func Spin() {
 func F(x: i32) -> (r: i32) {
   node entry = Entry()
   node boom = Throw(
-    .message <- "negative",
+    .message <- "negative"
   )
   node chk = Branch(
-    .cond <- neg.result,
+    .cond <- neg
   )
-  node neg = Lt::<i32>(
-    .a <- entry.x,
-    .b <- 0,
+  node neg = Lt#<i32>(
+    .a <- entry.x
+    .b <- 0
   )
   node ret = Return(
-    .r <- entry.x,
+    .r <- entry.x
   )
 
-  flow {
-    chk.then -> boom
-    chk.else -> ret
-    entry -> chk
+  exec entry
+  exec chk.then -> {
+    exec boom
+  }.else -> {
+    exec ret
   }
 }
 """, macros=False)
@@ -4957,18 +5301,19 @@ func F(x: i32) -> (r: i32) {
 func F(x: bool) {
   node entry = Entry()
   node chk = Branch(
-    .cond <- entry.x,
+    .cond <- entry.x
   )
   node log = Call host.Log(
-    .message <- "shared",
+    .message <- "shared"
   )
   node t = Try()
 
-  flow {
-    chk.then -> t
-    chk.else -> log
-    entry -> chk
-    t.body -> log
+  exec entry
+  exec chk.then -> {
+    exec t.body
+    exec log
+  }.else -> {
+    goto log
   }
 }
 """, macros=False)
@@ -4977,17 +5322,16 @@ func F(x: bool) {
     def test_e0412_body_loops_back_to_its_try(self):
         text = module("""
 func F() {
-  flow {
-    entry -> t
-    log -> t
-    t.body -> log
-  }
-
   node entry = Entry()
   node log = Call host.Log(
-    .message <- "again",
+    .message <- "again"
   )
   node t = Try()
+
+  exec entry
+  exec t.body
+  exec log
+  goto t
 }
 """, macros=False)
         self.assertIn("E0412", codes(text))
@@ -4995,14 +5339,13 @@ func F() {
     def test_e0412_exit_inside_a_try_body(self):
         text = module("""
 macro Guard(in: exec) -> (each: exec) {
-  flow {
-    entry -> t
-    t.body -> out
-  }
-
   node entry = Entry()
   node out = Exit each()
   node t = Try()
+
+  exec entry
+  exec t.body
+  exec out
 }
 """, macros=False)
         self.assertIn("E0412", codes(text))
@@ -5012,29 +5355,30 @@ macro Guard(in: exec) -> (each: exec) {
 func F() {
   node entry = Entry()
   node a = Call host.Log(
-    .message <- "a",
+    .message <- "a"
   )
   node b = Call host.Log(
-    .message <- "b",
+    .message <- "b"
   )
   node chk = Branch()
   node join = Call host.Log(
-    .message <- "join",
+    .message <- "join"
   )
   node loop = Macro ForRange(
-    .first <- 1,
-    .last <- 2,
+    .first <- 1
+    .last <- 2
   )
   node t = Try()
 
-  flow {
-    a -> join
-    b -> join
-    chk.then -> a
-    chk.else -> b
-    entry -> t
-    join -> loop
-    t.body -> chk
+  exec entry
+  exec t.body
+  exec chk.then -> {
+    exec a
+    exec join
+    exec loop
+  }.else -> {
+    exec b
+    goto join
   }
 }
 """)
@@ -5081,54 +5425,51 @@ func F() {
 
 FIBERS = """
 event Beep(gap: f64) {
-  flow {
-    a -> d
-    d -> b
-    entry -> a
-  }
-
   node a = Call host.Log(
-    .message <- "before",
+    .message <- "before"
   )
   node b = Call host.Log(
-    .message <- "after",
+    .message <- "after"
   )
   node d = Delay(
-    .seconds <- entry.gap,
+    .seconds <- entry.gap
   )
   node entry = Entry()
+
+  exec entry
+  exec a
+  exec d
+  exec b
 }
 
 event Listen(s: std.Signal, name: string) {
-  flow {
-    entry -> w
-    w -> log
-  }
-
   node entry = Entry()
   node log = Call host.Log(
-    .message <- entry.name,
+    .message <- entry.name
   )
   node w = Await(
-    .signal <- entry.s,
+    .signal <- entry.s
   )
+
+  exec entry
+  exec w
+  exec log
 }
 
 event Steps() {
-  flow {
-    a -> y
-    entry -> a
-    y -> b
-  }
-
   node a = Call host.Log(
-    .message <- "step 1",
+    .message <- "step 1"
   )
   node b = Call host.Log(
-    .message <- "step 2",
+    .message <- "step 2"
   )
   node entry = Entry()
   node y = Yield()
+
+  exec entry
+  exec a
+  exec y
+  exec b
 }
 """
 
@@ -5194,41 +5535,41 @@ class FiberTests(unittest.TestCase):
 
     def test_suspension_keeps_frames_and_continuations(self):
         text = module("""
-func Wait(seconds: f64) -> (waited: f64) @latent {
+@latent
+func Wait(seconds: f64) -> (waited: f64) {
   node d = Delay(
-    .seconds <- entry.seconds,
+    .seconds <- entry.seconds
   )
   node entry = Entry()
   node ret = Return(
-    .waited <- entry.seconds,
+    .waited <- entry.seconds
   )
 
-  flow {
-    d -> ret
-    entry -> d
-  }
+  exec entry
+  exec d
+  exec ret
 }
 
 event Count(n: i32) {
   node entry = Entry()
   node loop = Macro ForRange(
-    .first <- 1,
-    .last <- entry.n,
+    .first <- 1
+    .last <- entry.n
   )
-  node msg = Convert::<i32, string>(
-    .value <- loop.index,
+  node msg = Convert#<i32, string>(
+    .value <- loop.index
   )
   node say = Call host.Log(
-    .message <- msg.result,
+    .message <- msg
   )
   node w = Call Wait(
-    .seconds <- 1.0,
+    .seconds <- 1.0
   )
 
-  flow {
-    entry -> loop
-    loop.each -> w
-    w -> say
+  exec entry
+  exec loop.each -> {
+    exec w
+    exec say
   }
 }
 """)
@@ -5245,17 +5586,16 @@ event Count(n: i32) {
     def test_a_fault_in_a_fiber_goes_to_on_fault_and_others_run_on(self):
         text = module("""
 event Bad() {
-  flow {
-    entry -> y
-    y -> boom
-  }
-
   node boom = Throw(
-    .message <- "bad",
-    .code <- 9,
+    .message <- "bad"
+    .code <- 9
   )
   node entry = Entry()
   node y = Yield()
+
+  exec entry
+  exec y
+  exec boom
 }
 """ + FIBERS, macros=False)
         vm, mod, out = fiber_vm(text)
@@ -5271,18 +5611,18 @@ event Bad() {
     def test_await_on_a_null_signal_is_a_catchable_fault(self):
         text = module("""
 event E() {
-  flow {
-    entry -> t
-    t.body -> w
-    t.fault -> log
-  }
-
   node entry = Entry()
   node log = Call host.Log(
-    .message <- t.message,
+    .message <- t.message
   )
   node t = Try()
   node w = Await()
+
+  exec entry
+  exec t.body -> {
+    exec w
+  }.fault
+  exec log
 }
 """, macros=False)
         vm, mod, out = fiber_vm(text)
@@ -5296,34 +5636,32 @@ var bell: std.Signal
 event Ring() {
   node entry = Entry()
   node fire = Call std.signal.Fire(
-    .signal <- get.value,
+    .signal <- get
   )
   node get = GetVar bell()
 
-  flow {
-    entry -> fire
-  }
+  exec entry
+  exec fire
 }
 
 event Wait() {
   node aw = Await(
-    .signal <- mk.signal,
+    .signal <- mk
   )
   node entry = Entry()
   node log = Call host.Log(
-    .message <- "rang",
+    .message <- "rang"
   )
   node mk = Call std.signal.New()
   node keep = SetVar bell(
-    .value <- mk.signal,
+    .value <- mk
   )
 
-  flow {
-    aw -> log
-    entry -> mk
-    keep -> aw
-    mk -> keep
-  }
+  exec entry
+  exec mk
+  exec keep
+  exec aw
+  exec log
 }
 """, macros=False)
         vm, mod, out = fiber_vm(text)
@@ -5361,68 +5699,65 @@ event Wait() {
 
     def test_e0201_non_latent_graphs_cannot_wait(self):
         text = module("""
-func Sleeper() {
-  node d = Delay(
-    .seconds <- 1.0,
-  )
+macro Pause(in: exec) -> (then: exec) {
+  node d = Yield()
   node entry = Entry()
+  node out = Exit then()
 
-  flow {
-    entry -> d
-  }
-}
-
-func Waits() @latent {
-  node d = Delay(
-    .seconds <- 1.0,
-  )
-  node entry = Entry()
-
-  flow {
-    entry -> d
-  }
-}
-
-func CallsLatent() {
-  node c = Call Waits()
-  node entry = Entry()
-
-  flow {
-    entry -> c
-  }
-}
-
-event Ev() {
-  node entry = Entry()
+  exec entry
+  exec d
+  exec out
 }
 
 func CallsEvent() {
   node c = Call Ev()
   node entry = Entry()
 
-  flow {
-    entry -> c
-  }
+  exec entry
+  exec c
 }
 
-macro Pause(in: exec) -> (then: exec) {
-  node d = Yield()
+func CallsLatent() {
+  node c = Call Waits()
   node entry = Entry()
-  node out = Exit then()
 
-  flow {
-    d -> out
-    entry -> d
-  }
+  exec entry
+  exec c
 }
 
 func ExpandsLatent() {
   node entry = Entry()
   node p = Macro Pause()
 
-  flow {
-    entry -> p
-  }
+  exec entry
+  exec p
+}
+
+func Sleeper() {
+  node d = Delay(
+    .seconds <- 1.0
+  )
+  node entry = Entry()
+
+  exec entry
+  exec d
+}
+
+@latent
+func Waits() {
+  node d = Delay(
+    .seconds <- 1.0
+  )
+  node entry = Entry()
+
+  exec entry
+  exec d
+}
+
+event Ev() {
+  node entry = Entry()
+
+  exec entry
 }
 """, macros=False)
         diags = [(d.graph, d.code) for d in check(parse(text)) if d.code.startswith("E")]
@@ -5431,21 +5766,25 @@ func ExpandsLatent() {
 
     def test_e0302_pure_functions_cannot_be_latent(self):
         text = module("""
-func A() @latent @pure {
+@latent
+@pure
+func A() {
   node entry = Entry()
+
+  exec entry
 }
 
-func B() -> (x: i32) @pure {
-  flow {
-    d -> ret
-    entry -> d
-  }
-
+@pure
+func B() -> (x: i32) {
   node d = Yield()
   node entry = Entry()
   node ret = Return(
-    .x <- 1,
+    .x <- 1
   )
+
+  exec entry
+  exec d
+  exec ret
 }
 """, macros=False)
         diags = [(d.graph, d.code) for d in check(parse(text)) if d.code.startswith("E")]
@@ -5457,8 +5796,10 @@ struct Holder {
   s: std.Signal
 }
 
-func F(a: array::<std.Signal>) {
+func F(a: array#<std.Signal>) {
   node entry = Entry()
+
+  exec entry
 }
 """, macros=False)
         self.assertEqual(codes(text), ["E0501"])
@@ -5505,15 +5846,14 @@ CLASSES = """
 class Boss : Player {
   rage: i32 = 3
 
-  func Describe() -> (text: string) {
-    flow {
-      entry -> ret
-    }
-
+  func Describe(self) -> (text: string) {
     node entry = Entry()
     node ret = Return(
-      .text <- "boss",
+      .text <- "boss"
     )
+
+    exec entry
+    exec ret
   }
 }
 
@@ -5521,85 +5861,86 @@ class Player {
   health: i32 = 100
   name: string = "hero"
 
-  func Describe() -> (text: string) {
-    flow {
-      entry -> ret
-    }
-
+  func Describe(self) -> (text: string) {
     node entry = Entry()
     node ret = Return(
-      .text <- "player",
+      .text <- "player"
     )
+
+    exec entry
+    exec ret
   }
 
-  func TakeDamage(amount: i32) -> (died: bool) {
+  func TakeDamage(self, amount: i32) -> (died: bool) {
     local new_hp: i32
 
-    flow {
-      chk.then -> ret_dead
-      chk.else -> ret_alive
-      entry -> set_new
-      set_new -> store
-      store -> chk
-    }
-
     node chk = Branch(
-      .cond <- Le::<i32>(
-        .a <- hp,
-        .b <- 0,
-      ),
+      .cond <- Le#<i32>(
+        .a <- hp
+        .b <- 0
+      )
     )
     node entry = Entry()
     node hp = GetLocal new_hp()
     node ret_alive = Return(
-      .died <- false,
+      .died <- false
     )
     node ret_dead = Return(
-      .died <- true,
+      .died <- true
     )
     node set_new = SetLocal new_hp(
-      .value <- Sub::<i32>(
+      .value <- Sub#<i32>(
         .a <- GetField Player.health(
-          .obj <- entry.self,
-        ),
-        .b <- entry.amount,
-      ),
+          .obj <- entry.self
+        )
+        .b <- entry.amount
+      )
     )
     node store = SetField Player.health(
-      .obj <- entry.self,
-      .value <- hp,
+      .obj <- entry.self
+      .value <- hp
     )
+
+    exec entry
+    exec set_new
+    exec store
+    exec chk.then -> {
+      exec ret_dead
+    }.else -> {
+      exec ret_alive
+    }
   }
 }
 
 func Make(boss: bool) -> (p: Player) {
   local who: Player
 
-  flow {
-    b -> set_b
-    entry -> pick
-    pick.then -> b
-    pick.else -> pl
-    pl -> set_p
-    set_b -> ret
-    set_p -> ret
-  }
-
   node b = New Boss()
   node entry = Entry()
   node pick = Branch(
-    .cond <- entry.boss,
+    .cond <- entry.boss
   )
   node pl = New Player()
   node ret = Return(
-    .p <- GetLocal who(),
+    .p <- GetLocal who()
   )
   node set_b = SetLocal who(
-    .value <- b,
+    .value <- b
   )
   node set_p = SetLocal who(
-    .value <- pl,
+    .value <- pl
   )
+
+  exec entry
+  exec pick.then -> {
+    exec b
+    exec set_b
+    exec ret
+  }.else -> {
+    exec pl
+    exec set_p
+    goto ret
+  }
 }
 """
 
@@ -5636,9 +5977,11 @@ class ClassTests(unittest.TestCase):
     def test_a_note_on_a_method_round_trips_once(self):
         text = module("""
 class A {
-  #[note("one note")]
-  func F() {
+  @note("one note")
+  func F(self) {
     node entry = Entry()
+
+    exec entry
   }
 }
 """, macros=False)
@@ -5653,36 +5996,35 @@ class A {
     def test_fields_methods_and_virtual_dispatch(self):
         text = classes_text("""
 func Run(boss: bool) -> (said: string, died: bool, hp: i32, name: string) {
-  flow {
-    desc -> hit
-    entry -> mk
-    hit -> ret
-    mk -> desc
-  }
-
   node desc = Call Player.Describe(
-    .self <- mk.p,
+    .self <- mk.p
   )
   node entry = Entry()
   node hit = Call Player.TakeDamage(
-    .self <- mk.p,
-    .amount <- 150,
+    .self <- mk.p
+    .amount <- 150
   )
   node hp = GetField Player.health(
-    .obj <- mk.p,
+    .obj <- mk.p
   )
   node mk = Call Make(
-    .boss <- entry.boss,
+    .boss <- entry.boss
   )
   node nm = GetField Player.name(
-    .obj <- mk.p,
+    .obj <- mk.p
   )
   node ret = Return(
-    .said <- desc.text,
-    .died <- hit.died,
-    .hp <- hp.value,
-    .name <- nm.value,
+    .said <- desc.text
+    .died <- hit.died
+    .hp <- hp.value
+    .name <- nm.value
   )
+
+  exec entry
+  exec mk
+  exec desc
+  exec hit
+  exec ret
 }
 """)
         self.assertEqual(run(text, "Run", 0)[0], ["player", 1, -50, "hero"])
@@ -5692,42 +6034,41 @@ func Run(boss: bool) -> (said: string, died: bool, hp: i32, name: string) {
         text = classes_text("""
 func Probe(boss: bool) -> (ok: bool, rage: i32, valid: bool, same: bool, other: bool) {
   node as_boss = Cast Boss(
-    .obj <- mk.p,
+    .obj <- mk.p
   )
   node entry = Entry()
   node mk = Call Make(
-    .boss <- entry.boss,
+    .boss <- entry.boss
   )
   node mk2 = Call Make(
-    .boss <- entry.boss,
+    .boss <- entry.boss
   )
-  node other = Eq::<Player>(
-    .a <- mk.p,
-    .b <- mk2.p,
+  node other = Eq#<Player>(
+    .a <- mk.p
+    .b <- mk2.p
   )
   node rage = GetField Boss.rage(
-    .obj <- as_boss.result,
+    .obj <- as_boss.result
   )
   node ret = Return(
-    .ok <- as_boss.ok,
-    .rage <- rage.value,
-    .valid <- valid.result,
-    .same <- same.result,
-    .other <- other.result,
+    .ok <- as_boss.ok
+    .rage <- rage.value
+    .valid <- valid
+    .same <- same.result
+    .other <- other.result
   )
-  node same = Eq::<Player>(
-    .a <- mk.p,
-    .b <- mk.p,
+  node same = Eq#<Player>(
+    .a <- mk.p
+    .b <- mk.p
   )
   node valid = IsValid(
-    .obj <- mk.p,
+    .obj <- mk.p
   )
 
-  flow {
-    entry -> mk
-    mk -> mk2
-    mk2 -> ret
-  }
+  exec entry
+  exec mk
+  exec mk2
+  exec ret
 }
 """)
         self.assertEqual(run(text, "Probe", 1)[0], [1, 3, 1, 1, 0])
@@ -5739,25 +6080,25 @@ func Probe(boss: bool) -> (ok: bool, rage: i32, valid: bool, same: bool, other: 
     def test_null_reference_faults_are_catchable(self):
         text = classes_text("""
 func Safe() -> (code: i32) {
-  flow {
-    entry -> t
-    set -> ok
-    t.body -> set
-    t.fault -> caught
-  }
-
   node caught = Return(
-    .code <- t.code,
+    .code <- t.code
   )
   node entry = Entry()
   node ok = Return(
-    .code <- 0,
+    .code <- 0
   )
   node set = SetField Player.health(
-    .obj <- null,
-    .value <- 1,
+    .obj <- null
+    .value <- 1
   )
   node t = Try()
+
+  exec entry
+  exec t.body -> {
+    exec set
+    exec ok
+  }.fault
+  exec caught
 }
 """)
         self.assertEqual(run(text, "Safe")[0], [-3])
@@ -5765,31 +6106,30 @@ func Safe() -> (code: i32) {
     def test_objects_are_shared_references(self):
         text = classes_text("""
 func Alias() -> (hp: i32) {
-  flow {
-    a -> set
-    entry -> a
-    set -> ret
-  }
-
   node a = New Player()
-  node arr = MakeArray::<Player>(
-    .item0 <- a.result,
-  ) @count(1)
+  node arr = MakeArray#<Player>#count<1>(
+    .item[0] <- a.result
+  )
   node entry = Entry()
-  node first = ArrayGet::<Player>(
-    .array <- arr.result,
-    .index <- 0,
+  node first = ArrayGet#<Player>(
+    .array <- arr.result
+    .index <- 0
   )
   node hp = GetField Player.health(
-    .obj <- a.result,
+    .obj <- a.result
   )
   node ret = Return(
-    .hp <- hp.value,
+    .hp <- hp.value
   )
   node set = SetField Player.health(
-    .obj <- first.item,
-    .value <- 7,
+    .obj <- first.item
+    .value <- 7
   )
+
+  exec entry
+  exec a
+  exec set
+  exec ret
 }
 """)
         self.assertEqual(run(text, "Alias")[0], [7])
@@ -5812,30 +6152,28 @@ func Alias() -> (hp: i32) {
 
     def test_subclass_flows_into_base_pins_but_not_back(self):
         text = classes_text("""
-func Up() -> (p: Player) {
-  node b = New Boss()
-  node entry = Entry()
-  node ret = Return(
-    .p <- b.result,
-  )
-
-  flow {
-    b -> ret
-    entry -> b
-  }
-}
-
 func Down() -> (b: Boss) {
   node entry = Entry()
   node p = New Player()
   node ret = Return(
-    .b <- p.result,
+    .b <- p.result
   )
 
-  flow {
-    entry -> p
-    p -> ret
-  }
+  exec entry
+  exec p
+  exec ret
+}
+
+func Up() -> (p: Player) {
+  node b = New Boss()
+  node entry = Entry()
+  node ret = Return(
+    .p <- b.result
+  )
+
+  exec entry
+  exec b
+  exec ret
 }
 """)
         diags = [(d.graph, d.code) for d in check(parse(text)) if d.code.startswith("E")]
@@ -5844,22 +6182,31 @@ func Down() -> (b: Boss) {
     def test_e0150_bad_overrides(self):
         text = module("""
 class A {
-  func F(x: i32) {
+  func F(self, x: i32) {
     node entry = Entry()
+
+    exec entry
   }
 
-  func G() @final {
+  @final
+  func G(self) {
     node entry = Entry()
+
+    exec entry
   }
 }
 
 class B : A {
-  func F(x: f32) {
+  func F(self, x: f32) {
     node entry = Entry()
+
+    exec entry
   }
 
-  func G() {
+  func G(self) {
     node entry = Entry()
+
+    exec entry
   }
 }
 """, macros=False)
@@ -5869,33 +6216,32 @@ class B : A {
     def test_final_methods_are_called_directly(self):
         text = module("""
 class A {
-  func Id() -> (x: i32) @final {
-    flow {
-      entry -> ret
-    }
-
+  @final
+  func Id(self) -> (x: i32) {
     node entry = Entry()
     node ret = Return(
-      .x <- 1,
+      .x <- 1
     )
+
+    exec entry
+    exec ret
   }
 }
 
 func F() -> (x: i32) {
-  flow {
-    a -> c
-    c -> ret
-    entry -> a
-  }
-
   node a = New A()
   node c = Call A.Id(
-    .self <- a,
+    .self <- a
   )
   node entry = Entry()
   node ret = Return(
-    .x <- c,
+    .x <- c
   )
+
+  exec entry
+  exec a
+  exec c
+  exec ret
 }
 """, macros=False)
         _, r = build(text)
@@ -5914,8 +6260,7 @@ class B : A {
   y: i32
 }
 
-class C : Missing {
-}
+class C : Missing {}
 
 class D : E {
   x: i32
@@ -5930,29 +6275,26 @@ class E {
 
     def test_purity_rules_for_objects(self):
         text = classes_text("""
-func P(p: Player) -> (hp: i32) @pure {
-  flow {
-    entry -> ret
-  }
-
+@pure
+func P(p: Player) -> (hp: i32) {
   node entry = Entry()
   node hp = GetField Player.health(
-    .obj <- entry.p,
+    .obj <- entry.p
   )
   node ret = Return(
-    .hp <- hp.value,
+    .hp <- hp.value
   )
+
+  exec entry
+  exec ret
 }
 """)
         self.assertIn("E0304", codes(text))
 
-    def test_flow_view_reorders_methods(self):
+    def test_flow_view_is_the_text(self):
+        # the text is already in the order it runs, so the flow view changes nothing
         text = classes_text()
-        view = view_flow(parse(text))
-        self.assertIn("  func TakeDamage(amount: i32) -> (died: bool) {\n    local new_hp: i32\n\n"
-                      "    flow {\n      entry -> set_new\n      set_new -> store\n", view)
-        self.assertIn("    }\n\n    node entry = Entry()\n    node set_new = SetLocal new_hp(\n",
-                      view)
+        self.assertEqual(view_flow(parse(text)), print_module(parse(text)))
 
     def test_verifier_rejects_bad_class_code(self):
         _, r = build(classes_text())
@@ -6015,135 +6357,131 @@ func P(p: Player) -> (hp: i32) @pure {
 
 IFACE = """
 interface Damageable {
-  func Hit(amount: i32) -> (left: i32)
-  func Name() -> (name: string)
+  func Hit(self, amount: i32) -> (left: i32)
+  func Name(self) -> (name: string)
 }
 
 class Barrel impl Damageable {
   hp: i32 = 10
 
-  func Hit(amount: i32) -> (left: i32) {
+  func Hit(self, amount: i32) -> (left: i32) {
     local hp_left: i32
-
-    flow {
-      entry -> keep
-      keep -> set
-      set -> ret
-    }
 
     node entry = Entry()
     node keep = SetLocal hp_left(
-      .value <- Sub::<i32>(
+      .value <- Sub#<i32>(
         .a <- GetField Barrel.hp(
-          .obj <- entry.self,
-        ),
-        .b <- entry.amount,
-      ),
+          .obj <- entry.self
+        )
+        .b <- entry.amount
+      )
     )
     node now = GetLocal hp_left()
     node ret = Return(
-      .left <- now,
+      .left <- now
     )
     node set = SetField Barrel.hp(
-      .obj <- entry.self,
-      .value <- now,
+      .obj <- entry.self
+      .value <- now
     )
+
+    exec entry
+    exec keep
+    exec set
+    exec ret
   }
 
-  func Name() -> (name: string) {
-    flow {
-      entry -> ret
-    }
-
+  func Name(self) -> (name: string) {
     node entry = Entry()
     node ret = Return(
-      .name <- "barrel",
+      .name <- "barrel"
     )
+
+    exec entry
+    exec ret
   }
 }
 
 class BigBarrel : Barrel {
-  func Name() -> (name: string) {
-    flow {
-      entry -> ret
-    }
-
+  func Name(self) -> (name: string) {
     node entry = Entry()
     node ret = Return(
-      .name <- "big barrel",
+      .name <- "big barrel"
     )
+
+    exec entry
+    exec ret
   }
 }
 
 class Door impl Damageable {
-  func Hit(amount: i32) -> (left: i32) {
-    flow {
-      entry -> ret
-    }
-
+  func Hit(self, amount: i32) -> (left: i32) {
     node entry = Entry()
     node ret = Return(
-      .left <- 99,
+      .left <- 99
     )
+
+    exec entry
+    exec ret
   }
 
-  func Name() -> (name: string) {
-    flow {
-      entry -> ret
-    }
-
+  func Name(self) -> (name: string) {
     node entry = Entry()
     node ret = Return(
-      .name <- "door",
+      .name <- "door"
     )
+
+    exec entry
+    exec ret
   }
 }
 
 func Smash(which: i32) -> (name: string, left: i32, is_d: bool) {
   local t: Damageable
 
-  flow {
-    b -> sb
-    chk.then -> b
-    chk.else -> d
-    d -> sd
-    entry -> chk
-    hit -> nm
-    nm -> ret
-    sb -> hit
-    sd -> hit
-  }
-
   node b = New BigBarrel()
   node chk = Branch(
-    .cond <- Eq::<i32>(
-      .a <- entry.which,
-      .b <- 0,
-    ),
+    .cond <- Eq#<i32>(
+      .a <- entry.which
+      .b <- 0
+    )
   )
   node d = New Door()
   node entry = Entry()
   node get = GetLocal t()
   node hit = Call Damageable.Hit(
-    .self <- get,
-    .amount <- 4,
+    .self <- get
+    .amount <- 4
   )
   node nm = Call Damageable.Name(
-    .self <- get,
+    .self <- get
   )
   node ret = Return(
-    .name <- nm,
-    .left <- hit,
+    .name <- nm
+    .left <- hit
     .is_d <- Cast Door(
-      .obj <- get,
-    ).ok,
+      .obj <- get
+    ).ok
   )
   node sb = SetLocal t(
-    .value <- b,
+    .value <- b
   )
   node sd = SetLocal t(
-    .value <- d,
+    .value <- d
   )
+
+  exec entry
+  exec chk.then -> {
+    exec b
+    exec sb
+    exec hit
+    exec nm
+    exec ret
+  }.else -> {
+    exec d
+    exec sd
+    goto hit
+  }
 }
 """
 
@@ -6170,66 +6508,61 @@ class InterfaceTests(unittest.TestCase):
 
     def test_subtyping_and_cast(self):
         text = iface_text("""
-class Rock {
-}
-
-func Up() -> (d: Damageable) {
-  node entry = Entry()
-  node n = New Door()
-  node ret = Return(
-    .d <- n.result,
-  )
-
-  flow {
-    entry -> n
-    n -> ret
-  }
-}
+class Rock {}
 
 func Down(d: Damageable) -> (door: Door) {
   node entry = Entry()
   node ret = Return(
-    .door <- entry.d,
+    .door <- entry.d
   )
 
-  flow {
-    entry -> ret
-  }
+  exec entry
+  exec ret
 }
 
 func NotOne() -> (d: Damageable) {
   node entry = Entry()
   node n = New Rock()
   node ret = Return(
-    .d <- n.result,
+    .d <- n
   )
 
-  flow {
-    entry -> n
-    n -> ret
-  }
+  exec entry
+  exec n
+  exec ret
 }
 
 func Probe() -> (rock_ok: bool, door_ok: bool) {
   node door = New Door()
   node entry = Entry()
   node is_door = Cast Damageable(
-    .obj <- door.result,
+    .obj <- door.result
   )
   node is_rock = Cast Damageable(
-    .obj <- rock.result,
+    .obj <- rock
   )
   node ret = Return(
-    .rock_ok <- is_rock.ok,
-    .door_ok <- is_door.ok,
+    .rock_ok <- is_rock.ok
+    .door_ok <- is_door.ok
   )
   node rock = New Rock()
 
-  flow {
-    door -> rock
-    entry -> door
-    rock -> ret
-  }
+  exec entry
+  exec door
+  exec rock
+  exec ret
+}
+
+func Up() -> (d: Damageable) {
+  node entry = Entry()
+  node n = New Door()
+  node ret = Return(
+    .d <- n.result
+  )
+
+  exec entry
+  exec n
+  exec ret
 }
 """)
         diags = sorted((d.graph, d.code) for d in check(parse(text)) if d.code.startswith("E"))
@@ -6241,23 +6574,29 @@ func Probe() -> (rock_ok: bool, door_ok: bool) {
     def test_e0152_missing_or_mismatched_methods(self):
         text = module("""
 interface Named {
-  func Name() -> (name: string)
-  func Rank() -> (rank: i32)
+  func Name(self) -> (name: string)
+  func Rank(self) -> (rank: i32)
 }
 
 class A impl Named {
-  func Name() -> (name: i32) {
+  func Name(self) -> (name: i32) {
     node entry = Entry()
+
+    exec entry
   }
 }
 
 class B impl Named {
-  func Rank() -> (rank: i32) {
+  func Rank(self) -> (rank: i32) {
     node entry = Entry()
+
+    exec entry
   }
 
-  event Name() {
+  event Name(self) {
     node entry = Entry()
+
+    exec entry
   }
 }
 """, macros=False)
@@ -6269,16 +6608,15 @@ class B impl Named {
     def test_e0151_impl_of_something_else_and_interface_rules(self):
         text = module("""
 interface I {
-  func F()
-  func F()
-  func W() @latent
+  func F(self)
+  func F(self)
+  @latent
+  func W(self)
 }
 
-class A {
-}
+class A {}
 
-class B impl A, Missing {
-}
+class B impl A, Missing {}
 """, macros=False)
         diags = sorted((d.graph, d.code) for d in check(parse(text)) if d.code.startswith("E"))
         self.assertEqual(diags, [("B", "E0151"), ("B", "E0151"), ("I", "E0102"),
@@ -6289,24 +6627,25 @@ class B impl A, Missing {
         # field write; the slot holding it must keep the producer's type, Door
         text = iface_text("""
 func Both() -> (left: i32) {
-  flow {
-    a_use -> ret
-    door -> a_use
-    entry -> door
-  }
-
   node a_use = Call Damageable.Hit(
-    .self <- door.result,
-    .amount <- 1,
+    .self <- door.result
+    .amount <- 1
   )
   node door = New Door()
   node entry = Entry()
   node ret = Return(
-    .left <- a_use.left,
+    .left <- a_use.left
   )
   node z_cast = Cast Door(
-    .obj <- door.result,
+    .obj <- door.result
   )
+
+  exec entry
+  exec door
+  exec a_use
+  exec ret
+
+  !exec z_cast
 }
 """)
         self.assertEqual(run(text, "Both")[0], [99])
@@ -6314,24 +6653,24 @@ func Both() -> (left: i32) {
     def test_null_receiver_faults(self):
         text = iface_text("""
 func F() -> (code: i32) {
-  flow {
-    c -> ok
-    entry -> t
-    t.body -> c
-    t.fault -> caught
-  }
-
   node c = Call Damageable.Name(
-    .self <- null,
+    .self <- null
   )
   node caught = Return(
-    .code <- t.code,
+    .code <- t.code
   )
   node entry = Entry()
   node ok = Return(
-    .code <- 0,
+    .code <- 0
   )
   node t = Try()
+
+  exec entry
+  exec t.body -> {
+    exec c
+    exec ok
+  }.fault
+  exec caught
 }
 """)
         self.assertEqual(run(text, "F")[0], [-3])
@@ -6342,17 +6681,17 @@ func F() -> (code: i32) {
         m = parse(iface_text())
         assign_ids(m, rng=random.Random(3))
         out = print_module(m)
-        self.assertIn('interface Damageable @id("if_', out)
-        self.assertIn('class Door impl Damageable @id("cls_', out)
-        self.assertIn('func Name() -> (name: string) @id("im_', out)
+        self.assertRegex(out, r'@id\("if_\w+"\)\ninterface Damageable \{')
+        self.assertRegex(out, r'@id\("cls_\w+"\)\nclass Door impl Damageable \{')
+        self.assertRegex(out, r'  @id\("im_\w+"\)\n  func Name\(self\) -> \(')
         base = iface_text()
-        ours = base.replace("  func Name() -> (name: string)\n}",
-                            "  func Name() -> (name: string)\n  func Heal()\n}", 1)
+        ours = base.replace("  func Name(self) -> (name: string)\n}",
+                            "  func Name(self) -> (name: string)\n  func Heal(self)\n}", 1)
         theirs = base.replace("class Door impl Damageable {", "class Door impl Damageable {\n"
                               "  open: bool", 1)
         r = merge_texts(base, ours, theirs)
         self.assertEqual(r.conflicts, [])
-        self.assertIn("  func Heal()\n}", r.text)
+        self.assertIn("  func Heal(self)\n}", r.text)
         self.assertIn("  open: bool\n", r.text)
 
     def test_verifier_checks_interface_tables(self):
@@ -6410,136 +6749,139 @@ DELEGATES = """
 class Counter {
   hits: i32
 
-  func Add(amount: i32) {
-    flow {
-      entry -> set
-    }
-
+  func Add(self, amount: i32) {
     node entry = Entry()
     node set = SetField Counter.hits(
-      .obj <- entry.self,
-      .value <- Add::<i32>(
+      .obj <- entry.self
+      .value <- Add#<i32>(
         .a <- GetField Counter.hits(
-          .obj <- entry.self,
-        ),
-        .b <- entry.amount,
-      ),
+          .obj <- entry.self
+        )
+        .b <- entry.amount
+      )
     )
+
+    exec entry
+    exec set
   }
 
-  event Later(amount: i32) {
-    flow {
-      entry -> y
-      y -> log
-    }
-
+  event Later(self, amount: i32) {
     node entry = Entry()
     node log = Call host.Log(
-      .message <- "later",
+      .message <- "later"
     )
     node y = Yield()
+
+    exec entry
+    exec y
+    exec log
   }
 }
 
 class Player {
   dispatcher OnHit(amount: i32)
 
-  func Hit(amount: i32) {
-    flow {
-      entry -> b
-    }
-
+  func Hit(self, amount: i32) {
     node b = Broadcast Player.OnHit(
-      .obj <- entry.self,
-      .amount <- entry.amount,
+      .obj <- entry.self
+      .amount <- entry.amount
     )
     node entry = Entry()
+
+    exec entry
+    exec b
   }
 }
 
 func Boom(amount: i32) {
-  flow {
-    entry -> log
-  }
-
   node entry = Entry()
   node log = Call host.Log(
-    .message <- Convert::<i32, string>(
-      .value <- Div::<i32>(
-        .a <- 1,
-        .b <- 0,
-      ),
-    ),
+    .message <- Convert#<i32, string>(
+      .value <- Div#<i32>(
+        .a <- 1
+        .b <- 0
+      )
+    )
   )
+
+  exec entry
+  exec log
 }
 
 func Run() -> (hits: i32, twice: i32) {
-  flow {
-    b1 -> b2
-    b2 -> b3
-    b3 -> b4
-    b4 -> h1
-    c -> p
-    entry -> c
-    h1 -> ub
-    h2 -> inv
-    inv -> ret
-    p -> b1
-    ub -> h2
-  }
-
   node add = CreateDelegate Counter.Add(
-    .target <- c,
+    .target <- c
   )
   node b1 = Bind Player.OnHit(
-    .obj <- p,
-    .handler <- add,
+    .obj <- p
+    .handler <- add
   )
   node b2 = Bind Player.OnHit(
-    .obj <- p,
-    .handler <- CreateDelegate Boom(),
+    .obj <- p
+    .handler <- CreateDelegate Boom()
   )
   node b3 = Bind Player.OnHit(
-    .obj <- p,
+    .obj <- p
     .handler <- CreateDelegate Counter.Later(
-      .target <- c,
-    ),
+      .target <- c
+    )
   )
   node b4 = Bind Player.OnHit(
-    .obj <- p,
-    .handler <- add,
+    .obj <- p
+    .handler <- add
   )
   node c = New Counter()
   node entry = Entry()
   node h1 = Call Player.Hit(
-    .self <- p,
-    .amount <- 5,
+    .self <- p
+    .amount <- 5
   )
   node h2 = Call Player.Hit(
-    .self <- p,
-    .amount <- 7,
+    .self <- p
+    .amount <- 7
   )
-  node inv = Invoke::<delegate::<(i32) -> (i32)>>(
-    .delegate <- CreateDelegate Twice(),
-    .arg0 <- 21,
+  node inv = Invoke#<delegate#<(i32) -> (i32)>>(
+    .delegate <- CreateDelegate Twice()
+    .arg0 <- 21
   )
   node p = New Player()
   node ret = Return(
     .hits <- GetField Counter.hits(
-      .obj <- c,
-    ),
-    .twice <- inv,
+      .obj <- c
+    )
+    .twice <- inv
   )
   node ub = Unbind Player.OnHit(
-    .obj <- p,
-    .handler <- add,
+    .obj <- p
+    .handler <- add
   )
+
+  exec entry
+  exec c
+  exec p
+  exec b1
+  exec b2
+  exec b3
+  exec b4
+  exec h1
+  exec ub
+  exec h2
+  exec inv
+  exec ret
 }
 
-func Twice(x: i32) -> (y: i32) = Mul::<i32>(
-  .a <- x,
-  .b <- 2,
-)
+func Twice(x: i32) -> (y: i32) {
+  node entry = Entry()
+  node ret = Return(
+    .y <- Mul#<i32>(
+      .a <- entry.x
+      .b <- 2
+    )
+  )
+
+  exec entry
+  exec ret
+}
 """
 
 
@@ -6585,33 +6927,31 @@ class DelegateTests(unittest.TestCase):
     def test_a_method_delegate_calls_the_override(self):
         text = delegates_text("""
 class Loud : Counter {
-  func Add(amount: i32) {
-    flow {
-      entry -> log
-    }
-
+  func Add(self, amount: i32) {
     node entry = Entry()
     node log = Call host.Log(
-      .message <- "loud",
+      .message <- "loud"
     )
+
+    exec entry
+    exec log
   }
 }
 
 func Over() {
-  flow {
-    entry -> l
-    l -> inv
-  }
-
   node d = CreateDelegate Counter.Add(
-    .target <- l,
+    .target <- l
   )
   node entry = Entry()
-  node inv = Invoke::<delegate::<(i32)>>(
-    .delegate <- d.result,
-    .arg0 <- 1,
+  node inv = Invoke#<delegate#<(i32)>>(
+    .delegate <- d.result
+    .arg0 <- 1
   )
   node l = New Loud()
+
+  exec entry
+  exec l
+  exec inv
 }
 """)
         _, r = build(text)
@@ -6623,24 +6963,24 @@ func Over() {
     def test_null_delegate_and_null_object_fault(self):
         text = delegates_text("""
 func NullInvoke() -> (code: i32) {
-  flow {
-    entry -> t
-    inv -> ok
-    t.body -> inv
-    t.fault -> caught
-  }
-
   node caught = Return(
-    .code <- t.code,
+    .code <- t.code
   )
   node entry = Entry()
-  node inv = Invoke::<delegate::<(i32) -> (i32)>>(
-    .delegate <- null,
+  node inv = Invoke#<delegate#<(i32) -> (i32)>>(
+    .delegate <- null
   )
   node ok = Return(
-    .code <- 0,
+    .code <- 0
   )
   node t = Try()
+
+  exec entry
+  exec t.body -> {
+    exec inv
+    exec ok
+  }.fault
+  exec caught
 }
 """)
         self.assertEqual(run(text, "NullInvoke")[0], [-3])
@@ -6658,48 +6998,57 @@ func NullInvoke() -> (code: i32) {
 
     def test_type_rules(self):
         text = delegates_text("""
+struct Holder {
+  d: dispatcher#<(i32)>
+}
+
 func Bad() {
   node d = CreateDelegate Twice()
   node entry = Entry()
-  node eq = Eq::<delegate::<(i32) -> (i32)>>(
-    .a <- d.result,
-    .b <- d.result,
+  node eq = Eq#<delegate#<(i32) -> (i32)>>(
+    .a <- d.result
+    .b <- d.result
   )
   node p = New Player()
   node wrong = Bind Player.OnHit(
-    .obj <- p.result,
-    .handler <- d.result,
+    .obj <- p.result
+    .handler <- d.result
   )
 
-  flow {
-    entry -> p
-    p -> wrong
-  }
-}
+  exec entry
+  exec p
+  exec wrong
 
-func Waits() @latent {
-  node d = Delay(
-    .seconds <- 1.0,
-  )
-  node entry = Entry()
-
-  flow {
-    entry -> d
-  }
+  !exec eq
 }
 
 func BindsLatent() {
   node d = CreateDelegate Waits()
   node entry = Entry()
+
+  exec entry
+
+  !exec d
 }
 
 func Native() {
   node d = CreateDelegate host.Log()
   node entry = Entry()
+
+  exec entry
+
+  !exec d
 }
 
-struct Holder {
-  d: dispatcher::<(i32)>
+@latent
+func Waits() {
+  node d = Delay(
+    .seconds <- 1.0
+  )
+  node entry = Entry()
+
+  exec entry
+  exec d
 }
 """)
         diags = sorted((d.graph, d.code) for d in check(parse(text)) if d.code.startswith("E"))
@@ -6713,16 +7062,16 @@ class Twin {
   dispatcher hit(x: i32)
 }
 
-func P(p: Player) @pure {
-  flow {
-    entry -> b
-  }
-
+@pure
+func P(p: Player) {
   node b = Broadcast Player.OnHit(
-    .obj <- entry.p,
-    .amount <- 1,
+    .obj <- entry.p
+    .amount <- 1
   )
   node entry = Entry()
+
+  exec entry
+  exec b
 }
 """)
         c = codes(text)
@@ -6731,17 +7080,19 @@ func P(p: Player) @pure {
 
     def test_delegate_types_written_with_empty_results_are_the_short_form(self):
         m = parse(module("""
-func F(d: delegate::<(i32) -> ()>) {
+func F(d: delegate#<(i32)>) {
   node entry = Entry()
+
+  exec entry
 }
 """, macros=False))
-        self.assertEqual(m.graph("F").params[0].type, "delegate::<(i32)>")
+        self.assertEqual(m.graph("F").params[0].type, "delegate#<(i32)>")
 
     def test_ids_name_dispatchers(self):
         from wiret.ids import assign_ids
         m = parse(delegates_text())
         assign_ids(m, rng=random.Random(4))
-        self.assertIn('dispatcher OnHit(amount: i32) @id("dsp_', print_module(m))
+        self.assertRegex(print_module(m), r'  @id\("dsp_\w+"\)\n  dispatcher OnHit\(')
 
     def test_verifier_rules(self):
         _, r = build(delegates_text())
@@ -6784,163 +7135,167 @@ func F(d: delegate::<(i32) -> ()>) {
 
 COW = """
 class Bag {
-  items: array::<i32>
+  items: array#<i32>
 }
 
-func Build(n: i32) -> (len: i32) {
-  local acc: array::<i32>
-  node add = ArrayAdd::<i32> acc(
-    .item <- loop.index,
-  )
-  node entry = Entry()
-  node get = GetLocal acc()
-  node len = ArrayLength::<i32>(
-    .array <- get.value,
-  )
-  node loop = Macro ForRange(
-    .first <- 1,
-    .last <- entry.n,
-  )
-  node ret = Return(
-    .len <- len.length,
-  )
+func Alias() -> (a: array#<i32>, b: array#<i32>, c: array#<i32>, d: array#<i32>) {
+  local a: array#<i32>
+  local b: array#<i32>
 
-  flow {
-    entry -> loop
-    loop.done -> ret
-    loop.each -> add
-  }
-}
-
-func Bump(a: array::<i32>) -> (len: i32) {
-  local mine: array::<i32>
-  node add = ArrayAdd::<i32> mine(
-    .item <- 9,
+  node add_a = ArrayAdd#<i32> a(
+    .item <- 1
   )
-  node entry = Entry()
-  node get = GetLocal mine()
-  node keep = SetLocal mine(
-    .value <- entry.a,
-  )
-  node len = ArrayLength::<i32>(
-    .array <- get.value,
-  )
-  node ret = Return(
-    .len <- len.length,
-  )
-
-  flow {
-    add -> ret
-    entry -> keep
-    keep -> add
-  }
-}
-
-func Mutate(x: array::<i32>) -> (y: array::<i32>) {
-  local mine: array::<i32>
-  node add = ArrayAdd::<i32> mine(
-    .item <- 7,
-  )
-  node entry = Entry()
-  node get = GetLocal mine()
-  node keep = SetLocal mine(
-    .value <- entry.x,
-  )
-  node ret = Return(
-    .y <- get.value,
-  )
-
-  flow {
-    add -> ret
-    entry -> keep
-    keep -> add
-  }
-}
-
-func Alias() -> (a: array::<i32>, b: array::<i32>, c: array::<i32>, d: array::<i32>) {
-  local a: array::<i32>
-  local b: array::<i32>
-  node add_a = ArrayAdd::<i32> a(
-    .item <- 1,
-  )
-  node add_a2 = ArrayAdd::<i32> a(
-    .item <- 2,
+  node add_a2 = ArrayAdd#<i32> a(
+    .item <- 2
   )
   node bag = New Bag()
   node bag_items = GetField Bag.items(
-    .obj <- bag.result,
+    .obj <- bag
   )
   node call = Call Mutate(
-    .x <- get_a.value,
+    .x <- get_a
   )
   node copy_b = SetLocal b(
-    .value <- get_a.value,
+    .value <- get_a
   )
   node entry = Entry()
   node get_a = GetLocal a()
   node get_b = GetLocal b()
   node put = SetField Bag.items(
-    .obj <- bag.result,
-    .value <- get_a.value,
+    .obj <- bag
+    .value <- get_a
   )
   node ret = Return(
-    .a <- get_a.value,
-    .b <- get_b.value,
-    .c <- bag_items.value,
-    .d <- call.y,
+    .a <- get_a
+    .b <- get_b
+    .c <- bag_items
+    .d <- call
   )
 
-  flow {
-    add_a -> copy_b
-    add_a2 -> call
-    bag -> put
-    call -> ret
-    copy_b -> bag
-    entry -> add_a
-    put -> add_a2
+  exec entry
+  exec add_a
+  exec copy_b
+  exec bag
+  exec put
+  exec add_a2
+  exec call
+  exec ret
+}
+
+func Build(n: i32) -> (len: i32) {
+  local acc: array#<i32>
+
+  node add = ArrayAdd#<i32> acc(
+    .item <- loop.index
+  )
+  node entry = Entry()
+  node get = GetLocal acc()
+  node len = ArrayLength#<i32>(
+    .array <- get
+  )
+  node loop = Macro ForRange(
+    .first <- 1
+    .last <- entry.n
+  )
+  node ret = Return(
+    .len <- len
+  )
+
+  exec entry
+  exec loop.done -> {
+    exec ret
+  }.each -> {
+    exec add
   }
 }
 
-func Snapshot() -> (seen: i32, after: i32) {
-  local a: array::<i32>
-  local n: i32
-  node a1 = ArrayAdd::<i32> a(
-    .item <- 1,
+func Bump(a: array#<i32>) -> (len: i32) {
+  local mine: array#<i32>
+
+  node add = ArrayAdd#<i32> mine(
+    .item <- 9
   )
-  node a2 = ArrayAdd::<i32> a(
-    .item <- 2,
+  node entry = Entry()
+  node get = GetLocal mine()
+  node keep = SetLocal mine(
+    .value <- entry.a
+  )
+  node len = ArrayLength#<i32>(
+    .array <- get
+  )
+  node ret = Return(
+    .len <- len
+  )
+
+  exec entry
+  exec keep
+  exec add
+  exec ret
+}
+
+func Mutate(x: array#<i32>) -> (y: array#<i32>) {
+  local mine: array#<i32>
+
+  node add = ArrayAdd#<i32> mine(
+    .item <- 7
+  )
+  node entry = Entry()
+  node get = GetLocal mine()
+  node keep = SetLocal mine(
+    .value <- entry.x
+  )
+  node ret = Return(
+    .y <- get
+  )
+
+  exec entry
+  exec keep
+  exec add
+  exec ret
+}
+
+func Snapshot() -> (seen: i32, after: i32) {
+  local a: array#<i32>
+  local n: i32
+
+  node a1 = ArrayAdd#<i32> a(
+    .item <- 1
+  )
+  node a2 = ArrayAdd#<i32> a(
+    .item <- 2
   )
   node cnt = GetLocal n()
   node entry = Entry()
   node get_a = GetLocal a()
-  node grow = ArrayAdd::<i32> a(
-    .item <- 0,
+  node grow = ArrayAdd#<i32> a(
+    .item <- 0
   )
-  node inc = Add::<i32>(
-    .a <- cnt.value,
-    .b <- 1,
+  node inc = Add#<i32>(
+    .a <- cnt
+    .b <- 1
   )
-  node len = ArrayLength::<i32>(
-    .array <- get_a.value,
+  node len = ArrayLength#<i32>(
+    .array <- get_a
   )
-  node loop = Macro std.flow.ForEach::<i32>(
-    .array <- get_a.value,
+  node loop = Macro std.flow.ForEach#<i32>(
+    .array <- get_a
   )
   node ret = Return(
-    .seen <- cnt.value,
-    .after <- len.length,
+    .seen <- cnt
+    .after <- len
   )
   node set_n = SetLocal n(
-    .value <- inc.result,
+    .value <- inc
   )
 
-  flow {
-    a1 -> a2
-    a2 -> loop
-    entry -> a1
-    grow -> set_n
-    loop.done -> ret
-    loop.each -> grow
+  exec entry
+  exec a1
+  exec a2
+  exec loop.each -> {
+    exec grow
+    exec set_n
+  }.done -> {
+    exec ret
   }
 }
 """
@@ -7001,20 +7356,22 @@ class CopyOnWriteTests(unittest.TestCase):
 
 
 CAPS = """
-extern func host.Beep() @capability("audio.play")
-extern func host.Log(message: string) @capability("console.write")
+@capability("audio.play")
+extern func host.Beep()
+
+@capability("console.write")
+extern func host.Log(message: string)
 
 func Hello() {
   node beep = Call host.Beep()
   node entry = Entry()
   node log = Call host.Log(
-    .message <- "hi",
+    .message <- "hi"
   )
 
-  flow {
-    entry -> log
-    log -> beep
-  }
+  exec entry
+  exec log
+  exec beep
 }
 """
 
@@ -7062,14 +7419,13 @@ class CapabilityTests(unittest.TestCase):
     def test_leaving_the_attribute_off_does_not_get_around_a_grant(self):
         text = module("""
 func Hello() {
-  flow {
-    entry -> log
-  }
-
   node entry = Entry()
   node log = Call host.Log(
-    .message <- "hi",
+    .message <- "hi"
   )
+
+  exec entry
+  exec log
 }
 """, macros=False)                     # host.Log declared without @capability
         _, r = build(text)
@@ -7079,12 +7435,18 @@ func Hello() {
 
     def test_e0104_misplaced_or_malformed(self):
         text = self.caps_module("""
-extern func host.A() @capability
-extern func host.B() @capability(3)
-extern func host.C() @capability("x", "y")
+@capability
+extern func host.A()
 
-func F() @capability("x") {
-  node entry = Entry()
+@capability(3)
+extern func host.B()
+
+@capability("x", "y")
+extern func host.C()
+
+@capability("x")
+func F() {
+  exec Entry()
 }
 """)
         diags = [d for d in check(parse(text)) if d.code == "E0104"]
@@ -7139,14 +7501,13 @@ func F() @capability("x") {
             with open(path, "w", encoding="utf-8") as f:
                 f.write(module("""
 func Hello() {
-  flow {
-    entry -> log
-  }
-
   node entry = Entry()
   node log = Call host.Log(
-    .message <- "hi",
+    .message <- "hi"
   )
+
+  exec entry
+  exec log
 }
 """, macros=False))
             wiretc = os.path.join(os.path.dirname(HERE), "wiretc.py")
@@ -7164,101 +7525,97 @@ func Hello() {
 
 GAPS = """
 class Shouter : Ticker {
-  func Tick() -> (n: i32) {
-    flow {
-      entry -> parent
-      parent -> ret
-    }
-
+  func Tick(self) -> (n: i32) {
     node entry = Entry()
     node parent = CallParent Tick()
     node ret = Return(
-      .n <- Mul::<i32>(
-        .a <- parent,
-        .b <- 10,
-      ),
+      .n <- Mul#<i32>(
+        .a <- parent
+        .b <- 10
+      )
     )
+
+    exec entry
+    exec parent
+    exec ret
   }
 }
 
 class Ticker {
-  items: array::<i32>
+  items: array#<i32>
 
-  func Greet() {
-    flow {
-      entry -> once
-      once -> hi
-    }
-
+  func Greet(self) {
     node entry = Entry()
     node hi = Call host.Log(
-      .message <- "hello",
+      .message <- "hello"
     )
     node once = Macro std.flow.DoOnce()
+
+    exec entry
+    exec once
+    exec hi
   }
 
-  func Keep(x: i32) {
-    flow {
-      entry -> add
-    }
-
-    node add = ArrayAdd::<i32> Ticker.items(
-      .obj <- entry.self,
-      .item <- entry.x,
+  func Keep(self, x: i32) {
+    node add = ArrayAdd#<i32> Ticker.items(
+      .obj <- entry.self
+      .item <- entry.x
     )
     node entry = Entry()
+
+    exec entry
+    exec add
   }
 
-  func Tick() -> (n: i32) {
+  func Tick(self) -> (n: i32) {
     state count: i32
-
-    flow {
-      entry -> set
-      set -> ret
-    }
 
     node entry = Entry()
     node ret = Return(
-      .n <- GetState count(),
+      .n <- GetState count()
     )
     node set = SetState count(
-      .value <- Add::<i32>(
-        .a <- GetState count(),
-        .b <- 1,
-      ),
+      .value <- Add#<i32>(
+        .a <- GetState count()
+        .b <- 1
+      )
     )
+
+    exec entry
+    exec set
+    exec ret
   }
 }
 
-func Fill(t: Ticker) -> (before: array::<i32>, after: array::<i32>) {
-  local snap: array::<i32>
+func Fill(t: Ticker) -> (before: array#<i32>, after: array#<i32>) {
+  local snap: array#<i32>
 
-  flow {
-    add -> ret
-    entry -> keep
-    keep -> take
-    take -> add
-  }
-
-  node add = ArrayAdd::<i32> Ticker.items(
-    .obj <- entry.t,
-    .item <- 2,
+  node add = ArrayAdd#<i32> Ticker.items(
+    .obj <- entry.t
+    .item <- 2
   )
   node entry = Entry()
+  @live
   node get = GetField Ticker.items(
-    .obj <- entry.t,
-  ) @live
+    .obj <- entry.t
+  )
   node keep = Call Ticker.Keep(
-    .self <- entry.t,
-    .x <- 1,
+    .self <- entry.t
+    .x <- 1
   )
   node ret = Return(
-    .before <- GetLocal snap(),
-    .after <- get,
+    .before <- GetLocal snap()
+    .after <- get
   )
   node take = SetLocal snap(
-    .value <- get,
+    .value <- get
   )
+
+  exec entry
+  exec keep
+  exec take
+  exec add
+  exec ret
 }
 """
 
@@ -7321,16 +7678,24 @@ class ClassGapTests(unittest.TestCase):
 
     def test_call_parent_needs_an_override(self):
         text = gaps_text("""
+class Lonely {
+  func Tick(self) -> (n: i32) {
+    node entry = Entry()
+    node p = CallParent Tick()
+
+    exec entry
+
+    !exec p
+  }
+}
+
 func Loose() {
   node entry = Entry()
   node p = CallParent Tick()
-}
 
-class Lonely {
-  func Tick() -> (n: i32) {
-    node entry = Entry()
-    node p = CallParent Tick()
-  }
+  exec entry
+
+  !exec p
 }
 """)
         diags = sorted((d.graph, d.code) for d in check(parse(text)) if d.code.startswith("E"))
@@ -7338,16 +7703,16 @@ class Lonely {
 
     def test_pure_functions_cannot_change_fields(self):
         text = gaps_text("""
-func P(t: Ticker) @pure {
-  node add = ArrayAdd::<i32> Ticker.items(
-    .obj <- entry.t,
-    .item <- 1,
+@pure
+func P(t: Ticker) {
+  node add = ArrayAdd#<i32> Ticker.items(
+    .item <- 1
+    .obj <- entry.t
   )
   node entry = Entry()
 
-  flow {
-    entry -> add
-  }
+  exec entry
+  exec add
 }
 """)
         self.assertIn("E0302", codes(text))
@@ -7355,19 +7720,20 @@ func P(t: Ticker) @pure {
     def test_parent_event_needs_a_latent_caller(self):
         text = module("""
 class A {
-  event Go() {
+  event Go(self) {
     node entry = Entry()
+
+    exec entry
   }
 }
 
 class B : A {
-  event Go() {
-    flow {
-      entry -> p
-    }
-
+  event Go(self) {
     node entry = Entry()
     node p = CallParent Go()
+
+    exec entry
+    exec p
   }
 }
 """, macros=False)
@@ -7375,71 +7741,71 @@ class B : A {
 
 
 DET = """
+func Maths(x: f64) -> (s: f64, p: f64, mn: f64, mx: f64, nan_eq: bool) {
+  node entry = Entry()
+  node max = Max#<f64>(
+    .a <- 0.0
+    .b <- neg_zero
+  )
+  node min = Min#<f64>(
+    .a <- 0.0
+    .b <- neg_zero
+  )
+  node nan = Div#<f64>(
+    .a <- 0.0
+    .b <- 0.0
+  )
+  node nan_eq = Eq#<f64>(
+    .a <- nan
+    .b <- nan
+  )
+  node neg_zero = Neg#<f64>(
+    .value <- 0.0
+  )
+  node pow = Call std.math.Pow(
+    .a <- entry.x
+    .b <- 0.5
+  )
+  node ret = Return(
+    .s <- sin
+    .p <- pow
+    .mn <- min
+    .mx <- max
+    .nan_eq <- nan_eq
+  )
+  node sin = Call std.math.Sin(
+    .x <- entry.x
+  )
+
+  exec entry
+  exec ret
+}
+
 event Countdown() {
   node entry = Entry()
   node go = Call host.Log(
-    .message <- "Go!",
+    .message <- "Go!"
   )
   node loop = Macro ForRange(
-    .first <- 1,
-    .last <- 3,
+    .first <- 1
+    .last <- 3
   )
   node say = Call host.Log(
-    .message <- txt.result,
+    .message <- txt
   )
-  node txt = Convert::<i32, string>(
-    .value <- loop.index,
+  node txt = Convert#<i32, string>(
+    .value <- loop.index
   )
   node wait = Delay(
-    .seconds <- 0.5,
+    .seconds <- 0.5
   )
 
-  flow {
-    entry -> loop
-    loop.done -> go
-    loop.each -> say
-    say -> wait
-  }
-}
-
-func Maths(x: f64) -> (s: f64, p: f64, mn: f64, mx: f64, nan_eq: bool) {
-  node entry = Entry()
-  node max = Max::<f64>(
-    .a <- 0.0,
-    .b <- neg_zero.result,
-  )
-  node min = Min::<f64>(
-    .a <- 0.0,
-    .b <- neg_zero.result,
-  )
-  node nan = Div::<f64>(
-    .a <- 0.0,
-    .b <- 0.0,
-  )
-  node nan_eq = Eq::<f64>(
-    .a <- nan.result,
-    .b <- nan.result,
-  )
-  node neg_zero = Neg::<f64>(
-    .value <- 0.0,
-  )
-  node pow = Call std.math.Pow(
-    .a <- entry.x,
-    .b <- 0.5,
-  )
-  node ret = Return(
-    .s <- sin.result,
-    .p <- pow.result,
-    .mn <- min.result,
-    .mx <- max.result,
-    .nan_eq <- nan_eq.result,
-  )
-  node sin = Call std.math.Sin(
-    .x <- entry.x,
-  )
-
-  flow {
-    entry -> ret
+  exec entry
+  exec loop.done -> {
+    exec go
+  }.each -> {
+    exec say
+    exec wait
   }
 }
 """
@@ -7521,37 +7887,27 @@ class Box {
   n: i32
   dispatcher Changed(n: i32)
 
-  func Set(n: i32) {
-    node b = Broadcast Changed(
-      .obj <- entry.self,
-      .n <- entry.n,
+  func Set(self, n: i32) {
+    exec Entry()
+    exec SetField n(
+      .obj <- self
+      .value <- n
     )
-    node entry = Entry()
-    node s = SetField n(
-      .obj <- entry.self,
-      .value <- entry.n,
+    exec Broadcast Changed(
+      .obj <- self
+      .n <- n
     )
-
-    flow {
-      entry -> s
-      s -> b
-    }
   }
 }
 
 event Wait(s: std.Signal) {
-  node entry = Entry()
-  node log = Call host.Log(
-    .message <- "woken",
+  exec Entry()
+  exec Await(
+    .signal <- s
   )
-  node w = Await(
-    .signal <- entry.s,
+  exec Call host.Log(
+    .message <- "woken"
   )
-
-  flow {
-    entry -> w
-    w -> log
-  }
 }
 """
         _, r = build(text)
@@ -7593,13 +7949,9 @@ event Wait(s: std.Signal) {
         from wiret.natives import Signal
         _, r = build(module(DET) + """
 event Wait(s: std.Signal) {
-  flow {
-    entry -> w
-  }
-
-  node entry = Entry()
-  node w = Await(
-    .signal <- entry.s,
+  exec Entry()
+  exec Await(
+    .signal <- s
   )
 }
 """)
@@ -7638,8 +7990,8 @@ class BytecodeTests(unittest.TestCase):
     def test_disassembly_names_nodes(self):
         _, r = build(demo())
         text = disassemble(r.wbc)
-        self.assertIn(".loop/seq:", text)
-        self.assertIn("cont.push .loop/bump", text)
+        self.assertIn(".1/test.then.0:", text)
+        self.assertIn("cont.push .1/test.then.1", text)
         self.assertIn("call game.demo.Fib", text)
 
     def test_embedded_source_round_trips(self):
@@ -7699,12 +8051,11 @@ extern func host.Missing(x: i32)
 func F() {
   node entry = Entry()
   node c = Call host.Missing(
-    .x <- 1,
+    .x <- 1
   )
 
-  flow {
-    entry -> c
-  }
+  exec entry
+  exec c
 }
 """, macros=False)
         _, r = build(text)
@@ -7721,6 +8072,74 @@ def lesson(name: str) -> str:
         return f.read()
 
 
+# FizzBuzz with every `else` written as a block, nothing flattened. The flatten tests start
+# from this rather than lesson 6, so how the lesson happens to be saved cannot break them.
+NESTED_FIZZBUZZ = """wiret 1
+module tests.fizzbuzz
+
+extern func host.Log(message: string) -> ()
+
+func Main() {
+  exec Entry{pos=(0, 0)}()
+  exec Macro std.flow.ForRange{pos=(200, 0)}(
+    .first <- 1
+    .last <- 15
+  ).each|index| -> {
+    @note("Check 15")
+    exec Branch{pos=(788, 0)}(
+      .cond <- Eq#<i32>{pos=(608, 64)}(
+        .a <- Rem#<i32>{pos=(475, 64)}(
+          .a <- index
+          .b <- 15
+        )
+        .b <- 0
+      )
+    ).then -> {
+      exec Call host.Log{pos=(972, -138)}(
+        .message <- "FizzBuzz"
+      )
+    }.else -> {
+      @note("Check 3")
+      exec Branch{pos=(1043, 20)}(
+        .cond <- Eq#<i32>{pos=(609, 154)}(
+          .a <- Rem#<i32>{pos=(474, 156)}(
+            .a <- index
+            .b <- 3
+          )
+          .b <- 0
+        )
+      ).then -> {
+        exec Call host.Log{pos=(1255, -140)}(
+          .message <- "Fizz"
+        )
+      }.else -> {
+        @note("Check 5")
+        exec Branch{pos=(1282, 40)}(
+          .cond <- Eq#<i32>{pos=(609, 246)}(
+            .a <- Rem#<i32>{pos=(475, 246)}(
+              .a <- index
+              .b <- 5
+            )
+            .b <- 0
+          )
+        ).then -> {
+          exec Call host.Log{pos=(1502, -141)}(
+            .message <- "Buzz"
+          )
+        }.else -> {
+          exec Call host.Log{pos=(1531, 60)}(
+            .message <- Convert#<i32, string>{pos=(474, 346)}(
+              .value <- index
+            )
+          )
+        }
+      }
+    }
+  }
+}
+"""
+
+
 class StdFlowTests(unittest.TestCase):
     def test_library_is_canonical_and_clean(self):
         from wiret.registry import STD_FLOW_PATH
@@ -7734,37 +8153,41 @@ class StdFlowTests(unittest.TestCase):
 func Main() {
   node entry = Entry()
   node rep = Macro std.flow.Repeat(
-    .times <- 3,
+    .times <- 3
   )
   node flip = Macro std.flow.FlipFlop()
   node log_a = Call host.Log(
-    .message <- "A",
+    .message <- "A"
   )
   node log_b = Call host.Log(
-    .message <- "B",
+    .message <- "B"
   )
   node five = Macro std.flow.ForRange(
-    .first <- 1,
-    .last <- 5,
+    .first <- 1
+    .last <- 5
   )
   node limited = Macro std.flow.DoN(
-    .n <- 2,
+    .n <- 2
   )
-  node n_text = Convert::<i32, string>(
-    .value <- limited.counter,
+  node n_text = Convert#<i32, string>(
+    .value <- limited.counter
   )
   node log_n = Call host.Log(
-    .message <- n_text.result,
+    .message <- n_text
   )
 
-  flow {
-    entry -> rep
-    rep.body -> flip
-    rep.done -> five
-    flip.a -> log_a
-    flip.b -> log_b
-    five.each -> limited
-    limited.out -> log_n
+  exec entry
+  exec rep.body -> {
+    exec flip.a -> {
+      exec log_a
+    }.b -> {
+      exec log_b
+    }
+  }.done -> {
+    exec five.each -> {
+      exec limited
+      exec log_n
+    }
   }
 }
 """, macros=False)
@@ -7853,10 +8276,10 @@ class DebuggerTests(unittest.TestCase):
         seen = []
 
         def hook(f, node, pending, depth, snapshot, phase):
-            if phase == "ready" and f.endswith("SumTo") and node == "add":
+            if phase == "ready" and f.endswith("SumTo") and node == "1.each.0":
                 v = snapshot()[-1].pin_values()
-                seen.append((v[("add.value.a", "value")], v[("loop", "index")],
-                             v[("add.value", "result")]))
+                seen.append((v[("1.each.0.value.a", "value")], v[("1", "index")],
+                             v[("1.each.0.value", "result")]))
         vm = VM(hook=hook)
         self.assertEqual(vm.call(vm.load(r.wbc), "SumTo", [3]), [6])
         self.assertEqual(seen, [(0, 1, 1), (1, 2, 3), (3, 3, 6)])
@@ -7866,7 +8289,7 @@ class DebuggerTests(unittest.TestCase):
         stacks = []
 
         def hook(f, node, pending, depth, snapshot, phase):
-            if phase == "ready" and f.endswith("Square") and node == "ret":
+            if phase == "ready" and f.endswith("Square") and node == "1":
                 frames = snapshot()
                 stacks.append(([fr.func.name.split(".")[-1] for fr in frames],
                                frames[-1].named_locals()["x"]))
@@ -7903,17 +8326,16 @@ class ExplainTests(unittest.TestCase):
         text = module("""
 func F() {
   node entry = Entry()
-  node n = Add::<i32>(
-    .a <- 1,
-    .b <- 2,
+  node n = Add#<i32>(
+    .a <- 1
+    .b <- 2
   )
   node log = Call host.Log(
-    .message <- n.result,
+    .message <- n
   )
 
-  flow {
-    entry -> log
-  }
+  exec entry
+  exec log
 }
 """, macros=False)
         d = next(d for d in check(parse(text)) if d.code == "E0110")
@@ -7944,7 +8366,7 @@ class PaletteTests(unittest.TestCase):
         self.assertEqual(top("if").kind, "Branch")
         self.assertEqual(top("print").symbol, "host.Log")
         self.assertEqual(top("loop").symbol, "std.flow.ForRange")
-        self.assertEqual(top("add").label, "Add::<i32>")
+        self.assertEqual(top("add").label, "Add#<i32>")
 
     def test_wire_drop_filters_and_ranks(self):
         from wiret import palette
@@ -7952,7 +8374,7 @@ class PaletteTests(unittest.TestCase):
         fits = [i for i in items if palette.compatible(i, self.g, self.idx, "out", "i32")]
         self.assertTrue(all(palette.compatible(i, self.g, self.idx, "out", "i32") for i in fits))
         self.assertNotIn("Call host.Log", [i.label for i in fits])
-        self.assertEqual(palette.rank(fits, "text")[0].label, "Convert::<i32, string> (to text)")
+        self.assertEqual(palette.rank(fits, "text")[0].label, "Convert#<i32, string> (to text)")
         execs = [i for i in items if palette.compatible(i, self.g, self.idx, "out", "exec")]
         self.assertIn("Branch", [i.kind for i in execs])
         self.assertNotIn("Add", [i.kind for i in execs])
@@ -8052,12 +8474,13 @@ class WebApiTests(unittest.TestCase):
         lines = text.split("\n")
         for g, nodes in r["nodes"].items():
             for nid, info in nodes.items():
-                if "." in nid:            # an inline node: the line of the input it feeds
-                    pin = nid.rsplit(".", 1)[1]
-                    self.assertRegex(lines[info["line"] - 1], rf"^\s*\.{pin} <- {info['what']}\b")
-                else:
-                    self.assertRegex(lines[info["line"] - 1], rf"^\s*node {nid} = ")
-        self.assertEqual(r["nodes"]["Square"]["ret"]["what"], "Return")
+                line = lines[info["line"] - 1]
+                if nid.rsplit(".", 1)[-1].isidentifier() and "." in nid:
+                    pin = nid.rsplit(".", 1)[1]           # inline: the line of the input it feeds
+                    self.assertRegex(line, rf"^\s*\.{pin} <- {info['what']}\b")
+                else:                                     # an exec statement
+                    self.assertRegex(line, rf"^\s*exec {info['what']}\b")
+        self.assertEqual(r["nodes"]["Square"]["1"]["what"], "Return")
 
     def test_debug_run_records_frames_and_values(self):
         from wiret import webapi
@@ -8066,25 +8489,25 @@ class WebApiTests(unittest.TestCase):
         self.assertTrue(r["ok"])
         self.assertEqual(r["output"], json.loads(webapi.run(text))["output"])
         self.assertFalse(r["truncated"])
-        rets = [s for s in r["steps"] if (s["graph"], s["node"], s["phase"]) == ("Square", "ret", "ready")]
+        rets = [s for s in r["steps"] if (s["graph"], s["node"], s["phase"]) == ("Square", "1", "ready")]
         self.assertEqual(len(rets), 5)
         frames = [[r["frame_table"][i] for i in s["frames"]] for s in rets]
         self.assertEqual([(f["graph"], f["node"]) for f in frames[0]],
-                         [("Main", "say.message.b.value"), ("Square", "ret")])
+                         [("Main", "1.each.0.message.b.value"), ("Square", "1")])
         self.assertEqual([f[-1]["vars"] for f in frames][:2],
                          [[["x", "parameter", "i32", "1"]], [["x", "parameter", "i32", "2"]]])
         self.assertEqual([s["depth"] for s in rets], [1] * 5)
-        self.assertEqual(r["counts"]["Square"]["ret"], 5)
+        self.assertEqual(r["counts"]["Square"]["1"], 5)
         # the output a step had seen grows as the run goes on
         self.assertEqual([s["out"] for s in rets], [0, 1, 2, 3, 4])
 
     def test_debug_run_fault_and_truncation(self):
         from wiret import webapi
-        text = (lesson("02_variables.wiret").replace(".value <- Add::<i32>(", ".value <- Div::<i32>(")
+        text = (lesson("02_variables.wiret").replace(".value <- Add#<i32>", ".value <- Div#<i32>")
                 .replace(".b <- 5", ".b <- 0"))
         r = json.loads(webapi.debug_run(text))
         self.assertFalse(r["ok"])
-        self.assertEqual(r["fault"], {"graph": "Main", "node": "bonus.value"})
+        self.assertEqual(r["fault"], {"graph": "Main", "node": "2.value"})
         self.assertIn("divide by zero", r["explain"])
         r = json.loads(webapi.debug_run(lesson("06_fizzbuzz.wiret"), max_steps=10))
         self.assertTrue(r["ok"] and r["truncated"])
@@ -8097,35 +8520,35 @@ class WebApiTests(unittest.TestCase):
         r = json.loads(webapi.check(lesson("04_loops.wiret")))
         (main,) = r["graphs"]
         nodes = {n["id"]: n for n in main["nodes"]}
-        self.assertEqual((nodes["count"]["x"], nodes["count"]["y"]), (200, 0))
-        self.assertEqual([p["label"] for p in nodes["count"]["ins"]],
+        self.assertEqual((nodes["1"]["x"], nodes["1"]["y"]), (200, 0))
+        self.assertEqual([p["label"] for p in nodes["1"]["ins"]],
                          ["", "break", "first = 1", "last = 5"])
-        self.assertEqual([p["name"] for p in nodes["count"]["outs"]], ["each", "done", "index"])
-        self.assertTrue(nodes["count"]["outs"][0]["exec"] and nodes["count"]["outs"][0]["filled"])
-        self.assertIn({"exec": True, "from": ["count", "each"], "to": ["say", "in"], "color": "#f0f0f0"},
+        self.assertEqual([p["name"] for p in nodes["1"]["outs"]], ["each", "done", "index"])
+        self.assertTrue(nodes["1"]["outs"][0]["exec"] and nodes["1"]["outs"][0]["filled"])
+        self.assertIn({"exec": True, "from": ["1", "each"], "to": ["1.each.0", "in"], "color": "#f0f0f0"},
                       main["wires"])
-        self.assertIn({"exec": False, "from": ["keep.value", "result"], "to": ["keep", "value"], "color": "#1abc9c"},
-                      main["wires"])
-        self.assertTrue(nodes["keep.value"]["pure"])
-        self.assertEqual(nodes["entry"]["header"], "#a93226")
+        self.assertIn({"exec": False, "from": ["1.each.1.value", "result"], "to": ["1.each.1", "value"],
+                       "color": "#1abc9c"}, main["wires"])
+        self.assertTrue(nodes["1.each.1.value"]["pure"])
+        self.assertEqual(nodes["0"]["header"], "#a93226")
         self.assertTrue(any(n["on"] is None and "Loops" in n["text"] for n in main["notes"]))
         r = json.loads(webapi.check(lesson("05_functions.wiret")))
         squared = next(n for g in r["graphs"] if g["name"] == "Main" for n in g["nodes"]
-                       if n["id"] == "say.message.b.value")
+                       if n["id"] == "1.each.0.message.b.value")
         self.assertEqual(squared["opens"], "Square")
 
     def test_check_marks_problem_nodes_and_lays_out_new_ones(self):
         from wiret import webapi
         text = lesson("02_variables.wiret").replace(".b <- 5", '.b <- "x"')
-        text = text.replace("  node show = Call host.Log(", "  node extra = Add::<i32>()\n  node show = Call host.Log(")
+        text = text.rstrip("}\n") + "\n\n  !Add#<i32>()\n}\n"
         r = json.loads(webapi.check(text))
         nodes = {n["id"]: n for n in r["graphs"][0]["nodes"]}
-        self.assertEqual(nodes["bonus.value"]["diag"], "error")
-        self.assertIsNone(nodes["start"]["diag"])
-        # a node without a place line is laid out automatically, and stays put on the next check
-        first = (nodes["extra"]["x"], nodes["extra"]["y"])
+        self.assertEqual(nodes["2.value"]["diag"], "error")
+        self.assertIsNone(nodes["1"]["diag"])
+        # a node without a position is laid out automatically, and stays put on the next check
+        first = (nodes["~0"]["x"], nodes["~0"]["y"])
         again = {n["id"]: n for n in json.loads(webapi.check(text + "\n"))["graphs"][0]["nodes"]}
-        self.assertEqual((again["extra"]["x"], again["extra"]["y"]), first)
+        self.assertEqual((again["~0"]["x"], again["~0"]["y"]), first)
 
     def edit(self, source, graph, **req):
         from wiret import webapi
@@ -8134,97 +8557,135 @@ class WebApiTests(unittest.TestCase):
     def test_edit_values(self):
         from wiret import webapi
         text = lesson("02_variables.wiret")
-        r = self.edit(text, "Main", op="literal", node="bonus.value", pin="b", text="100")
+        r = self.edit(text, "Main", op="literal", node="2.value", pin="b", text="100")
         self.assertTrue(r["ok"])
         self.assertIn(".b <- 100", r["text"])
         self.assertEqual(r["text"], print_module(parse(r["text"])))          # canonical
-        self.assertEqual(self.edit(text, "Main", op="literal", node="bonus.value", pin="b", text="1.5"),
+        self.assertEqual(self.edit(text, "Main", op="literal", node="2.value", pin="b", text="1.5"),
                          {"ok": False, "message": "1.5 is not a valid i32"})
-        r = self.edit(text, "Main", op="literal", node="bonus.value", pin="b", text="")
-        self.assertNotIn(".b <-", r["text"].split("node bonus")[1].split("node entry")[0])
-        self.assertEqual(json.loads(webapi.literal_prompt(text, "Main", "bonus.value", "b")),
+        r = self.edit(text, "Main", op="literal", node="2.value", pin="b", text="")
+        self.assertNotIn(".b <-", r["text"].split("Add#<i32>")[1].split("exec Call")[0])
+        self.assertEqual(json.loads(webapi.literal_prompt(text, "Main", "2.value", "b")),
                          {"type": "i32", "current": "5", "hint": ""})
         # a string needs no quotes
-        r = self.edit(text, "Main", op="literal", node="show.message", pin="a", text='Score: "big"')
+        r = self.edit(text, "Main", op="literal", node="3.message", pin="a", text='Score: "big"')
         self.assertIn('.a <- "Score: \\"big\\""', r["text"])
         # an enum member needs no type name, and must be a member
         pets = lesson("08_structs.wiret")
-        g = next(g["name"] for g in json.loads(webapi.check(pets))["graphs"]
-                 if any(n["id"] == "save.value" for n in g["nodes"]))
-        self.assertIn("Happy, Hungry, Sleepy", json.loads(webapi.literal_prompt(pets, g, "save.value", "value"))["hint"])
-        self.assertIn(".value <- Mood::Sleepy", self.edit(pets, g, op="literal", node="save.value", pin="value", text="Sleepy")["text"])
-        self.assertIn("not a member of Mood", self.edit(pets, g, op="literal", node="save.value", pin="value", text="Bored")["message"])
-        self.assertIn("has no typed value", self.edit(pets, g, op="literal", node="save.value", pin="obj", text="1")["message"])
+        self.assertIn("Happy, Hungry, Sleepy", json.loads(webapi.literal_prompt(pets, "Main", "3.value", "value"))["hint"])
+        self.assertIn(".value <- Mood::Sleepy", self.edit(pets, "Main", op="literal", node="3.value", pin="value", text="Sleepy")["text"])
+        self.assertIn("not a member of Mood", self.edit(pets, "Main", op="literal", node="3.value", pin="value", text="Bored")["message"])
+        self.assertIn("has no typed value", self.edit(pets, "Main", op="literal", node="3.value", pin="obj", text="1")["message"])
         # a bool flips
-        r = self.edit(lesson("03_decisions.wiret"), "CheckAge", op="disconnect", node="decide", dir="in", pin="cond")
-        r = self.edit(r["text"], "CheckAge", op="toggle", node="decide", pin="cond")
+        r = self.edit(lesson("03_decisions.wiret"), "CheckAge", op="disconnect", node="1", dir="in", pin="cond")
+        r = self.edit(r["text"], "CheckAge", op="toggle", node="1", pin="cond")
         self.assertIn(".cond <- true", r["text"])
-        r = self.edit(r["text"], "CheckAge", op="toggle", node="decide", pin="cond")
-        self.assertEqual(r["message"], "Set decide.cond = false")
+        r = self.edit(r["text"], "CheckAge", op="toggle", node="1", pin="cond")
+        self.assertEqual(r["message"], "Set 1.cond = false")
         self.assertNotIn(".cond <-", r["text"])          # false is cond's default, so it is not written
-        self.assertIn(".cond <- true", self.edit(r["text"], "CheckAge", op="toggle", node="decide", pin="cond")["text"])
+        self.assertIn(".cond <- true", self.edit(r["text"], "CheckAge", op="toggle", node="1", pin="cond")["text"])
+
+    def test_edit_values_verbatim(self):
+        """A canvas text field sends the string as typed: spaces and quotes kept, never parsed."""
+        text = lesson("02_variables.wiret")
+        r = self.edit(text, "Main", op="literal", node="3.message", pin="a", text=' "hi" ',
+                      verbatim=True)
+        self.assertIn('.a <- " \\"hi\\" "', r["text"])
+        r = self.edit(text, "Main", op="literal", node="3.message", pin="a", text="", verbatim=True)
+        self.assertNotIn('.a <- "Your score', r["text"])          # empty: removed from the source
+        # a wired input takes no value
+        r = self.edit(text, "Main", op="literal", node="3.message", pin="b", text="x", verbatim=True)
+        self.assertFalse(r["ok"])
+        self.assertIn("is wired", r["message"])
+
+    def test_input_editors(self):
+        """The form control each unwired input shows on the canvas (graph_json ins[].editor)."""
+        from wiret import webapi
+
+        def editors(text, graph):
+            g = next(x for x in json.loads(webapi.check(text))["graphs"] if x["name"] == graph)
+            return {(n["id"], p["name"]): p.get("editor") for n in g["nodes"] for p in n["ins"]}
+
+        ins = editors(lesson("02_variables.wiret"), "Main")
+        self.assertEqual(ins[("2.value", "b")], {"kind": "int", "value": "5", "placeholder": None,
+                                                 "min": -2**31, "max": 2**31 - 1})
+        self.assertIsNone(ins[("2.value", "a")])                    # wired: no field
+        self.assertEqual(ins[("3.message", "a")]["kind"], "text")
+        self.assertEqual(ins[("3.message", "a")]["value"], "Your score is ")   # no quotes
+        self.assertIsNone(ins[("3", "in")])                         # exec: no field
+        mood = editors(lesson("08_structs.wiret"), "Main")[("3.value", "value")]
+        self.assertEqual(mood["kind"], "enum")
+        self.assertIn("Sleepy", mood["options"])
 
     def test_edit_wires(self):
         text = lesson("02_variables.wiret")
         # an i32 into a string input: a visible Convert node goes in between, and is selected
-        now = "show.message.b.value"
-        r = self.edit(text, "Main", op="connect", a=["show", "in", "message"], b=[now, "out", "value"],
-                      geoms={now: [440, 420, 120], "show": [980, 0, 150]})
-        conv = r["select"]
+        now = "3.message.b.value"
+        r = self.edit(text, "Main", op="connect", a=["3", "in", "message"], b=[now, "out", "value"],
+                      geoms={now: [440, 420, 120], "3": [980, 0, 150]})
         self.assertTrue(r["ok"])
-        self.assertEqual(conv, "show.message")                 # written inline in show.message
-        self.assertIn("    .message <- Convert::<i32, string>(\n"
-                      "      .value <- show_message_b_value,\n    ),\n", r["text"])
-        self.assertIn(f"{conv} at (710, 250)", r["text"])       # x: (440 + 120 + 980) / 2 - 60
+        self.assertEqual(r["select"], "3.message")             # written inline in 3.message
+        # x: (440 + 120 + 980) / 2 - 60; the GetLocal, now read twice, gets a name
+        self.assertIn("    .message <- Convert#<i32, string>{pos=(710, 250)}(\n"
+                      "      .value <- score\n    )\n", r["text"])
+        self.assertIn("  node score = GetLocal score{pos=(440, 420)}()\n", r["text"])
+        # the Concat it replaced is wired to nothing, so it is kept after a `!`
+        self.assertIn("  !Call std.string.Concat{pos=(780, 180)}(\n", r["text"])
         refused = {
-            "Connect an output pin to an input pin.": (["bonus.value", "out", "result"], [now, "out", "value"]),
-            "A node cannot be wired to itself.": (["bonus.value", "out", "result"], ["bonus.value", "in", "a"]),
-            "Exec pins connect only to exec pins (E0120).": (["start", "out", "then"], ["bonus.value", "in", "a"]),
+            "Connect an output pin to an input pin.": (["2.value", "out", "result"], [now, "out", "value"]),
+            "A node cannot be wired to itself.": (["2.value", "out", "result"], ["2.value", "in", "a"]),
+            "Exec pins connect only to exec pins (E0120).": (["1", "out", "then"], ["2.value", "in", "a"]),
         }
         for message, (a, b) in refused.items():
             self.assertEqual(self.edit(text, "Main", op="connect", a=a, b=b), {"ok": False, "message": message})
-        r = self.edit(text, "Main", op="connect", a=["start", "out", "then"], b=["show", "in", "in"])
-        self.assertIn("start -> show", r["text"])
-        self.assertNotIn("start -> bonus", r["text"])
-        r = self.edit(r["text"], "Main", op="disconnect", node="start", dir="out", pin="then")
-        self.assertNotIn("start ->", r["text"])
+        # the second SetLocal is skipped: it moves into a `!{ }` block that still goes on to
+        # the Log, which is entered from two places now and so is named
+        r = self.edit(text, "Main", op="connect", a=["1", "out", "then"], b=["3", "in", "in"])
+        self.assertIn("  exec SetLocal score{pos=(200, 0)}(\n    .value <- 10\n  )\n  exec log\n",
+                      r["text"])
+        self.assertIn("  !{\n    exec SetLocal score{pos=(560, 0)}(\n", r["text"])
+        self.assertIn("    goto log\n  }\n", r["text"])
+        self.assertEqual(run(r["text"], "Main")[1], ["Your score is 10"])
+        r = self.edit(r["text"], "Main", op="disconnect", node="1", dir="out", pin="then")
+        self.assertIn("    )\n    exec log\n  }\n", r["text"])      # a name, once given, stays
         # dropped on a node: the first free input of the same type
-        old = "bonus.value.a"
-        self.assertEqual(self.edit(text, "Main", op="connect_to_node", a=[old, "out", "value"], node="bonus.value"),
+        old = "2.value.a"
+        self.assertEqual(self.edit(text, "Main", op="connect_to_node", a=[old, "out", "value"], node="2.value"),
                          {"ok": False, "message": ""})                    # both inputs are taken
-        freed = self.edit(text, "Main", op="literal", node="bonus.value", pin="b", text="")["text"]
-        r = self.edit(freed, "Main", op="connect_to_node", a=[old, "out", "value"], node="bonus.value")
-        self.assertEqual(r["message"], "Bound bonus.value.b = bonus.value.a.value")
-        # now read twice, the GetLocal is declared under a name of its own
-        self.assertIn("      .a <- bonus_value_a,\n      .b <- bonus_value_a,\n", r["text"])
-        r = self.edit(text, "Main", op="disconnect", node="bonus.value", dir="out", pin="result")
-        self.assertIn("  node bonus = SetLocal score()\n", r["text"])
-        self.assertIn("  node bonus_value = Add::<i32>(\n", r["text"])
+        freed = self.edit(text, "Main", op="literal", node="2.value", pin="b", text="")["text"]
+        r = self.edit(freed, "Main", op="connect_to_node", a=[old, "out", "value"], node="2.value")
+        self.assertEqual(r["message"], "Bound 2.value.b = 2.value.a.value")
+        # now read twice, the GetLocal is named
+        self.assertIn("      .a <- score\n      .b <- score\n", r["text"])
+        r = self.edit(text, "Main", op="disconnect", node="2.value", dir="out", pin="result")
+        self.assertIn("  exec SetLocal score{pos=(560, 0)}()\n", r["text"])
+        self.assertIn("  !Add#<i32>{pos=(360, 160)}(\n", r["text"])
 
     def test_edit_move_delete_and_comments(self):
         text = lesson("02_variables.wiret")
-        r = self.edit(text, "Main", op="move", moves=[["entry", 10.6, -20.2]])
-        self.assertIn("entry at (11, -20)", r["text"])
-        r = self.edit(text, "Main", op="delete", node="show.message.b")
-        self.assertEqual(r["message"], "Deleted show.message.b and 1 wire(s): "
-                                       "show.message.b.result -> show.message.b")
-        self.assertIn('detached: "show.message.b"', r["text"])        # its note is kept
+        r = self.edit(text, "Main", op="move", moves=[["0", 10.6, -20.2]])
+        self.assertIn("exec Entry{pos=(11, -20)}()", r["text"])
+        r = self.edit(text, "Main", op="delete", node="3.message.b")
+        self.assertEqual(r["message"], "Deleted 3.message.b and 1 wire(s): "
+                                       "3.message.b.result -> 3.message.b")
+        self.assertIn('detached: "3.message.b"', r["text"])        # its note is kept
+        self.assertIn("  !GetLocal score{pos=(440, 420)}()\n", r["text"])
         self.assertEqual(self.edit(text + "garbage(", "Main", op="move", moves=[]),
                          {"ok": False, "message": "Fix the parse error in the source before editing the graph."})
-        # a node without a place line gets one where it was drawn
-        unplaced = text.replace("    entry at (0, 0)\n", "")
-        r = self.edit(unplaced, "Main", op="move", moves=[["start", 200, 0]])
-        self.assertRegex(r["text"], r"entry at \(-?\d+, -?\d+\)")
+        # a node without a position gets one where it was drawn
+        unplaced = text.replace("exec Entry{pos=(0, 0)}()", "exec Entry()")
+        r = self.edit(unplaced, "Main", op="move", moves=[["1", 200, 0]])
+        self.assertRegex(r["text"], r"exec Entry\{pos=\(-?\d+, -?\d+\)\}\(\)")
         # a // comment directly above a statement is kept through an edit
-        kept = text.replace("  node entry = Entry()\n", "  // the start\n  node entry = Entry()\n")
-        r = self.edit(kept, "Main", op="move", moves=[["entry", 1, 1]])
-        self.assertIn("  // the start\n  node entry = Entry()\n", r["text"])
+        kept = text.replace("  exec Entry{", "  // the start\n  exec Entry{")
+        r = self.edit(kept, "Main", op="move", moves=[["0", 1, 1]])
+        self.assertIn("  // the start\n  exec Entry{pos=(1, 1)}()\n", r["text"])
         # one attached to nothing cannot be kept: ask first, then convert it to a note
         commented = text.replace("func Main() {", "func Main() {\n  // keep me\n")
-        self.assertEqual(self.edit(commented, "Main", op="move", moves=[["entry", 1, 1]]),
+        self.assertEqual(self.edit(commented, "Main", op="move", moves=[["0", 1, 1]]),
                          {"ok": False, "comments": 1})
-        r = self.edit(commented, "Main", op="move", moves=[["entry", 1, 1]], comments="convert")
-        self.assertIn('#[note("keep me")]', r["text"])
+        r = self.edit(commented, "Main", op="move", moves=[["0", 1, 1]], comments="convert")
+        self.assertIn('@note("keep me")', r["text"])
 
     def test_canvas_edits_match_the_desktop(self):
         """The desktop editor makes its canvas edits through canvasedit too."""
@@ -8238,7 +8699,7 @@ class WebApiTests(unittest.TestCase):
         from wiret.registry import ModuleIndex
         text = lesson("02_variables.wiret")
         r = json.loads(webapi.palette(text, "Main", "mul"))
-        self.assertEqual(r["items"][0]["label"], "Mul::<i32>")
+        self.assertEqual(r["items"][0]["label"], "Mul#<i32>")
         self.assertEqual(r["items"][0]["description"], "Multiplies: a × b.")
         # the same ranking as the desktop palette
         m = parse(text)
@@ -8247,31 +8708,30 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual([it["label"] for it in r["items"]], desktop[:200])
         self.assertEqual(r["total"], len(palette.items(m.graph("Main"), idx)))
         # from a dragged pin: only what fits it
-        r = json.loads(webapi.palette(text, "Main", "", json.dumps(["show", "in", "message"])))
-        self.assertEqual(r["title"], "Add a node for show.message (text (string))")
+        r = json.loads(webapi.palette(text, "Main", "", json.dumps(["3", "in", "message"])))
+        self.assertEqual(r["title"], "Add a node for 3.message (text (string))")
         self.assertIn("Call std.string.Concat", [it["label"] for it in r["items"]])
-        self.assertNotIn("Mul::<i32>", [it["label"] for it in r["items"]])
-        self.assertEqual(webapi.palette(text, "Main", "", json.dumps(["show", "in", "nope"])), "null")
+        self.assertNotIn("Mul#<i32>", [it["label"] for it in r["items"]])
+        self.assertEqual(webapi.palette(text, "Main", "", json.dumps(["3", "in", "nope"])), "null")
         self.assertEqual(webapi.palette(text + "(", "Main"), "null")
-        # adding: at the point given, and wired to the dragged pin (a producer goes to its left)
+        # adding: at the point given, wired to nothing yet, so after a `!`
         r = self.edit(text, "Main", op="add", kind="Mul", symbol=None, targs=["i32"], x=10, y=20)
-        self.assertEqual(r["message"], f"Added {r['select']}")
-        self.assertIn(f"node {r['select']} = Mul::<i32>", r["text"])
-        self.assertIn(f"{r['select']} at (10, 20)", r["text"])
+        self.assertEqual((r["message"], r["select"]), ("Added ~0", "~0"))
+        self.assertIn("  !Mul#<i32>{pos=(10, 20)}()\n", r["text"])
+        # wired to the dragged pin (a producer goes to its left)
         r = self.edit(text, "Main", op="add", kind="Call", symbol="std.string.Concat", targs=[],
-                      x=500, y=300, context=["show", "in", "message"])
-        new = r["select"]
-        self.assertEqual(new, "show.message")
-        self.assertEqual(r["message"], f"Bound show.message = {new}.result")
-        self.assertIn(f"{new} at (300, 300)", r["text"])
+                      x=500, y=300, context=["3", "in", "message"])
+        self.assertEqual(r["select"], "3.message")
+        self.assertIn("    .message <- Call std.string.Concat{pos=(300, 300)}()\n", r["text"])
         r = self.edit(text, "Main", op="add", kind="Branch", symbol=None, targs=[], x=300, y=200,
-                      context=["start", "out", "then"])
-        self.assertIn(f"start -> {r['select']}", r["text"])
+                      context=["1", "out", "then"])
+        self.assertEqual(r["select"], "2")
+        self.assertIn("  exec Branch{pos=(300, 200)}()\n", r["text"])
 
     def test_graph_nodes_carry_descriptions(self):
         from wiret import webapi
         nodes = {n["id"]: n for n in json.loads(webapi.check(lesson("02_variables.wiret")))["graphs"][0]["nodes"]}
-        self.assertEqual(nodes["bonus.value"]["description"], "Adds two numbers: a + b.")
+        self.assertEqual(nodes["2.value"]["description"], "Adds two numbers: a + b.")
 
     def menu(self, source, graph, **target):
         from wiret import webapi
@@ -8284,26 +8744,27 @@ class WebApiTests(unittest.TestCase):
 
     def test_menus_follow_the_desktop(self):
         pets = lesson("08_structs.wiret")
-        self.assertEqual(self.labels(self.menu(pets, "Main", kind="pin", node="save.value", dir="in", pin="value")),
+        self.assertEqual(self.labels(self.menu(pets, "Main", kind="pin", node="3.value", dir="in", pin="value")),
                          ["[Set 'value' to]", "Mood::Happy", "Mood::Hungry", "Mood::Sleepy", "Disconnect",
-                          "---", "[save.value  (WithField)]", "Breakpoint  (F9)", "Label…",
+                          "---", "[3.value  (WithField)]", "Breakpoint  (F9)", "Name…", "Label…",
                           "Colour…", "Add note…", "Disable (@disabled)", "---", "Delete node"])
-        self.assertEqual(self.labels(self.menu(pets, "Main", kind="pin", node="save.value", dir="in", pin="obj"))[:2],
+        self.assertEqual(self.labels(self.menu(pets, "Main", kind="pin", node="3.value", dir="in", pin="obj"))[:2],
                          ["Make a Pet for 'obj'", "Disconnect"])
-        self.assertEqual(self.labels(self.menu(pets, "Main", kind="pin", node="start.value", dir="out", pin="result"))[:2],
+        self.assertEqual(self.labels(self.menu(pets, "Main", kind="pin", node="1.value", dir="out", pin="result"))[:2],
                          ["Break 'result' into fields", "Disconnect"])
-        name = self.menu(pets, "Main", kind="pin", node="start.value", dir="in", pin="name")[0]
-        self.assertEqual(name, {"label": "Set literal for 'name'…", "client": "editPin", "node": "start.value",
+        name = self.menu(pets, "Main", kind="pin", node="1.value", dir="in", pin="name")[0]
+        self.assertEqual(name, {"label": "Set literal for 'name'…", "client": "editPin", "node": "1.value",
                                 "pin": "name"})
-        self.assertIn("Rename id…", self.labels(self.menu(pets, "Main", kind="node", node="save")))
+        self.assertIn("Name…", self.labels(self.menu(pets, "Main", kind="node", node="3")))
         self.assertEqual(self.labels(self.menu(pets, "Main", kind="canvas", x=5, y=6)),
                          ["Search nodes…   (Tab)", "---", "Add box here…", "Add graph note…", "Add local…"])
-        self.assertEqual(self.labels(self.menu(pets, "Main", kind="wire", wire="d|save|value")), ["Delete wire"])
-        self.assertEqual(self.labels(self.menu(pets, "Main", kind="note", note="save.value|0")), ["Edit note…", "Delete note"])
-        entry = self.menu(pets, "Main", kind="node", node="entry")
+        self.assertEqual(self.labels(self.menu(pets, "Main", kind="wire", wire="d|3|value")), ["Delete wire"])
+        self.assertEqual(self.labels(self.menu(pets, "Main", kind="note", note="3.value|0")), ["Edit note…", "Delete note"])
+        entry = self.menu(pets, "Main", kind="node", node="0")
         self.assertNotIn("Disable (@disabled)", self.labels(entry))
         self.assertEqual(entry[-1]["confirm"], "Delete the graph's Entry node?")
-        calls = self.labels(self.menu(lesson("05_functions.wiret"), "Main", kind="node", node="say.message.b.value"))
+        calls = self.labels(self.menu(lesson("05_functions.wiret"), "Main", kind="node",
+                                      node="1.each.0.message.b.value"))
         self.assertIn("Open Square", calls)
         self.assertEqual(self.menu(pets, "Main", kind="node", node="gone"), [])
         self.assertEqual(self.menu(pets + "(", "Main", kind="canvas"), [])
@@ -8318,40 +8779,37 @@ class WebApiTests(unittest.TestCase):
             if text is not None:
                 req["text"] = text
             return self.edit(source, "Main", **req)
-        node = {"kind": "node", "node": "start.value"}
-        self.assertIn(".value <- Mood::Sleepy", run({"kind": "pin", "node": "save.value", "dir": "in", "pin": "value"}, "Mood::Sleepy")["text"])
-        r = run({"kind": "pin", "node": "save.value", "dir": "in", "pin": "obj"}, "Make a Pet for 'obj'", geoms={"save.value": [300, 0, 150]})
-        self.assertEqual(r["select"], "save.value.obj")
-        self.assertIn("      .obj <- MakeStruct Pet(),\n", r["text"])
-        self.assertIn(f"{r['select']} at (80, 0)", r["text"])
-        r = run({"kind": "pin", "node": "start.value", "dir": "out", "pin": "result"}, "Break 'result' into fields", geoms={"start.value": [0, 160, 120]})
-        self.assertIn(f"{r['select']} at (180, 160)", r["text"])
-        r = run({"kind": "node", "node": "save"}, "Rename id…", "store")
-        self.assertEqual((r["message"], r["select"]), ("Renamed save to store", "store"))
-        self.assertEqual(run({"kind": "node", "node": "save"}, "Rename id…", "2x"),
-                         {"ok": False, "message": "Not a valid identifier."})
-        self.assertIn("Rename", self.edit(pets, "Main", op="rename", node="start.value", text="build")["message"] + "Rename")
-        self.assertFalse(self.edit(pets, "Main", op="rename", node="start.value", text="build")["ok"])
-        self.assertIn('[label = "Feed"]', run(node, "Label…", "Feed")["text"])
-        self.assertIn('color = "#C0392B"', run(node, "Colour…", "#c0392b")["text"])
+        node = {"kind": "node", "node": "1.value"}
+        self.assertIn(".value <- Mood::Sleepy", run({"kind": "pin", "node": "3.value", "dir": "in", "pin": "value"}, "Mood::Sleepy")["text"])
+        r = run({"kind": "pin", "node": "3.value", "dir": "in", "pin": "obj"}, "Make a Pet for 'obj'", geoms={"3.value": [300, 0, 150]})
+        self.assertEqual(r["select"], "3.value.obj")
+        self.assertIn("      .obj <- MakeStruct Pet{pos=(80, 0)}()\n", r["text"])
+        r = run({"kind": "pin", "node": "1.value", "dir": "out", "pin": "result"}, "Break 'result' into fields", geoms={"1.value": [0, 160, 120]})
+        self.assertIn("BreakStruct Pet{pos=(180, 160)}(", r["text"])
+        # naming a node declares it at the top of the function, after the names already there
+        r = run({"kind": "node", "node": "3"}, "Name…", "store")
+        self.assertEqual((r["message"], r["select"]), ("Renamed 3 to store", "store"))
+        self.assertIn("  node store = SetLocal pet{pos=(640, 0)}(\n", r["text"])
+        self.assertIn("  exec store\n", r["text"])
+        self.assertEqual(run({"kind": "node", "node": "3"}, "Name…", "2x"),
+                         {"ok": False, "message": "Not a valid name."})
+        self.assertIn('label="Feed"', run(node, "Label…", "Feed")["text"])
+        self.assertIn('color="#C0392B"', run(node, "Colour…", "#c0392b")["text"])
         self.assertEqual(run(node, "Colour…", "red")["message"], "Use the form #RRGGBB.")
-        # a semantic attribute makes the node a declared one
-        self.assertIn('  node start_value = MakeStruct Pet(\n    .name <- "Rex",\n  ) @disabled\n',
+        # a semantic decorator stands above the node, which stays where it is written
+        self.assertIn('    @disabled\n    .value <- MakeStruct Pet{pos=(-105, 81)}(\n',
                       run(node, "Disable (@disabled)")["text"])
-        self.assertIn('#[note("Hi")]\n    start.value at (', run(node, "Add note…", "Hi")["text"])
-        r = run({"kind": "canvas", "x": 10, "y": 20}, "Add box here…", "Pets", member="start.value")
-        self.assertRegex(r["text"], r'box box_\w+ "Pets" at \(10, 20\) size \(360, 220\) \[members = \[start\.value\]\]')
-        bid = re.search(r"box (box_\w+)", r["text"]).group(1)
-        box = {"kind": "box", "box": bid}
-        self.assertIn("size (500, 300)", run(box, "Resize…", "500, 300", source=r["text"])["text"])
+        self.assertIn('    @note("Hi")\n    .value <- MakeStruct Pet', run(node, "Add note…", "Hi")["text"])
+        r = run({"kind": "canvas", "x": 10, "y": 20}, "Add box here…", "Pets")
+        self.assertIn('  box {title="Pets", pos=(10, 20), size=(360, 220)}\n', r["text"])
+        box = {"kind": "box", "box": "box.0"}
+        self.assertIn("size=(500, 300)", run(box, "Resize…", "500, 300", source=r["text"])["text"])
         self.assertEqual(run(box, "Resize…", "big", source=r["text"])["message"], "Enter the width and height, as in 360, 220.")
-        self.assertIn(f'box {bid} "Cats"', run(box, "Rename title…", "Cats", source=r["text"])["text"])
-        self.assertIn("[members = [entry, start.value]]",
-                      run(box, "Edit members…", "entry, start.value", source=r["text"])["text"])
+        self.assertIn('box {title="Cats"', run(box, "Rename title…", "Cats", source=r["text"])["text"])
         self.assertIn("local count: i32", run({"kind": "canvas"}, "Add local…", "count: i32")["text"])
         self.assertIn("Use a valid name", run({"kind": "canvas"}, "Add local…", "x: Nope")["message"])
-        self.assertIn('#[note("Short")]', run({"kind": "note", "note": "save.value|0"}, "Edit note…", "Short")["text"])
-        self.assertNotIn("WithField makes a copy", run({"kind": "note", "note": "save.value|0"}, "Delete note")["text"])
+        self.assertIn('@note("Short")', run({"kind": "note", "note": "3.value|0"}, "Edit note…", "Short")["text"])
+        self.assertNotIn("WithField makes a copy", run({"kind": "note", "note": "3.value|0"}, "Delete note")["text"])
 
     def test_menu_counts_and_cases(self):
         text = """wiret 1
@@ -8365,24 +8823,129 @@ enum Mode {
 }
 
 func Main() {
-  node entry = Entry()
-  node seq = Sequence()
-  node sw = Switch::<Mode>()
-  flow {
-    entry -> seq
-  }
+  exec Entry()
+  exec Sequence()
+
+  !exec Switch#<Mode>()
 }
 """
-        seq = self.menu(text, "Main", kind="node", node="seq")
-        e = next(e for e in seq if e["label"] == "Set output count (@count)…")
+        seq = self.menu(text, "Main", kind="node", node="1")
+        e = next(e for e in seq if e["label"] == "Set output count (#count)…")
         self.assertEqual(e["ask"], {"label": "Number of outputs:", "value": "2"})
         r = self.edit(text, "Main", **{**e["action"], "text": "3"})
-        self.assertIn("node seq = Sequence() @count(3)", r["text"])
+        self.assertIn("  exec Sequence#count<3>{pos=(250, 0)}()\n", r["text"])
         self.assertEqual(self.edit(text, "Main", **{**e["action"], "text": "99"})["message"],
                          "Enter a whole number from 1 to 64.")
-        e = next(e for e in self.menu(text, "Main", kind="node", node="sw") if e["label"] == "Set cases (@cases)…")
-        self.assertEqual(e["ask"]["label"], "Mode members, comma separated (one of: Idle, Chase):")
-        self.assertIn("@cases(Mode::Idle, Mode::Chase)", self.edit(text, "Main", **{**e["action"], "text": "Idle, Chase"})["text"])
+        # "Add case" on a Switch: a case with the first member no case has yet
+        e = next(e for e in self.menu(text, "Main", kind="node", node="~0") if e.get("label") == "Add case")
+        self.assertTrue(any(e.get("label") == "Add then"
+                            for e in self.menu(text, "Main", kind="node", node="1")))
+        r = self.edit(text, "Main", **e["action"])
+        self.assertIn("!exec Switch#<Mode>#cases<1>{pos=", r["text"])
+        self.assertIn(").case[0] Mode::Idle -> {}\n", r["text"])
+        r = self.edit(r["text"], "Main", op="add_pin", node="~0")
+        self.assertIn(").case[0] Mode::Idle -> {}.case[1] Mode::Chase -> {}\n", r["text"])
+        # every member taken: the new case has no value yet, and says so
+        r = self.edit(r["text"], "Main", op="add_pin", node="~0")
+        self.assertIn(".case[2] -> {}\n", r["text"])
+        # Remove pin on case[0]: the later cases move down, keeping their values
+        pins = self.menu(r["text"], "Main", kind="pin", node="~0", dir="out", pin="case[0]")
+        e = next(e for e in pins if e.get("label") == "Remove pin 'case[0]'")
+        r = self.edit(r["text"], "Main", **e["action"])
+        self.assertIn("!exec Switch#<Mode>#cases<2>{pos=", r["text"])
+        self.assertIn(").case[0] Mode::Chase -> {}.case[1] -> {}\n", r["text"])
+        self.assertFalse(any(e.get("label", "").startswith("Remove pin") for e in
+                             self.menu(r["text"], "Main", kind="pin", node="~0", dir="out",
+                                       pin="default")))
+        # and on a Sequence: one more `then`
+        r = self.edit(text, "Main", op="add_pin", node="1")
+        self.assertIn("  exec Sequence#count<3>{pos=(250, 0)}()\n", r["text"])
+
+    def test_make_array_items_are_added_and_removed(self):
+        from wiret import viewmodel
+        from wiret.checker import GraphInfo
+        from wiret.registry import ModuleIndex
+        text = ("wiret 1\nmodule m\n\nextern func host.Log(message: string)\n\nfunc Main() {\n"
+                "  exec Entry{pos=(0, 0)}()\n\n"
+                "  !MakeArray#<i32>#count<3>{pos=(0, 100)}(\n"
+                "    .item[0] <- 10\n    .item[1] <- 20\n    .item[2] <- 30\n  )\n}\n")
+        self.assertEqual(print_module(parse(text)), text)
+        # the item's − removes it, and the items after it move up with their values
+        pins = self.menu(text, "Main", kind="pin", node="~0", dir="in", pin="item[0]")
+        e = next(e for e in pins if e.get("label") == "Remove pin 'item[0]'")
+        r = self.edit(text, "Main", **e["action"])
+        self.assertIn("!MakeArray#<i32>#count<2>{pos=(0, 100)}(\n    .item[0] <- 20\n"
+                      "    .item[1] <- 30\n  )", r["text"])
+        r = self.edit(r["text"], "Main", op="add_pin", node="~0")
+        self.assertIn("!MakeArray#<i32>#count<3>{pos=", r["text"])
+        # down to no items, which is an empty array
+        for _ in range(3):
+            r = self.edit(r["text"], "Main", op="remove_pin", node="~0", pin="item[0]")
+        self.assertIn("!MakeArray#<i32>#count<0>{pos=(0, 100)}()", r["text"])
+        # on the canvas: the item's label stays, a − on each item, the button on the left
+        m = parse(text)
+        g, idx = m.graph("Main"), ModuleIndex(m)
+        web = next(x for x in viewmodel.graph_json(g, GraphInfo(g, idx), idx)["nodes"]
+                   if x["title"].startswith("MakeArray"))
+        self.assertEqual([(p["name"], p["removable"]) for p in web["ins"]],
+                         [("item[0]", True), ("item[1]", True), ("item[2]", True)])
+        self.assertEqual((web["addSide"], web["addLabel"]), ("left", "Add item"))
+        self.assertIsNone(web["rule"])
+
+
+    def test_flatten_bottom_exec_output(self):
+        from wiret import viewmodel
+        from wiret.checker import GraphInfo
+        from wiret.printer import GraphNames
+        from wiret.registry import ModuleIndex
+        src = NESTED_FIZZBUZZ
+        self.assertEqual(print_module(parse(src)), src)     # the fixture is canonical
+        # the triangle on the first Branch's `else`: its block joins the each block
+        r = self.edit(src, "Main", op="toggle_flat", node="1.each.0")
+        self.assertEqual(r["message"], "Flattened 1.each.0.else")
+        self.assertIn('    }.else\n    @note("Check 3")\n    exec Branch{pos=(1043, 20)}(\n',
+                      r["text"])
+        flat = r["text"]
+        # the canvas puts `else` beside `in`, over a line, with the triangle pointing down
+        m = parse(flat)
+        g, idx = m.graph("Main"), ModuleIndex(m)
+        web = viewmodel.graph_json(g, GraphInfo(g, idx), idx)["nodes"]
+        br = next(x for x in web if x["title"] == "Branch" and x["flat"])
+        self.assertEqual([row[:2] for row in br["rows"]],
+                         [["in", "else"], ["cond", "then"]])
+        self.assertEqual(br["flatPin"], "else")
+        self.assertIsNotNone(br["rule"])
+        others = [x for x in web if x["title"] == "Branch" and not x["flat"]]
+        self.assertEqual([row[:2] for row in others[0]["rows"]],
+                         [["in", "then"], ["cond", "else"]])
+        self.assertIsNone(others[0]["rule"])
+        # and back: the statements after it are gathered into `.else -> { }` again
+        name = next(GraphNames(g, idx).name(n.id) for n in g.nodes if n.kind == "Branch" and n.flat)
+        self.assertEqual(self.edit(flat, "Main", op="toggle_flat", node=name)["text"], src)
+        # a loop's `done`: the loop's `index` belongs to `each`, so it can flatten
+        r = self.edit(src, "Main", op="toggle_flat", node="1")
+        self.assertTrue(r["text"].endswith("    }\n  }.done\n}\n"))
+        self.assertEqual(self.edit(r["text"], "Main", op="toggle_flat", node="1")["text"], src)
+
+    def test_flatten_unwired_and_refused(self):
+        text = ("wiret 1\nmodule m\n\nextern func host.Log(message: string)\n\nenum Mode {\n"
+                "  Idle\n}\n\nfunc Main() {\n  exec Entry{pos=(0, 0)}()\n"
+                "  exec Branch{pos=(200, 0)}().then -> {\n"
+                "    exec Call host.Log{pos=(400, 0)}(\n      .message <- \"a\"\n    )\n  }\n\n"
+                "  !exec Switch#<Mode>#cases<1>{pos=(0, 200)}().case[0] Mode::Idle -> {}\n\n"
+                "  !exec Sequence{pos=(0, 400)}()\n}\n")
+        self.assertEqual(print_module(parse(text)), text)
+        # nothing wired to `else`: flattened, it still ends the block as `}.else`
+        r = self.edit(text, "Main", op="toggle_flat", node="1")
+        self.assertIn("  }.else\n\n  !exec Switch", r["text"])
+        self.assertEqual(print_module(parse(r["text"])), r["text"])
+        # wiring something to it continues the block
+        self.assertEqual(self.edit(r["text"], "Main", op="toggle_flat", node="1")["text"], text)
+        # a Switch's `default` can flatten; a Sequence's `then[1]` and an Entry cannot
+        r = self.edit(text, "Main", op="toggle_flat", node="~0")
+        self.assertIn(").case[0] Mode::Idle -> {}.default\n", r["text"])
+        for nid in ("~1", "0"):
+            self.assertFalse(self.edit(text, "Main", op="toggle_flat", node=nid)["ok"])
 
     def test_web_highlighting_matches_desktop(self):
         """web/syntax.js colours every line as the desktop editor does (wiret/syntax.py)."""
@@ -8397,11 +8960,12 @@ func Main() {
             if name.endswith(".wiret"):
                 lines += lesson(name).split("\n")
         lines += demo().split("\n")
-        lines += ['  .a <- "say \\"hi\\" // not a comment"', "  // a comment with \"quotes\" and 12",
-                  "  .b <- -3.5e2", "node n = Add::<i32>() @pure", '#[note("x")]', "  .s <- \"unfinished",
-                  "var x: i32 = 0x1F", "]"]
+        lines += ["  goto exec", '@note("x")',
+                  '  .a <- "say \\"hi\\" // not a comment"', "  // a comment with \"quotes\" and 12",
+                  "  .b <- -3.5e2", "  exec Sequence#count<2>()", "@pure", "  .s <- \"unfinished",
+                  "var x: i32 = 0x1F", "  !exec box"]
         expect = [[list(s) for s in syntax.spans(line)] for line in lines]
-        self.assertGreater(sum(map(len, expect)), 1500)
+        self.assertGreater(sum(map(len, expect)), 1000)
         js = r"""
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -8526,6 +9090,7 @@ process.stdout.write(JSON.stringify(got));
 # -- Lane types (Draft 0.13, section 3.1.1) --------------------------------------------------
 LANES = """
 const Up: vec3 = (0, 1, 0)
+
 var spawn: transform = ((0, 2, 0), (0, 0, 0, 1), (2, 2, 2))
 
 struct Body {
@@ -8537,283 +9102,349 @@ class Mover {
   at: vec3 = (5, 0, 0)
 }
 
-func Step(p: vec3, v: vec3, dt: f32) -> (r: vec3) @pure = Add::<vec3>(
-  .a <- p,
-  .b <- Scale::<vec3>(
-    .v <- v,
-    .s <- dt,
-  ),
-)
-
-func Arith(a: vec2, b: vec2) -> (sub: vec2, mul: vec2, div: vec2, min: vec2, max: vec2, neg: vec2, abs: vec2) @pure {
-  flow {
-    entry -> ret
-  }
-
+func Angle(a: quat, b: quat) -> (r: f32) {
   node entry = Entry()
   node ret = Return(
-    .sub <- Sub::<vec2>(
-      .a <- entry.a,
-      .b <- entry.b,
-    ),
-    .mul <- Mul::<vec2>(
-      .a <- entry.a,
-      .b <- entry.b,
-    ),
-    .div <- Div::<vec2>(
-      .a <- entry.a,
-      .b <- entry.b,
-    ),
-    .min <- Min::<vec2>(
-      .a <- entry.a,
-      .b <- entry.b,
-    ),
-    .max <- Max::<vec2>(
-      .a <- entry.a,
-      .b <- entry.b,
-    ),
-    .neg <- Neg::<vec2>(
-      .value <- entry.a,
-    ),
-    .abs <- Abs::<vec2>(
-      .value <- entry.b,
-    ),
+    .r <- Call std.quat.Angle(
+      .a <- entry.a
+      .b <- entry.b
+    )
   )
+
+  exec entry
+  exec ret
 }
 
-func VecLib(a: vec3, b: vec3) -> (dot: f32, cross: vec3, len: f32, dist: f32, norm: vec3, lerp: vec3, refl: vec3) @pure {
-  flow {
-    entry -> ret
-  }
-
+@pure
+func Arith(a: vec2, b: vec2) -> (sub: vec2, mul: vec2, div: vec2, min: vec2, max: vec2, neg: vec2, abs: vec2) {
   node entry = Entry()
   node ret = Return(
-    .dot <- Call std.vec.Dot::<vec3>(
-      .a <- entry.a,
-      .b <- entry.b,
-    ),
-    .cross <- Call std.vec.Cross(
-      .a <- entry.a,
-      .b <- entry.b,
-    ),
-    .len <- Call std.vec.Length::<vec3>(
-      .v <- entry.a,
-    ),
-    .dist <- Call std.vec.Distance::<vec3>(
-      .a <- entry.a,
-      .b <- entry.b,
-    ),
-    .norm <- Call std.vec.Normalize::<vec3>(
-      .v <- entry.a,
-    ),
-    .lerp <- Call std.vec.Lerp::<vec3>(
-      .a <- entry.a,
-      .b <- entry.b,
-      .t <- 0.25,
-    ),
-    .refl <- Call std.vec.Reflect::<vec3>(
-      .v <- entry.a,
-      .n <- GetVar Up(),
-    ),
+    .sub <- Sub#<vec2>(
+      .a <- entry.a
+      .b <- entry.b
+    )
+    .mul <- Mul#<vec2>(
+      .a <- entry.a
+      .b <- entry.b
+    )
+    .div <- Div#<vec2>(
+      .a <- entry.a
+      .b <- entry.b
+    )
+    .min <- Min#<vec2>(
+      .a <- entry.a
+      .b <- entry.b
+    )
+    .max <- Max#<vec2>(
+      .a <- entry.a
+      .b <- entry.b
+    )
+    .neg <- Neg#<vec2>(
+      .value <- entry.a
+    )
+    .abs <- Abs#<vec2>(
+      .value <- entry.b
+    )
   )
+
+  exec entry
+  exec ret
 }
 
-func PerpDot(a: vec2, b: vec2) -> (r: f32) @pure = Call std.vec.PerpDot(
-  .a <- a,
-  .b <- b,
-)
-
-func Turn(axis: vec3, angle: f32, v: vec3) -> (r: vec3) = Call std.quat.Rotate(
-  .q <- Call std.quat.FromAxisAngle(
-    .axis <- axis,
-    .angle <- angle,
-  ),
-  .v <- v,
-)
-
-func Compose(a: quat, b: quat, v: vec3) -> (r: vec3) @pure = Call std.quat.Rotate(
-  .q <- Mul::<quat>(
-    .a <- a,
-    .b <- b,
-  ),
-  .v <- v,
-)
-
-func Slerp(a: quat, b: quat, t: f32) -> (r: quat) = Call std.quat.Slerp(
-  .a <- a,
-  .b <- b,
-  .t <- t,
-)
-
-func Angle(a: quat, b: quat) -> (r: f32) = Call std.quat.Angle(
-  .a <- a,
-  .b <- b,
-)
-
-func QuatLib(q: quat) -> (conj: quat, inv: quat, norm: quat) @pure {
-  flow {
-    entry -> ret
-  }
-
+@pure
+func Compose(a: quat, b: quat, v: vec3) -> (r: vec3) {
   node entry = Entry()
   node ret = Return(
-    .conj <- Call std.quat.Conjugate(
-      .q <- entry.q,
-    ),
-    .inv <- Call std.quat.Inverse(
-      .q <- entry.q,
-    ),
-    .norm <- Call std.quat.Normalize(
-      .q <- entry.q,
-    ),
+    .r <- Call std.quat.Rotate(
+      .q <- Mul#<quat>(
+        .a <- entry.a
+        .b <- entry.b
+      )
+      .v <- entry.v
+    )
   )
+
+  exec entry
+  exec ret
 }
 
-func Place(p: vec3) -> (r: vec3) = Call std.transform.Apply(
-  .t <- GetVar spawn(),
-  .p <- p,
-)
-
-func TLib(a: transform, b: transform, p: vec3) -> (both: vec3, back: vec3, dir: vec3) @pure {
-  flow {
-    entry -> ret
-  }
-
+@pure
+func Converts(v: vec3) -> (flat: vec2, up: vec3, text: string) {
   node entry = Entry()
   node ret = Return(
-    .both <- Call std.transform.Apply(
-      .t <- Mul::<transform>(
-        .a <- entry.a,
-        .b <- entry.b,
-      ),
-      .p <- entry.p,
-    ),
-    .back <- Call std.transform.Apply(
-      .t <- Call std.transform.Inverse(
-        .t <- entry.a,
-      ),
-      .p <- Call std.transform.Apply(
-        .t <- entry.a,
-        .p <- entry.p,
-      ),
-    ),
-    .dir <- Call std.transform.ApplyVector(
-      .t <- entry.a,
-      .v <- entry.p,
-    ),
+    .flat <- Convert#<vec3, vec2>(
+      .value <- entry.v
+    )
+    .up <- Convert#<vec2, vec3>(
+      .value <- (7, 8)
+    )
+    .text <- Format "at {v}"(
+      .v <- entry.v
+    )
   )
-}
 
-func Fields(v: vec3, t: transform) -> (y: f32, moved: vec3, rot: quat, x: f32, z: f32) @pure {
-  flow {
-    entry -> ret
-  }
-
-  node entry = Entry()
-  node parts = BreakStruct vec3(
-    .obj <- entry.v,
-  )
-  node ret = Return(
-    .y <- GetField vec3.y(
-      .obj <- entry.v,
-    ),
-    .moved <- WithField vec3.z(
-      .obj <- entry.v,
-      .value <- 9,
-    ),
-    .rot <- GetField transform.rotation(
-      .obj <- entry.t,
-    ),
-    .x <- parts.x,
-    .z <- parts.z,
-  )
-}
-
-func Same(a: vec3, b: vec3) -> (eq: bool, ne: bool) @pure {
-  flow {
-    entry -> ret
-  }
-
-  node entry = Entry()
-  node ret = Return(
-    .eq <- Eq::<vec3>(
-      .a <- entry.a,
-      .b <- entry.b,
-    ),
-    .ne <- Ne::<vec3>(
-      .a <- entry.a,
-      .b <- entry.b,
-    ),
-  )
+  exec entry
+  exec ret
 }
 
 func Defaults() -> (body: Body, t: transform, q: quat, at: vec3) {
-  flow {
-    entry -> mk
-    mk -> ret
-  }
-
   node entry = Entry()
   node mk = New Mover()
   node ret = Return(
-    .body <- MakeStruct Body(),
+    .body <- MakeStruct Body()
     .t <- MakeStruct transform(
-      .translation <- (1, 0, 0),
-    ),
-    .q <- MapFind::<string, quat>(
-      .key <- "none",
-    ).value,
+      .translation <- (1, 0, 0)
+    )
+    .q <- MapFind#<string, quat>(
+      .key <- "none"
+    ).value
     .at <- GetField Mover.at(
-      .obj <- mk.result,
-    ),
+      .obj <- mk
+    )
   )
+
+  exec entry
+  exec mk
+  exec ret
 }
 
-func Converts(v: vec3) -> (flat: vec2, up: vec3, text: string) @pure {
-  flow {
-    entry -> ret
-  }
-
+@pure
+func Fields(v: vec3, t: transform) -> (y: f32, moved: vec3, rot: quat, x: f32, z: f32) {
   node entry = Entry()
-  node ret = Return(
-    .flat <- Convert::<vec3, vec2>(
-      .value <- entry.v,
-    ),
-    .up <- Convert::<vec2, vec3>(
-      .value <- (7, 8),
-    ),
-    .text <- Format "at {v}"(
-      .v <- entry.v,
-    ),
+  node parts = BreakStruct vec3(
+    .obj <- entry.v
   )
+  node ret = Return(
+    .y <- GetField vec3.y(
+      .obj <- entry.v
+    )
+    .moved <- WithField vec3.z(
+      .obj <- entry.v
+      .value <- 9
+    )
+    .rot <- GetField transform.rotation(
+      .obj <- entry.t
+    )
+    .x <- parts.x
+    .z <- parts.z
+  )
+
+  exec entry
+  exec ret
 }
 
 func Keyed(v: vec3) -> (n: i32) {
-  local seen: map::<vec3, i32>
-
-  flow {
-    entry -> put
-    put -> ret
-  }
+  local seen: map#<vec3, i32>
 
   node entry = Entry()
-  node put = MapSet::<vec3, i32> seen(
-    .key <- (1, 2, 3),
-    .value <- 42,
+  node put = MapSet#<vec3, i32> seen(
+    .key <- (1, 2, 3)
+    .value <- 42
   )
   node ret = Return(
-    .n <- MapFind::<vec3, i32>(
-      .map <- GetLocal seen(),
-      .key <- entry.v,
-    ).value,
+    .n <- MapFind#<vec3, i32>(
+      .map <- GetLocal seen()
+      .key <- entry.v
+    ).value
   )
+
+  exec entry
+  exec put
+  exec ret
 }
 
-func Pick(c: bool) -> (r: vec3) @pure = Select::<vec3>(
-  .cond <- c,
-  .a <- GetVar Up(),
-  .b <- (0, -1, 0),
-)
+@pure
+func PerpDot(a: vec2, b: vec2) -> (r: f32) {
+  node entry = Entry()
+  node ret = Return(
+    .r <- Call std.vec.PerpDot(
+      .a <- entry.a
+      .b <- entry.b
+    )
+  )
+
+  exec entry
+  exec ret
+}
+
+@pure
+func Pick(c: bool) -> (r: vec3) {
+  node entry = Entry()
+  node ret = Return(
+    .r <- Select#<vec3>(
+      .cond <- entry.c
+      .a <- GetVar Up()
+      .b <- (0, -1, 0)
+    )
+  )
+
+  exec entry
+  exec ret
+}
+
+func Place(p: vec3) -> (r: vec3) {
+  node entry = Entry()
+  node ret = Return(
+    .r <- Call std.transform.Apply(
+      .t <- GetVar spawn()
+      .p <- entry.p
+    )
+  )
+
+  exec entry
+  exec ret
+}
+
+@pure
+func QuatLib(q: quat) -> (conj: quat, inv: quat, norm: quat) {
+  node entry = Entry()
+  node ret = Return(
+    .conj <- Call std.quat.Conjugate(
+      .q <- entry.q
+    )
+    .inv <- Call std.quat.Inverse(
+      .q <- entry.q
+    )
+    .norm <- Call std.quat.Normalize(
+      .q <- entry.q
+    )
+  )
+
+  exec entry
+  exec ret
+}
+
+@pure
+func Same(a: vec3, b: vec3) -> (eq: bool, ne: bool) {
+  node entry = Entry()
+  node ret = Return(
+    .eq <- Eq#<vec3>(
+      .a <- entry.a
+      .b <- entry.b
+    )
+    .ne <- Ne#<vec3>(
+      .a <- entry.a
+      .b <- entry.b
+    )
+  )
+
+  exec entry
+  exec ret
+}
+
+func Slerp(a: quat, b: quat, t: f32) -> (r: quat) {
+  node entry = Entry()
+  node ret = Return(
+    .r <- Call std.quat.Slerp(
+      .a <- entry.a
+      .b <- entry.b
+      .t <- entry.t
+    )
+  )
+
+  exec entry
+  exec ret
+}
+
+@pure
+func Step(p: vec3, v: vec3, dt: f32) -> (r: vec3) {
+  node entry = Entry()
+  node ret = Return(
+    .r <- Add#<vec3>(
+      .a <- entry.p
+      .b <- Scale#<vec3>(
+        .v <- entry.v
+        .s <- entry.dt
+      )
+    )
+  )
+
+  exec entry
+  exec ret
+}
+
+@pure
+func TLib(a: transform, b: transform, p: vec3) -> (both: vec3, back: vec3, dir: vec3) {
+  node entry = Entry()
+  node ret = Return(
+    .both <- Call std.transform.Apply(
+      .t <- Mul#<transform>(
+        .a <- entry.a
+        .b <- entry.b
+      )
+      .p <- entry.p
+    )
+    .back <- Call std.transform.Apply(
+      .t <- Call std.transform.Inverse(
+        .t <- entry.a
+      )
+      .p <- Call std.transform.Apply(
+        .t <- entry.a
+        .p <- entry.p
+      )
+    )
+    .dir <- Call std.transform.ApplyVector(
+      .t <- entry.a
+      .v <- entry.p
+    )
+  )
+
+  exec entry
+  exec ret
+}
+
+func Turn(axis: vec3, angle: f32, v: vec3) -> (r: vec3) {
+  node entry = Entry()
+  node ret = Return(
+    .r <- Call std.quat.Rotate(
+      .q <- Call std.quat.FromAxisAngle(
+        .axis <- entry.axis
+        .angle <- entry.angle
+      )
+      .v <- entry.v
+    )
+  )
+
+  exec entry
+  exec ret
+}
+
+@pure
+func VecLib(a: vec3, b: vec3) -> (dot: f32, cross: vec3, len: f32, dist: f32, norm: vec3, lerp: vec3, refl: vec3) {
+  node entry = Entry()
+  node ret = Return(
+    .dot <- Call std.vec.Dot#<vec3>(
+      .a <- entry.a
+      .b <- entry.b
+    )
+    .cross <- Call std.vec.Cross(
+      .a <- entry.a
+      .b <- entry.b
+    )
+    .len <- Call std.vec.Length#<vec3>(
+      .v <- entry.a
+    )
+    .dist <- Call std.vec.Distance#<vec3>(
+      .a <- entry.a
+      .b <- entry.b
+    )
+    .norm <- Call std.vec.Normalize#<vec3>(
+      .v <- entry.a
+    )
+    .lerp <- Call std.vec.Lerp#<vec3>(
+      .a <- entry.a
+      .b <- entry.b
+      .t <- 0.25
+    )
+    .refl <- Call std.vec.Reflect#<vec3>(
+      .v <- entry.a
+      .n <- GetVar Up()
+    )
+  )
+
+  exec entry
+  exec ret
+}
 """
 
 
@@ -8872,7 +9503,7 @@ class LaneTypeTests(unittest.TestCase):
         self.assertEqual(self.call("Turn", (0, 0, 0), 1.0, (1, 2, 3)), [(1.0, 2.0, 3.0)])
         s = math.sqrt(0.5)
         turn_z, tilt_x = (0, 0, s, s), (s, 0, 0, s)
-        # Mul::<quat>(a, b) rotates by b, then a
+        # Mul#<quat>(a, b) rotates by b, then a
         self.close(self.call("Compose", turn_z, tilt_x, (0, 1, 0))[0], (-0.0, 0.0, 1.0))
         self.close(self.call("Compose", tilt_x, turn_z, (0, 1, 0))[0], (-1.0, 0.0, 0.0))
         half, = self.call("Slerp", (0, 0, 0, 1), turn_z, 0.5)
@@ -8976,22 +9607,21 @@ class LaneTypeTests(unittest.TestCase):
                          ["E0110"])
         self.assertEqual(c("const A: i32 = \"x\"\n"), ["E0110"])
         self.assertEqual(c("struct vec3 {\n  x: f32\n}\n"), ["E0102"])
-        for kind in ("Add::<quat>", "Rem::<vec3>", "Lt::<vec3>", "Div::<transform>"):
+        for kind in ("Add#<quat>", "Rem#<vec3>", "Lt#<vec3>", "Div#<transform>"):
             with self.subTest(kind=kind):
-                self.assertIn("E0110", c(f"func F(a: quat) -> (r: bool) @pure = Eq::<bool>(\n"
+                self.assertIn("E0110", c(f"@pure\nfunc F(a: quat) -> (r: bool) = Eq#<bool>(\n"
                                          f"  .a <- {kind}(\n    .a <- a,\n    .b <- a,\n  ),\n"
                                          f"  .b <- true,\n)\n"))
-        self.assertIn("E0110", c("func F(a: quat) -> (r: quat) @pure = Scale::<quat>(\n"
+        self.assertIn("E0110", c("@pure\nfunc F(a: quat) -> (r: quat) = Scale#<quat>(\n"
                                  "  .v <- a,\n  .s <- 2,\n)\n"))
-        self.assertIn("E0110", c("func F() -> (r: vec3) @pure = Add::<vec3>(\n"
+        self.assertIn("E0110", c("@pure\nfunc F() -> (r: vec3) = Add#<vec3>(\n"
                                  "  .a <- (1, 2),\n  .b <- (1, 2, 3),\n)\n"))
-        self.assertIn("E0502", c("func F(a: vec3) -> (r: f32) @pure = Call std.vec.Dot(\n"
+        self.assertIn("E0502", c("@pure\nfunc F(a: vec3) -> (r: f32) = Call std.vec.Dot(\n"
                                  "  .a <- a,\n  .b <- a,\n)\n"))
-        self.assertIn("E0110", c("func F(a: quat) -> (r: vec3) @pure = Convert::<quat, vec3>(\n"
+        self.assertIn("E0110", c("@pure\nfunc F(a: quat) -> (r: vec3) = Convert#<quat, vec3>(\n"
                                  "  .value <- a,\n)\n"))
-        self.assertIn("E0501", c("func F(a: vec3) {\n  flow {\n    entry -> s\n  }\n\n"
-                                 "  node entry = Entry()\n  node s = SetField vec3.x(\n"
-                                 "    .obj <- a,\n    .value <- 1,\n  )\n}\n"))
+        self.assertIn("E0501", c("func F(a: vec3) {\n  exec Entry()\n  exec SetField vec3.x(\n"
+                                 "    .obj <- a\n    .value <- 1\n  )\n}\n"))
         with self.assertRaises(ParseError):
             parse(module('const A: vec3 = (0, "1", 0)\n', macros=False))
 
@@ -9002,6 +9632,31 @@ class LaneTypeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             lit_value(parse_literal("(1, 2)"), "vec3", "p")
         self.assertEqual(format_value("vec3", (1.0, 2.5, 0.0)), "(1.0, 2.5, 0.0)")
+
+
+class TextChangesTests(unittest.TestCase):
+    """What the Source pane flashes after a graph edit (wiret/textchanges.py)."""
+
+    def setUp(self):
+        from wiret.textchanges import changes
+        self.changes = changes
+        self.text = "func Main() {\n  exec Entry{pos=(0, 0)}()\n  exec Call host.Log{pos=(200, 0)}(\n" \
+                    "    .message <- \"Hi\"\n  )\n}\n"
+
+    def test_changed_number_is_shown_whole(self):
+        new = self.text.replace("(200, 0)", "(220, 40)")
+        self.assertEqual(self.changes(self.text, new), {"lines": [3], "spans": [[3, 26, 33]]})
+
+    def test_inserted_line_is_marked_without_its_indent(self):
+        new = self.text.replace('"Hi"\n', '"Hi"\n    .level <- 2\n')
+        self.assertEqual(self.changes(self.text, new), {"lines": [5], "spans": [[5, 4, 15]]})
+
+    def test_deleted_lines_mark_where_they_were(self):
+        new = self.text.replace('    .message <- "Hi"\n', "")
+        self.assertEqual(self.changes(self.text, new), {"lines": [4], "spans": []})
+
+    def test_no_change(self):
+        self.assertEqual(self.changes(self.text, self.text), {"lines": [], "spans": []})
 
 
 if __name__ == "__main__":

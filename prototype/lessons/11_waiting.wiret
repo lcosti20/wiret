@@ -1,50 +1,34 @@
 wiret 1
 module lessons.waiting
 
-extern func host.Log(message: string)
+extern func host.Log(message: string) -> ()
 
-#[note("Lesson 11: Waiting. An event can pause partway and carry on later: Delay waits a number of seconds of game time. Main is an event here, not a func, because it waits. While one event waits, a game keeps running everything else.")]
-#[note("Try it: (1) Change the wait to 0.5 and run: the countdown takes half as long in game time (see the time printed in the Output). (2) Count down from 5. (3) Try putting a Delay in a func: Wiret asks you to mark it @latent, because whatever calls it will have to wait too.")]
+@note("Lesson 11: Waiting. An event can pause partway and carry on later: Delay waits a number of seconds of game time. Main is an event here, not a func, because it waits. While one event waits, a game keeps running everything else.")
+@note("Try it: (1) Change the wait to 0.5 and run: the countdown takes half as long in game time (see the time printed in the Output). (2) Count down from 5. (3) Try putting a Delay in a func: Wiret asks you to mark it @latent, because whatever calls it will have to wait too.")
 event Main() {
-  flow {
-    entry -> loop
-    loop.each -> say
-    loop.done -> go
-    say -> wait
-  }
-
-  node entry = Entry()
-  node go = Call host.Log(
-    .message <- "Go!",
-  )
-  node loop = Macro std.flow.ForRange(
-    .first <- 1,
-    .last <- 3,
-  )
-  node say = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- Convert::<i32, string>(
-        .value <- Sub::<i32>(
-          .a <- 4,
-          .b <- loop.index,
-        ),
-      ),
-      .b <- "...",
-    ),
-  )
-  node wait = Delay(
-    .seconds <- 1.0,
-  )
-
-  layout {
-    entry at (0, 0)
-    go at (724, 175)
-    loop at (250, 0)
-    say at (1396, 0)
-    say.message at (1178, 62)
-    say.message.a at (920, 62)
-    say.message.a.value at (723, 62)
-    #[note("The event stops here for one second, then the loop carries on where it was.")]
-    wait at (1614, 0)
+  exec Entry{pos=(0, 0)}()
+  exec Macro std.flow.ForRange{pos=(250, 0)}(
+    .first <- 1
+    .last <- 3
+  ).each|index| -> {
+    exec Call host.Log{pos=(1396, 0)}(
+      .message <- Call std.string.Concat{pos=(1178, 62)}(
+        .a <- Convert#<i32, string>{pos=(920, 62)}(
+          .value <- Sub#<i32>{pos=(723, 62)}(
+            .a <- 4
+            .b <- index
+          )
+        )
+        .b <- "..."
+      )
+    )
+    @note("The event stops here for one second, then the loop carries on where it was.")
+    exec Delay{pos=(1614, 0)}(
+      .seconds <- 1.0
+    )
+  }.done -> {
+    exec Call host.Log{pos=(724, 175)}(
+      .message <- "Go!"
+    )
   }
 }

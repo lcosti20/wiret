@@ -1,155 +1,100 @@
 wiret 1
 module lessons.objects
 
-extern func host.Log(message: string)
+extern func host.Log(message: string) -> ()
 
-#[doc("Any animal: it has a name and can speak.")]
+@doc("Any animal: it has a name and can speak.")
 class Animal {
   name: string = "An animal"
 
-  #[note("What any animal says, unless its own class says otherwise. GetField reads this animal's name: self is the animal Speak was called on.")]
-  func Speak() -> (line: string) {
-    flow {
-      entry -> ret
-    }
-
-    node entry = Entry()
-    node ret = Return(
-      .line <- Call std.string.Concat(
-        .a <- GetField Animal.name(
-          .obj <- entry.self,
-        ),
-        .b <- " makes a sound.",
-      ),
+  @note("What any animal says, unless its own class says otherwise. GetField reads this animal's name: self is the animal Speak was called on.")
+  func Speak(self) -> (line: string) {
+    exec Entry{pos=(0, 0)}()
+    exec Return{pos=(678, 0)}(
+      .line <- Call std.string.Concat{pos=(387, 82)}(
+        .a <- GetField Animal.name{pos=(208, 82)}(
+          .obj <- self
+        )
+        .b <- " makes a sound."
+      )
     )
-
-    layout {
-      entry at (0, 0)
-      ret at (678, 0)
-      ret.line at (387, 82)
-      ret.line.a at (208, 82)
-    }
   }
 }
 
-#[doc("A cat: an Animal that speaks its own way.")]
+@doc("A cat: an Animal that speaks its own way.")
 class Cat : Animal {
-  #[note("Cat replaces Speak completely: an override. A Cat still has a name, inherited from Animal.")]
-  func Speak() -> (line: string) {
-    flow {
-      entry -> ret
-    }
-
-    node entry = Entry()
-    node ret = Return(
-      .line <- Call std.string.Concat(
-        .a <- GetField Cat.name(
-          .obj <- entry.self,
-        ),
-        .b <- " says Meow.",
-      ),
+  @note("Cat replaces Speak completely: an override. A Cat still has a name, inherited from Animal.")
+  func Speak(self) -> (line: string) {
+    exec Entry{pos=(0, 0)}()
+    exec Return{pos=(711, 0)}(
+      .line <- Call std.string.Concat{pos=(449, 71)}(
+        .a <- GetField Cat.name{pos=(244, 71)}(
+          .obj <- self
+        )
+        .b <- " says Meow."
+      )
     )
-
-    layout {
-      entry at (0, 0)
-      ret at (711, 0)
-      ret.line at (449, 71)
-      ret.line.a at (244, 71)
-    }
   }
 }
 
-#[doc("A dog: an Animal that adds to what any animal says.")]
+@doc("A dog: an Animal that adds to what any animal says.")
 class Dog : Animal {
-  #[note("Dog keeps what Animal says and adds to it: CallParent runs Animal's Speak on this same dog.")]
-  func Speak() -> (line: string) {
-    flow {
-      entry -> parent
-      parent -> ret
-    }
+  @note("Dog keeps what Animal says and adds to it: CallParent runs Animal's Speak on this same dog.")
+  func Speak(self) -> (line: string) {
+    node parent = CallParent Speak{pos=(138, 0)}()
 
-    node entry = Entry()
-    node parent = CallParent Speak()
-    node ret = Return(
-      .line <- Call std.string.Concat(
-        .a <- parent,
-        .b <- " Woof!",
-      ),
+    exec Entry{pos=(0, 0)}()
+    exec parent
+    exec Return{pos=(590, 0)}(
+      .line <- Call std.string.Concat{pos=(362, 67)}(
+        .a <- parent
+        .b <- " Woof!"
+      )
     )
-
-    layout {
-      entry at (0, 0)
-      parent at (138, 0)
-      ret at (590, 0)
-      ret.line at (362, 67)
-    }
   }
 }
 
-#[note("Lesson 12: Objects. A class describes a kind of thing: its fields (what each one knows) and its methods (what each one can do). New makes an object of a class. Dog and Cat extend Animal, so they are Animals too, and can each speak in their own way.")]
-#[note("Try it: (1) Step (F11) into Speak and look at self in the Variables panel. (2) Give Animal a second field, 'legs: i32 = 4', and use it in Speak. (3) Delete Cat's Speak: Tom now speaks like any animal.")]
+@note("Lesson 12: Objects. A class describes a kind of thing: its fields (what each one knows) and its methods (what each one can do). New makes an object of a class. Dog and Cat extend Animal, so they are Animals too, and can each speak in their own way.")
+@note("Try it: (1) Step (F11) into Speak and look at self in the Variables panel. (2) Give Animal a second field, 'legs: i32 = 4', and use it in Speak. (3) Delete Cat's Speak: Tom now speaks like any animal.")
 func Main() {
-  local pets: array::<Animal>
+  local pets: array#<Animal>
 
-  flow {
-    add_cat -> other
-    add_dog -> cat
-    add_other -> loop
-    cat -> name_cat
-    dog -> name_dog
-    entry -> dog
-    loop.each -> speak
-    name_cat -> add_cat
-    name_dog -> add_dog
-    other -> add_other
-    speak -> say
-  }
-
-  node add_cat = ArrayAdd::<Animal> pets(
-    .item <- cat,
+  node cat = New Cat{pos=(1000, 0)}()
+  node dog = New Dog{pos=(250, 0)}()
+  node other = New Animal{pos=(1750, 0)}()
+  node loop = Macro std.flow.ForEach#<Animal>{pos=(2250, 0)}(
+    .array <- GetLocal pets{pos=(2050, 110)}()
   )
-  node add_dog = ArrayAdd::<Animal> pets(
-    .item <- dog,
-  )
-  node add_other = ArrayAdd::<Animal> pets(
-    .item <- other,
-  )
-  node cat = New Cat()
-  node dog = New Dog()
-  node entry = Entry()
-  node loop = Macro std.flow.ForEach::<Animal>(
-    .array <- GetLocal pets(),
-  )
-  node name_cat = SetField Animal.name(
-    .obj <- cat,
-    .value <- "Tom",
-  )
-  node name_dog = SetField Animal.name(
-    .obj <- dog,
-    .value <- "Rex",
-  )
-  node other = New Animal()
-  node say = Call host.Log(
-    .message <- speak,
-  )
-  node speak = Call Animal.Speak(
-    .self <- loop.item,
+  @note("Each pet runs its own class's Speak, though the array only knows they are Animals.")
+  node speak = Call Animal.Speak{pos=(2659, 0)}(
+    .self <- loop.item
   )
 
-  layout {
-    add_cat at (1500, 0)
-    add_dog at (750, 0)
-    add_other at (2000, 0)
-    cat at (1000, 0)
-    dog at (250, 0)
-    entry at (0, 0)
-    loop at (2250, 0)
-    loop.array at (2050, 110)
-    name_cat at (1250, 0)
-    name_dog at (500, 0)
-    other at (1750, 0)
-    say at (2934, 0)
-    #[note("Each pet runs its own class's Speak, though the array only knows they are Animals.")]
-    speak at (2659, 0)
+  exec Entry{pos=(0, 0)}()
+  exec dog
+  exec SetField Animal.name{pos=(500, 0)}(
+    .obj <- dog
+    .value <- "Rex"
+  )
+  exec ArrayAdd#<Animal> pets{pos=(750, 0)}(
+    .item <- dog
+  )
+  exec cat
+  exec SetField Animal.name{pos=(1250, 0)}(
+    .obj <- cat
+    .value <- "Tom"
+  )
+  exec ArrayAdd#<Animal> pets{pos=(1500, 0)}(
+    .item <- cat
+  )
+  exec other
+  exec ArrayAdd#<Animal> pets{pos=(2000, 0)}(
+    .item <- other
+  )
+  exec loop.each -> {
+    exec speak
+    exec Call host.Log{pos=(2934, 0)}(
+      .message <- speak
+    )
   }
 }

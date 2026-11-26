@@ -1,6 +1,6 @@
 # Wiret Language Specification
 
-*Draft 0.13: text syntax, bytecode (WBC) and embedding API for a text-based visual scripting language*
+*Draft 0.14: text syntax, bytecode (WBC) and embedding API for a text-based visual scripting language*
 
 > **Status.** This is a design draft, not an implementation. Nothing here has been run through a real parser, verifier or VM, so treat the grammar and opcode tables as a starting point to test, not a frozen standard. Where I went beyond your reference documents (mainly Blueprint runtime behaviour that the supplied documentation does not spell out), the text says so.
 
@@ -19,6 +19,8 @@
 **Draft 0.8.** Records decisions made while adding maps, sets, container equality, ids and merging to the prototype (Appendix G). Map and set nodes have fixed pins, and the mutators that may change nothing say whether they did (3.3). Every NaN is the same map key or set item (3.1). Container equality calls one native per container kind, which takes `anyref` and declares its fuel cost (3.4, 4.9, 5.7). `@id`s and `W0202` are required only in a project (2.4, 4.7), and `wiret.ids` has a fixed line format (7.3). A merge matches an element to the same element after it gains an `@id`, carries renames across, lets the incoming side win layout disagreements, and marks a deleted-versus-modified node as a whole block (7.1).
 
 **Draft 0.9.** Node statements change shape, following the research note on text syntax for a Blueprint-style language (Appendix H). A node's inputs are written in parentheses, comma separated with a trailing comma allowed, and a node without inputs is written `Entry()` (2.3). A node's metadata lines move to its line in the layout block (2.3, 2.4). A node that exactly one input reads, with no exec pins and no semantic attribute, is written inline in that input and named by its position, `show.message` (2.3, 2.5); such names are never retired (7.3). The verifier rejects unknown function flags and an event with results (5.2).
+
+**Draft 0.14.** A graph's text now reads in the order it runs (Appendix M). The `flow` and `layout` blocks are removed: each function is a list of `exec` statements from `Entry`, a node with several exec outputs writes each as a block, `.then -> { ... }`, and the last may continue in place (2.3). A node is anonymous unless it is used from more than one place; a named node is declared with `node name = ...`, placed once with `exec name` and entered from elsewhere with `goto name` (2.3). Code that nothing reaches is kept after a `!` (2.3). A node's position and display properties move into its attribute block, `Kind{pos=(x, y)}(...)`, and a box no longer lists members (2.3). All decorators are written `@name(...)` on the line above, generic arguments are `#<...>`, and `@count`/`@cases` become `#count<n>`/`#cases<n>` (2.2, 2.4). Instance methods declare `self`, methods without it are static, and parameters may have defaults (2.2).
 
 **Draft 0.13.** Adds the built-in types `vec2`, `vec3`, `quat` and `transform` for game scripting (Appendix L). They behave like structs with fixed `f32` fields, but the VM holds them unboxed, so per-frame vector math never allocates (3.1.1, 5.3). Tuple literals such as `(0, 1, 0)` write them (2.1). The arithmetic kinds work on them component-wise, `Mul` composes rotations and transforms, and `std.vec`, `std.quat` and `std.transform` are defined by formulas with a fixed evaluation order, so results are deterministic (3.1.1, 4.10). New lane instructions in the `FB` prefix space (5.6) and `wr_push_vec3`-style host calls (6.7) complete it. The prototype implements all of it except `std.quat.FromEuler`; it stays **Provisional** until a native VM has run it.
 
@@ -53,3 +55,4 @@
 - [Appendix J. Changes in Draft 0.11](reference/appendix-j.md)
 - [Appendix K. Changes in Draft 0.12](reference/appendix-k.md)
 - [Appendix L. Changes in Draft 0.13](reference/appendix-l.md)
+- [Appendix M. Changes in Draft 0.14](reference/appendix-m.md)

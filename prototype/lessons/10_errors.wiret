@@ -1,134 +1,87 @@
 wiret 1
 module lessons.errors
 
-extern func host.Log(message: string)
+extern func host.Log(message: string) -> ()
 
-#[note("CheckAge stops with an error of its own when the age is negative. Throw gives the error a message and a code; whoever called CheckAge decides what to do about it.")]
+@note("CheckAge stops with an error of its own when the age is negative. Throw gives the error a message and a code; whoever called CheckAge decides what to do about it.")
 func CheckAge(age: i32) {
-  flow {
-    chk.then -> stop
-    entry -> chk
-  }
-
-  node chk = Branch(
-    .cond <- Lt::<i32>(
-      .a <- entry.age,
-      .b <- 0,
-    ),
-  )
-  node entry = Entry()
-  node stop = Throw(
-    .message <- "An age can't be negative",
-    .code <- 1,
-  )
-
-  layout {
-    chk at (333, 0)
-    chk.cond at (162, 60)
-    entry at (0, 0)
-    stop at (500, 0)
+  exec Entry{pos=(0, 0)}()
+  exec Branch{pos=(333, 0)}(
+    .cond <- Lt#<i32>{pos=(162, 60)}(
+      .a <- age
+      .b <- 0
+    )
+  ).then -> {
+    exec Throw{pos=(500, 0)}(
+      .message <- "An age can't be negative"
+      .code <- 1
+    )
   }
 }
 
-#[note("Lesson 10: Errors. Dividing by zero has no answer, so it is an error, and normally an error stops the whole program. A Try node catches it instead: what is wired after 'body' runs protected, and if something in it goes wrong, 'fault' runs with the error's message. Either way, 'then' runs afterwards.")]
-#[note("Try it: (1) Change 0 in 'zero' to 2: now 'never' prints, and 'fault' is skipped. (2) Disconnect 'sorted.fault' and run: the age error now stops the program, and the error panel names the node. (3) Make your own Throw with your own message.")]
+@note("Lesson 10: Errors. Dividing by zero has no answer, so it is an error, and normally an error stops the whole program. A Try node catches it instead: what is wired after 'body' runs protected, and if something in it goes wrong, 'fault' runs with the error's message. Either way, 'then' runs afterwards.")
+@note("Try it: (1) Change 0 in 'zero' to 2: now 'never' prints, and 'fault' is skipped. (2) Disconnect 'sorted.fault' and run: the age error now stops the program, and the error panel names the node. (3) Make your own Throw with your own message.")
 func Main() {
-  flow {
-    age -> ages_ok
-    entry -> safe
-    good -> log_share
-    log_share -> zero
-    safe.body -> good
-    safe.fault -> say_oops
-    safe.then -> sorted
-    sorted.body -> age
-    sorted.fault -> say_oops2
-    sorted.then -> still
-    zero -> never
-  }
-
-  node age = Call CheckAge(
-    .age <- -3,
-  )
-  node ages_ok = Call host.Log(
-    .message <- "That age is fine",
-  )
-  node entry = Entry()
-  node good = Call Share(
-    .total <- 12,
-    .people <- 4,
-  )
-  node log_share = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- "Each gets ",
-      .b <- Convert::<i32, string>(
-        .value <- good,
-      ),
-    ),
-  )
-  node never = Call host.Log(
-    .message <- "This line never prints",
-  )
-  node safe = Try()
-  node say_oops = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- "Oops: ",
-      .b <- safe.message,
-    ),
-  )
-  node say_oops2 = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- "Oops: ",
-      .b <- sorted.message,
-    ),
-  )
-  node sorted = Try()
-  node still = Call host.Log(
-    .message <- "Still running!",
-  )
-  node zero = Call Share(
-    .total <- 7,
-    .people <- 0,
+  node good = Call Share{pos=(567, 0)}(
+    .total <- 12
+    .people <- 4
   )
 
-  layout {
-    age at (853, 316)
-    ages_ok at (1214, 316)
-    entry at (0, 0)
-    good at (567, 3)
-    log_share at (1288, 2)
-    log_share.message at (1009, 67)
-    log_share.message.b at (787, 87)
-    never at (1638, 2)
-    #[note("Everything wired after 'body' is protected by this Try.")]
-    safe at (250, 0)
-    say_oops at (764, 208)
-    say_oops.message at (542, 252)
-    say_oops2 at (1110, 420)
-    say_oops2.message at (886, 483)
-    sorted at (500, 400)
-    still at (843, 606)
-    zero at (1447, 2)
+  exec Entry{pos=(0, 0)}()
+  @note("Everything wired after 'body' is protected by this Try.")
+  exec Try{pos=(250, 0)}().body -> {
+    exec good
+    exec Call host.Log{pos=(1290, 0)}(
+      .message <- Call std.string.Concat{pos=(1009, 67)}(
+        .a <- "Each gets "
+        .b <- Convert#<i32, string>{pos=(787, 87)}(
+          .value <- good
+        )
+      )
+    )
+    exec Call Share{pos=(1457, 0)}(
+      .total <- 7
+      .people <- 0
+    )
+    exec Call host.Log{pos=(1674, 0)}(
+      .message <- "This line never prints"
+    )
+  }.fault|message| -> {
+    exec Call host.Log{pos=(764, 208)}(
+      .message <- Call std.string.Concat{pos=(542, 252)}(
+        .a <- "Oops: "
+        .b <- message
+      )
+    )
+  }.then -> {
+    exec Try{pos=(500, 400)}().body -> {
+      exec Call CheckAge{pos=(853, 316)}(
+        .age <- -3
+      )
+      exec Call host.Log{pos=(1214, 316)}(
+        .message <- "That age is fine"
+      )
+    }.fault|message| -> {
+      exec Call host.Log{pos=(1110, 420)}(
+        .message <- Call std.string.Concat{pos=(886, 483)}(
+          .a <- "Oops: "
+          .b <- message
+        )
+      )
+    }.then
+    exec Call host.Log{pos=(843, 606)}(
+      .message <- "Still running!"
+    )
   }
 }
 
-#[note("Share divides a total between people. Divide by zero people and Div fails.")]
+@note("Share divides a total between people. Divide by zero people and Div fails.")
 func Share(total: i32, people: i32) -> (each: i32) {
-  flow {
-    entry -> ret
-  }
-
-  node entry = Entry()
-  node ret = Return(
-    .each <- Div::<i32>(
-      .a <- entry.total,
-      .b <- entry.people,
-    ),
+  exec Entry{pos=(0, 0)}()
+  exec Return{pos=(375, 0)}(
+    .each <- Div#<i32>{pos=(198, 65)}(
+      .a <- total
+      .b <- people
+    )
   )
-
-  layout {
-    entry at (0, 0)
-    ret at (375, 0)
-    ret.each at (198, 65)
-  }
 }
