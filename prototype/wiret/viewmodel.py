@@ -54,13 +54,41 @@ def type_color(ty: str, idx=None) -> str:
     return "#95a5a6"
 
 
+def angled(text: str) -> str:
+    """`text` with its type arguments in single guillemets, as the canvas shows them:
+    `array#<i32>` reads `array‹i32›`. A plain `<...>` (as in `#cases<2>`) and the `>` of a
+    `->` are left alone."""
+    out, opens = [], []
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if text.startswith("#<", i):
+            out.append("‹")
+            opens.append(True)
+            i += 2
+            continue
+        if c == "<":
+            opens.append(False)
+        elif c == ">" and not (i and text[i - 1] == "-") and opens:
+            if opens.pop():
+                c = "›"
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def pin_type(ty: str) -> str:
+    """A pin's type in words, as the canvas shows it: `a list of i32s (array‹i32›)`."""
+    return angled(type_words(ty))
+
+
 def node_title(n) -> str:
     t = n.kind
     if n.symbol:
         t += " " + n.symbol.split(".")[-1] if n.kind == "Call" and n.symbol.startswith("std.") \
             else " " + n.symbol
     if n.targs:
-        t += "#<" + ", ".join(n.targs) + ">"
+        t += "‹" + ", ".join(angled(a) for a in n.targs) + "›"
     return t
 
 
@@ -357,14 +385,14 @@ def graph_json(g: Graph, info, idx, diags=(), remembered=None, module=None) -> d
             "header": header_color(g, n, sig), "pure": sig.pure,
             "disabled": n.attr("disabled") is not None, "diag": marks.get(n.id),
             "opens": opens(module, n), "description": describe(n.kind, n.symbol, idx, n.targs),
-            "ins": [{"name": p.name, "exec": p.is_exec, "type": type_words(p.type),
+            "ins": [{"name": p.name, "exec": p.is_exec, "type": pin_type(p.type),
                      "color": type_color(p.type, idx),
                      "label": input_label(n, p), "bound": n.binding(p.name) is not None,
                      "removable": can_remove(n, p.name, "in"),
                      "editor": input_editor(n, p, idx),
                      "filled": p.name in connected or (p.is_exec and (n.id, p.name) in targets)}
                     for p in sig.exec_ins + sig.data_ins],
-            "outs": [{"name": p.name, "exec": p.is_exec, "type": type_words(p.type),
+            "outs": [{"name": p.name, "exec": p.is_exec, "type": pin_type(p.type),
                       "color": type_color(p.type, idx),
                       "label": output_label(sig, p), "filled": (n.id, p.name) in used,
                       "removable": can_remove(n, p.name, "out")}

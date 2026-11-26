@@ -33,7 +33,7 @@ from .printer import GraphNames, layout_hash, print_module, semantic_hash
 from .ids import assign_ids, attach_retired, find_project, retired_between
 from .registry import (ModuleIndex, STATIC_KINDS, can_convert, enum_values,
                        type_choices, type_ok)
-from .explain import explain, explain_runtime, type_words
+from .explain import explain, explain_runtime
 from .runner import format_results, format_value, parse_args_for, run_function, split_args
 from .vm import STATUS_INTERRUPT, VM, WiretError
 
@@ -865,7 +865,7 @@ class EditorApp:
                 sig = self.info.sigs.get(nid)
                 p = (sig.input(h[3]) if h[2] == "in" else sig.output(h[3])) if sig else None
                 if p:
-                    text += f".{p.name}: {type_words(p.type)}"
+                    text += f".{p.name}: {viewmodel.pin_type(p.type)}"
                     v = self.view.pin_values.get((nid, p.name)) if h[2] == "out" else None
                     if v is not None:
                         text += f" = {format_value(p.type, v, self.idx)}"
