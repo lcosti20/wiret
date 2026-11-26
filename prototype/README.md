@@ -47,7 +47,8 @@ pin (or onto a node) to wire them, click a wire or node and press Delete to remo
 double-click an input to type its value, and add nodes from the palette (Tab, a double click
 on empty canvas, a wire dropped on empty canvas, or the Add node button). Right-click (or press
 and hold on a touch screen) for the same context menus as the desktop editor: set an enum
-input, make or break a struct, rename, label, colour, notes, boxes, locals and #count.
+input, make or break a struct, rename, label, colour, notes, boxes, locals, #count, and add or
+remove a Sequence's or Switch's pins (also the *+ Add pin* button on the node).
 Ctrl+Z and Ctrl+Y undo and redo. You can debug with Step (F11),
 Over (F10), Back (Shift+F11), Run/Continue (F5), Animate and breakpoints (click the circle at a
 node's top-left corner or beside its line number, or press F9). The Tkinter modules, the Git
@@ -200,6 +201,7 @@ available to every module as `Macro std.flow.ForRange` and so on.
 | Delete | Select a node or wire and press Delete/Backspace, or use the right-click menu |
 | Open a called function/macro | Double-click a `Call` or `Macro` node |
 | Name, label, colour, note, `@disabled`, `#count` | Right-click a node |
+| Add or remove a `Sequence`'s or `Switch`'s outputs | *+ Add pin* at the bottom of the node; right-click a numbered pin → Remove pin |
 | Set a `Switch` case's value | Its `caseK` input: type it, pick an enum member, or wire a value in |
 | Boxes | Right-click empty canvas → Add box. Drag a box by its title bar. Members are edited explicitly |
 | Pan / zoom | Drag empty canvas / mouse wheel (Shift+wheel pans) |
@@ -346,6 +348,9 @@ In the editor:
 - Right-clicking an enum input pin lists its members, and an unwired one shows a dropdown of
   them on the canvas. Typing a literal into one accepts the bare member name. A `Switch`'s case
   values are inputs too (`case0`, `case1`, ...), with the same box or dropdown.
+- A `Sequence` and a `Switch` have a *+ Add pin* button at the bottom. On a `Switch` the new case
+  starts with the first enum member no case has yet, or the integer after the largest.
+  Right-clicking one of their numbered pins offers *Remove pin*, and the pins after it move down.
 - *Add local* accepts struct and enum types. Struct pins are light blue and enum pins lavender.
 - Lesson 8 walks through a struct, an enum, `WithField` and a `Switch` on an enum.
 

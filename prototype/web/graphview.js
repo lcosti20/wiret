@@ -37,6 +37,7 @@ export class GraphView {
    *  toggleBreakpoint(nodeId), canEdit() -> true or the reason not, message(text),
    *  move(id, x, y), connect(a, b), connectToNode(a, nodeId), disconnect(node, dir, pin),
    *  deleteNode(id), editPin(node, pin, [screenX, screenY]), setPin(node, pin, text),
+   *  addPin(nodeId),
    *  palette([worldX, worldY], [screenX, screenY], pin or null),
    *  menu(target, [screenX, screenY], [worldX, worldY])}. A pin is [node, "in"/"out", pin];
    *  screen points are relative to the canvas. A menu target is as webapi.menu takes it. */
@@ -186,7 +187,17 @@ export class GraphView {
       body.append(ins, outs);
       d.append(head, body);
       const rows = Math.max(n.ins.length, n.outs.length, n.pure ? 0 : 1);
-      d.style.height = `${HEADER + ROW * rows + 6}px`;
+      if (n.addPin) {             // one more numbered output (Sequence, Switch)
+        const add = h("button", "gv-addpin", "+ Add pin");
+        add.type = "button";
+        add.title = "Add an output to this node";
+        add.style.top = `${HEADER + ROW * rows + 1}px`;
+        add.addEventListener("pointerdown", (e) => e.stopPropagation());
+        add.addEventListener("dblclick", (e) => e.stopPropagation());
+        add.addEventListener("click", (e) => { e.stopPropagation(); this.on.addPin(n.id); });
+        d.append(add);
+      }
+      d.style.height = `${HEADER + ROW * (rows + (n.addPin ? 1 : 0)) + 6}px`;
       d.title = this.#nodeTip(n);
       nodes.append(d);
       els.push([n, d]);

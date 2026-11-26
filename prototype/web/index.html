@@ -120,6 +120,11 @@
   input[type=checkbox].gv-field { width: 13px; height: 13px; margin: 0; accent-color: #6aa0ff; }
   .gv-field.gv-default { opacity: 0.6; }
   select.gv-field { padding: 0 2px; }
+  /* a Sequence's or Switch's "+ Add pin" button (graphview.js) */
+  .gv-addpin { position: absolute; left: 8px; right: 8px; height: 18px; font: 11px var(--mono);
+               color: var(--g-dim); background: #1d1f23; border: 1px solid #3a3e46;
+               border-radius: 3px; cursor: pointer; }
+  .gv-addpin:hover { color: var(--g-text); border-color: #6aa0ff; }
   .gv-text { position: absolute; white-space: nowrap; pointer-events: none; }
   .gv-id { color: var(--g-dim); font-size: 11px; }
   .gv-count { color: #2ecc71; font-size: 11px; font-weight: 700; }
@@ -354,6 +359,7 @@ const gv = new GraphView($("graph"), {
   },
   editPin: (node, pin, at) => editPin(node, pin, at),
   setPin: (node, pin, text) => applyEdit({ op: "literal", node, pin, text, verbatim: true }),
+  addPin: (node) => { if (canEdit() === true) applyEdit({ op: "add_pin", node }); else say(canEdit(), true); },
   palette: (world, at, context) => openPalette(world, at, context),
   menu: (target, at, world) => openMenu(target, at, world),
 });

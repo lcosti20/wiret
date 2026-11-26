@@ -8700,6 +8700,28 @@ func Main() {
         self.assertIn("  exec Sequence#count<3>{pos=(250, 0)}()\n", r["text"])
         self.assertEqual(self.edit(text, "Main", **{**e["action"], "text": "99"})["message"],
                          "Enter a whole number from 1 to 64.")
+        # "+ Add pin" on a Switch: a case with the first member no case has yet
+        e = next(e for e in self.menu(text, "Main", kind="node", node="~0") if e["label"] == "Add pin")
+        r = self.edit(text, "Main", **e["action"])
+        self.assertIn("!exec Switch#<Mode>#cases<1>{pos=", r["text"])
+        self.assertIn(").case0 Mode::Idle -> {}\n", r["text"])
+        r = self.edit(r["text"], "Main", op="add_pin", node="~0")
+        self.assertIn(").case0 Mode::Idle -> {}.case1 Mode::Chase -> {}\n", r["text"])
+        # every member taken: the new case has no value yet, and says so
+        r = self.edit(r["text"], "Main", op="add_pin", node="~0")
+        self.assertIn(".case2 -> {}\n", r["text"])
+        # Remove pin on case0: the later cases move down, keeping their values
+        pins = self.menu(r["text"], "Main", kind="pin", node="~0", dir="out", pin="case0")
+        e = next(e for e in pins if e.get("label") == "Remove pin 'case0'")
+        r = self.edit(r["text"], "Main", **e["action"])
+        self.assertIn("!exec Switch#<Mode>#cases<2>{pos=", r["text"])
+        self.assertIn(").case0 Mode::Chase -> {}.case1 -> {}\n", r["text"])
+        self.assertFalse(any(e.get("label", "").startswith("Remove pin") for e in
+                             self.menu(r["text"], "Main", kind="pin", node="~0", dir="out",
+                                       pin="default")))
+        # and on a Sequence: one more `then`
+        r = self.edit(text, "Main", op="add_pin", node="1")
+        self.assertIn("  exec Sequence#count<3>{pos=(250, 0)}()\n", r["text"])
 
 
     def test_web_highlighting_matches_desktop(self):

@@ -8,8 +8,8 @@ from dataclasses import dataclass, field
 from .checker import GraphInfo
 from .model import Graph, PinRef, note_detached, note_text
 from .ops import note_key
-from .viewmodel import (HEADER, ROW, display_title, header_color, input_editor, input_label,
-                        output_label, type_color)
+from .viewmodel import (HEADER, ROW, display_title, has_add_pin, header_color, input_editor,
+                        input_label, output_label, type_color)
 
 FIELD_BG = "#1d1f23"
 FIELD_EDGE = "#3a3e46"
@@ -37,6 +37,7 @@ class Geom:
     h: float
     pins: dict = field(default_factory=dict)   # (dir, name) -> (x, y, type)
     fields: dict = field(default_factory=dict)  # input name -> (x, y, width, input_editor)
+    add_pin: float = None       # the y of its "+ Add pin" row (Sequence, Switch), or None
 
 
 class GraphView(tk.Canvas):
@@ -153,8 +154,10 @@ class GraphView(tk.Canvas):
                          for p in outs] or [0]) / s
             w = max(f_title.measure(title) / s + 28, in_w + out_w + 46, 96)
             rows = max(len(ins), len(outs), 1 if not sig.pure else 0)
-            h = HEADER + ROW * rows + 6
+            adds = has_add_pin(n)       # a "+ Add pin" row at the bottom
+            h = HEADER + ROW * (rows + adds) + 6
             gm = Geom(x, y, w, h)
+            gm.add_pin = (y + HEADER + ROW * (rows + 0.5) + 3) if adds else None
             for i, p in enumerate(ins):
                 gm.pins[("in", p.name)] = (x, y + HEADER + ROW * (i + 0.5) + 3, p.type)
                 if p.name in fields:
@@ -359,6 +362,13 @@ class GraphView(tk.Canvas):
                 label = output_label(sig, pin) if pin else name
                 self.create_text(sx - 2.2 * r, sy, anchor="e", text=label, fill=TEXT, font=fpin,
                                  tags=tag)
+        if gm.add_pin is not None:       # the "+ Add pin" button
+            _, ay = self.to_screen(gm.x, gm.add_pin)
+            atag = ("addpin", f"a={n.id}")
+            self.create_rectangle(x0 + 8 * s, ay - 8 * s, x1 - 8 * s, ay + 8 * s,
+                                  fill=FIELD_BG, outline=FIELD_EDGE, tags=atag)
+            self.create_text((x0 + x1) / 2, ay, text="+ Add pin", fill=DIM, font=fpin,
+                             tags=atag)
         if (self.app.graph_name, n.id) in self.app.breakpoints:
             self.create_oval(x0 - 7 * s, y0 - 7 * s, x0 + 7 * s, y0 + 7 * s, fill=BREAK,
                              outline="white", width=1, tags=tag)
@@ -571,6 +581,8 @@ class GraphView(tk.Canvas):
         if "f" in found:
             nid, name = found["f"].split("|")
             return ("field", nid, name)
+        if "a" in found:
+            return ("addpin", found["a"])
         if "p" in found:
             nid, d, name = found["p"].split("|")
             return ("pin", nid, d, name)
@@ -597,6 +609,10 @@ class GraphView(tk.Canvas):
         if h and h[0] == "field":
             self.drag = None
             self.edit_field(h[1], h[2], e)
+            return
+        if h and h[0] == "addpin":
+            self.drag = None
+            self.app.add_pin(h[1])
             return
         if h and h[0] == "pin":
             _, nid, d, name = h

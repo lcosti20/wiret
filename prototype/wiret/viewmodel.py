@@ -129,6 +129,12 @@ def input_editor(n, pin, idx=None):
     return ed
 
 
+def has_add_pin(n) -> bool:
+    """Whether the node shows a "+ Add pin" button at its bottom: a Sequence or a Switch, the
+    nodes whose numbered exec outputs are counted by `#count` or `#cases`."""
+    return n.kind in ("Sequence", "Switch") and n.attr("disabled") is None
+
+
 def output_label(sig, pin) -> str:
     """An output pin's label; a lone `then` exec output needs none."""
     return "" if (pin.name == "then" and pin.is_exec and len(sig.exec_outs) == 1) else pin.name
@@ -251,6 +257,7 @@ def graph_json(g: Graph, info, idx, diags=(), remembered=None, module=None) -> d
             "header": header_color(g, n, sig), "pure": sig.pure,
             "disabled": n.attr("disabled") is not None, "diag": marks.get(n.id),
             "opens": opens(module, n), "description": describe(n.kind, n.symbol, idx, n.targs),
+            "addPin": has_add_pin(n),
             "ins": [{"name": p.name, "exec": p.is_exec, "type": type_words(p.type),
                      "color": type_color(p.type, idx),
                      "label": input_label(n, p), "bound": n.binding(p.name) is not None,

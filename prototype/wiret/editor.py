@@ -1076,6 +1076,26 @@ class EditorApp:
             return
         self.commit(canvasedit.set_int_attr(self.graph, nid, name, v))
 
+    def add_pin(self, nid):
+        """The "+ Add pin" button of a Sequence or Switch."""
+        if not self.can_edit():
+            return
+        try:
+            reason = canvasedit.add_pin(self.graph, self.idx, nid)
+        except canvasedit.Refused as e:
+            messagebox.showerror("Add pin", str(e))
+            return
+        self.commit(reason)
+
+    def remove_pin(self, nid, pin):
+        if not self.can_edit():
+            return
+        try:
+            reason = canvasedit.remove_pin(self.graph, nid, pin)
+        except canvasedit.Refused as e:
+            messagebox.showerror("Remove pin", str(e))
+            return
+        self.commit(reason)
 
     def add_note(self, on):
         if not self.can_edit():
@@ -1224,6 +1244,9 @@ class EditorApp:
                 menu.add_command(label=f"Break '{pin}' into fields",
                                  command=lambda: self.break_struct(nid, pin, p.type))
             menu.add_command(label="Disconnect", command=lambda: self.disconnect(nid, d, pin))
+            if canvasedit.removable_pin(self.graph.node(nid), pin):
+                menu.add_command(label=f"Remove pin '{pin}'",
+                                 command=lambda: self.remove_pin(nid, pin))
             menu.add_separator()
             self.node_menu(menu, nid)
         elif h[0] in ("box", "boxtitle"):
@@ -1279,6 +1302,8 @@ class EditorApp:
         if n.kind == "Sequence":
             menu.add_command(label="Set output count (#count)…",
                              command=lambda: self.set_int_attr(nid, "count", "Number of outputs:"))
+        if canvasedit.pin_count(n) is not None:
+            menu.add_command(label="Add pin", command=lambda: self.add_pin(nid))
         if n.kind not in ("Entry",):
             menu.add_command(label=("Enable" if n.attr("disabled") else "Disable") + " (@disabled)",
                              command=lambda: self.toggle_attr(nid, "disabled"))
