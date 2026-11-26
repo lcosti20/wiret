@@ -328,8 +328,8 @@ INTRINSICS = {}
 for _t, _p in (("vec2", "v2"), ("vec3", "v3")):
     for _fn, _op in (("Dot", "dot"), ("Length", "len"), ("LengthSquared", "lensq"),
                      ("Normalize", "normalize"), ("Lerp", "lerp"), ("Reflect", "reflect")):
-        INTRINSICS[f"std.vec.{_fn}::<{_t}>"] = f"{_p}.{_op}"
-    INTRINSICS[f"std.vec.Distance::<{_t}>"] = [f"{_p}.sub", f"{_p}.len"]
+        INTRINSICS[f"std.vec.{_fn}#<{_t}>"] = f"{_p}.{_op}"
+    INTRINSICS[f"std.vec.Distance#<{_t}>"] = [f"{_p}.sub", f"{_p}.len"]
 INTRINSICS["std.vec.Cross"] = "v3.cross"
 INTRINSICS["std.vec.PerpDot"] = "v2.perpdot"
 INTRINSICS.update({"std.quat.Rotate": "q.rotate", "std.quat.Conjugate": "q.conj",

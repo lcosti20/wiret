@@ -1,86 +1,63 @@
 wiret 1
 module lessons.fizzbuzz
 
-extern func host.Log(message: string)
+extern func host.Log(message: string) -> ()
 
-#[note("Lesson 6: Challenge, FizzBuzz. For 1 to 15, print Fizz for multiples of 3, Buzz for multiples of 5, FizzBuzz for multiples of both, and otherwise the number. Rem gives the remainder: a number is a multiple of 3 when the remainder after dividing by 3 is 0.")]
-#[note("Try it: (1) Predict the output, then Run. (2) Swap the order of check15 and check3 and see what breaks. (3) Add 'Bang' for multiples of 7.")]
+@note("Lesson 6: Challenge, FizzBuzz. For 1 to 15, print Fizz for multiples of 3, Buzz for multiples of 5, FizzBuzz for multiples of both, and otherwise the number. Rem gives the remainder: a number is a multiple of 3 when the remainder after dividing by 3 is 0.")
+@note("Try it: (1) Predict the output, then Run. (2) Swap the order of check15 and check3 and see what breaks. (3) Add 'Bang' for multiples of 7.")
 func Main() {
-  flow {
-    check15.then -> fizzbuzz
-    check15.else -> check3
-    check3.then -> fizz
-    check3.else -> check5
-    check5.then -> buzz
-    check5.else -> number
-    entry -> loop
-    loop.each -> check15
-  }
-
-  node buzz = Call host.Log(
-    .message <- "Buzz",
-  )
-  node check15 = Branch(
-    .cond <- Eq::<i32>(
-      .a <- Rem::<i32>(
-        .a <- loop.index,
-        .b <- 15,
-      ),
-      .b <- 0,
-    ),
-  )
-  node check3 = Branch(
-    .cond <- Eq::<i32>(
-      .a <- Rem::<i32>(
-        .a <- loop.index,
-        .b <- 3,
-      ),
-      .b <- 0,
-    ),
-  )
-  node check5 = Branch(
-    .cond <- Eq::<i32>(
-      .a <- Rem::<i32>(
-        .a <- loop.index,
-        .b <- 5,
-      ),
-      .b <- 0,
-    ),
-  )
-  node entry = Entry()
-  node fizz = Call host.Log(
-    .message <- "Fizz",
-  )
-  node fizzbuzz = Call host.Log(
-    .message <- "FizzBuzz",
-  )
-  node loop = Macro std.flow.ForRange(
-    .first <- 1,
-    .last <- 15,
-  )
-  node number = Call host.Log(
-    .message <- Convert::<i32, string>(
-      .value <- loop.index,
-    ),
-  )
-
-  layout {
-    buzz at (1502, -141)
-    #[note("Why check 15 first? 15 is a multiple of 3 too. If check3 came first, 15 would only print Fizz.")]
-    check15 at (788, 0)
-    check15.cond at (608, 64)
-    check15.cond.a at (475, 64)
-    check3 at (1043, 20)
-    check3.cond at (609, 154)
-    check3.cond.a at (474, 156)
-    check5 at (1282, 40)
-    check5.cond at (609, 246)
-    check5.cond.a at (475, 246)
-    entry at (0, 0)
-    fizz at (1255, -140)
-    fizzbuzz at (972, -138)
-    loop at (200, 0)
-    number at (1531, 60)
-    number.message at (474, 346)
+  exec Entry{pos=(0, 0)}()
+  exec Macro std.flow.ForRange{pos=(200, 0)}(
+    .first <- 1
+    .last <- 15
+  ).each|index| -> {
+    @note("Check 15")
+    @note("Why check 15 first? 15 is a multiple of 3 too. If check3 came first, 15 would only print Fizz.")
+    exec Branch{pos=(877, 0)}(
+      .cond <- Eq#<i32>{pos=(674, 64)}(
+        .a <- Rem#<i32>{pos=(475, 64)}(
+          .a <- index
+          .b <- 15
+        )
+        .b <- 0
+      )
+    ).then -> {
+      exec Call host.Log{pos=(1153, 243)}(
+        .message <- "FizzBuzz"
+      )
+    }.else
+    @note("Check 3")
+    exec Branch{pos=(1086, 0)}(
+      .cond <- Eq#<i32>{pos=(674, 156)}(
+        .a <- Rem#<i32>{pos=(474, 156)}(
+          .a <- index
+          .b <- 3
+        )
+        .b <- 0
+      )
+    ).then -> {
+      exec Call host.Log{pos=(1405, 245)}(
+        .message <- "Fizz"
+      )
+    }.else
+    @note("Check 5")
+    exec Branch{pos=(1297, 0)}(
+      .cond <- Eq#<i32>{pos=(674, 246)}(
+        .a <- Rem#<i32>{pos=(475, 246)}(
+          .a <- index
+          .b <- 5
+        )
+        .b <- 0
+      )
+    ).then -> {
+      exec Call host.Log{pos=(1656, 246)}(
+        .message <- "Buzz"
+      )
+    }.else
+    exec Call host.Log{pos=(1525, 0)}(
+      .message <- Convert#<i32, string>{pos=(474, 346)}(
+        .value <- index
+      )
+    )
   }
 }

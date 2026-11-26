@@ -1,101 +1,69 @@
 wiret 1
 module lessons.arrays
 
-extern func host.Log(message: string)
+extern func host.Log(message: string) -> ()
 
-#[note("Lesson 7: Arrays. An array is one variable that holds a list of values, in order. MakeArray builds a list from the items wired into it. Each item has a position (its index), and positions start at 0, not 1.")]
-#[note("Try it: (1) Step (F11) and watch scores in the Variables panel of the Debugger tab. (2) Add a fifth score with another ArrayAdd. (3) Use ArrayGet::<i32> to print only the first score (index 0). (4) Ask ArrayGet for index 10 and read the error message.")]
+@note("Lesson 7: Arrays. An array is one variable that holds a list of values, in order. MakeArray builds a list from the items wired into it. Each item has a position (its index), and positions start at 0, not 1.")
+@note("Try it: (1) Step (F11) and watch scores in the Variables panel of the Debugger tab. (2) Add a fifth score with another ArrayAdd. (3) Use ArrayGet#<i32> to print only the first score (index 0). (4) Ask ArrayGet for index 10 and read the error message.")
 func Main() {
-  local scores: array::<i32>
+  local scores: array#<i32>
   local total: i32
 
-  flow {
-    add -> loop
-    entry -> start
-    loop.each -> say
-    loop.done -> report
-    say -> keep
-    start -> add
-  }
+  node list = GetLocal scores{pos=(467, 124)}()
 
-  node add = ArrayAdd::<i32> scores(
-    .item <- 25,
+  exec Entry{pos=(0, 0)}()
+  exec SetLocal scores{pos=(200, 0)}(
+    .value <- MakeArray#<i32>#count<3>{pos=(-51, 75)}(
+      .item[0] <- 12
+      .item[1] <- 30
+      .item[2] <- 7
+    )
   )
-  node entry = Entry()
-  node keep = SetLocal total(
-    .value <- Add::<i32>(
-      .a <- GetLocal total(),
-      .b <- loop.item,
-    ),
+  @note("ArrayAdd puts one more item on the end of the array. scores now holds 4 items.")
+  exec ArrayAdd#<i32> scores{pos=(420, 0)}(
+    .item <- 25
   )
-  node list = GetLocal scores()
-  node loop = Macro std.flow.ForEach::<i32>(
-    .array <- list,
-  )
-  node make = MakeArray::<i32>(
-    .item0 <- 12,
-    .item1 <- 30,
-    .item2 <- 7,
-  ) @count(3)
-  node report = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- Call std.string.Concat(
-        .a <- Convert::<i32, string>(
-          .value <- ArrayLength::<i32>(
-            .array <- list,
-          ),
-        ),
-        .b <- " scores, total ",
-      ),
-      .b <- Convert::<i32, string>(
-        .value <- GetLocal total(),
-      ),
-    ),
-  )
-  node say = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- Call std.string.Concat(
-        .a <- Call std.string.Concat(
-          .a <- "Item ",
-          .b <- Convert::<i32, string>(
-            .value <- loop.index,
-          ),
-        ),
-        .b <- " is ",
-      ),
-      .b <- Convert::<i32, string>(
-        .value <- loop.item,
-      ),
-    ),
-  )
-  node start = SetLocal scores(
-    .value <- make,
-  )
-
-  layout {
-    #[note("ArrayAdd puts one more item on the end of the array. scores now holds 4 items.")]
-    add at (420, 0)
-    entry at (0, 0)
-    keep at (2004, -1)
-    keep.value at (1831, 98)
-    keep.value.a at (1620, 74)
-    list at (467, 124)
-    #[note("ForEach runs 'each' once for every item. item is the value, index is its position. After the last item it follows 'done'.")]
-    loop at (715, 0)
-    make at (-51, 75)
-    report at (1666, 224)
-    report.message at (1482, 306)
-    report.message.a at (1212, 284)
-    report.message.a.a at (968, 284)
-    report.message.a.a.value at (729, 284)
-    report.message.b at (1216, 376)
-    report.message.b.value at (1026, 376)
-    say at (1802, -1)
-    say.message at (1616, -191)
-    say.message.a at (1427, -191)
-    say.message.a.a at (1241, -191)
-    say.message.a.a.b at (1036, -99)
-    say.message.b at (1330, -86)
-    start at (200, 0)
+  @note("ForEach runs 'each' once for every item. item is the value, index is its position. After the last item it follows 'done'.")
+  exec Macro std.flow.ForEach#<i32>{pos=(715, 0)}(
+    .array <- list
+  ).each|item, index| -> {
+    exec Call host.Log{pos=(1802, -1)}(
+      .message <- Call std.string.Concat{pos=(1616, -191)}(
+        .a <- Call std.string.Concat{pos=(1427, -191)}(
+          .a <- Call std.string.Concat{pos=(1241, -191)}(
+            .a <- "Item "
+            .b <- Convert#<i32, string>{pos=(1036, -99)}(
+              .value <- index
+            )
+          )
+          .b <- " is "
+        )
+        .b <- Convert#<i32, string>{pos=(1330, -86)}(
+          .value <- item
+        )
+      )
+    )
+    exec SetLocal total{pos=(2004, -1)}(
+      .value <- Add#<i32>{pos=(1831, 98)}(
+        .a <- GetLocal total{pos=(1620, 74)}()
+        .b <- item
+      )
+    )
+  }.done -> {
+    exec Call host.Log{pos=(1666, 224)}(
+      .message <- Call std.string.Concat{pos=(1482, 306)}(
+        .a <- Call std.string.Concat{pos=(1212, 284)}(
+          .a <- Convert#<i32, string>{pos=(968, 284)}(
+            .value <- ArrayLength#<i32>{pos=(729, 284)}(
+              .array <- list
+            )
+          )
+          .b <- " scores, total "
+        )
+        .b <- Convert#<i32, string>{pos=(1216, 376)}(
+          .value <- GetLocal total{pos=(1026, 376)}()
+        )
+      )
+    )
   }
 }

@@ -77,7 +77,7 @@ def simple_effect(name: str):
 
 def valid_vt(m: WbcModule, vt) -> bool:
     """A supported value type: a number, a string, or a reference to an array or struct type.
-    References may point forward (`struct Tree { children: array::<Tree> }`); the check that a
+    References may point forward (`struct Tree { children: array#<Tree> }`); the check that a
     struct does not hold itself by value is `check_struct_cycles`."""
     if isinstance(vt, Ref):
         return vt.type < len(m.types) and isinstance(m.types[vt.type], REF_TYPES)

@@ -17,7 +17,9 @@ from .checker import GraphInfo
 from .explain import type_words
 from .model import Attr, Box, Graph, Lit, PinRef, set_note_text
 from .parser import ParseError, parse_literal
-from .registry import PRIM_TYPES, can_convert, enum_values, lit_fits
+from .printer import fmt_string
+from .registry import (COUNTED_PINS, PRIM_TYPES, can_convert, enum_values, flattenable_pin,
+                       indexed_name, is_flat, lit_fits, pin_count, pin_index, removable_pin)
 
 # geom(node id) -> (x, y, width) of a node as drawn, or None; used to place an inserted node
 Geom = Callable[[str], Optional[tuple]]
@@ -61,7 +63,7 @@ def connect(g: Graph, info, idx, a: tuple, b: tuple, geom: Geom) -> Optional[str
                                (ga[0] + ga[2] + gb[0]) / 2 - 60, (ga[1] + gb[1]) / 2 + 40)
         ops.bind(g, conv.id, "value", PinRef(na, pa))
         ops.bind(g, nb, pb, PinRef(conv.id, "result"))
-        return f"Inserted {conv.id} = Convert::<{out.type}, {inp.type}>"
+        return f"Inserted {conv.id} = Convert#<{out.type}, {inp.type}>"
     raise Refused(f"Cannot connect {out.type} to {inp.type}: no conversion exists (E0110).")
 
 
@@ -136,14 +138,21 @@ def literal_prompt(g: Graph, info, idx, nid: str, pin: str) -> Optional[dict]:
     return {"type": p.type, "current": current, "hint": hint}
 
 
-def set_literal(g: Graph, info, idx, nid: str, pin: str, text: str) -> str:
+def set_literal(g: Graph, info, idx, nid: str, pin: str, text: str, verbatim: bool = False) -> str:
     """Set an input to the value typed for it. Empty text unbinds it (it takes its default).
-    A string needs no quotes, and an enum member no type name."""
+    A string needs no quotes, and an enum member no type name. With `verbatim` (a text field
+    on the canvas), the text of a string input is the string itself, spaces and quotes kept."""
     p = info.sigs[nid].input(pin)
     if p is None or p.is_exec:
         raise Refused(f"{nid}.{pin} takes no value.")
     if p.type in idx.structs:
         raise Refused(f"A {p.type} has no typed value. Wire a 'Make {p.type}' node into {nid}.{pin}.")
+    b = g.node(nid).binding(pin)
+    if verbatim and b is not None and not isinstance(b.value, Lit):
+        raise Refused(f"{nid}.{pin} is wired. Disconnect it to type a value.")
+    if verbatim and p.type == "string" and text:
+        ops.bind(g, nid, pin, Lit("string", text))
+        return f"Set {nid}.{pin} = {fmt_string(text)}"
     text = text.strip()
     if not text:
         ops.unbind(g, nid, pin)
@@ -206,13 +215,12 @@ def add_node(g: Graph, idx, item, x: float, y: float, context: Optional[tuple] =
 
 
 def place_unplaced(g: Graph, remembered: dict) -> None:
-    """Give every node without a place line one, where the automatic layout put it: auto-placed
-    nodes get a place line when first saved (section 2.3)."""
+    """Give every node without a `pos` one, where the automatic layout put it: auto-placed
+    nodes get a `pos` when first saved (section 2.3)."""
     for n in g.nodes:
         if g.place(n.id) is None:
             x, y = remembered.get((g.name, n.id), (0, 0))
             ops.place(g, n.id, x, y)
-    ops.prune_box_members(g)
 
 
 # -- the context menu's edits ------------------------------------------------------------
@@ -243,15 +251,14 @@ def make_for_pin(g: Graph, nid: str, pin: str, ty: str, geom: Geom) -> tuple:
 
 
 def rename_node(g: Graph, nid: str, new: str) -> Optional[str]:
-    """Give a node a new id; every wire follows. None when the id is unchanged."""
+    """Name a node, or rename a named one; every wire follows. A node named for the first
+    time is declared with `node new = ...`, after the names already there (section 2.3).
+    None when the name is unchanged."""
     from .parser import RESERVED
     if not new or new == nid:
         return None
-    if "." in nid:
-        raise Refused(f"'{nid}' is written inside the input it feeds, so its name says where it "
-                      f"is. Wire its output into a second input to give it a name of its own.")
-    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", new) or new in RESERVED:
-        raise Refused("Not a valid identifier.")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", new) or new in RESERVED or new == "self":
+        raise Refused("Not a valid name.")
     if g.node(new) or g.box(new):
         raise Refused(f"'{new}' is already used in this graph (E0102).")
     ops.rename_node(g, nid, new)
@@ -304,7 +311,7 @@ def int_attr(g: Graph, nid: str, name: str, default: int = 2) -> int:
 
 
 def set_int_attr(g: Graph, nid: str, name: str, value) -> str:
-    """@name(value) on a node, value a whole number from 1 to 64 (as Sequence's @count)."""
+    """#name<value> on a node, value a whole number from 1 to 64 (as Sequence's #count)."""
     try:
         v = int(str(value).strip())
     except ValueError:
@@ -313,37 +320,101 @@ def set_int_attr(g: Graph, nid: str, name: str, value) -> str:
         raise Refused("Enter a whole number from 1 to 64.")
     n = g.node(nid)
     n.attrs = [x for x in n.attrs if x.name != name] + [Attr(name, [(None, Lit("int", v))])]
-    return f"Set @{name}({v}) on {nid}"
+    return f"Set #{name}<{v}> on {nid}"
 
 
-def cases_prompt(g: Graph, idx, nid: str) -> tuple:
-    """(what to ask, the current cases as text) for a Switch's @cases."""
-    from .printer import fmt_lit
-    n = g.node(nid)
-    a = n.attr("cases")
-    cur = ", ".join(fmt_lit(v) for _, v in a.args) if a and a.args else ""
-    ety = n.targs[0] if n.targs and n.targs[0] in idx.enums else None
-    prompt = "Case values, comma separated:"
-    if ety:
-        members = ", ".join(m for m, _ in enum_values(idx.enums[ety]))
-        prompt = f"{ety} members, comma separated (one of: {members}):"
-    return prompt, cur
+MAX_PINS = 64
 
 
-def set_cases(g: Graph, idx, nid: str, text: str) -> str:
-    """A Switch's @cases from comma-separated values; enum members need no type name."""
-    import csv
-    n = g.node(nid)
+def _set_count(n, name: str, v: int):
+    n.attrs = [x for x in n.attrs if x.name != name] + [Attr(name, [(None, Lit("int", v))])]
+
+
+def _next_case(g: Graph, idx, n) -> Optional[Lit]:
+    """The value a new Switch case starts with: the first enum member no case has yet, or the
+    integer after the largest; None when there is none to suggest (it is then set by hand)."""
     ty = n.targs[0] if n.targs else None
-    parts = [t.strip() for t in next(csv.reader([text], skipinitialspace=True), []) if t.strip()]
-    if ty in idx.enums:      # bare member names are enough: Idle, Chase
-        parts = [t if "." in t or "::" in t else f"{ty}::{t}" for t in parts]
-    try:
-        vals = [parse_literal(t) for t in parts]
-    except ParseError as e:
-        raise Refused(e.msg)
-    n.attrs = [x for x in n.attrs if x.name != "cases"] + [Attr("cases", [(None, v) for v in vals])]
-    return f"Set cases on {nid}"
+    have = [b.value for b in n.bindings if pin_index(b.pin) and isinstance(b.value, Lit)]
+    if ty in idx.enums:
+        used = {v.value for v in have if v.kind == "enum"}
+        for member, _ in enum_values(idx.enums[ty]):
+            if f"{ty}.{member}" not in used:
+                return Lit("enum", f"{ty}.{member}")
+        return None
+    if ty in ("i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"):
+        nums = [v.value for v in have if v.kind == "int"]
+        return Lit("int", max(nums) + 1 if nums else 0)
+    return None
+
+
+def add_pin(g: Graph, idx, nid: str) -> str:
+    """The "Add pin" button: one more indexed pin on a Sequence (`then[2]`), a Switch
+    (`case[2]`, given the next value that no case has) or a MakeArray (`item[2]`)."""
+    n = g.node(nid)
+    count = pin_count(n) if n is not None else None
+    if count is None:
+        raise Refused("Only a Sequence, a Switch or a MakeArray has pins to add.")
+    name, base, side, _, _ = COUNTED_PINS[n.kind]
+    what = "inputs" if side == "in" else "outputs"
+    if count >= MAX_PINS:
+        raise Refused(f"A {n.kind} has at most {MAX_PINS} {what}.")
+    _set_count(n, name, count + 1)
+    pin = indexed_name(base, count)
+    if n.kind == "Switch":
+        lit = _next_case(g, idx, n)
+        if lit is not None:
+            ops.bind(g, nid, pin, lit)
+    return f"Added {nid}.{pin}"
+
+
+def remove_pin(g: Graph, nid: str, pin: str) -> str:
+    """Remove one indexed pin of a Sequence, Switch or MakeArray, with its wire and its value.
+    The pins after it move down one, `case[2]` becoming `case[1]`, keeping their wires and
+    values."""
+    n = g.node(nid)
+    count = pin_count(n) if n is not None else None
+    if count is None:
+        raise Refused("Only a Sequence, a Switch or a MakeArray has pins to remove.")
+    name, base, side, _, least = COUNTED_PINS[n.kind]
+    what = "input" if side == "in" else "output"
+    ix = pin_index(pin)
+    if ix is None or ix[0] != base or ix[1] >= count:
+        raise Refused(f"'{pin}' is not one of the {n.kind}'s indexed {what}s.")
+    if count <= least:
+        raise Refused(f"A {n.kind} needs at least {least} {what}{'s' if least != 1 else ''}.")
+    k = ix[1]
+
+    def shift(p):
+        i = pin_index(p)
+        if i is None or i[0] != base:
+            return p
+        return p if i[1] < k else indexed_name(base, i[1] - 1)
+
+    n.execs = [e for e in n.execs if e.pin != pin]
+    for e in n.execs:
+        e.pin = shift(e.pin)
+    n.bindings = [b for b in n.bindings if b.pin != pin]
+    for b in n.bindings:
+        b.pin = shift(b.pin)
+    _set_count(n, name, count - 1)
+    return f"Removed {nid}.{pin}"
+
+
+def toggle_flat(g: Graph, info, nid: str) -> str:
+    """The small triangle beside a node's bottom exec output (registry.flattenable_pin):
+    flatten it, so `}.else` drops its `-> { }` and the statements it runs continue in the
+    node's own block, or unflatten it, so they are gathered back into `.else -> { ... }`."""
+    n = g.node(nid)
+    sig = info.sigs.get(nid) if n is not None else None
+    pin = flattenable_pin(n, sig)
+    if pin is None:
+        raise Refused("Only the bottom exec output of a node, one that gives no values, "
+                      "can be flattened.")
+    if is_flat(n, sig):
+        n.flat, n.flat_pin = False, None
+        return f"Unflattened {nid}.{pin}"
+    n.flat, n.flat_pin = True, pin
+    return f"Flattened {nid}.{pin}"
 
 
 def add_note(g: Graph, on: Optional[str], text: str) -> Optional[str]:
@@ -368,20 +439,16 @@ def delete_note(g: Graph, key: str) -> str:
 
 
 def add_box(g: Graph, x: float, y: float, title: str, member: Optional[str] = None) -> Optional[str]:
-    """A box at (x, y) titled `title`, holding the selected node (`member`) if there is one."""
+    """A box at (x, y) titled `title`, drawn around the selected node (`member`) if there is
+    one. A box has no member list: the nodes inside it move with it (section 2.3)."""
     if not title:
         return None
-    members = [Lit("ident", member)] if member else []
-    g.boxes.append(Box(ops.fresh_id(g, "box"), int(x), int(y), [("members", Lit("list", members))],
-                       title=title, w=360, h=220))
+    w, h = 360, 220
+    p = g.place(member) if member else None
+    if p is not None:
+        x, y = p.x - 20, p.y - 40
+    g.boxes.append(Box(f"box.{len(g.boxes)}", int(x), int(y), [], title=title, w=w, h=h))
     return f"Added box {title!r}"
-
-
-def set_members(g: Graph, bid: str, text: str) -> str:
-    """A box's members: node or box ids, comma separated (membership is explicit, 2.3)."""
-    ids = [t.strip() for t in text.split(",") if t.strip()]
-    g.box(bid).set_prop("members", Lit("list", [Lit("ident", i) for i in ids]))
-    return f"Edited members of {bid}"
 
 
 def resize_box(g: Graph, bid: str, text: str) -> str:
@@ -405,7 +472,7 @@ def retitle_box(g: Graph, bid: str, text: str) -> Optional[str]:
 def local_prompt(idx, kw: str = "local") -> str:
     own = sorted(idx.structs) + sorted(idx.enums)
     example = f"  or  pos: {own[0]}" if own else ""
-    return f"name: type   (e.g.  count: i32  or  scores: array::<i32>{example})"
+    return f"name: type   (e.g.  count: i32  or  scores: array#<i32>{example})"
 
 
 def add_local(g: Graph, idx, kw: str, text: str) -> Optional[str]:
@@ -419,6 +486,6 @@ def add_local(g: Graph, idx, kw: str, text: str) -> Optional[str]:
         own = sorted(idx.structs) + sorted(idx.enums)
         extra = f", or one of this module's types: {', '.join(own)}" if own else ""
         raise Refused("Use a valid name and a type such as i32, string "
-                      f"or array::<i32>{extra}.")
+                      f"or array#<i32>{extra}.")
     (g.locals if kw == "local" else g.states).append(Local(name, ty))
     return f"Added {kw} {name}"

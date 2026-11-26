@@ -2,7 +2,7 @@
 
 Changes to behaviour come first, per declaration and per graph: added, removed and changed
 nodes, each change named by field (a binding, an exec wire, the kind, ...). Metadata
-(`#[...]` lines) and layout-only changes follow in sections of their own, so a reviewer can
+(`@note`, `@doc` and other metadata decorators) and layout-only changes follow in sections of their own, so a reviewer can
 tell at a glance whether a commit changed what the program does.
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ from .checker import GraphInfo
 from .flow import flow_order
 from .merge import decl_fields, decl_kind, key_of, meta_text, node_fields, sub_fields
 from .model import Graph, Module
-from .printer import IND, fmt_node
+from .printer import IND, fmt_expr
 from .registry import ModuleIndex, signature
 
 
@@ -123,8 +123,8 @@ class Differ:
         for nid in ids:
             p, q = x.node(nid), y.node(nid)
             if p is None:
-                text = fmt_node(q, signature(q, y, self.ib), "").splitlines()
-                out.append(f"{IND}+ {text[0]}")
+                text = fmt_expr(q, signature(q, y, self.ib), "").splitlines()
+                out.append(f"{IND}+ node {nid} = {text[0]}")
                 out += [f"{IND}    {t}" for t in text[1:]]     # keeps the nesting of inline nodes
             elif q is None:
                 out.append(f"{IND}- node {nid} = {p.kind}" + (f" {p.symbol}" if p.symbol else ""))
@@ -144,9 +144,10 @@ class Differ:
         for bid in sorted(set(ba) | set(bb)):
             p, q = ba.get(bid), bb.get(bid)
             if p is None or q is None:
-                self.layout.append(f"{y.name}: box {bid} {'added' if p is None else 'removed'}")
+                self.layout.append(f"{y.name}: box '{(p or q).title}' "
+                                   f"{'added' if p is None else 'removed'}")
             elif (p.x, p.y, p.w, p.h, p.title, p.props) != (q.x, q.y, q.w, q.h, q.title, q.props):
-                self.layout.append(f"{y.name}: box {bid} changed")
+                self.layout.append(f"{y.name}: box '{q.title}' changed")
         return out
 
     def meta_changes(self, where: str, a: list, b: list):

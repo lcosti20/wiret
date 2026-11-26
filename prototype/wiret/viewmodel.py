@@ -1,19 +1,23 @@
 """What a graph looks like, without drawing it: node titles, pin labels, colors and the
-automatic layout of nodes that have no `place` line. The desktop canvas (graphview.py) draws
+automatic layout of nodes that have no `pos`. The desktop canvas (graphview.py) draws
 from these; `graph_json` hands the same to the web page."""
 from __future__ import annotations
 
 from collections import Counter
+from itertools import zip_longest
 
 from .explain import type_words
 from .palette import describe
 from .model import Graph, Lit, PinRef, note_detached, note_text
 from .ops import note_key
 from .printer import fmt_lit
-from .registry import FLOAT_TYPES, INT_TYPES
+from .registry import (COUNTED_PINS, FLOAT_TYPES, INT_RANGES, INT_TYPES, counted_side,
+                       flattenable_pin, is_flat, output_values,
+                       pin_count, pin_index, removable_pin)
 
 HEADER = 24     # node header height, in graph units
 ROW = 20        # height of one pin row
+RULE = 10       # height of the line between a node's indexed outputs and the ones after
 
 HEADER_COLORS = {"Arrays": "#b9770e", "Flow": "#566573", "Call": "#2471a3", "Math": "#1e8449", "Compare": "#138d75",
                  "Logic": "#9a7d0a", "Bits": "#873600", "Variables": "#6c3483", "Macro": "#7d3c98",
@@ -41,13 +45,41 @@ def type_color(ty: str, idx=None) -> str:
         return "#a3d65c"
     if ty == "string":
         return "#e056fd"
-    if ty.startswith("map::<"):
+    if ty.startswith("map#<"):
         return "#dc7633"        # maps: dark orange
-    if ty.startswith("set::<"):
+    if ty.startswith("set#<"):
         return "#f8c471"        # sets: pale orange
-    if ty.startswith("array::<"):
+    if ty.startswith("array#<"):
         return "#f0a830"        # arrays: orange, whatever they hold
     return "#95a5a6"
+
+
+def angled(text: str) -> str:
+    """`text` with its type arguments in single guillemets, as the canvas shows them:
+    `array#<i32>` reads `array‹i32›`. A plain `<...>` (as in `#cases<2>`) and the `>` of a
+    `->` are left alone."""
+    out, opens = [], []
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if text.startswith("#<", i):
+            out.append("‹")
+            opens.append(True)
+            i += 2
+            continue
+        if c == "<":
+            opens.append(False)
+        elif c == ">" and not (i and text[i - 1] == "-") and opens:
+            if opens.pop():
+                c = "›"
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def pin_type(ty: str) -> str:
+    """A pin's type in words, as the canvas shows it: `a list of i32s (array‹i32›)`."""
+    return angled(type_words(ty))
 
 
 def node_title(n) -> str:
@@ -56,12 +88,12 @@ def node_title(n) -> str:
         t += " " + n.symbol.split(".")[-1] if n.kind == "Call" and n.symbol.startswith("std.") \
             else " " + n.symbol
     if n.targs:
-        t += "::<" + ", ".join(n.targs) + ">"
+        t += "‹" + ", ".join(angled(a) for a in n.targs) + "›"
     return t
 
 
 def display_title(g: Graph, n) -> str:
-    """The node's `label` from its place line, or its title."""
+    """The node's `label` from its attribute block, or its title."""
     place = g.place(n.id)
     label = place.prop("label") if place else None
     return label.value if label is not None and label.kind == "string" else node_title(n)
@@ -70,6 +102,8 @@ def display_title(g: Graph, n) -> str:
 def input_label(n, pin) -> str:
     if pin.is_exec:
         return "" if pin.name == "in" else pin.name
+    if pin_index(pin.name) and counted_side(n) == "out":
+        return ""               # an output's value, on its output's row: that names it
     b = n.binding(pin.name)
     if b is not None and isinstance(b.value, Lit):
         text = fmt_lit(b.value)
@@ -79,6 +113,154 @@ def input_label(n, pin) -> str:
     if b is None and pin.default is not None and n.kind not in ("Exit", "Leave"):
         return f"{pin.name} ({fmt_lit(pin.default_lit())})"
     return pin.name
+
+
+def input_editor(n, pin, idx=None):
+    """The form control the canvas shows on an input that nothing is wired to, or None: an
+    exec pin, a wired one, or a type with no typed value (a struct, a class, ...).
+    {"kind": "text" | "int" | "float" | "bool" | "enum", "value": the value set in the source
+    as it is typed in the control (a string without its quotes, an enum member without its
+    type), or None when there is none, "placeholder": the pin's default the same way, or None,
+    and for an int its "min" and "max", for an enum its "options"}."""
+    if pin.is_exec:
+        return None
+    b = n.binding(pin.name)
+    if b is not None and not isinstance(b.value, Lit):
+        return None
+    ty = pin.type
+    enum = idx.enums.get(ty) if idx is not None else None
+    if ty == "string":
+        kind = "text"
+    elif ty == "bool":
+        kind = "bool"
+    elif ty in INT_TYPES:
+        kind = "int"
+    elif ty in FLOAT_TYPES:
+        kind = "float"
+    elif enum is not None:
+        kind = "enum"
+    else:
+        return None
+
+    def shown(lit):
+        if lit is None:
+            return None
+        if kind == "text" and lit.kind == "string":
+            return lit.value
+        if kind == "bool" and lit.kind == "bool":
+            return bool(lit.value)
+        if kind == "enum" and lit.kind == "enum":
+            return lit.value.split(".", 1)[1]
+        return fmt_lit(lit)
+
+    default = pin.default_lit() if n.kind not in ("Exit", "Leave") else None
+    ed = {"kind": kind, "value": shown(b.value) if b is not None else None,
+          "placeholder": shown(default)}
+    if kind == "int" and ty in INT_RANGES:
+        ed["min"], ed["max"] = INT_RANGES[ty]
+    if enum is not None:
+        ed["options"] = [m.name for m in enum.members]
+    return ed
+
+
+def has_add_pin(n) -> bool:
+    """Whether the node shows an "Add pin" button at its bottom: a Sequence, a Switch or a
+    MakeArray, the nodes whose indexed pins are counted by `#count` or `#cases`."""
+    return pin_count(n) is not None and n.attr("disabled") is None
+
+
+def add_pin_side(n):
+    """Which side a node's Add pin button sits on: "right" for indexed outputs, so it lines up
+    with their remove buttons, "left" for indexed inputs, or None for no button."""
+    if not has_add_pin(n):
+        return None
+    return "left" if counted_side(n) == "in" else "right"
+
+
+def add_pin_label(n) -> str:
+    """The text of a node's add button: "Add " and the name its indexed pins share, "Add
+    case", "Add item", "Add then", so a node with several kinds of them could tell them apart."""
+    return f"Add {COUNTED_PINS[n.kind][1]}"
+
+
+def can_remove(n, pin, d: str = "out") -> bool:
+    """Whether a pin shows a remove button next to it: an indexed pin of a node with an Add
+    pin button (the button is beside the pin's label, toward the inside of the node)."""
+    return has_add_pin(n) and removable_pin(n, pin, d)
+
+
+def _layout(n, sig) -> dict:
+    """pin_rows for the web canvas, as JSON."""
+    r = pin_rows(n, sig)
+    return {"rows": [[p.name if p else None, o.name if o else None, y] for p, o, y in r["rows"]],
+            "rule": r["rule"], "addPin": r["add"], "addSide": add_pin_side(n),
+            "addLabel": add_pin_label(n) if r["add"] is not None else None,
+            "flatPin": flat_toggle(n, sig), "flat": is_flat(n, sig),
+            "height": r["height"]}
+
+
+def flat_toggle(n, sig):
+    """The exec output that shows the small flatten triangle beside it, or None: the node's
+    flattenable output (registry.flattenable_pin), while the node is not disabled. It points
+    up to flatten the output, down (when the node is flat) to gather it back into a block."""
+    if n.attr("disabled") is not None:
+        return None
+    return flattenable_pin(n, sig)
+
+
+def pin_rows(n, sig) -> dict:
+    """Where a node's pins sit, top to bottom, in graph units from the node's top:
+    {"rows": [(input Pin | None, output Pin | None, y of the row's centre)], "rule": the y of
+    the line between indexed outputs and the outputs after them, or None, "add": the y of the
+    Add pin button, or None, "height": the node's height}.
+    An output that takes a value (a Switch's `case[0]`) sits on the row of its value's input,
+    so each case reads across; the other inputs come first, beside the outputs before it."""
+    ins = sig.exec_ins + sig.data_ins
+    outs = sig.exec_outs + sig.data_outs
+    # a flattened output (`}.else`) sits at the top, beside the exec input, over a line
+    top = None
+    if is_flat(n, sig):
+        fpin = sig.output(flattenable_pin(n, sig))
+        top = (sig.exec_ins[0] if sig.exec_ins else None, fpin)
+        ins = [p for p in ins if p is not top[0]]
+        outs = [p for p in outs if p is not fpin]
+    valued = output_values(sig)
+    if valued:
+        first = next(i for i, p in enumerate(outs) if p.name == valued[0])
+        lead = [p for p in ins if p.name not in valued]
+        pairs = list(zip_longest(lead, outs[:first]))
+        pairs += [(sig.input(v), sig.output(v)) for v in valued]
+        pairs += [(None, p) for p in outs[first:] if p.name not in valued]
+    else:
+        pairs = list(zip_longest(ins, outs))
+    if not pairs and not sig.pure and top is None:
+        pairs = [(None, None)]
+    # the line goes above the first exec output that follows indexed ones, `default`, or
+    # under the flattened output's row
+    rule_at, seen = None, False
+    if top is not None:
+        pairs.insert(0, top)
+        rule_at = 1 if len(pairs) > 1 else None
+    for i, (_, o) in enumerate(pairs if top is None else []):
+        if o is not None and o.is_exec:
+            if pin_index(o.name):
+                seen = True
+            elif seen:
+                rule_at = i
+                break
+    y = HEADER + 3
+    rows, rule = [], None
+    for i, (p, o) in enumerate(pairs):
+        if i == rule_at:
+            rule = y + RULE / 2
+            y += RULE
+        rows.append((p, o, y + ROW / 2))
+        y += ROW
+    add = None
+    if has_add_pin(n):
+        add = y + ROW / 2
+        y += ROW
+    return {"rows": rows, "rule": rule, "add": add, "height": y + 3}
 
 
 def output_label(sig, pin) -> str:
@@ -114,7 +296,7 @@ def used_outputs(g: Graph, info) -> set:
 
 
 def positions(g: Graph, info, remembered: dict) -> dict:
-    """node id -> (x, y): from the place lines, and for nodes without one, from `remembered`
+    """node id -> (x, y): from their attribute blocks, and for nodes without one, from `remembered`
     ((graph, node) -> (x, y), updated here) or the automatic layout (section 7.5: lay out
     only what has no layout)."""
     pos = {p.id: (p.x, p.y) for p in g.places}
@@ -124,7 +306,7 @@ def positions(g: Graph, info, remembered: dict) -> dict:
 
 
 def auto_layout(g: Graph, info, pos: dict, remembered: dict):
-    """Place nodes without a `place` line."""
+    """Place nodes without a `pos`."""
     for n in g.nodes:
         if n.id not in pos and (g.name, n.id) in remembered:
             pos[n.id] = remembered[(g.name, n.id)]
@@ -203,15 +385,21 @@ def graph_json(g: Graph, info, idx, diags=(), remembered=None, module=None) -> d
             "header": header_color(g, n, sig), "pure": sig.pure,
             "disabled": n.attr("disabled") is not None, "diag": marks.get(n.id),
             "opens": opens(module, n), "description": describe(n.kind, n.symbol, idx, n.targs),
-            "ins": [{"name": p.name, "exec": p.is_exec, "type": type_words(p.type),
+            "ins": [{"name": p.name, "exec": p.is_exec, "type": pin_type(p.type),
                      "color": type_color(p.type, idx),
                      "label": input_label(n, p), "bound": n.binding(p.name) is not None,
+                     "removable": can_remove(n, p.name, "in"),
+                     "editor": input_editor(n, p, idx),
                      "filled": p.name in connected or (p.is_exec and (n.id, p.name) in targets)}
                     for p in sig.exec_ins + sig.data_ins],
-            "outs": [{"name": p.name, "exec": p.is_exec, "type": type_words(p.type),
+            "outs": [{"name": p.name, "exec": p.is_exec, "type": pin_type(p.type),
                       "color": type_color(p.type, idx),
-                      "label": output_label(sig, p), "filled": (n.id, p.name) in used}
+                      "label": output_label(sig, p), "filled": (n.id, p.name) in used,
+                      "removable": can_remove(n, p.name, "out")}
                      for p in sig.exec_outs + sig.data_outs],
+            # [[input name | null, output name | null, y]], the y of the line between indexed
+            # outputs and the rest, of the Add pin button, and the node's height (pin_rows)
+            **_layout(n, sig),
         })
         for b in n.bindings:
             if isinstance(b.value, PinRef):

@@ -115,16 +115,16 @@ def vt_name(vt, types=None, depth=0) -> str:
     if isinstance(vt, Ref):
         entry = types[vt.type] if types is not None and vt.type < len(types) else None
         if isinstance(entry, ArrayType) and depth < 8:
-            return f"array::<{vt_name(entry.elem, types, depth + 1)}>"
+            return f"array#<{vt_name(entry.elem, types, depth + 1)}>"
         if isinstance(entry, StructType):
             return f"struct {vt.type}"
         if isinstance(entry, (ClassType, InterfaceType)):
             return CLASS_NAMES.get(vt.type, f"{'class' if isinstance(entry, ClassType) else 'interface'} {vt.type}")
         if isinstance(entry, MapType) and depth < 8:
-            return (f"map::<{vt_name(entry.key, types, depth + 1)}, "
+            return (f"map#<{vt_name(entry.key, types, depth + 1)}, "
                     f"{vt_name(entry.value, types, depth + 1)}>")
         if isinstance(entry, SetType) and depth < 8:
-            return f"set::<{vt_name(entry.elem, types, depth + 1)}>"
+            return f"set#<{vt_name(entry.elem, types, depth + 1)}>"
         return f"ref {vt.type}"
     return VT_NAMES.get(vt, f"0x{vt:02X}")
 

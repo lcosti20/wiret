@@ -21,18 +21,19 @@ from typing import Optional
 
 from . import canvasedit, ops, palette, palettepopup, syntax, viewmodel
 from .checker import GraphInfo, check
+from .textchanges import changes
 from .compiler import compile_module
 from .debugstate import DebugState
 from .disasm import disassemble
-from .graphview import BG, DIM, TEXT, GraphView
+from .graphview import BG, DIM, SELECT, TEXT, GraphView
 from .model import Box, Graph, Lit, Local, Module, Param, PinRef, note_text, set_note_text
 from .natives import STD
-from .parser import ParseError, parse, parse_literal
+from .parser import ParseError, Parser, parse, parse_literal
 from .printer import GraphNames, layout_hash, print_module, semantic_hash
 from .ids import assign_ids, attach_retired, find_project, retired_between
 from .registry import (ModuleIndex, STATIC_KINDS, can_convert, enum_values,
                        type_choices, type_ok)
-from .explain import explain, explain_runtime, type_words
+from .explain import explain, explain_runtime
 from .runner import format_results, format_value, parse_args_for, run_function, split_args
 from .vm import STATUS_INTERRUPT, VM, WiretError
 
@@ -42,25 +43,30 @@ module untitled
 extern func host.Log(message: string)
 
 func Main() {
-  flow {
-    entry -> hello
-  }
-
-  node entry = Entry()
-  node hello = Call host.Log(
-    .message <- "Hello, Wiret!",
+  exec Entry{pos=(0, 0)}()
+  exec Call host.Log{pos=(200, 0)}(
+    .message <- "Hello, Wiret!"
   )
-
-  layout {
-    entry at (0, 0)
-    hello at (200, 0)
-  }
 }
 """
 
 FROZEN = getattr(sys, "frozen", False)          # running from a PyInstaller build
 HERE = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LESSONS_DIR = os.path.join(HERE, "lessons")       # read-only originals
+
+# A graph edit flashes what it changed in the Source pane: the lines in grey, the changed
+# columns in yellow, fading in FLASH_MS from full strength to 25% over the background.
+SOURCE_BG = "#15171a"
+FLASH_LINE, FLASH_LINE_DIM = "#868788", "#313336"
+FLASH_COL, FLASH_COL_DIM = "#ffef88", "#655f36"
+FLASH_MS, FLASH_STEPS = 1000, 25
+
+
+def mix(c1: str, c2: str, t: float) -> str:
+    """The colour t of the way from c1 to c2 (both #rrggbb)."""
+    a = [int(c1[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(c2[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(a, b))
 
 
 def user_dir() -> str:
@@ -134,6 +140,8 @@ class EditorApp:
         self.redo_stack: list = []
         self._suppress_text_event = False
         self._parse_job = None
+        self._flash_job = None
+        self.node_lines: dict = {}      # (graph, node) -> the 1-based line its node is written on
         self.run_thread = None
         self.vm: Optional[VM] = None
         self.out_queue: queue.Queue = queue.Queue()
@@ -244,19 +252,31 @@ class EditorApp:
         self.notebook = nb
 
         src_frame = ttk.Frame(nb)
-        self.src = tk.Text(src_frame, wrap="none", undo=True, font=MONO, bg="#15171a", fg=TEXT,
+        self.src = tk.Text(src_frame, wrap="none", undo=True, font=MONO, bg=SOURCE_BG, fg=TEXT,
                            insertbackground="white", selectbackground="#3a4a63")
         ys = ttk.Scrollbar(src_frame, orient="vertical", command=self.src.yview)
         xs = ttk.Scrollbar(src_frame, orient="horizontal", command=self.src.xview)
-        self.src.configure(yscrollcommand=ys.set, xscrollcommand=xs.set)
+
+        def scrolled(*a):
+            ys.set(*a)
+            self.mark_selected_source()
+        self.src.configure(yscrollcommand=scrolled, xscrollcommand=xs.set)
         ys.pack(side="right", fill="y")
         xs.pack(side="bottom", fill="x")
+        # the strip at the edge of the text that marks the selected node's whole block
+        self.src_edge = tk.Canvas(src_frame, width=4, bg=SOURCE_BG, highlightthickness=0, bd=0)
+        self.src_edge.pack(side="left", fill="y")
         self.src.pack(fill="both", expand=True)
+        self.src.bind("<Configure>", lambda _e: self.mark_selected_source(), add="+")
         self.src.bind("<<Modified>>", self.on_text_modified)
         for tag, color in syntax.COLORS.items():
             self.src.tag_configure(tag, foreground=color)
         self.src.tag_configure("err", background="#5c1f1f")
         self.src.tag_configure("hl", background="#3a3f4b")
+        self.src.tag_configure("chg_line")
+        self.src.tag_configure("chg_col")
+        self.src.tag_raise("chg_line", "hl")
+        self.src.tag_raise("chg_col", "chg_line")
         nb.add(src_frame, text="Source (.wiret)")
 
         prob = ttk.Frame(nb)
@@ -515,6 +535,7 @@ class EditorApp:
     def set_text(self, text, from_disk=False):
         """Replace the source pane's contents and parse them."""
         self._suppress_text_event = True
+        self.clear_flash()
         y = self.src.yview()[0]
         ins = self.src.index("insert")
         self.src.delete("1.0", "end")
@@ -530,8 +551,11 @@ class EditorApp:
     def parse_text(self) -> bool:
         self.src.tag_remove("err", "1.0", "end")
         try:
-            self.module = parse(self.text)
+            p = Parser(self.text)
+            self.module = p.parse_module()
             self.parse_error = None
+            self.node_lines = {(a[1], a[2]): p.toks[i].line
+                               for i, a in p.anchors if a and a[0] == "node"}
             return True
         except ParseError as e:
             self.parse_error = e
@@ -546,6 +570,7 @@ class EditorApp:
         self.src.edit_modified(False)
         if self._suppress_text_event:
             return
+        self.clear_flash()
         if self._parse_job:
             self.root.after_cancel(self._parse_job)
         self._parse_job = self.root.after(350, self.text_edited)
@@ -591,6 +616,60 @@ class EditorApp:
             for start, end, tag in syntax.spans(line):
                 t.tag_add(tag, f"{i}.{start}", f"{i}.{end}")
 
+    def mark_selected_source(self):
+        """A bar at the edge of the Source pane beside every line of the selected node, from
+        its `node` line to where its input block closes (as the web page marks it)."""
+        edge = getattr(self, "src_edge", None)
+        if edge is None:
+            return
+        edge.delete("all")
+        sel = self.view.selected if hasattr(self, "view") else None
+        if not sel or sel[0] != "node" or self.parse_error is not None:
+            return
+        first = self.node_lines.get((self.graph_name, sel[1]))
+        if first is None:
+            return
+        last = syntax.block_end(self.text.split("\n"), first)
+        top, bottom = self.src.index("@0,0"), self.src.index(f"@0,{self.src.winfo_height()}")
+        lo, hi = max(first, int(top.split(".")[0])), min(last, int(bottom.split(".")[0]))
+        y0 = y1 = None
+        for line in range(lo, hi + 1):
+            info = self.src.dlineinfo(f"{line}.0")
+            if info:
+                y0 = info[1] if y0 is None else y0
+                y1 = info[1] + info[3]
+        if y0 is not None:
+            edge.create_rectangle(0, y0, 3, y1, fill=SELECT, width=0)
+
+    def flash_changes(self, old: str, new: str):
+        """Mark what an edit changed in the Source pane and fade it (see FLASH_LINE)."""
+        ch = changes(old, new)
+        t = self.src
+        for line in ch["lines"]:
+            t.tag_add("chg_line", f"{line}.0", f"{line + 1}.0")
+        for line, start, end in ch["spans"]:
+            t.tag_add("chg_col", f"{line}.{start}", f"{line}.{end}")
+        if ch["lines"]:
+            t.update_idletasks()
+            first = t.dlineinfo(f"{ch['lines'][0]}.0")
+            if first is None:                  # off screen: bring it into view
+                t.see(f"{ch['lines'][0]}.0")
+        self._flash_step(0)
+
+    def _flash_step(self, i: int):
+        k = i / FLASH_STEPS
+        self.src.tag_configure("chg_line", background=mix(FLASH_LINE, FLASH_LINE_DIM, k))
+        self.src.tag_configure("chg_col", background=mix(FLASH_COL, FLASH_COL_DIM, k))
+        self._flash_job = (self.root.after(FLASH_MS // FLASH_STEPS, self._flash_step, i + 1)
+                           if i < FLASH_STEPS else None)
+
+    def clear_flash(self):
+        if self._flash_job:
+            self.root.after_cancel(self._flash_job)
+            self._flash_job = None
+        self.src.tag_remove("chg_line", "1.0", "end")
+        self.src.tag_remove("chg_col", "1.0", "end")
+
     def push_undo(self, text):
         self.undo_stack.append(text)
         self.redo_stack.clear()
@@ -623,7 +702,7 @@ class EditorApp:
             else:
                 m.comments = []
         g = self.graph
-        if g is not None:   # auto-placed nodes get a place line when first saved (section 2.3)
+        if g is not None:   # auto-placed nodes get a `pos` when first saved (section 2.3)
             canvasedit.place_unplaced(g, self.auto_pos)
         if getattr(self, "project", None) is not None:   # editors always write @id (2.4)
             assign_ids(m, retired={r.id for r in self.project.retired})
@@ -636,9 +715,11 @@ class EditorApp:
             self.view.selected = ("node", GraphNames(g, ModuleIndex(m)).name(sel[1]))
         text = print_module(m)
         if text != self.text:
-            self.push_undo(self.text)
+            prev = self.text
+            self.push_undo(prev)
             self.write_file(text)
             self.set_text(text)
+            self.flash_changes(prev, text)
         self.status(f"{reason} — saved {os.path.basename(self.path or '')}")
         self.refresh()
         return True
@@ -648,9 +729,10 @@ class EditorApp:
             self.status("Nothing to undo.")
             return
         self.redo_stack.append(self.text)
-        text = self.keep_ids(self.undo_stack.pop())
+        prev, text = self.text, self.keep_ids(self.undo_stack.pop())
         self.write_file(text)
         self.set_text(text)
+        self.flash_changes(prev, text)
         self.after_text_parsed()
         self.status("Undone.")
 
@@ -658,9 +740,10 @@ class EditorApp:
         if not self.redo_stack:
             return
         self.undo_stack.append(self.text)
-        text = self.keep_ids(self.redo_stack.pop())
+        prev, text = self.text, self.keep_ids(self.redo_stack.pop())
         self.write_file(text)
         self.set_text(text)
+        self.flash_changes(prev, text)
         self.after_text_parsed()
 
     def format_now(self):
@@ -782,7 +865,7 @@ class EditorApp:
                 sig = self.info.sigs.get(nid)
                 p = (sig.input(h[3]) if h[2] == "in" else sig.output(h[3])) if sig else None
                 if p:
-                    text += f".{p.name}: {type_words(p.type)}"
+                    text += f".{p.name}: {viewmodel.pin_type(p.type)}"
                     v = self.view.pin_values.get((nid, p.name)) if h[2] == "out" else None
                     if v is not None:
                         text += f" = {format_value(p.type, v, self.idx)}"
@@ -880,6 +963,20 @@ class EditorApp:
             return
         self.commit(reason)
 
+    def set_pin_text(self, nid, pin, text, verbatim=False):
+        """A value typed in an input's field on the canvas; empty text removes the input from
+        the source, so it takes its default."""
+        if not self.can_edit():
+            return
+        try:
+            reason = canvasedit.set_literal(self.graph, self.info, self.idx, nid, pin, text,
+                                            verbatim=verbatim)
+        except canvasedit.Refused as e:
+            messagebox.showerror("Invalid value", str(e))
+            self.view.redraw()
+            return
+        self.commit(reason)
+
     def set_enum_value(self, nid, pin, ty, member):
         if not self.can_edit():
             return
@@ -927,14 +1024,17 @@ class EditorApp:
         self.commit(f"Deleted box {bid}")
 
     def rename_node(self, nid):
-        new = simpledialog.askstring("Rename node", f"New id for '{nid}' (renames every wire):",
-                                     initialvalue=nid, parent=self.root)
+        n = self.graph.node(nid)
+        new = simpledialog.askstring("Name node", f"Name for '{nid}' (a named node is declared at "
+                                     f"the top of the function, and every wire follows):",
+                                     initialvalue=nid if n is not None and n.named else "",
+                                     parent=self.root)
         if not new:
             return
         try:
             reason = canvasedit.rename_node(self.graph, nid, new)
         except canvasedit.Refused as e:
-            messagebox.showerror("Rename", str(e))
+            messagebox.showerror("Name", str(e))
             return
         if reason is None:
             return
@@ -976,15 +1076,35 @@ class EditorApp:
             return
         self.commit(canvasedit.set_int_attr(self.graph, nid, name, v))
 
-    def set_cases(self, nid):
-        prompt, cur = canvasedit.cases_prompt(self.graph, self.idx, nid)
-        text = simpledialog.askstring("@cases", prompt, initialvalue=cur, parent=self.root)
-        if text is None:
+    def add_pin(self, nid):
+        """The "+ Add pin" button of a Sequence or Switch."""
+        if not self.can_edit():
             return
         try:
-            reason = canvasedit.set_cases(self.graph, self.idx, nid, text)
+            reason = canvasedit.add_pin(self.graph, self.idx, nid)
         except canvasedit.Refused as e:
-            messagebox.showerror("@cases", str(e))
+            messagebox.showerror("Add pin", str(e))
+            return
+        self.commit(reason)
+
+    def remove_pin(self, nid, pin):
+        if not self.can_edit():
+            return
+        try:
+            reason = canvasedit.remove_pin(self.graph, nid, pin)
+        except canvasedit.Refused as e:
+            messagebox.showerror("Remove pin", str(e))
+            return
+        self.commit(reason)
+
+    def toggle_flat(self, nid):
+        """The triangle beside a node's bottom exec output: flatten or unflatten it."""
+        if not self.can_edit():
+            return
+        try:
+            reason = canvasedit.toggle_flat(self.graph, self.info, nid)
+        except canvasedit.Refused as e:
+            messagebox.showerror("Flatten", str(e))
             return
         self.commit(reason)
 
@@ -1006,14 +1126,6 @@ class EditorApp:
         if reason:
             self.commit(reason)
 
-    def edit_members(self, bid):
-        b = self.graph.box(bid)
-        text = simpledialog.askstring("Members", "Member node/box ids, comma separated "
-                                                 "(membership is explicit, section 2.3):",
-                                      initialvalue=", ".join(b.members()), parent=self.root)
-        if text is None:
-            return
-        self.commit(canvasedit.set_members(self.graph, bid, text))
 
     def resize_box(self, bid):
         b = self.graph.box(bid)
@@ -1143,12 +1255,14 @@ class EditorApp:
                 menu.add_command(label=f"Break '{pin}' into fields",
                                  command=lambda: self.break_struct(nid, pin, p.type))
             menu.add_command(label="Disconnect", command=lambda: self.disconnect(nid, d, pin))
+            if canvasedit.removable_pin(self.graph.node(nid), pin, d):
+                menu.add_command(label=f"Remove pin '{pin}'",
+                                 command=lambda: self.remove_pin(nid, pin))
             menu.add_separator()
             self.node_menu(menu, nid)
         elif h[0] in ("box", "boxtitle"):
             bid = h[1]
             menu.add_command(label="Rename title…", command=lambda: self.rename_box(bid))
-            menu.add_command(label="Edit members…", command=lambda: self.edit_members(bid))
             menu.add_command(label="Resize…", command=lambda: self.resize_box(bid))
             menu.add_command(label="Colour…", command=lambda: self.set_color(bid))
             menu.add_command(label="Add note…", command=lambda: self.add_note(bid))
@@ -1192,16 +1306,15 @@ class EditorApp:
         bp = (self.graph_name, nid) in self.breakpoints
         menu.add_command(label=("Remove breakpoint" if bp else "Set breakpoint") + "  (F9)",
                          command=lambda: self.toggle_breakpoint(nid))
-        if "." not in nid:          # an inline node's name says where it is written
-            menu.add_command(label="Rename id…", command=lambda: self.rename_node(nid))
+        menu.add_command(label="Name…", command=lambda: self.rename_node(nid))
         menu.add_command(label="Label…", command=lambda: self.set_label(nid))
         menu.add_command(label="Colour…", command=lambda: self.set_color(nid))
         menu.add_command(label="Add note…", command=lambda: self.add_note(nid))
         if n.kind == "Sequence":
-            menu.add_command(label="Set output count (@count)…",
+            menu.add_command(label="Set output count (#count)…",
                              command=lambda: self.set_int_attr(nid, "count", "Number of outputs:"))
-        if n.kind == "Switch":
-            menu.add_command(label="Set cases (@cases)…", command=lambda: self.set_cases(nid))
+        if canvasedit.pin_count(n) is not None:
+            menu.add_command(label=viewmodel.add_pin_label(n), command=lambda: self.add_pin(nid))
         if n.kind not in ("Entry",):
             menu.add_command(label=("Enable" if n.attr("disabled") else "Disable") + " (@disabled)",
                              command=lambda: self.toggle_attr(nid, "disabled"))

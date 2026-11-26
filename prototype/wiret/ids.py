@@ -1,7 +1,8 @@
 """Identity: `@id` generation, the project id registry `wiret.ids`, E0140 and W0202
 (spec sections 2.3, 2.4, 7.3 and 7.5).
 
-Two kinds of identity exist. Node and box ids are the node's or box's name. Declarations,
+Two kinds of identity exist. A named node's id is its name (an anonymous node is named by
+where it is written, and a box has no name). Declarations,
 parameters, results, fields, enum members, locals and state slots carry an optional `@id`
 attribute that survives a rename. Retiring an id means recording, in the project's
 `wiret.ids`, that it was deleted, so it is never used again.
@@ -123,7 +124,7 @@ def carry_ids(src: Module, dst: Module) -> int:
 @dataclass(frozen=True)
 class Retired:
     """One line of `wiret.ids`: `module graph kind id`. For an `@id` the graph is `-` and the
-    kind is `id`; a node or box id is retired per graph, as `node` or `box`."""
+    kind is `id`; a named node's id is retired per graph, as `node`."""
     module: str
     graph: str
     kind: str
@@ -137,8 +138,8 @@ class Retired:
 
 
 def attach_retired(m: Module, project: Optional["Project"]) -> Module:
-    """Tell the printer which node ids the project retired, so a node it declares under a
-    new name never reuses one (section 2.3)."""
+    """Tell the printer which node names the project retired, so a node it has to name
+    never takes one (section 2.3)."""
     if project is not None:
         m.retired_nodes = {(r.graph, r.id) for r in project.retired
                            if r.module == m.name and r.kind == "node"}
@@ -146,13 +147,12 @@ def attach_retired(m: Module, project: Optional["Project"]) -> Module:
 
 
 def ids_of(m: Module) -> set:
-    """Every id in a module as registry entries: node and box ids per graph, and `@id`s."""
+    """Every id in a module as registry entries: named nodes per graph, and `@id`s."""
     out = {Retired(m.name, "-", "id", e.id) for e in elements(m) if e.id}
     for g in m.graphs():
-        # an inline node's dotted name says where it is written, not which node it is, so
-        # it is never retired (section 2.3)
-        out |= {Retired(m.name, g.name, "node", n.id) for n in g.nodes if "." not in n.id}
-        out |= {Retired(m.name, g.name, "box", b.id) for b in g.boxes}
+        # only a named node's id is its identity; an anonymous node's id is where it is
+        # written (its execution position), so it is never retired (section 2.3)
+        out |= {Retired(m.name, g.name, "node", n.id) for n in g.nodes if n.named}
     return out
 
 
@@ -264,13 +264,10 @@ def check_ids(m: Module, project: Project, D) -> None:
     a lone file cannot know which ids were retired."""
     for g in m.graphs():
         for n in g.nodes:
-            if "." not in n.id and Retired(m.name, g.name, "node", n.id) in project.retired:
+            if n.named and Retired(m.name, g.name, "node", n.id) in project.retired:
                 D("E0140", f"node id '{n.id}' was retired in wiret.ids and cannot be reused",
                   g.name, n.id)
-        for b in g.boxes:
-            if Retired(m.name, g.name, "box", b.id) in project.retired:
-                D("E0140", f"box id '{b.id}' was retired in wiret.ids and cannot be reused",
-                  g.name, b.id)
+
     seen = {}
     for e in elements(m):
         where = e.owner or (e.name if e.kind != "module" else None)

@@ -17,7 +17,7 @@ DESCRIBE = {
     "Return": ("Finishes the function and hands back its results.", "end exit result output"),
     "Branch": ("If/else: follows 'then' when the condition is true, otherwise 'else'.",
                "if else condition when check decide"),
-    "Sequence": ("Does several things in order: everything after then0 first, then then1, …",
+    "Sequence": ("Does several things in order: everything after then[0] first, then then[1], …",
                  "order steps first then do"),
     "Switch": ("Chooses a path by comparing a value with several cases.",
                "case match choose which"),
@@ -220,7 +220,7 @@ def describe(kind: str, symbol: Optional[str] = None, idx: Optional[ModuleIndex]
         return (f"Calls {symbol} on any object that implements "
                 f"{symbol.rpartition('.')[0]}; the object's own class decides what runs.")
     if kind == "Call" and symbol:
-        spec = STD.get(f"{symbol}::<{', '.join(targs)}>" if targs else symbol)
+        spec = STD.get(f"{symbol}#<{', '.join(targs)}>" if targs else symbol)
         return spec.doc if spec is not None and spec.doc else f"Calls {symbol}."
     return DESCRIBE.get(kind, ("", ""))[0]
 
@@ -287,17 +287,17 @@ def items(g: Graph, idx: ModuleIndex) -> list:
         out.append(_item("Entry", "Entry", "Flow"))
     values = type_choices("any", idx)
     for t in values:
-        out.append(_item("Select", f"Select::<{t}>", "Flow", targs=[t]))
+        out.append(_item("Select", f"Select#<{t}>", "Flow", targs=[t]))
     for t in type_choices("switch", idx):
-        out.append(_item("Switch", f"Switch::<{t}>", "Flow", targs=[t]))
+        out.append(_item("Switch", f"Switch#<{t}>", "Flow", targs=[t]))
     for t in ["exec"] + values:
-        out.append(_item("Reroute", f"Reroute::<{t}>", "Flow", targs=[t]))
+        out.append(_item("Reroute", f"Reroute#<{t}>", "Flow", targs=[t]))
     for k, (cat, _, tps, _) in sorted(STATIC_KINDS.items()):
         if k in ("Convert", "Select", "Branch"):
             continue
         if tps:
             for t in type_choices(tps[0], idx):
-                out.append(_item(k, f"{k}::<{t}>", cat, targs=[t]))
+                out.append(_item(k, f"{k}#<{t}>", cat, targs=[t]))
         else:
             out.append(_item(k, k, cat))
     convertible = type_choices("convertible", idx)
@@ -307,7 +307,7 @@ def items(g: Graph, idx: ModuleIndex) -> list:
                 to = ("text" if t == "string" else "decimal" if t in ("f32", "f64")
                       else "true/false" if t == "bool" else f"a {t}"
                       if t in idx.enums or t in ("vec2", "vec3") else "whole number")
-                out.append(_item("Convert", f"Convert::<{f}, {t}> (to {to})", "Math", targs=[f, t]))
+                out.append(_item("Convert", f"Convert#<{f}, {t}> (to {to})", "Math", targs=[f, t]))
     out.append(_item("Format", 'Format "{value}" (text from a template)', "Text", "{value}"))
     for l in sorted(g.locals, key=lambda l: l.name):
         out.append(_item("GetLocal", f"Get {l.name}", "Variables", l.name))
@@ -330,7 +330,7 @@ def items(g: Graph, idx: ModuleIndex) -> list:
     for q in sorted(idx.externs):
         out.append(_item("Call", f"Call {q}", "Call", q, idx=idx))
     for q in sorted(STD):
-        sym, _, targs = q.partition("::<")      # a generic native: std.vec.Dot::<vec3>
+        sym, _, targs = q.partition("#<")      # a generic native: std.vec.Dot#<vec3>
         out.append(_item("Call", f"Call {q}", "Call", sym, idx=idx,
                          targs=[t.strip() for t in targs[:-1].split(",")] if targs else None))
     for name in sorted(idx.classes):
@@ -358,8 +358,8 @@ def items(g: Graph, idx: ModuleIndex) -> list:
                              idx=idx))
     for t in sorted({p.type for gr in list(idx.graphs.values()) + [g]
                      for p in list(gr.params) + gr.result_list + list(gr.locals)
-                     if p.type.startswith("delegate::<")}):
-        out.append(_item("Invoke", f"Invoke::<{t}>", "Delegates", targs=[t], idx=idx))
+                     if p.type.startswith("delegate#<")}):
+        out.append(_item("Invoke", f"Invoke#<{t}>", "Delegates", targs=[t], idx=idx))
     for name in sorted(idx.structs):
         out.append(_item("MakeStruct", f"Make {name}", "Structs", name, idx=idx))
         out.append(_item("BreakStruct", f"Break {name}", "Structs", name, idx=idx))
@@ -368,9 +368,9 @@ def items(g: Graph, idx: ModuleIndex) -> list:
             out.append(_item("GetField", f"Get {sym}", "Structs", sym, idx=idx))
             out.append(_item("WithField", f"With {sym} (changed copy)", "Structs", sym, idx=idx))
     for t in values:
-        out.append(_item("MakeArray", f"MakeArray::<{t}>", "Arrays", targs=[t]))
-        out.append(_item("ArrayGet", f"ArrayGet::<{t}>", "Arrays", targs=[t]))
-        out.append(_item("ArrayLength", f"ArrayLength::<{t}>", "Arrays", targs=[t]))
+        out.append(_item("MakeArray", f"MakeArray#<{t}>", "Arrays", targs=[t]))
+        out.append(_item("ArrayGet", f"ArrayGet#<{t}>", "Arrays", targs=[t]))
+        out.append(_item("ArrayLength", f"ArrayLength#<{t}>", "Arrays", targs=[t]))
     places = [(l.name, l.type) for l in g.locals] + [(v.name, v.type) for v in idx.vars.values()]
     places += [(f"{c}.{f.name}", f.type) for c in sorted(idx.classes)       # object fields
                for owner, f in idx.class_fields(c) if owner == c]
@@ -383,16 +383,16 @@ def items(g: Graph, idx: ModuleIndex) -> list:
     maps, sets, containers = container_types(g, idx)
     for t in containers:
         for kind in ("Eq", "Ne"):
-            out.append(_item(kind, f"{kind}::<{t}>", STATIC_KINDS[kind][0], targs=[t]))
+            out.append(_item(kind, f"{kind}#<{t}>", STATIC_KINDS[kind][0], targs=[t]))
     for k, v in maps:
         for kind in MAP_PURE:
-            out.append(_item(kind, f"{kind}::<{k}, {v}>", "Maps", targs=[k, v]))
+            out.append(_item(kind, f"{kind}#<{k}, {v}>", "Maps", targs=[k, v]))
         if "std.flow.ForEachMap" in idx.macros:
-            out.append(_item("Macro", f"Macro std.flow.ForEachMap::<{k}, {v}>", "Macro",
+            out.append(_item("Macro", f"Macro std.flow.ForEachMap#<{k}, {v}>", "Macro",
                              "std.flow.ForEachMap", [k, v], idx=idx))
     for t in sets:
         for kind in SET_PURE:
-            out.append(_item(kind, f"{kind}::<{t}>", "Sets", targs=[t]))
+            out.append(_item(kind, f"{kind}#<{t}>", "Sets", targs=[t]))
     for name, ty in sorted(places):
         kv, el = map_types(ty), set_elem(ty)
         if kv is not None:
@@ -406,10 +406,10 @@ def items(g: Graph, idx: ModuleIndex) -> list:
             continue
         tps = idx.macros[name].tparams
         if len(tps) > 1:
-            continue        # ForEachMap::<K, V> is offered above, for the maps in use
+            continue        # ForEachMap#<K, V> is offered above, for the maps in use
         if tps:
             for t in values:
-                out.append(_item("Macro", f"Macro {name}::<{t}>", "Macro", name, [t] * len(tps),
+                out.append(_item("Macro", f"Macro {name}#<{t}>", "Macro", name, [t] * len(tps),
                                  idx=idx))
         else:
             out.append(_item("Macro", f"Macro {name}", "Macro", name, idx=idx))

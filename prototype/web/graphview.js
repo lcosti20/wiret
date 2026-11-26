@@ -36,7 +36,8 @@ export class GraphView {
   /** host: an empty element to fill. on: {select(nodeId|null), open(graphName),
    *  toggleBreakpoint(nodeId), canEdit() -> true or the reason not, message(text),
    *  move(id, x, y), connect(a, b), connectToNode(a, nodeId), disconnect(node, dir, pin),
-   *  deleteNode(id), editPin(node, pin, [screenX, screenY]),
+   *  deleteNode(id), editPin(node, pin, [screenX, screenY]), setPin(node, pin, text),
+   *  addPin(nodeId), removePin(nodeId, pin), toggleFlat(nodeId),
    *  palette([worldX, worldY], [screenX, screenY], pin or null),
    *  menu(target, [screenX, screenY], [worldX, worldY])}. A pin is [node, "in"/"out", pin];
    *  screen points are relative to the canvas. A menu target is as webapi.menu takes it. */
@@ -119,6 +120,12 @@ export class GraphView {
     this.#applyView();
   }
 
+  /** Put a cancelled drag back: the dragged item, and the nodes a box carried. */
+  #unmove(d) {
+    d.item.x = d.x0; d.item.y = d.y0;
+    for (const [n, x0, y0] of d.inside ?? []) { n.x = x0; n.y = y0; }
+  }
+
   #applyView() {
     this.world.style.transform = `translate(${this.ox}px, ${this.oy}px) scale(${this.scale})`;
     const step = 40 * this.scale;
@@ -129,6 +136,11 @@ export class GraphView {
   // ---------- drawing ----------
   render() {
     const g = this.graph, st = this.state;
+    // a value field that has the focus keeps it across the redraw an edit makes
+    const act = document.activeElement;
+    const keep = act?.dataset?.field && this.world.contains(act)
+      ? { key: act.dataset.field, sel: act.type === "text" ? [act.selectionStart, act.selectionEnd] : null }
+      : null;
     this.world.replaceChildren();
     this.notesBox.replaceChildren();
     this.geoms = new Map();
@@ -157,19 +169,62 @@ export class GraphView {
       d.style.left = `${n.x}px`; d.style.top = `${n.y}px`;
       const head = h("div", "gv-head", n.title);
       head.style.background = n.header;
+      // the rows of pins (viewmodel.pin_rows): an input on the left, an output on the right,
+      // a Switch case's value beside its output, a line above the outputs after indexed ones
       const body = h("div", "gv-body");
-      const ins = h("div", "gv-col"), outs = h("div", "gv-col gv-outs");
-      for (const p of n.ins) {
-        const r = h("div", "gv-pin", p.label);
-        if (!p.bound && !p.exec) r.classList.add("gv-unbound");
-        if (!p.exec) { r.dataset.row = p.name; r.title = `${p.name}: ${p.type}\nDouble-click to type a value`; }
-        ins.append(r);
+      const inOf = new Map(n.ins.map((p) => [p.name, p]));
+      const outOf = new Map(n.outs.map((p) => [p.name, p]));
+      const button = (cls, text, title, act) => {
+        const b = h("button", cls, text);
+        b.type = "button"; b.title = title;
+        b.addEventListener("pointerdown", (e) => e.stopPropagation());
+        b.addEventListener("dblclick", (e) => e.stopPropagation());
+        b.addEventListener("click", (e) => { e.stopPropagation(); act(); });
+        return b;
+      };
+      n.rows.forEach(([iname, oname, y], i) => {
+        if (n.rule != null && y > n.rule && (i === 0 || n.rows[i - 1][2] < n.rule)) body.append(h("div", "gv-rule"));
+        const p = iname != null ? inOf.get(iname) : null;
+        const r = h("div", "gv-pin", p ? (p.editor ? (p.label ? p.name : "") : p.label) : "");
+        if (p && !p.bound && !p.exec) r.classList.add("gv-unbound");
+        if (p?.editor) {
+          r.classList.add("gv-hasfield");
+          r.title = `${p.name}: ${p.type}` + (p.editor.placeholder != null ? `\nEmpty: the default, ${p.editor.placeholder}` : "");
+          r.append(this.#field(n.id, p));
+        } else if (p && !p.exec) {
+          r.dataset.row = p.name; r.title = `${p.name}: ${p.type}\nDouble-click to type a value`;
+        }
+        if (p?.removable) {       // an indexed input (MakeArray's item[K]): − on its right
+          r.classList.add("gv-hasfield");
+          r.append(button("gv-circle", "−", `Remove ${p.name}; the inputs after it move up`,
+                          () => this.on.removePin(n.id, p.name)));
+        }
+        const o = oname != null ? outOf.get(oname) : null;
+        const out = h("div", "gv-pin gv-out", o ? o.label : "");
+        if (o?.removable) {       // an indexed output (case[K], then[K]): − on its left
+          out.prepend(button("gv-circle", "−", `Remove ${o.name}; the outputs after it move up`,
+                             () => this.on.removePin(n.id, o.name)));
+        }
+        if (o && o.name === n.flatPin) {   // the bottom exec output: ▲ flattens it, ▼ puts it back
+          out.prepend(button("gv-flat", n.flat ? "▼" : "▲",
+                             n.flat ? `Unflatten ${o.name}: gather what it runs back into its own block`
+                                    : `Flatten ${o.name}: bring it to the top, and let what it runs continue in this node's block`,
+                             () => this.on.toggleFlat(n.id)));
+        }
+        body.append(r, out);
+      });
+      if (n.addPin != null) {     // one more indexed pin, on the side the pins are on
+        const left = n.addSide === "left";
+        const add = button("gv-addpin", "", `Add ${left ? "an input" : "an output"} to this node`,
+                           () => this.on.addPin(n.id));
+        const plus = h("span", "gv-circle", "+");
+        if (left) add.append(n.addLabel, plus); else add.append(plus, n.addLabel);
+        const cell = h("div", left ? "gv-pin" : "gv-pin gv-out");
+        cell.append(add);
+        body.append(...(left ? [cell, h("div", "gv-pin")] : [h("div", "gv-pin"), cell]));
       }
-      for (const p of n.outs) outs.append(h("div", "gv-pin", p.label));
-      body.append(ins, outs);
       d.append(head, body);
-      const rows = Math.max(n.ins.length, n.outs.length, n.pure ? 0 : 1);
-      d.style.height = `${HEADER + ROW * rows + 6}px`;
+      d.style.height = `${n.height}px`;
       d.title = this.#nodeTip(n);
       nodes.append(d);
       els.push([n, d]);
@@ -178,8 +233,10 @@ export class GraphView {
       const w = Math.max(d.offsetWidth, 96);
       d.style.width = `${w}px`;
       const geom = { x: n.x, y: n.y, w, h: d.offsetHeight, pins: new Map() };
-      n.ins.forEach((p, i) => geom.pins.set(`in|${p.name}`, [n.x, n.y + HEADER + ROW * (i + 0.5) + 3]));
-      n.outs.forEach((p, i) => geom.pins.set(`out|${p.name}`, [n.x + w, n.y + HEADER + ROW * (i + 0.5) + 3]));
+      for (const [iname, oname, y] of n.rows) {
+        if (iname != null) geom.pins.set(`in|${iname}`, [n.x, n.y + y]);
+        if (oname != null) geom.pins.set(`out|${oname}`, [n.x + w, n.y + y]);
+      }
       this.geoms.set(n.id, geom);
     }
     const pinAt = (id, dir, name) => this.geoms.get(id)?.pins.get(`${dir}|${name}`);
@@ -304,9 +361,10 @@ export class GraphView {
       const toggle = h("button", "gv-notes-toggle", open ? "Hide notes" : `✎ Notes (${graphNotes.length})`);
       toggle.onclick = (e) => {
         e.stopPropagation();
+        // the view stays where it is: refitting here made the graph jump each time the
+        // notes were folded or unfolded (but only while the view was untouched)
         this.notesOpen = !open;
         this.render();
-        if (this.autoFit) this.fit(true);
       };
       toggle.onpointerdown = (e) => e.stopPropagation();
       this.notesBox.append(...(open ? graphNotes : []), toggle);
@@ -325,6 +383,73 @@ export class GraphView {
       over.append(d);
     }
     this.#applyView();
+    if (keep) {
+      const f = this.world.querySelector(`[data-field="${CSS.escape(keep.key)}"]`);
+      if (f) {
+        f.focus({ preventScroll: true });
+        if (keep.sel) try { f.setSelectionRange(...keep.sel); } catch { /* not a text field */ }
+      }
+    }
+  }
+
+  /** The form control on an input that nothing is wired to (p.editor, from
+   *  viewmodel.input_editor): a text box, a number box, a checkbox or a list of enum members.
+   *  A change reports on.setPin(node, pin, text) with the value as the source writes it, or ""
+   *  to remove the input from the source so that it takes its default (the placeholder). */
+  #field(nodeId, p) {
+    const ed = p.editor, key = `${nodeId}|${p.name}`;
+    const set = (text) => this.on.setPin(nodeId, p.name, text);
+    const ph = ed.placeholder;
+    let f;
+    if (ed.kind === "bool") {
+      f = h("input");
+      f.type = "checkbox";
+      f.checked = ed.value ?? ph ?? false;
+      if (ed.value == null) f.classList.add("gv-default");
+      // the default needs no line in the source; with no default, the value is always written
+      f.onchange = () => set(ph != null && f.checked === ph ? "" : String(f.checked));
+    } else if (ed.kind === "enum") {
+      f = h("select");
+      f.append(new Option(ph != null ? `${ph} (default)` : "—", ""));
+      for (const m of ed.options) f.append(new Option(m, m));
+      f.value = ed.value ?? "";
+      if (ed.value == null) f.classList.add("gv-default");
+      f.onchange = () => set(f.value);
+    } else {
+      f = h("input");
+      if (ed.kind === "text") {
+        f.type = "text";
+        f.size = Math.max(4, Math.min(24, (ed.value ?? ph ?? "").length + 1));
+      } else {
+        f.type = "number";
+        f.step = ed.kind === "int" ? "1" : "any";
+        if (ed.min != null) { f.min = ed.min; f.max = ed.max; }
+      }
+      f.value = ed.value ?? "";
+      f.placeholder = ph ?? (ed.kind === "text" ? "" : p.type);
+      const commit = () => {
+        const v = f.value;
+        if (v === (ed.value ?? "")) return;
+        set(ed.kind === "text" ? v : v.trim());     // a string input takes the text as typed
+      };
+      f.onchange = commit;
+      f.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); commit(); f.blur(); }
+        else if (e.key === "Escape") { f.value = ed.value ?? ""; f.blur(); }
+      });
+      if (f.type === "number" && ed.value != null && f.value === "") {
+        f.type = "text";                // a value a number box cannot show (e.g. 1_000, 2.5f32)
+        f.value = ed.value;
+      }
+    }
+    f.classList.add("gv-field");
+    f.dataset.field = key;
+    f.setAttribute("aria-label", `${nodeId}.${p.name}`);
+    // the field takes its own pointer and keys: no drag, pan, palette or delete from here
+    for (const ev of ["pointerdown", "keydown", "dblclick"]) {
+      f.addEventListener(ev, (e) => e.stopPropagation());
+    }
+    return f;
   }
 
   #nodeTip(n) {
@@ -582,7 +707,7 @@ export class GraphView {
         const [a, b] = [...pointers.values()];
         pinch = { dist: Math.hypot(a[0] - b[0], a[1] - b[1]), scale: this.scale };
         this.temp.replaceChildren();
-        if (drag?.kind === "move" && drag.moved) { drag.item.x = drag.x0; drag.item.y = drag.y0; this.render(); }
+        if (drag?.kind === "move" && drag.moved) { this.#unmove(drag); this.render(); }
         drag = null;
         return;
       }
@@ -612,7 +737,13 @@ export class GraphView {
         const id = nodeEl ? nodeEl.dataset.id : boxTitle.dataset.box;
         const item = nodeEl ? this.graph.nodes.find((n) => n.id === id)
                             : this.graph.boxes.find((b) => b.id === id);
-        if (item) Object.assign(drag, { kind: "move", id, item, x0: item.x, y0: item.y });
+        if (item) {
+          // a box carries the nodes that lie inside it (they are not members of it: section 2.3)
+          const inside = nodeEl ? [] : this.graph.nodes
+            .filter((n) => n.x >= item.x && n.x <= item.x + item.w && n.y >= item.y && n.y <= item.y + item.h)
+            .map((n) => [n, n.x, n.y]);
+          Object.assign(drag, { kind: "move", id, item, x0: item.x, y0: item.y, inside });
+        }
       }
     });
 
@@ -647,6 +778,9 @@ export class GraphView {
       } else if (drag.kind === "move") {
         drag.item.x = Math.round(drag.x0 + dx / this.scale);
         drag.item.y = Math.round(drag.y0 + dy / this.scale);
+        for (const [n, x0, y0] of drag.inside) {
+          n.x = x0 + drag.item.x - drag.x0; n.y = y0 + drag.item.y - drag.y0;
+        }
         this.render();
       } else if (drag.kind === "wire" && drag.at) {
         const end = world([x, y]);
@@ -667,7 +801,7 @@ export class GraphView {
       if (!d) return;
       clearTimeout(d.timer);
       if (e.type !== "pointerup") {         // cancelled: put a dragged node back
-        if (d.kind === "move" && d.moved) { d.item.x = d.x0; d.item.y = d.y0; this.render(); }
+        if (d.kind === "move" && d.moved) { this.#unmove(d); this.render(); }
         return;
       }
       if (!d.moved) return this.#click(d.target, local(e));

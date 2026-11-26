@@ -84,7 +84,7 @@ USER_CONSTRAINTS = {"eq": ("struct", "enum", "class"), "ord": ("enum",), "switch
 
 
 def split_types(s: str) -> list:
-    """`i32, map::<string, i32>, f32` -> the three types, splitting only at top-level commas."""
+    """`i32, map#<string, i32>, f32` -> the three types, splitting only at top-level commas."""
     out, depth, cur = [], 0, ""
     for ch in s:
         if ch in "<(":
@@ -109,10 +109,10 @@ def _tlist(s: str) -> Optional[list]:
 
 
 def delegate_sig(ty: str) -> Optional[tuple]:
-    """`delegate::<(i32, f32) -> (bool)>` -> (["i32", "f32"], ["bool"]); None otherwise."""
-    if not ty.startswith("delegate::<") or not ty.endswith(">"):
+    """`delegate#<(i32, f32) -> (bool)>` -> (["i32", "f32"], ["bool"]); None otherwise."""
+    if not ty.startswith("delegate#<") or not ty.endswith(">"):
         return None
-    inner = ty[len("delegate::<"):-1]
+    inner = ty[len("delegate#<"):-1]
     depth, cut = 0, None
     for i, ch in enumerate(inner):
         if ch in "<(":
@@ -130,20 +130,20 @@ def delegate_sig(ty: str) -> Optional[tuple]:
 
 
 def dispatcher_params(ty: str) -> Optional[list]:
-    """`dispatcher::<(i32)>` -> ["i32"]; None otherwise."""
-    if not ty.startswith("dispatcher::<") or not ty.endswith(">"):
+    """`dispatcher#<(i32)>` -> ["i32"]; None otherwise."""
+    if not ty.startswith("dispatcher#<") or not ty.endswith(">"):
         return None
-    return _tlist(ty[len("dispatcher::<"):-1])
+    return _tlist(ty[len("dispatcher#<"):-1])
 
 
 def delegate_type(params: list, results: list) -> str:
     """The canonical text of a delegate type (results left out when there are none)."""
-    t = f"delegate::<({', '.join(params)})"
+    t = f"delegate#<({', '.join(params)})"
     return t + (f" -> ({', '.join(results)})>" if results else ">")
 
 
 def dispatcher_type(params: list) -> str:
-    return f"dispatcher::<({', '.join(params)})>"
+    return f"dispatcher#<({', '.join(params)})>"
 
 
 def allows(constraint: str, ty: str, idx: "Optional[ModuleIndex]" = None) -> bool:
@@ -192,17 +192,17 @@ ZERO = object()  # pin default: the zero value of the pin's type
 
 
 def array_elem(ty: str) -> Optional[str]:
-    """The element type of `array::<T>`, else None."""
-    if ty.startswith("array::<") and ty.endswith(">"):
-        return ty[8:-1]
+    """The element type of `array#<T>`, else None."""
+    if ty.startswith("array#<") and ty.endswith(">"):
+        return ty[len("array#<"):-1]
     return None
 
 
 def map_types(ty: str) -> Optional[tuple]:
-    """(K, V) of `map::<K, V>`, else None."""
-    if ty.startswith("map::<") and ty.endswith(">"):
+    """(K, V) of `map#<K, V>`, else None."""
+    if ty.startswith("map#<") and ty.endswith(">"):
         depth = 0
-        inner = ty[6:-1]
+        inner = ty[len("map#<"):-1]
         for i, ch in enumerate(inner):
             depth += ch == "<"
             depth -= ch == ">"
@@ -212,9 +212,9 @@ def map_types(ty: str) -> Optional[tuple]:
 
 
 def set_elem(ty: str) -> Optional[str]:
-    """The element type of `set::<T>`, else None."""
-    if ty.startswith("set::<") and ty.endswith(">"):
-        return ty[6:-1]
+    """The element type of `set#<T>`, else None."""
+    if ty.startswith("set#<") and ty.endswith(">"):
+        return ty[len("set#<"):-1]
     return None
 
 
@@ -526,7 +526,7 @@ SET_MUTATORS = {
     "SetClear": ([], []),
 }
 
-# Every kind that changes a place: `ArrayAdd::<i32> acc`, `MapSet::<string, i32> scores`.
+# Every kind that changes a place: `ArrayAdd#<i32> acc`, `MapSet#<string, i32> scores`.
 PLACE_MUTATORS = set(ARRAY_MUTATORS) | set(MAP_MUTATORS) | set(SET_MUTATORS)
 
 
@@ -695,8 +695,8 @@ class ModuleIndex:
         return symbol[len(prefix):] if symbol.startswith(prefix) else symbol
 
     def callee(self, symbol: str, targs=()) -> Optional[Callee]:
-        if targs:                  # a generic native: `std.vec.Dot::<vec3>` (section 3.4)
-            key = f"{symbol}::<{', '.join(targs)}>"
+        if targs:                  # a generic native: `std.vec.Dot#<vec3>` (section 3.4)
+            key = f"{symbol}#<{', '.join(targs)}>"
             n = STD.get(key)
             if n is None:
                 return None
@@ -718,11 +718,11 @@ class ModuleIndex:
         if g is not None:
             purity = "pure" if g.has_attr("pure") else "reads" if g.has_attr("reads") else "impure"
             params = [Pin(p.name, p.type, p.default) for p in g.params]
-            if g.owner:                            # methods take self first (section 2.2)
+            if g.receiver:                         # instance methods take self first (2.2)
                 params = [Pin("self", cls)] + params
             return Callee(g.name, g.kind, params, [Pin(r.name, r.type) for r in g.result_list],
                           purity, g.kind == "event" or g.has_attr("latent"),
-                          cls if g.owner else None, g.has_attr("final"))
+                          cls if g.receiver else None, g.has_attr("final"))
         if symbol in self.externs:
             e = self.externs[symbol]
             purity = "pure" if e.has_attr("pure") else "reads" if e.has_attr("reads") else "impure"
@@ -782,6 +782,101 @@ def _static_sig(node: Node, idx: "Optional[ModuleIndex]" = None) -> Sig:
     return sig
 
 
+# The nodes with a variable number of pins: kind -> (the named generic that counts them, the
+# pins' name, which side they are on, the count a node has without it, the fewest it may
+# have). The pins are indexed, `then[0]`, `case[1]`, `item[2]` (section 2.3). A Switch case
+# also has a value input of the same name; the case is its exec output.
+COUNTED_PINS = {"Sequence": ("count", "then", "out", 2, 1),
+                "Switch": ("cases", "case", "out", 0, 0),
+                "MakeArray": ("count", "item", "in", 2, 0)}
+COUNTED_OUTPUTS = {k: v for k, v in COUNTED_PINS.items() if v[2] == "out"}
+_INDEXED = re.compile(r"([A-Za-z_]\w*)\[(\d+)\]")
+
+
+def indexed_name(base: str, i: int) -> str:
+    """The name of the `i`th of a node's variable pins, `case[0]`."""
+    return f"{base}[{i}]"
+
+
+def pin_index(name: str):
+    """(base, index) for an indexed pin name, `case[2]` -> ("case", 2), or None."""
+    m = _INDEXED.fullmatch(name or "")
+    return (m.group(1), int(m.group(2))) if m else None
+
+
+def counted_side(n) -> Optional[str]:
+    """Which side a node's variable pins are on, "in" or "out", or None if it has none."""
+    spec = COUNTED_PINS.get(n.kind)
+    return spec[2] if spec else None
+
+
+def pin_count(n) -> Optional[int]:
+    """How many indexed pins a Sequence, Switch or MakeArray has, or None for another node (or
+    a count written in a form the checker rejects)."""
+    spec = COUNTED_PINS.get(n.kind)
+    if spec is None:
+        return None
+    a = n.attr(spec[0])
+    if a is None or not a.args:
+        return spec[3]
+    v = a.args[0][1]
+    return v.value if len(a.args) == 1 and v.kind == "int" else None
+
+
+def removable_pin(n, pin: str, d: str) -> bool:
+    """Whether pin `pin` on side `d` ("in" or "out") is one of a node's indexed pins that the
+    editor can remove, while it has more than the fewest it may have."""
+    count = pin_count(n) if n is not None else None
+    if count is None:
+        return False
+    _, base, side, _, least = COUNTED_PINS[n.kind]
+    ix = pin_index(pin)
+    return (d == side and ix is not None and ix[0] == base and ix[1] < count
+            and count > least)
+
+
+def output_values(sig) -> list:
+    """The exec outputs that take a value, in pin order: those with a data input of the same
+    name, as a Switch's `case[0]`. The value is written after the output's name in the text,
+    `.case[0] Mode::Idle -> { ... }`, and on its own input pin on the canvas (section 2.3)."""
+    out = []
+    for p in sig.exec_outs:
+        q = sig.input(p.name)
+        if q is not None and not q.is_exec:
+            out.append(p.name)
+    return out
+
+
+def flattenable_pin(node, sig) -> Optional[str]:
+    """The exec output that the canvas can flatten (section 2.5): the bottom one, `.else` of
+    a Branch, `.then` of a Try, `.default` of a Switch, `.done` of a loop, when the node has
+    another exec output above it and it gives no values of its own. A macro's value outputs
+    (a loop's `index`) belong to the outputs above, so a loop's `done` qualifies; an output
+    that takes a value (a Switch's `case[0]`) or an indexed one (a Sequence's `then[1]`) does
+    not. None when there is no such output."""
+    if sig is None or node is None or len(sig.exec_outs) < 2 or node.kind == "Entry":
+        return None     # an Entry's outputs are its graph's exec inputs, each its own block
+    last = sig.exec_outs[-1]
+    if pin_index(last.name) or last.name in output_values(sig):
+        return None
+    if node.kind == "Try":
+        return last.name        # `then` runs after the body; `message`, `code` are the fault's
+    if any(not p.is_exec for p in sig.outputs) and node.kind != "Macro":
+        return None
+    return last.name
+
+
+def is_flat(node, sig) -> bool:
+    """Whether a node is written flattened at its flattenable output (`}.else`), as the
+    text was last read: the canvas then shows that output at the top, beside `in`."""
+    pin = flattenable_pin(node, sig)
+    if pin is None:
+        return False
+    if node.flat is None:           # not read from text yet: the canonical default (2.5)
+        return node.kind == "Try"
+    return node.flat and node.flat_pin in (None, pin)
+
+
 def attr_int(node: Node, name: str, default: int) -> int:
     a = node.attr(name)
     if a and a.args and a.args[0][1].kind == "int":
@@ -802,8 +897,8 @@ def signature(node: Node, graph: Graph, idx: ModuleIndex) -> Sig:
             sig.outputs = [Pin(p.name, p.type) for p in graph.params]
         else:
             sig.outputs = [Pin("then", E)] + [Pin(p.name, p.type) for p in graph.params]
-            if graph.owner:                        # a method's implicit receiver
-                sig.outputs.insert(1, Pin("self", graph.owner))
+            if graph.receiver:                     # an instance method's receiver
+                sig.outputs.insert(1, Pin("self", graph.receiver))
         return sig
     if k == "Return":
         sig.inputs = [Pin("in", E)] + [Pin(r.name, r.type) for r in graph.result_list]
@@ -813,7 +908,7 @@ def signature(node: Node, graph: Graph, idx: ModuleIndex) -> Sig:
     if k == "Sequence":
         n = attr_int(node, "count", 2)
         sig.inputs = [Pin("in", E)]
-        sig.outputs = [Pin(f"then{i}", E) for i in range(n)]
+        sig.outputs = [Pin(indexed_name("then", i), E) for i in range(n)]
         return sig
     if k == "Switch":
         if len(node.targs) != 1:
@@ -822,9 +917,18 @@ def signature(node: Node, graph: Graph, idx: ModuleIndex) -> Sig:
         if not allows("switch", t, idx):
             sig.error = ("E0110", f"Switch does not accept type {t}")
         a = node.attr("cases")
-        n = len(a.args) if a and a.args else 0
-        sig.inputs = [Pin("in", E), Pin("value", t)]
-        sig.outputs = [Pin(f"case{i}", E) for i in range(n)] + [Pin("default", E)]
+        n = attr_int(node, "cases", 0)
+        if a is not None and a.args and not (len(a.args) == 1 and a.args[0][1].kind == "int"):
+            sig.error = ("E0502", "#cases takes the number of cases, '#cases<2>'; each case's "
+                                  "value follows its output, '.case[0] Mode::Idle -> { ... }'")
+            n = len(a.args)
+        elif not 0 <= n <= 64:
+            sig.error = ("E0502", "#cases takes a number of cases from 0 to 64")
+            n = max(0, min(n, 64))
+        # each case output takes its value: an input of the same name (section 2.3)
+        cases = [indexed_name("case", i) for i in range(n)]
+        sig.inputs = [Pin("in", E), Pin("value", t)] + [Pin(c, t) for c in cases]
+        sig.outputs = [Pin(c, E) for c in cases] + [Pin("default", E)]
         return sig
     if k == "Reroute":
         if len(node.targs) != 1:
@@ -865,7 +969,7 @@ def signature(node: Node, graph: Graph, idx: ModuleIndex) -> Sig:
     if k == "Call":
         c = idx.callee(node.symbol or "", node.targs)
         if c is None:
-            generic = [q for q in STD if q.startswith(f"{node.symbol}::<")]
+            generic = [q for q in STD if q.startswith(f"{node.symbol}#<")]
             if generic and not node.targs:
                 sig.error = ("E0502", f"'{node.symbol}' needs a type argument, as in "
                                       f"'Call {generic[0]}'")
@@ -1101,7 +1205,7 @@ def _delegate_sig(node: Node, graph: Graph, idx: ModuleIndex, sig: Sig) -> Sig:
         c = idx.callee(node.symbol or "")
         if c is None:
             sig.error = ("E0501", f"unresolved function '{node.symbol}'")
-            sig.outputs = [Pin("result", "delegate::<()>")]
+            sig.outputs = [Pin("result", "delegate#<()>")]
             return sig
         why = bindable(c)
         if why:
@@ -1117,8 +1221,8 @@ def _delegate_sig(node: Node, graph: Graph, idx: ModuleIndex, sig: Sig) -> Sig:
         ds = delegate_sig(d) if d else None
         if ds is None:
             sig.error = ("E0502", "Invoke needs the delegate type, as in "
-                                  "'Invoke::<delegate::<(i32) -> (bool)>>'")
-            ds, d = ([], []), "delegate::<()>"
+                                  "'Invoke#<delegate#<(i32) -> (bool)>>'")
+            ds, d = ([], []), "delegate#<()>"
         sig.inputs = [Pin("in", E), Pin("delegate", d)] + [Pin(f"arg{i}", t)
                                                            for i, t in enumerate(ds[0])]
         sig.outputs = [Pin("then", E)] + [Pin(f"result{i}", t) for i, t in enumerate(ds[1])]
@@ -1269,20 +1373,20 @@ def _container_sig(node: Node, graph: Graph, idx: ModuleIndex, sig: Sig) -> Sig:
     k = node.kind
     is_map = k.startswith("Map")
     want = 2 if is_map else 1
-    example = f"{k}::<string, i32>" if is_map else f"{k}::<i32>"
+    example = f"{k}#<string, i32>" if is_map else f"{k}#<i32>"
     if len(node.targs) != want:
         sig.error = ("E0502", f"{k} needs {'the key and value types' if is_map else 'the item type'}"
                               f", as in {example}")
     targs = (list(node.targs) + ["i32", "i32"])[:want]
     if is_map:
         K, V = targs
-        container, cname = f"map::<{K}, {V}>", "map"
+        container, cname = f"map#<{K}, {V}>", "map"
         subst = {"K": K, "V": V}
         bad_key = None if key_type_ok(K, idx) else K
         bad_value = None if type_ok(V, idx) else V
     else:
         T = targs[0]
-        container, cname = f"set::<{T}>", "set"
+        container, cname = f"set#<{T}>", "set"
         subst = {"T": T}
         bad_key, bad_value = (None if key_type_ok(T, idx) else T), None
     if sig.error is None and bad_key is not None:
@@ -1315,14 +1419,14 @@ def _container_sig(node: Node, graph: Graph, idx: ModuleIndex, sig: Sig) -> Sig:
 def _array_sig(node: Node, graph: Graph, idx: ModuleIndex, sig: Sig) -> Sig:
     k = node.kind
     if len(node.targs) != 1:
-        sig.error = ("E0502", f"{k} needs one type argument: the element type, as in {k}::<i32>")
+        sig.error = ("E0502", f"{k} needs one type argument: the element type, as in {k}#<i32>")
     t = node.targs[0] if node.targs else "i32"
     if not type_ok(t, idx):
         sig.error = ("E0501", f"type '{t}' is not supported by this prototype")
-    arr = f"array::<{t}>"
+    arr = f"array#<{t}>"
     if k == "MakeArray":
         sig.purity = "pure"
-        sig.inputs = [Pin(f"item{i}", t) for i in range(attr_int(node, "count", 2))]
+        sig.inputs = [Pin(indexed_name("item", i), t) for i in range(attr_int(node, "count", 2))]
         sig.outputs = [Pin("result", arr)]
     elif k == "ArrayGet":
         sig.purity = "pure"
@@ -1333,12 +1437,12 @@ def _array_sig(node: Node, graph: Graph, idx: ModuleIndex, sig: Sig) -> Sig:
         sig.inputs = [Pin("array", arr)]
         sig.outputs = [Pin("length", "i32")]
     else:
-        # A mutator changes a place: a local or a module variable of type array::<T>.
+        # A mutator changes a place: a local or a module variable of type array#<T>.
         place = node.symbol
         ty = place_type(place, graph, idx)
         if not place or ty is None:
             sig.error = ("E0130", f"{k} must name the local, variable or field it changes, as "
-                                  f"in {k}::<{t}> scores")
+                                  f"in {k}#<{t}> scores")
         elif ty != arr and not sig.error:
             sig.error = ("E0110", f"'{place}' is {ty}, not {arr}")
         fp = field_place(place, graph, idx) if not graph.local(place or "") else None

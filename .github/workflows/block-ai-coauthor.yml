@@ -1,0 +1,61 @@
+name: Block Claude co-authors
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check-commit-authors:
+    name: Check commit messages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out commits
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reject Claude co-author trailers
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          PUSH_AFTER_SHA: ${{ github.event.after }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            base="$PR_BASE_SHA"
+            head="$PR_HEAD_SHA"
+          else
+            base="$PUSH_BEFORE_SHA"
+            head="$PUSH_AFTER_SHA"
+          fi
+
+          if [[ "$base" =~ ^0+$ ]]; then
+            commits=$(git rev-list "$head")
+          else
+            commits=$(git rev-list "$base..$head")
+          fi
+
+          if [[ -z "$commits" ]]; then
+            echo "No new commits to check."
+            exit 0
+          fi
+
+          failed=0
+          while IFS= read -r commit; do
+            message=$(git show -s --format=%B "$commit")
+            if printf '%s\n' "$message" | grep -Eiq '^[[:space:]]*Co-authored-by:.*(Claude|claude@anthropic\.com)'; then
+              echo "::error::Commit $commit contains a disallowed Claude Co-authored-by trailer."
+              failed=1
+            fi
+          done <<< "$commits"
+
+          if [[ "$failed" -ne 0 ]]; then
+            echo "Remove Claude co-author trailers from the commit message(s)."
+            exit 1
+          fi

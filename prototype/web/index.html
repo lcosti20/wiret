@@ -105,11 +105,41 @@
                   border: 1px solid #3a3e46; background: #1d1f23; color: var(--g-text); }
   .gv-head { height: 24px; line-height: 24px; padding: 0 20px 0 8px; color: #fff;
              font-weight: 700; font-size: 13px; white-space: nowrap; }
-  .gv-body { display: flex; justify-content: space-between; gap: 24px; padding: 3px 11px; }
-  .gv-col { display: flex; flex-direction: column; }
-  .gv-outs { align-items: flex-end; }
+  /* a node's pins: rows of [input, output] (viewmodel.pin_rows) */
+  .gv-body { display: grid; grid-template-columns: auto auto; column-gap: 24px; padding: 3px 11px; }
+  .gv-out { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+  /* the line between a node's indexed outputs (case[0], ...) and the ones after (default) */
+  .gv-rule { grid-column: 1 / -1; height: 10px; position: relative; }
+  .gv-rule::after { content: ""; position: absolute; left: -3px; right: -3px; top: 5px;
+                    border-top: 1px solid #4a4f59; }
   .gv-pin { height: 20px; line-height: 20px; font-size: 12px; white-space: nowrap; }
   .gv-unbound { color: var(--g-dim); }
+  /* the value field on an input nothing is wired to (graphview.js #field) */
+  .gv-hasfield { display: flex; align-items: center; gap: 6px; }
+  .gv-field { height: 16px; box-sizing: border-box; font: 11px var(--mono); color: var(--g-text);
+              background: #1d1f23; border: 1px solid #3a3e46; border-radius: 3px; padding: 0 4px; }
+  .gv-field:focus { outline: none; border-color: #6aa0ff; }
+  .gv-field::placeholder { color: var(--g-dim); font-style: italic; }
+  input[type=number].gv-field { width: 64px; }
+  input[type=checkbox].gv-field { width: 13px; height: 13px; margin: 0; accent-color: #6aa0ff; }
+  .gv-field.gv-default { opacity: 0.6; }
+  select.gv-field { padding: 0 2px; }
+  /* a Sequence's or Switch's Add pin button, and the circled − beside each indexed output */
+  .gv-addpin { display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 5px;
+               font: 12px system-ui, sans-serif; color: var(--g-dim); background: #1d1f23;
+               border: 1px solid #3a3e46; border-radius: 3px; cursor: pointer; }
+  .gv-circle { display: inline-flex; align-items: center; justify-content: center;
+               width: 13px; height: 13px; padding: 0; box-sizing: border-box; border-radius: 50%;
+               border: 1px solid currentColor; background: none; color: var(--g-dim);
+               font: 12px/1 system-ui, sans-serif; cursor: pointer; }
+  .gv-addpin:hover, .gv-circle:hover { color: var(--g-text); }
+  .gv-addpin:hover { border-color: #6aa0ff; }
+  .gv-addpin .gv-circle { cursor: inherit; }
+  button.gv-circle:hover { color: #ff8a80; }
+  /* the triangle beside a node's bottom exec output that flattens it (graphview.js) */
+  .gv-flat { padding: 0 2px; border: none; background: none; color: var(--g-dim);
+             font-size: 9px; line-height: 20px; cursor: pointer; }
+  .gv-flat:hover { color: var(--g-text); }
   .gv-text { position: absolute; white-space: nowrap; pointer-events: none; }
   .gv-id { color: var(--g-dim); font-size: 11px; }
   .gv-count { color: #2ecc71; font-size: 11px; font-weight: 700; }
@@ -179,10 +209,16 @@
   #code { position: relative; flex: 1; min-width: 0; }
   #hl { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
   #hl div { position: absolute; left: 0; right: 0; height: var(--lh); }
-  #hl .sel { background: var(--sel-bg); box-shadow: inset 3px 0 var(--sel-edge); }
+  #hl .sel { box-shadow: inset 3px 0 var(--sel-edge); }
   #hl .cur { background: var(--cur-bg); box-shadow: inset 3px 0 var(--cur-edge); }
   #hl .frame { background: var(--frame-bg); }
   #hl .bad { background: var(--bad-bg); box-shadow: inset 3px 0 var(--error); }
+  /* what the last graph edit changed: bright, then faded to 25% so the text reads (1 s) */
+  #flash { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+  #flash div { position: absolute; height: var(--lh); animation: flash 1s ease-out forwards; }
+  #flash .line { left: 0; right: 0; background: #868788; }
+  #flash .col { background: #ffef88; }
+  @keyframes flash { from { opacity: 1; } to { opacity: .25; } }
   /* the text is drawn twice: coloured in #paint, and transparent in the textarea above it,
      which keeps editing, the caret, selection and undo */
   #paint { position: absolute; inset: 0; margin: 0; padding: 10px; overflow: hidden;
@@ -272,7 +308,7 @@
       <div class="tabpane" id="pane-source" role="tabpanel">
         <div id="editor">
           <div id="gutter-clip"><div id="gutter"></div></div>
-          <div id="code"><div id="hl"></div><pre id="paint" aria-hidden="true"><div></div></pre><textarea id="src" spellcheck="false" aria-label="Source"></textarea></div>
+          <div id="code"><div id="hl"></div><div id="flash"></div><pre id="paint" aria-hidden="true"><div></div></pre><textarea id="src" spellcheck="false" aria-label="Source"></textarea></div>
         </div>
       </div>
       <div class="tabpane" id="pane-debugger" role="tabpanel" hidden><div id="dbg-body"></div></div>
@@ -337,6 +373,10 @@ const gv = new GraphView($("graph"), {
     if (applyEdit({ op: "delete", node: id })) selected = null;
   },
   editPin: (node, pin, at) => editPin(node, pin, at),
+  setPin: (node, pin, text) => applyEdit({ op: "literal", node, pin, text, verbatim: true }),
+  addPin: (node) => { if (canEdit() === true) applyEdit({ op: "add_pin", node }); else say(canEdit(), true); },
+  removePin: (node, pin) => { if (canEdit() === true) applyEdit({ op: "remove_pin", node, pin }); else say(canEdit(), true); },
+  toggleFlat: (node) => { if (canEdit() === true) applyEdit({ op: "toggle_flat", node }); else say(canEdit(), true); },
   palette: (world, at, context) => openPalette(world, at, context),
   menu: (target, at, world) => openMenu(target, at, world),
 });
@@ -383,13 +423,48 @@ function applyEdit(req) {
 
 /** Replace the source text after a graph edit, undo or redo; the last run is now stale. */
 function setText(text) {
-  const ta = $("src"), top = ta.scrollTop;
+  const ta = $("src"), top = ta.scrollTop, before = ta.value;
   if (trace) stop();
   counts = fault = null;
   ta.value = text;
   ta.scrollTop = top;
   recheck();
   setButtons();
+  flashChanges(before, text);
+}
+
+/** Mark what an edit changed in the source: the lines in grey, the changed columns in yellow,
+ *  fading as #flash's CSS says. Typing or the next edit clears it. */
+function flashChanges(before, after) {
+  const box = $("flash");
+  box.replaceChildren();
+  if (!api || before === after) return;
+  const ch = JSON.parse(api.changes(before, after));
+  const strip = (cls, line, start, end) => {
+    const d = el("div", cls);
+    d.dataset.line = line;
+    if (cls === "col") { d.dataset.start = start; d.dataset.end = end; }
+    return d;
+  };
+  box.append(...ch.lines.map((l) => strip("line", l)),
+             ...ch.spans.map(([l, s, e]) => strip("col", l, s, e)));
+  if (ch.lines.length) scrollToLine(ch.lines[0]);
+  syncScroll();
+}
+
+/** The width of one character of the source, for placing the column strips. It is measured
+ *  in #paint, which draws the text in the same font as the textarea: the computed `font`
+ *  shorthand cannot be used, since browsers leave it empty when font-variant-ligatures is set. */
+let charW = 0;
+function charWidth() {
+  if (!charW) {
+    const probe = el("span", null, "x".repeat(100));
+    probe.style.cssText = "position: absolute; visibility: hidden; white-space: pre";
+    $("paint").append(probe);
+    charW = probe.getBoundingClientRect().width / 100;
+    probe.remove();
+  }
+  return charW;
 }
 
 function undo() {
@@ -500,6 +575,7 @@ import os
     stop();
     $("src").value = py.FS.readFile("/app/" + $("lesson").value, { encoding: "utf8" });
     $("src").scrollTop = 0;
+    $("flash").replaceChildren();                      // the last edit's changes were in the old text
     breakpoints.clear();
     undoStack.length = redoStack.length = 0;
     counts = fault = null;
@@ -866,16 +942,39 @@ function renderHighlights() {
     if (line) strips.push([line, "bad"]);
   }
   const sl = selected ? lineOf(graphName, selected) : null;
-  if (sl) strips.push([sl, "sel"]);
+  if (sl) strips.push([sl, "sel", blockEnd(sl) - sl + 1]);
   const f = selectedFrame();
   const cl = f ? lineOf(f.graph, f.node) : null;
   if (cl) strips.push([cl, frameSel < 0 || frameSel === session.current.frames.length - 1 ? "cur" : "frame"]);
-  $("hl").replaceChildren(...strips.map(([line, cls]) => {
+  $("hl").replaceChildren(...strips.map(([line, cls, span = 1]) => {
     const d = el("div", cls);
     d.dataset.line = line;
+    d.style.height = `${span * LH}px`;
     return d;
   }));
   syncScroll();
+}
+
+/** The last line of the node written on `line`: where its parenthesised input block closes.
+ *  Parentheses inside its {…} attributes, strings and comments do not count. */
+function blockEnd(line) {
+  const lines = $("src").value.split("\n");
+  let depth = 0, braces = 0;
+  for (let i = line - 1; i < lines.length; i++) {
+    const s = lines[i];
+    for (let j = 0; j < s.length; j++) {
+      const c = s[j];
+      if (c === "/" && s[j + 1] === "/") break;
+      if (c === '"') {
+        for (j++; j < s.length && s[j] !== '"'; j++) if (s[j] === "\\") j++;
+      } else if (c === "{") braces++;
+      else if (c === "}") braces--;
+      else if (braces === 0 && c === "(") depth++;
+      else if (braces === 0 && c === ")" && --depth === 0) return i + 1;
+    }
+    if (depth <= 0) return line;                       // no input block opened on the node's line
+  }
+  return line;
 }
 
 function syncScroll() {
@@ -883,6 +982,14 @@ function syncScroll() {
   $("gutter").style.transform = `translateY(${-top}px)`;
   $("paint").firstElementChild.style.transform = `translate(${-$("src").scrollLeft}px, ${-top}px)`;
   for (const d of $("hl").children) d.style.top = `${PAD + (d.dataset.line - 1) * LH - top}px`;
+  const left = PAD - $("src").scrollLeft;
+  for (const d of $("flash").children) {
+    d.style.top = `${PAD + (d.dataset.line - 1) * LH - top}px`;
+    if (d.dataset.start !== undefined) {
+      d.style.left = `${left + d.dataset.start * charWidth()}px`;
+      d.style.width = `${(d.dataset.end - d.dataset.start) * charWidth()}px`;
+    }
+  }
 }
 
 function scrollToLine(line) {
@@ -933,6 +1040,7 @@ let checkJob = null;
 $("src").addEventListener("input", () => {
   if (trace) stop();                                   // the last run was of other text
   counts = fault = null;
+  $("flash").replaceChildren();
   renderGutter();
   clearTimeout(checkJob);
   checkJob = setTimeout(recheck, 350);

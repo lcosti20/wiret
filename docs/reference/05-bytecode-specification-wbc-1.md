@@ -93,11 +93,11 @@ A `const` is 8 bytes (numeric bit pattern), or a `u32` data index for `string`, 
 | Name | Purpose |
 | --- | --- |
 | `name` | Names of functions, locals, types, fields and enum members, for tools and reflection. |
-| `wr.debug` | Maps code offsets to graph position. For each function: its graph item id, a string table of node ids and pin names (path-style after macro expansion, such as `loop/test`), and a list of `(pc_delta, node)` entries. Drives node-level breakpoints, stepping and tracebacks. Layout in section 5.4.1. |
+| `wr.debug` | Maps code offsets to graph position. For each function: its graph item id, a string table of node ids and pin names (path-style after macro expansion, such as `1/test`), and a list of `(pc_delta, node)` entries. Drives node-level breakpoints, stepping and tracebacks. Layout in section 5.4.1. |
 | `wr.pins` | For each function: a list of `(local, node, pin)` triples, naming the node output pin that each local holds (`node` and `pin` are indices into that function's `wr.debug` string table). Complete for `-Og` builds; otherwise it lists the pins that survive optimisation. Lets an editor show the value on a wire and lets the host call `wr_getpin`. |
 | `wr.graph` | The canonical `.wiret` text, deflate-compressed. Lets a debugger or editor open a `.wbc` it did not build. |
 | `wr.meta` | Module id, compiler and registry versions, **semantic hash** and **layout hash** (section 2.5), source hash. |
-| `wr.reflect` | Attribute data for the host: `#[doc]`, `#[category]`, parameter names and defaults. |
+| `wr.reflect` | Attribute data for the host: `@doc`, `@category`, parameter names and defaults. |
 | `wr.caps` | Every capability the module's imports require, so a host can inspect or refuse a module before loading it. |
 
 **Sidecar.** `wiretc build --sidecar` writes `wr.debug`, `wr.pins`, `wr.graph` and `wr.reflect` to a separate `out.wdbg` file instead of embedding them. `wr.meta` in both files carries the same module id and semantic hash, so a debugger can match them. Release builds can ship the small `.wbc` alone. A `.wdbg` file uses the container of section 5.2 with the magic `00 57 44 47` (NUL 'W' 'D' 'G'), `version` 1 and `flags` 0, and holds only custom sections.
@@ -258,47 +258,47 @@ Each instruction costs 1 unit, a lane instruction included; `call`, `call_virtua
 
 ### 5.8 Disassembly
 
-`wiretc dis` prints the bytecode with node ids recovered from `wr.debug`. The two listings below are the compiled forms of `TakeDamage` and `SumTo` from section 2.6 (at `-O1`; at `-O0` the loop keeps its `cont.push` / `cont.pop` pair).
+`wiretc dis` prints the bytecode with node ids recovered from `wr.debug`: a named node's name, else its execution position (section 2.3). The two listings below are the compiled forms of `TakeDamage` and `SumTo` from section 2.6 (at `-O1`; at `-O0` the loop keeps its `cont.push` / `cont.pop` pair).
 
 ```
 func game.demo.Player.TakeDamage (ref Player, i32) -> (i32)
   locals: 2:i32 new_hp
-.set_new:
+.1:                      ; SetLocal new_hp
   local.get 0
   class.get Player.health
   local.get 1
   i32.sub
   local.set 2
-.store:
+.2:                      ; SetField Player.health
   local.get 0
   local.get 2
   class.set Player.health
-.chk:
+.3:                      ; Branch
   local.get 2
   i32.const 0
   i32.le_s
-  br_if .log_dead
-.ret_alive:
+  br_if .3.then.0
+.4:                      ; Return died = false
   i32.const 0
   return
-.log_dead:
+.3.then.0:
   string.const 0          ; "Player died"
   call host.Log
   i32.const 1
   return
 
 func game.demo.SumTo (i32) -> (i32)
-  locals: 1:i32 acc, 2:i32 loop.i, 3:i32 loop.last, 4:i32 loop.index
+  locals: 1:i32 acc, 2:i32 1.i, 3:i32 1.last, 4:i32 1.index
   local.get 0
-  local.set 3             ; loop.last = n   (loop.first = 1 folded into the next line)
+  local.set 3             ; last = n   (first = 1 folded into the next line)
   i32.const 1
-  local.set 2             ; loop.i = first
+  local.set 2             ; i = first
 .test:
   local.get 2
   local.get 3
   i32.le_s
   br_if .body
-  local.get 1             ; ret: total = acc
+  local.get 1             ; 2: Return total = acc
   return
 .body:
   local.get 2
@@ -306,7 +306,7 @@ func game.demo.SumTo (i32) -> (i32)
   local.get 1
   local.get 4
   i32.add
-  local.set 1             ; add: acc = acc + index
+  local.set 1             ; 1.each.0: acc = acc + index
   local.get 2
   i32.const 1
   i32.add

@@ -1,113 +1,78 @@
 wiret 1
 module lessons.structs
 
-extern func host.Log(message: string)
+extern func host.Log(message: string) -> ()
 
-#[doc("How a pet feels right now.")]
+@doc("How a pet feels right now.")
 enum Mood {
   Happy
   Hungry
   Sleepy
 }
 
-#[doc("A pet: its name and how it feels.")]
+@doc("A pet: its name and how it feels.")
 struct Pet {
   name: string
   mood: Mood = Mood::Happy
 }
 
-#[note("Lesson 8: Structs and enums. An enum is a short list of named choices: a Mood is Happy, Hungry or Sleepy, and nothing else. A struct bundles several values into one: a Pet has a name and a mood. Both are declared at the top of the Source pane.")]
-#[note("Try it: (1) Step (F11) into Show and look at p in the Variables panel. (2) Right-click the value pin of 'hungry' and set it to Mood.Sleepy. (3) In the Source pane, add a field 'age: i32 = 1' to Pet and watch 'Make Pet' grow a pin. (4) Right-click an output pin that carries a Pet and choose 'Break into fields'.")]
+@note("Lesson 8: Structs and enums. An enum is a short list of named choices: a Mood is Happy, Hungry or Sleepy, and nothing else. A struct bundles several values into one: a Pet has a name and a mood. Both are declared at the top of the Source pane.")
+@note("Try it: (1) Step (F11) into Show and look at p in the Variables panel. (2) Right-click the value pin of 'hungry' and set it to Mood.Sleepy. (3) In the Source pane, add a field 'age: i32 = 1' to Pet and watch 'Make Pet' grow a pin. (4) Right-click an output pin that carries a Pet and choose 'Break into fields'.")
 func Main() {
   local pet: Pet
 
-  flow {
-    entry -> start
-    save -> show_after
-    show_before -> save
-    start -> show_before
-  }
-
-  node entry = Entry()
-  node save = SetLocal pet(
-    .value <- WithField Pet.mood(
-      .obj <- GetLocal pet(),
-      .value <- Mood::Hungry,
-    ),
+  exec Entry{pos=(0, 0)}()
+  exec SetLocal pet{pos=(200, 0)}(
+    @note("Make Pet builds a Pet from its fields. mood is not wired, so it takes its default, Mood.Happy.")
+    .value <- MakeStruct Pet{pos=(-105, 81)}(
+      .name <- "Rex"
+    )
   )
-  node show_after = Call Show(
-    .p <- GetLocal pet(),
+  exec Call Show{pos=(420, 0)}(
+    .p <- GetLocal pet{pos=(193, 106)}()
   )
-  node show_before = Call Show(
-    .p <- GetLocal pet(),
+  exec SetLocal pet{pos=(640, 0)}(
+    @note("WithField makes a copy of the pet with one field changed. Structs never change in place, so the copy is stored back in pet.")
+    .value <- WithField Pet.mood{pos=(365, 187)}(
+      .obj <- GetLocal pet{pos=(201, 187)}()
+      .value <- Mood::Hungry
+    )
   )
-  node start = SetLocal pet(
-    .value <- MakeStruct Pet(
-      .name <- "Rex",
-    ),
+  exec Call Show{pos=(860, 0)}(
+    .p <- GetLocal pet{pos=(653, 116)}()
   )
-
-  layout {
-    entry at (0, 0)
-    save at (640, 0)
-    #[note("WithField makes a copy of the pet with one field changed. Structs never change in place, so the copy is stored back in pet.")]
-    save.value at (365, 187)
-    save.value.obj at (201, 187)
-    show_after at (860, 0)
-    show_after.p at (653, 116)
-    show_before at (420, 0)
-    show_before.p at (193, 106)
-    start at (200, 0)
-    #[note("Make Pet builds a Pet from its fields. mood is not wired, so it takes its default, Mood.Happy.")]
-    start.value at (-105, 81)
-  }
 }
 
-#[note("Show prints one line about a pet. Break Pet splits the pet into its fields, and the Switch picks a line by its mood.")]
+@note("Show prints one line about a pet. Break Pet splits the pet into its fields, and the Switch picks a line by its mood.")
 func Show(p: Pet) {
-  flow {
-    entry -> which
-    which.case0 -> happy
-    which.case1 -> hungry
-    which.default -> sleepy
-  }
+  node parts = BreakStruct Pet{pos=(205, 90)}(
+    .obj <- p
+  )
 
-  node entry = Entry()
-  node happy = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- parts.name,
-      .b <- " is happy.",
-    ),
-  )
-  node hungry = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- parts.name,
-      .b <- " is hungry.",
-    ),
-  )
-  node parts = BreakStruct Pet(
-    .obj <- entry.p,
-  )
-  node sleepy = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- parts.name,
-      .b <- " is sleepy.",
-    ),
-  )
-  node which = Switch::<Mood>(
-    .value <- parts.mood,
-  ) @cases(Mood::Happy, Mood::Hungry)
-
-  layout {
-    entry at (0, 0)
-    happy at (774, -115)
-    happy.message at (460, -200)
-    hungry at (970, 20)
-    hungry.message at (724, 90)
-    parts at (205, 90)
-    sleepy at (759, 197)
-    sleepy.message at (434, 220)
-    #[note("A Switch on an enum has one path per case. Anything not listed, here Sleepy, follows default.")]
-    which at (444, 0)
+  exec Entry{pos=(0, 0)}()
+  @note("A Switch on an enum has one path per case. Anything not listed, here Sleepy, follows default.")
+  exec Switch#<Mood>#cases<2>{pos=(444, 0)}(
+    .value <- parts.mood
+  ).case[0] Mood::Happy -> {
+    exec Call host.Log{pos=(752, -118)}(
+      .message <- Call std.string.Concat{pos=(451, -98)}(
+        .a <- parts.name
+        .b <- " is happy."
+      )
+    )
+  }.case[1] Mood::Hungry -> {
+    exec Call host.Log{pos=(1165, 60)}(
+      .message <- Call std.string.Concat{pos=(436, 326)}(
+        .a <- parts.name
+        .b <- " is hungry."
+      )
+    )
+  }.default -> {
+    exec Call host.Log{pos=(724, 210)}(
+      .message <- Call std.string.Concat{pos=(438, 230)}(
+        .a <- parts.name
+        .b <- " is sleepy."
+      )
+    )
   }
 }

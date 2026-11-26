@@ -1,85 +1,62 @@
 wiret 1
 module lessons.maps
 
-extern func host.Log(message: string)
+extern func host.Log(message: string) -> ()
 
-#[note("Lesson 9: Maps. A map stores a value under each key, like a dictionary: here, how many times each fruit appears. MapFind looks a key up (a missing key gives 0), and MapSet stores a new value under it. A map remembers the order keys were first added.")]
-#[note("Try it: (1) Add a fifth fruit to the array (right-click 'fruits', more inputs) and run again. (2) Step (F11) through the first loop and watch counts grow in the Variables panel. (3) Change the key type: what has to change with it?")]
+@note("Lesson 9: Maps. A map stores a value under each key, like a dictionary: here, how many times each fruit appears. MapFind looks a key up (a missing key gives 0), and MapSet stores a new value under it. A map remembers the order keys were first added.")
+@note("Try it: (1) Add a fifth fruit to the array (right-click 'fruits', more inputs) and run again. (2) Step (F11) through the first loop and watch counts grow in the Variables panel. (3) Change the key type: what has to change with it?")
 func Main() {
-  local counts: map::<string, i32>
+  local counts: map#<string, i32>
 
-  flow {
-    entry -> loop
-    loop.each -> count
-    loop.done -> show
-    show.each -> log
-    show.done -> log_total
-  }
+  node got = GetLocal counts{pos=(-109, 381)}()
 
-  node count = MapSet::<string, i32> counts(
-    .key <- loop.item,
-    .value <- Add::<i32>(
-      .a <- MapFind::<string, i32>(
-        .map <- got,
-        .key <- loop.item,
-      ).value,
-      .b <- 1,
-    ),
-  )
-  node entry = Entry()
-  node fruits = MakeArray::<string>(
-    .item0 <- "apple",
-    .item1 <- "pear",
-    .item2 <- "apple",
-    .item3 <- "kiwi",
-  ) @count(4)
-  node got = GetLocal counts()
-  node log = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- Call std.string.Concat(
-        .a <- show.key,
-        .b <- ": ",
-      ),
-      .b <- Convert::<i32, string>(
-        .value <- show.value,
-      ),
-    ),
-  )
-  node log_total = Call host.Log(
-    .message <- Call std.string.Concat(
-      .a <- Convert::<i32, string>(
-        .value <- MapLength::<string, i32>(
-          .map <- got,
-        ),
-      ),
-      .b <- " different fruits",
-    ),
-  )
-  node loop = Macro std.flow.ForEach::<string>(
-    .array <- fruits,
-  )
-  node show = Macro std.flow.ForEachMap::<string, i32>(
-    .map <- got,
-  )
-
-  layout {
-    #[note("A key that is not there yet gives 0, so the first apple counts as 0 + 1.")]
-    count at (1476, 2)
-    count.value at (1146, 92)
-    count.value.a at (795, 92)
-    entry at (0, 0)
-    fruits at (-83, 74)
-    got at (-109, 381)
-    log at (1719, 254)
-    log.message at (1528, 347)
-    log.message.a at (1232, 347)
-    log.message.b at (1203, 436)
-    log_total at (1165, 540)
-    log_total.message at (804, 560)
-    log_total.message.a at (542, 560)
-    log_total.message.a.value at (261, 560)
-    loop at (217, 0)
-    #[note("ForEachMap visits every key in the order it was first added, with its value.")]
-    show at (628, 253)
+  exec Entry{pos=(0, 0)}()
+  exec Macro std.flow.ForEach#<string>{pos=(217, 0)}(
+    .array <- MakeArray#<string>#count<4>{pos=(-83, 74)}(
+      .item[0] <- "apple"
+      .item[1] <- "pear"
+      .item[2] <- "apple"
+      .item[3] <- "kiwi"
+    )
+  ).each|item| -> {
+    @note("A key that is not there yet gives 0, so the first apple counts as 0 + 1.")
+    exec MapSet#<string, i32> counts{pos=(1476, 2)}(
+      .key <- item
+      .value <- Add#<i32>{pos=(1146, 92)}(
+        .a <- MapFind#<string, i32>{pos=(795, 92)}(
+          .map <- got
+          .key <- item
+        ).value
+        .b <- 1
+      )
+    )
+  }.done -> {
+    @note("ForEachMap visits every key in the order it was first added, with its value.")
+    exec Macro std.flow.ForEachMap#<string, i32>{pos=(628, 253)}(
+      .map <- got
+    ).each|key, value| -> {
+      exec Call host.Log{pos=(1719, 254)}(
+        .message <- Call std.string.Concat{pos=(1528, 347)}(
+          .a <- Call std.string.Concat{pos=(1232, 347)}(
+            .a <- key
+            .b <- ": "
+          )
+          .b <- Convert#<i32, string>{pos=(1203, 436)}(
+            .value <- value
+          )
+        )
+      )
+    }.done -> {
+      exec Call host.Log{pos=(1165, 540)}(
+        .message <- Call std.string.Concat{pos=(804, 560)}(
+          .a <- Convert#<i32, string>{pos=(542, 560)}(
+            .value <- MapLength#<string, i32>{pos=(261, 560)}(
+              .map <- got
+            )
+          )
+          .b <- " different fruits"
+        )
+      )
+    }
   }
 }
