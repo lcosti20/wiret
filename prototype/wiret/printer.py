@@ -875,7 +875,7 @@ def _bound_list(names: GraphNames, nid: str, pin: str) -> str:
         return ""
     sig = names.sigs[nid]
     order = {p.name: i for i, p in enumerate(sig.data_outs + sig.exec_ins)}
-    return "(" + ", ".join(sorted(bound, key=lambda k: order.get(k, len(order)))) + ")"
+    return "|" + ", ".join(sorted(bound, key=lambda k: order.get(k, len(order)))) + "|"
 
 
 def fmt_stmts(stmts: list, names: GraphNames, indent: str, scope: dict, semantic: bool) -> list:

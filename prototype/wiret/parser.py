@@ -97,7 +97,7 @@ def lex(text: str):
         elif text.startswith(("->", "<-", "::"), i):
             toks.append(Tok("punct", text[i:i + 2], line, col))
             i += 2
-        elif c in "(){}[]<>,:=.@#!":
+        elif c in "(){}[]<>,:=.@#!|":
             toks.append(Tok("punct", c, line, col))
             i += 1
         else:
@@ -981,7 +981,7 @@ class Parser:
         return None
 
     def exec_stmt(self, st: _Body, pos: str, cur, scope, meta, attrs, cm, tok):
-        """`exec Kind(...)` or `exec name`, then its exec outputs: `.pin(names) -> { ... }`
+        """`exec Kind(...)` or `exec name`, then its exec outputs: `.pin|names| -> { ... }`
         blocks, the last of which may be written `.pin` alone to continue in this block.
         Returns the exec output the next statement continues from."""
         g = st.g
@@ -1018,21 +1018,26 @@ class Parser:
         outs = False
         while self.at_p("."):
             self.next()
+            pt = self.peek()
             pin = self.ident("exec output")
+            nt = self.peek()
+            if self.at_p("(") and nt.line == pt.line and nt.col == pt.col + len(pin):
+                self.error(f"an exec output's block binds names between bars: "
+                           f"'.{pin}|name, ...| -> {{ ... }}'")
             names = []
-            if self.at_p("("):
+            if self.at_p("|"):
                 self.next()
-                while not self.at_p(")"):
+                while not self.at_p("|"):
                     names.append(self.ident("output or exec input name"))
                     if self.at_p(","):
                         self.next()
-                    elif not self.at_p(")"):
-                        self.error("expected ',' or ')'")
+                    elif not self.at_p("|"):
+                        self.error("expected ',' or '|'")
                 self.next()
             if not self.at_p("->"):
                 if names:
                     self.error(f"'.{pin}' continues in this block, so it binds no names; "
-                               f"write '.{pin}({', '.join(names)}) -> {{ ... }}'")
+                               f"write '.{pin}|{', '.join(names)}| -> {{ ... }}'")
                 if not self.at("nl") and not self.at_p("}"):
                     self.error(f"expected '-> {{' after '.{pin}', or the end of the line to "
                                f"continue from it in this block")

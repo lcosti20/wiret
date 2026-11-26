@@ -316,6 +316,8 @@ func F() {
                            ("exec Add#<i32>(.a <- Call host.Log())", "no output"),
                            ('exec Call host.Log() .message <- "hi"', "-> {"),
                            ("exec Sequence() @count(2)", "#count<2>"),
+                           ("exec Sequence().then0(a) -> {\n  }", "'.then0|name, ...| -> {"),
+                           ("exec Sequence().then0|a| ", "write '.then0|a| -> {"),
                            ("node entry = Entry()\n  entry -> entry", "expected 'exec'")):
             with self.subTest(body):
                 with self.assertRaises(ParseError) as cm:
@@ -524,7 +526,7 @@ func F() -> (n: i32) {
   exec Macro std.flow.ForRange(
     .first <- 1
     .last <- 100
-  ).each(index, break) -> {
+  ).each|index, break| -> {
     exec SetLocal total(
       .value <- Add#<i32>(
         .a <- GetLocal total()
@@ -3823,7 +3825,7 @@ func F(n: i32) -> (r: i32, x: f32, y: f32) {
   exec Macro std.flow.ForRange(
     .first <- 1
     .last <- n
-  ).each(index) -> {
+  ).each|index| -> {
     exec SetLocal acc(
       .value <- Add#<i32>(
         .a <- cur
@@ -4609,7 +4611,7 @@ func Main(at: i32) -> (r: i32) {
   )
   exec Macro std.flow.ForEach#<i32>(
     .array <- GetLocal nums()
-  ).each(item) -> {
+  ).each|item| -> {
     exec SetLocal total(
       .value <- Add#<i32>(
         .a <- GetLocal total()

@@ -186,7 +186,7 @@ The VM ships these namespaces as natives (callable through `Call`) and as Wiret 
 - `std.fault`: `Make(message, code) -> fault`, `Message(fault) -> string`, `Code(fault) -> i32` (pure). The compiler calls them to lower `Throw` and the outputs of `Try`; they are not nodes in the palette.
 - `std.signal`: `New() -> std.Signal` and `Fire(signal)` (both impure). `Fire` does what `wr_signal_fire` does (section 6.8).
 - `std.random`: an explicit-state generator class (`New`, `NextI32`, `NextF64`). There is **no ambient randomness, clock or I/O**. The host provides any of those as natives, which keeps modules replayable.
-- `std.flow` (macros written in Wiret): `ForRange`, `ForEach#<T>`, `ForEachMap#<K,V>`, `While`, `DoOnce`, `DoN`, `Gate`, `FlipFlop`, `MultiGate`, `Retriggerable`. Each loop has a `break` exec input besides `in`: a `goto break` inside the loop's block (`.each(index, break) -> { ... goto break }`) ends the loop at once and runs `done`. `ForEachMap#<K,V>` takes `map` and has the exec outputs `each` and `done` and the data outputs `key`, `value` and `index`, in insertion order.
+- `std.flow` (macros written in Wiret): `ForRange`, `ForEach#<T>`, `ForEachMap#<K,V>`, `While`, `DoOnce`, `DoN`, `Gate`, `FlipFlop`, `MultiGate`, `Retriggerable`. Each loop has a `break` exec input besides `in`: a `goto break` inside the loop's block (`.each|index, break| -> { ... goto break }`) ends the loop at once and runs `done`. `ForEachMap#<K,V>` takes `map` and has the exec outputs `each` and `done` and the data outputs `key`, `value` and `index`, in insertion order.
 
 ### 3.5 The node registry
 

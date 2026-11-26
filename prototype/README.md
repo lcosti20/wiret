@@ -444,7 +444,7 @@ exec Try().body -> {
       .b <- b
     )
   )
-}.fault(message, code) -> {
+}.fault|message, code| -> {
   ...                // the fault block reads message and code
 }
 ```

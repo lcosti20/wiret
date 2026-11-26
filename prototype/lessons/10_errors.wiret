@@ -46,7 +46,7 @@ func Main() {
     exec Call host.Log{pos=(1638, 2)}(
       .message <- "This line never prints"
     )
-  }.fault(message) -> {
+  }.fault|message| -> {
     exec Call host.Log{pos=(764, 208)}(
       .message <- Call std.string.Concat{pos=(542, 252)}(
         .a <- "Oops: "
@@ -61,7 +61,7 @@ func Main() {
     exec Call host.Log{pos=(1214, 316)}(
       .message <- "That age is fine"
     )
-  }.fault(message) -> {
+  }.fault|message| -> {
     exec Call host.Log{pos=(1110, 420)}(
       .message <- Call std.string.Concat{pos=(886, 483)}(
         .a <- "Oops: "

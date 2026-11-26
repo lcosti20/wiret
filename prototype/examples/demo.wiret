@@ -127,7 +127,7 @@ func Main() {
   exec Macro ForRange{pos=(680, 0)}(
     .first <- 1
     .last <- 10
-  ).each(index) -> {
+  ).each|index| -> {
     exec Branch{pos=(960, 0)}(
       .cond <- Eq#<i32>{pos=(800, 220)}(
         .a <- Rem#<i32>{pos=(640, 220)}(
@@ -178,7 +178,7 @@ func SumTo(n: i32) -> (total: i32) {
   exec Macro ForRange(
     .first <- 1
     .last <- n
-  ).each(index) -> {
+  ).each|index| -> {
     exec SetLocal acc(
       .value <- Add#<i32>(
         .a <- GetLocal acc()

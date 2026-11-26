@@ -10,7 +10,7 @@ event Main() {
   exec Macro std.flow.ForRange{pos=(250, 0)}(
     .first <- 1
     .last <- 3
-  ).each(index) -> {
+  ).each|index| -> {
     exec Call host.Log{pos=(1396, 0)}(
       .message <- Call std.string.Concat{pos=(1178, 62)}(
         .a <- Convert#<i32, string>{pos=(920, 62)}(

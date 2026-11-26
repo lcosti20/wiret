@@ -117,7 +117,7 @@ box       = "box" attrs NL ;
 named     = "node" IDENT "=" expr NL ;
 stmt      = exec | goto ;
 exec      = "exec" ( expr | IDENT ) { out } NL ;
-out       = "." IDENT [ "(" IDENT { "," IDENT } ")" ] "->" "{" { decos stmt } "}"
+out       = "." IDENT [ "|" IDENT { "," IDENT } "|" ] "->" "{" { decos stmt } "}"
           | "." IDENT ;                      (* only last: continue in this block *)
 goto      = "goto" IDENT [ "." IDENT ] NL ;
 disabled  = "!" ( "exec" ( expr | IDENT ) { out } | "{" { decos stmt } "}" | expr ) NL ;
@@ -164,7 +164,7 @@ exec Branch(
 ```
 
 - **Flattening.** The last output may be written `.pin` alone, without a block. Then the statements that follow in the enclosing block are that output's block: they continue from it. `Try`'s `.then`, which runs after the body or the fault, and `Sequence`'s last output read most naturally this way, and so does an `if` without an `else` (`}.else` followed by the rest of the function). Flattening is notation only: the graph is the same either way, and the formatter keeps the form that is written. A node created by an editor flattens its last output when it is a `Try` or a `Sequence`.
-- **Output names.** An output's block may bind names, `.each(index, item) -> { ... }`. A name is one of the node's data outputs, read in the block as a bare name (`.b <- index`), or one of its other exec inputs, run with `goto` (`.each(index, break) -> { ... goto break }`). Names are matched by pin name, not position, so `.each(item)` binds only `item`. A name is in scope in its block and in the blocks inside it, and an inner block's name hides an outer one's. A flattened output binds no names.
+- **Output names.** An output's block may bind names between bars, `.each|index, item| -> { ... }`. A name is one of the node's data outputs, read in the block as a bare name (`.b <- index`), or one of its other exec inputs, run with `goto` (`.each|index, break| -> { ... goto break }`). Names are matched by pin name, not position, so `.each|item|` binds only `item`; the bars, unlike parentheses, do not read as a call's arguments. A name is in scope in its block and in the blocks inside it, and an inner block's name hides an outer one's. A named node may bind names too, as a shorthand for `name.pin`. A flattened output binds no names. The parenthesised form of earlier drafts, `.each(index) -> {`, is a syntax error that shows the bars.
 - A node whose output must be read anywhere else (after its blocks, or from a grandparent's block) is named, and its outputs are read as `name.pin` (see *Named nodes*).
 
 #### Named nodes
@@ -241,7 +241,7 @@ func Main() {
     exec Call CheckAge(                      // 1.body.0
       .age <- -3
     )
-  }.fault(message) -> {
+  }.fault|message| -> {
     exec Call host.Log(                      // 1.fault.0
       .message <- Call std.string.Concat(    // 1.fault.0.message
         .a <- "Oops: "
@@ -436,7 +436,7 @@ Two hashes are defined over the canonical form, both SHA-256:
 
 **Merging.** The text is written in the order the graph runs, so a reviewer reads it top to bottom and `git diff` shows changes where they happen; `wiretc view --flow` (section 7) prints the same text. This trades some merge friendliness for readability. Moving a node or rewording its note still edits one line, and changing one input still edits one line, so most edits by two people merge as plain lines. But rewiring exec flow moves whole statements and blocks, and changes the execution positions of the anonymous nodes after the change, so two people rewiring the same function, or one rewiring while another edits a node further down, are more likely to conflict in a line-based merge than with the id-sorted layout of earlier drafts. The keyed merge of section 7.1 works on the parsed model rather than the text, and matches named nodes by name and anonymous nodes by identifier and position, so it resolves many of these; a node that should keep its identity through restructuring can be given a name. `wiretc diff` prints a node-aware semantic diff (added, removed and rewired nodes, with layout-only changes separate). Whether the cost is acceptable is decided by the review trial in section 9.1, not assumed here.
 
-Guidance for LLM authors: write each function in the order it runs, starting with `exec Entry()`; write a node that feeds a single input inline in that input, without `.result` when it has one output; write each output of a branching node as a block, binding the outputs you read (`.each(index) -> { ... }`); name a node (`node name = ...`) only when its output is read from two places or it is entered from two places, and use `goto` for loops; write a one-result function that is a single expression as `= value`; build text with `Format`; always write generic arguments with `#<...>`, never rely on inference; read pin names from the registry (section 3.5) instead of guessing; omit attribute blocks; and run `wiretc check --json` and `wiretc fmt` on the output (section 7.2).
+Guidance for LLM authors: write each function in the order it runs, starting with `exec Entry()`; write a node that feeds a single input inline in that input, without `.result` when it has one output; write each output of a branching node as a block, binding the outputs you read (`.each|index| -> { ... }`); name a node (`node name = ...`) only when its output is read from two places or it is entered from two places, and use `goto` for loops; write a one-result function that is a single expression as `= value`; build text with `Format`; always write generic arguments with `#<...>`, never rely on inference; read pin names from the registry (section 3.5) instead of guessing; omit attribute blocks; and run `wiretc check --json` and `wiretc fmt` on the output (section 7.2).
 
 ### 2.6 A complete example
 
@@ -600,7 +600,7 @@ func SumTo(n: i32) -> (total: i32) {
   exec Macro ForRange(
     .first <- 1
     .last <- n
-  ).each(index) -> {
+  ).each|index| -> {
     exec SetLocal acc(
       .value <- Add#<i32>(
         .a <- GetLocal acc()
@@ -622,6 +622,6 @@ Things to notice:
 - Positions and labels are in each node's attribute block (`{pos=(960, -40), label="Log death"}`), which never changes the semantic hash. Moving a node edits only that part of its line. Each input is its own line, so changing one literal input changes exactly one line.
 - `@capability` and `@pure` are semantic decorators and change what is compiled. `@doc` and `@category` above `Clamp01`, and the `@note` above the `SetLocal`, are metadata; deleting all of them changes neither the semantic hash nor the bytecode. `@id` on the module line is the module's stable identity.
 - `Sequence#count<2>` has two exec outputs, written as a `.then0` block and a flattened `.then1`. `DoOnce`'s macro `Entry` has two exec parameters, so it writes an `.in` block and a flattened `.reset`.
-- `SumTo`'s loop body binds the loop's `index` output, `.each(index) -> { ... }`, and reads it by name. The `SetLocal` in it has no exec output wired: a chain that ends returns control to whatever pushed it, here the macro (section 4.2), which is what makes the loop continue.
+- `SumTo`'s loop body binds the loop's `index` output, `.each|index| -> { ... }`, and reads it by name. The `SetLocal` in it has no exec output wired: a chain that ends returns control to whatever pushed it, here the macro (section 4.2), which is what makes the loop continue.
 - `Respawn` is an `event`, which is implicitly latent, so it may contain `Delay`. `TakeDamage` has no latent nodes and is not latent, so a host can call it with `wr_call` and rely on getting a result (section 4.5). Both are instance methods and take `self`.
 - `DoOnce` keeps its flag in a `state` slot. Each expansion of the macro gets its own slot, so two `DoOnce` nodes in one graph do not interfere.

@@ -10,7 +10,7 @@ func Main() {
   exec Macro std.flow.ForRange{pos=(200, 0)}(
     .first <- 1
     .last <- 5
-  ).each(index) -> {
+  ).each|index| -> {
     exec Call host.Log{pos=(1247, 0)}(
       .message <- Call std.string.Concat{pos=(1056, 99)}(
         .a <- Call std.string.Concat{pos=(753, 99)}(
